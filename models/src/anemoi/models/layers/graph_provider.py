@@ -547,12 +547,12 @@ class ProjectionGraphProvider(BaseGraphProvider):
         sub_graph = graph[edges_name]
 
         if edge_weight_attribute:
-            weights = sub_graph[edge_weight_attribute].squeeze()
+            weights = sub_graph[edge_weight_attribute].reshape(-1)
         else:
             weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
 
         if src_node_weight_attribute:
-            weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+            weights = weights * graph[edges_name[0]][src_node_weight_attribute].reshape(-1)[sub_graph.edge_index[0]]
 
         matrix = coo_matrix(
             (

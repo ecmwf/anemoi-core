@@ -6,27 +6,26 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_energy_score_base import BaseGraphEnergyScoreLoss
+from anemoi.training.losses.graph_score_base import csr_matmul
+from anemoi.training.losses.graph_score_base import safe_sqrt
+from anemoi.training.losses.graph_score_base import scale_node_differences
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
-    """Fair energy score over graph edge differences.
+class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
+    """Energy score over graph-edge differences using sparse moments.
 
-    For each graph edge ``src -> dst``, the difference is
-    ``x[src] - x[dst]``. The incoming edge differences at each node are scored
-    together, giving one score for each node and variable.
-
-    With ``loss_graph.row_normalize=True``, the distance is
-    ``sqrt(sum_e w_e d_e**2)`` with edge weights that sum to one.
-
-    When ``ignore_nans=True``, edges containing missing values are left out. If
-    ``row_normalize=True``, the weights of the remaining edges are scaled to
-    sum to one; otherwise their original weights are kept.
+    For node differences ``q``, the weighted squared edge norm is evaluated as
+    ``A @ q**2 - 2*q*(A @ q) + q**2*(A @ 1)``. This avoids materializing an
+    edge tensor while retaining the exact edge-difference definition.
     """
+
+    uses_row_weight_sums: bool = True
 
     def __init__(
         self,
@@ -36,23 +35,6 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
         no_autocast: bool = True,
         ignore_nans: bool = False,
     ) -> None:
-        """Graph edge-difference energy score.
-
-        Parameters
-        ----------
-        loss_graph : dict
-            Graph-based edge definition.
-        graph_data : HeteroData
-            Graph data used to build the edge graph.
-        fair : bool
-            Whether to use the fair ensemble correction.
-        no_autocast : bool
-            Whether to keep the original numerical precision throughout.
-        ignore_nans : bool
-            Whether to leave out edges containing missing values. With
-            ``loss_graph.row_normalize=True``, the remaining weights are
-            scaled to sum to one.
-        """
         graph = GraphScoreGraph.from_definition(
             loss_graph,
             graph_data,
@@ -60,55 +42,63 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEdgeScoreLoss):
             allow_none=False,
             require_square=True,
         )
-        super().__init__(graph=graph, no_autocast=no_autocast, ignore_nans=ignore_nans)
-        self.fair = fair
+        assert graph is not None
+        super().__init__(
+            graph=graph,
+            fair=fair,
+            no_autocast=no_autocast,
+            ignore_nans=ignore_nans,
+        )
 
     @property
     def name(self) -> str:
         prefix = "f" if self.fair else ""
         return f"{prefix}graph_edge_energy_score"
 
-    def _compute_local_score_tensor(
+    def _neighbourhood_norm(
         self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_weights: torch.Tensor,
+        differences: torch.Tensor,
+        matrix: torch.Tensor | None,
+        row_weight_sum: torch.Tensor | None,
+        node_valid: torch.Tensor | None,
+        valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Return one edge energy score per output step, batched node, and variable."""
-        ensemble_size = y_pred_ens.shape[1]
-        num_nodes = y.shape[-2]
-        edge_valid = self._valid_edges(y_pred_ens, y, edge_index)
+        assert matrix is not None
+        assert row_weight_sum is not None
 
-        obs_edge_difference = self._edge_difference(y, edge_index)
+        safe_differences = differences
+        if node_valid is not None:
+            safe_differences = torch.where(node_valid, differences, torch.zeros_like(differences))
 
-        # Mean distance between each member and the observation, measured over
-        # the incoming edge differences of each node.
-        obs_term_sum = torch.zeros_like(y)
-        for i in range(ensemble_size):
-            member_edge_difference = self._edge_difference(y_pred_ens[:, i], edge_index)
-            obs_term_sum = obs_term_sum + self.graph.weighted_row_l2_norm(
-                member_edge_difference - obs_edge_difference,
-                edge_index,
-                edge_weights,
-                num_nodes,
-                valid_edges=edge_valid,
+        # Edge differences are invariant to a constant spatial offset. Removing
+        # an anchor before forming sparse moments reduces cancellation.
+        safe_differences = safe_differences - safe_differences[..., :1, :]
+        if node_valid is not None:
+            safe_differences = torch.where(
+                node_valid,
+                safe_differences,
+                torch.zeros_like(safe_differences),
             )
-        obs_term = obs_term_sum / ensemble_size
 
-        # Sum of distances over unordered pairs of ensemble members.
-        pair_distance_sum = torch.zeros_like(obs_term)
-        for i in range(ensemble_size):
-            member_edge_difference = self._edge_difference(y_pred_ens[:, i], edge_index)
-            for j in range(i + 1, ensemble_size):
-                pair_edge_difference = self._edge_difference(y_pred_ens[:, j], edge_index)
-                pair_distance_sum = pair_distance_sum + self.graph.weighted_row_l2_norm(
-                    member_edge_difference - pair_edge_difference,
-                    edge_index,
-                    edge_weights,
-                    num_nodes,
-                    valid_edges=edge_valid,
-                )
+        scaled, scale = scale_node_differences(safe_differences)
+        moments = csr_matmul(matrix, torch.cat((scaled, scaled.square()), dim=-1))
+        projected, projected_square = moments.chunk(2, dim=-1)
 
-        pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
-        return obs_term - pair_coefficient * pair_distance_sum
+        if node_valid is None:
+            row_shape = (1,) * (scaled.ndim - 2) + (row_weight_sum.shape[0], 1)
+            effective_weight_sum = row_weight_sum.view(row_shape)
+        else:
+            assert valid_weight_sum is not None
+            effective_weight_sum = valid_weight_sum
+
+        squared_norm = projected_square - 2.0 * scaled * projected + scaled.square() * effective_weight_sum
+        if node_valid is not None and self.row_normalize:
+            squared_norm = squared_norm / torch.where(
+                effective_weight_sum > 0,
+                effective_weight_sum,
+                torch.ones_like(effective_weight_sum),
+            )
+        norm = scale * safe_sqrt(squared_norm)
+        if node_valid is not None:
+            norm = norm.masked_fill((effective_weight_sum <= 0) | ~node_valid, torch.nan)
+        return norm

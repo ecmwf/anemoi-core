@@ -7,17 +7,25 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Common CSR operations and lifecycle for graph scores.
+"""Common shapes, weights, and sums used by graph scores.
 
-Graph scores retain the model layout throughout their numerical kernel:
+Shapes use ``B`` for batch, ``T`` for forecast output steps, ``M`` for
+ensemble members, ``N`` for nodes, and ``V`` for variables:
 
-- prediction: ``(B, T, M, N, V)``
-- target: ``(B, T, N, V)``
-- local score: ``(B, T, N, V)``
+- ensemble predictions: ``(B, T, M, N, V)``
+- targets: ``(B, T, 1, N, V)``
+- scores for each output step, node, and variable: ``(B, T, N, V)``
 
-The graph is a destination-by-source CSR matrix ``A[N, N]``. Batch, time,
-ensemble, and variable dimensions are treated as dense right-hand sides, so
-the sparse graph is never copied across the batch.
+Graph-backed kernels flatten batch and nodes to operate on the batched
+disjoint graph returned by the graph provider:
+
+- ensemble predictions: ``(T, M, B*N, V)``
+- targets: ``(T, B*N, V)``
+- local scores: ``(T, B*N, V)``
+
+Each forecast output step is scored independently. The configured weights are
+then applied, the values are summed over output steps and nodes, and variables
+are averaged unless a summation is requested.
 """
 
 from abc import abstractmethod
@@ -30,64 +38,23 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
-from anemoi.training.losses.graph_score_graph import GraphScoreGraph
+from anemoi.training.losses.deprecated.graph_scores.graph import LegacyGraphScoreGraph
 from anemoi.training.utils.enums import TensorDim
 
 
-def csr_matmul(matrix: torch.Tensor, node_values: torch.Tensor) -> torch.Tensor:
-    """Apply ``matrix`` to the node dimension of ``(..., N, V)`` values."""
-    if matrix.layout != torch.sparse_csr:
-        msg = f"csr_matmul requires a CSR matrix, got {matrix.layout}."
-        raise TypeError(msg)
-    input_shape = node_values.shape
-    input_nodes, channels = input_shape[-2:]
-    if matrix.shape[1] != input_nodes:
-        msg = f"CSR matrix width {matrix.shape[1]} does not match the input node count {input_nodes}."
-        raise ValueError(msg)
-
-    dense_batches = node_values.numel() // (input_nodes * channels)
-    right_hand_side = (
-        node_values.reshape(dense_batches, input_nodes, channels)
-        .permute(1, 0, 2)
-        .reshape(input_nodes, dense_batches * channels)
-    )
-    projected = torch.sparse.mm(matrix, right_hand_side)
-    output_nodes = projected.shape[0]
-    return (
-        projected.reshape(output_nodes, dense_batches, channels)
-        .permute(1, 0, 2)
-        .reshape(*input_shape[:-2], output_nodes, channels)
-    )
-
-
-def scale_node_differences(differences: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """Scale along nodes so squares remain representable in float32."""
-    scale = differences.abs().amax(dim=-2, keepdim=True)
-    safe_scale = torch.where(scale > 0, scale, torch.ones_like(scale))
-    return differences / safe_scale, scale
-
-
-def safe_sqrt(values: torch.Tensor) -> torch.Tensor:
-    """Take a square root with a finite zero derivative at zero."""
-    positive = values > 0
-    safe_values = torch.where(positive, values, torch.ones_like(values))
-    return torch.where(positive, torch.sqrt(safe_values), torch.zeros_like(values))
-
-
-class BaseGraphScoreLoss(BaseLoss):
-    """Evaluate a graph score with one shared CSR graph per model grid."""
+class LegacyBaseGraphScoreLoss(BaseLoss):
+    """Evaluate a graph score and apply its weights and sums."""
 
     needs_graph_data: bool = True
-    uses_edge_tensors: bool = False
-    graph: GraphScoreGraph | None
+    graph: LegacyGraphScoreGraph | None
 
     def __init__(
         self,
         *,
-        graph: GraphScoreGraph | None,
+        graph: LegacyGraphScoreGraph | None,
         no_autocast: bool = True,
         ignore_nans: bool = False,
     ) -> None:
@@ -101,16 +68,20 @@ class BaseGraphScoreLoss(BaseLoss):
         return self.graph.row_normalize if self.graph is not None else False
 
     @property
-    def graph_provider(self) -> ProjectionGraphProvider | None:
-        """Return the sparse projection provider used by this score."""
+    def graph_provider(self) -> StaticGraphProvider | None:
+        """Return the graph provider used by graph-backed scores."""
         return self.graph.graph_provider if self.graph is not None else None
 
     def compile_for_training(self, **options) -> None:
-        """Compile only the numerical score kernel."""
-        self._compute_local_score_tensor = torch.compile(self._compute_local_score_tensor, **options)
+        """Compile the score calculation used during training."""
+        self._compute_local_score_tensor = torch.compile(
+            self._compute_local_score_tensor,
+            **options,
+        )
 
     @property
     def needs_shard_layout_info(self) -> bool:
+        """Return whether a graph is used."""
         return self.graph is not None
 
     def _prepare_for_aggregation(
@@ -121,8 +92,12 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int,
         grid_shard_sizes: ShardSizes,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-        """Bring values from all nodes together while sharding variables."""
-        channel_shard_sizes_pred = get_shard_sizes(y_pred_ens, TensorDim.VARIABLE, group)
+        """Bring values from all nodes together."""
+        channel_shard_sizes_pred = get_shard_sizes(
+            y_pred_ens,
+            TensorDim.VARIABLE,
+            group,
+        )
         channel_shard_sizes_target = get_shard_sizes(y, TensorDim.VARIABLE, group)
         if channel_shard_sizes_pred != channel_shard_sizes_target:
             msg = (
@@ -130,6 +105,7 @@ class BaseGraphScoreLoss(BaseLoss):
                 f"{channel_shard_sizes_pred} != {channel_shard_sizes_target}"
             )
             raise ValueError(msg)
+
         y_pred_ens_full = all_to_all_transpose(
             y_pred_ens,
             TensorDim.VARIABLE,
@@ -146,6 +122,7 @@ class BaseGraphScoreLoss(BaseLoss):
             grid_shard_sizes,
             group,
         )
+
         return y_pred_ens_full, y_full, channel_shard_sizes_target
 
     @staticmethod
@@ -155,6 +132,7 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_shard_sizes: list[int],
         channel_shard_sizes: list[int],
     ) -> torch.Tensor:
+        """Return each score to the node on which it originated."""
         return all_to_all_transpose(
             score,
             -2,
@@ -182,6 +160,7 @@ class BaseGraphScoreLoss(BaseLoss):
     def _validate_graph_grid_size(self, y_pred_ens: torch.Tensor) -> None:
         if self.graph is None:
             return
+
         grid_size = y_pred_ens.shape[TensorDim.GRID]
         expected_shape = (grid_size, grid_size)
         if self.graph.shape != expected_shape:
@@ -191,38 +170,40 @@ class BaseGraphScoreLoss(BaseLoss):
             )
             raise ValueError(msg)
 
-    def _graph_kernel_tensors(
+    def _get_batched_graph(
         self,
-        reference: torch.Tensor,
-    ) -> tuple[
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-        torch.Tensor | None,
-    ]:
-        """Prepare CSR tensors eagerly for the compiled numerical kernel."""
-        if self.graph is None:
-            return None, None, None, None
-        matrix = self.graph.get_matrix(device=reference.device, dtype=reference.dtype)
-        if not self.uses_edge_tensors:
-            return matrix, None, None, None
-        source_index, destination_index, edge_weights = self.graph.edge_tensors(matrix)
-        # Nonlinear edge scores use CSR storage to obtain the shared edge
-        # tensors, but must not pass a sparse tensor into their dense compiled
-        # kernel. Doing so prevents Dynamo/Inductor from fusing that kernel.
-        return None, source_index, destination_index, edge_weights
+        batch_size: int,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None]:
+        """Return batch-expanded edges and scalar weights without sharding."""
+        if self.graph_provider is None:
+            return None, None
+
+        edge_attributes, edge_index, edge_shard_sizes = self.graph_provider.get_edges(
+            batch_size=batch_size,
+            shard_edges=False,
+            act_checkpoint=False,
+        )
+        assert edge_attributes is not None
+        assert edge_index is not None
+        assert edge_shard_sizes is None
+        assert edge_attributes.shape[-1] == 1, "Graph score providers require one scalar edge weight."
+        return edge_index, edge_attributes[:, 0]
 
     @abstractmethod
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        matrix: torch.Tensor | None,
-        source_index: torch.Tensor | None,
-        destination_index: torch.Tensor | None,
+        edge_index: torch.Tensor | None,
         edge_weights: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Return local scores with shape ``(B, T, N, V)``."""
+        """Return the flattened score ``S[T, B*N, V]`` before weights and sums.
+
+        ``y_pred_ens`` has shape ``(T, M, B*N, V)`` and ``y`` has shape
+        ``(T, B*N, V)``. Graph-backed scores receive batch-expanded edges;
+        the pointwise graph energy score receives ``None`` for both graph
+        tensors. No weights or sums over ``T`` and ``N`` are applied here.
+        """
 
     def _format_and_scale_score(
         self,
@@ -252,11 +233,16 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int | None = None,
         grid_shard_sizes: ShardSizes = None,
     ) -> tuple[torch.Tensor, bool]:
+        # Predictions and observations must cover the same output steps, nodes,
+        # and variables. At least two ensemble members are needed.
         self._validate_input_shapes(y_pred_ens, y)
-        assert y_pred_ens.shape[TensorDim.ENSEMBLE_DIM] > 1, "Ensemble size must be greater than 1."
+        assert y_pred_ens.shape[2] > 1, "Ensemble size must be greater than 1."
 
         is_sharded = grid_shard_slice is not None
         is_model_sharded = self.graph is not None and is_sharded
+
+        # Bring neighbouring node values together before measuring graph
+        # distances.
         pred_for_score, target_for_score = y_pred_ens, y
         channel_shard_sizes = None
         if is_model_sharded:
@@ -277,9 +263,23 @@ class BaseGraphScoreLoss(BaseLoss):
                 grid_shard_sizes,
             )
 
+        # Expand the graph across the batch, then flatten batch and nodes into
+        # the provider's disjoint-graph node space. Provider execution and
+        # reshaping remain eager; only the numerical score kernel is compiled.
         self._validate_graph_grid_size(pred_for_score)
+        batch_size = pred_for_score.shape[TensorDim.BATCH_SIZE]
+        num_nodes = pred_for_score.shape[TensorDim.GRID]
+        edge_index, edge_weights = self._get_batched_graph(batch_size)
+
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
-        graph_tensors = self._graph_kernel_tensors(pred_for_score)
+        pred_for_score = einops.rearrange(
+            pred_for_score,
+            "bs t ensemble latlon v -> t ensemble (bs latlon) v",
+        )
+        target_for_score = einops.rearrange(
+            target_for_score,
+            "bs t latlon v -> t (bs latlon) v",
+        )
         context = (
             torch.amp.autocast(device_type=pred_for_score.device.type, enabled=False)
             if self.no_autocast
@@ -289,9 +289,19 @@ class BaseGraphScoreLoss(BaseLoss):
             score = self._compute_local_score_tensor(
                 pred_for_score,
                 target_for_score,
-                *graph_tensors,
+                edge_index,
+                edge_weights,
             )
 
+        score = einops.rearrange(
+            score,
+            "t (bs latlon) v -> bs t latlon v",
+            bs=batch_size,
+            latlon=num_nodes,
+        )
+
+        # Return scores to their original nodes, then apply node and variable
+        # weights.
         if is_model_sharded:
             assert grid_shard_sizes is not None
             assert channel_shard_sizes is not None
@@ -301,6 +311,7 @@ class BaseGraphScoreLoss(BaseLoss):
                 grid_shard_sizes,
                 channel_shard_sizes,
             )
+
         score = self._format_and_scale_score(
             score,
             scaler_indices=scaler_indices,
@@ -334,6 +345,8 @@ class BaseGraphScoreLoss(BaseLoss):
             grid_dim=grid_dim,
             grid_shard_sizes=grid_shard_sizes,
         )
+        # Neighbourhoods with no available values contribute zero to the final
+        # sums.
         if self.ignore_nans:
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
         return self.reduce(

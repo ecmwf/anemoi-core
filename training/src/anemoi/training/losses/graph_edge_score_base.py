@@ -7,11 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Edge differences and weighted node sums for graph scores.
-
-Shapes use ``B`` for batch, ``T`` for forecast output steps, ``M`` for
-ensemble members, ``N`` for nodes, ``E`` for edges, and ``V`` for variables.
-"""
+"""Shared CSR structure and reduction for nonlinear edge scores."""
 
 import torch
 
@@ -20,8 +16,9 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
-    """Form edge differences and sum edge scores at each node."""
+    """Evaluate nonlinear edge statistics and reduce them by CSR rows."""
 
+    uses_edge_tensors: bool = True
     graph: GraphScoreGraph
 
     def __init__(
@@ -34,87 +31,65 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         super().__init__(graph=graph, no_autocast=no_autocast, ignore_nans=ignore_nans)
 
     @staticmethod
-    def _edge_difference(node_values: torch.Tensor, edge_index: torch.Tensor) -> torch.Tensor:
-        """Return ``source - destination`` for every edge."""
-        return node_values[..., edge_index[0], :] - node_values[..., edge_index[1], :]
+    def _edge_difference(
+        node_values: torch.Tensor,
+        source_index: torch.Tensor,
+        destination_index: torch.Tensor,
+    ) -> torch.Tensor:
+        """Return ``source - destination`` for each CSR non-zero."""
+        return node_values[..., source_index, :] - node_values[..., destination_index, :]
 
-    def _valid_edges(
+    def _validity_tensors(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
-        edge_index: torch.Tensor,
-    ) -> torch.Tensor | None:
-        """Return ``True`` for edges whose values are available.
-
-        Both end nodes need an observation and values for every ensemble
-        member. This keeps the ensemble size unchanged.
-        """
+        source_index: torch.Tensor,
+        destination_index: torch.Tensor,
+        edge_weights: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
+        """Return node, edge, and incoming-weight validity tensors."""
         if not self.ignore_nans:
-            return None
-        node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=1)
-        return node_valid[..., edge_index[0], :] & node_valid[..., edge_index[1], :]
+            return None, None, None
+        node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
+        edge_valid = node_valid[..., source_index, :] & node_valid[..., destination_index, :]
+        weight_shape = (1,) * (edge_valid.ndim - 2) + (-1, 1)
+        valid_edge_weights = edge_valid.to(dtype=y_pred_ens.dtype) * edge_weights.view(weight_shape)
+        valid_weight_sum = torch.zeros_like(node_valid, dtype=y_pred_ens.dtype)
+        valid_weight_sum.index_add_(-2, destination_index, valid_edge_weights)
+        return node_valid, edge_valid, valid_weight_sum
 
-    def _aggregate_edges(
+    def _aggregate_edge_values(
         self,
         edge_values: torch.Tensor,
-        edge_index: torch.Tensor,
+        destination_index: torch.Tensor,
         edge_weights: torch.Tensor,
         num_nodes: int,
-        valid_edges: torch.Tensor | None = None,
+        *,
+        node_valid: torch.Tensor | None,
+        edge_valid: torch.Tensor | None,
+        valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Sum weighted edge scores at each destination node."""
-        edge_dst_index = edge_index[1]
+        """Take a weighted CSR-row sum, including dynamic NaN normalization."""
         weight_shape = (1,) * (edge_values.ndim - 2) + (-1, 1)
         weights = edge_weights.to(dtype=edge_values.dtype).view(weight_shape)
-        if valid_edges is not None:
-            safe_edge_values = torch.where(
-                valid_edges,
-                edge_values,
-                torch.zeros_like(edge_values),
-            )
-            valid_weights = weights * valid_edges.to(dtype=edge_values.dtype)
+        if edge_valid is not None:
+            edge_values = torch.where(edge_valid, edge_values, torch.zeros_like(edge_values))
 
-            valid_row_weight_sum = torch.zeros(
-                (*edge_values.shape[:-2], num_nodes, edge_values.shape[-1]),
-                dtype=edge_values.dtype,
-                device=edge_values.device,
-            )
-            valid_row_weight_sum.index_add_(-2, edge_dst_index, valid_weights)
-
-            # Normalized neighbourhoods keep unit total weight after missing
-            # edges are removed. Otherwise the original weights are retained.
-            if self.row_normalize:
-                edge_weight_sums = valid_row_weight_sum[..., edge_dst_index, :]
-                safe_weight_sums = torch.where(
-                    edge_weight_sums > 0,
-                    edge_weight_sums,
-                    torch.ones_like(edge_weight_sums),
-                )
-                effective_weights = torch.where(
-                    valid_edges & (edge_weight_sums > 0),
-                    weights / safe_weight_sums,
-                    torch.zeros_like(weights),
-                )
-            else:
-                effective_weights = torch.where(
-                    valid_edges,
-                    weights,
-                    torch.zeros_like(weights),
-                )
-
-            node_scores = torch.zeros_like(valid_row_weight_sum)
-            node_scores.index_add_(
-                -2,
-                edge_dst_index,
-                safe_edge_values * effective_weights,
-            )
-            return node_scores.masked_fill(valid_row_weight_sum <= 0, torch.nan)
-
-        weighted_values = edge_values * weights
-        node_scores = torch.zeros(
-            (*weighted_values.shape[:-2], num_nodes, weighted_values.shape[-1]),
-            dtype=weighted_values.dtype,
-            device=weighted_values.device,
+        node_values = torch.zeros(
+            (*edge_values.shape[:-2], num_nodes, edge_values.shape[-1]),
+            dtype=edge_values.dtype,
+            device=edge_values.device,
         )
-        node_scores.index_add_(-2, edge_dst_index, weighted_values)
-        return node_scores
+        node_values.index_add_(-2, destination_index, edge_values * weights)
+
+        if node_valid is None:
+            return node_values
+        assert valid_weight_sum is not None
+        if self.row_normalize:
+            safe_weight_sum = torch.where(
+                valid_weight_sum > 0,
+                valid_weight_sum,
+                torch.ones_like(valid_weight_sum),
+            )
+            node_values = node_values / safe_weight_sum
+        return node_values.masked_fill((valid_weight_sum <= 0) | ~node_valid, torch.nan)

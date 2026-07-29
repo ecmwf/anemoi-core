@@ -72,6 +72,21 @@ def test_projection_graph_provider_accepts_int32_edge_index() -> None:
     assert torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-6)
 
 
+def test_projection_graph_provider_does_not_mutate_graph_weights() -> None:
+    graph = _make_graph_with_edges()
+    graph["data"].area = torch.tensor([2.0, 3.0, 4.0])
+    original_weights = graph["data", "to", "target"].gauss_weight.clone()
+
+    ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("data", "to", "target"),
+        edge_weight_attribute="gauss_weight",
+        src_node_weight_attribute="area",
+    )
+
+    torch.testing.assert_close(graph["data", "to", "target"].gauss_weight, original_weights)
+
+
 def _make_graph_with_edges() -> HeteroData:
     graph = HeteroData()
     graph["data"].num_nodes = 3

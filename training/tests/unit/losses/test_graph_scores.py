@@ -9,15 +9,16 @@
 
 from collections.abc import Callable
 
-import einops
 import pytest
 import torch
 from omegaconf import DictConfig
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import GlobalEnergyScoreLoss
@@ -92,16 +93,6 @@ def _aggregate_edges(
     out = torch.zeros((*values.shape[:-2], num_nodes, values.shape[-1]), dtype=values.dtype)
     out.index_add_(-2, dst, values * weights.to(dtype=values.dtype).view(1, 1, -1, 1))
     return out
-
-
-def _batched_provider_edges(loss: BaseLoss, batch_size: int) -> tuple[torch.Tensor, torch.Tensor]:
-    edge_attributes, edge_index, edge_shard_sizes = loss.graph_provider.get_edges(
-        batch_size=batch_size,
-        shard_edges=False,
-        act_checkpoint=False,
-    )
-    assert edge_shard_sizes is None
-    return edge_index, edge_attributes[:, 0]
 
 
 def _graph_energy_reference(
@@ -256,21 +247,11 @@ def test_graph_scores_match_reference(
     pred, target = score_inputs
     loss = loss_factory(graph_data, loss_graph)
 
-    batch_size, _, _, num_nodes, _ = pred.shape
-    edge_index, edge_weights = _batched_provider_edges(loss, batch_size)
-    pred_flat = einops.rearrange(pred, "b t m n v -> t m (b n) v")
-    target_flat = einops.rearrange(target.squeeze(2), "b t n v -> t (b n) v")
+    graph_tensors = loss._graph_kernel_tensors(pred)
     actual = loss._compute_local_score_tensor(
-        pred_flat,
-        target_flat,
-        edge_index,
-        edge_weights,
-    )
-    actual = einops.rearrange(
-        actual,
-        "t (b n) v -> b t n v",
-        b=batch_size,
-        n=num_nodes,
+        pred,
+        target.squeeze(2),
+        *graph_tensors,
     )
     expected = reference(pred, target, graph_data)
 
@@ -300,17 +281,33 @@ def test_graph_scores_expand_the_graph_across_batch(
     torch.testing.assert_close(batched, separate)
 
 
-def test_graph_provider_returns_disjoint_batch_copies(
+def test_graph_provider_reuses_one_csr_matrix_across_the_batch(
     graph_data: HeteroData,
     loss_graph: dict[str, object],
 ) -> None:
     loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
-    edge_index, edge_weights = _batched_provider_edges(loss, batch_size=2)
-    num_edges = graph_data["data", "to", "data"].num_edges
-    num_nodes = graph_data["data"].num_nodes
+    matrix_one = loss.graph_provider.get_edges(batch_size=1)
+    matrix_two = loss.graph_provider.get_edges(batch_size=2)
 
-    torch.testing.assert_close(edge_index[:, num_edges:], edge_index[:, :num_edges] + num_nodes)
-    torch.testing.assert_close(edge_weights[num_edges:], edge_weights[:num_edges])
+    assert matrix_one is matrix_two
+    assert matrix_two.layout == torch.sparse_csr
+    assert matrix_two.shape == (3, 3)
+    assert matrix_two.values().numel() == graph_data["data", "to", "data"].num_edges
+
+
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
+def test_all_graph_scores_use_projection_graph_providers(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    loss_cls: type[BaseLoss],
+) -> None:
+    loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
+
+    assert isinstance(loss.graph_provider, ProjectionGraphProvider)
+    assert loss.graph_provider.get_edges().layout == torch.sparse_csr
 
 
 @pytest.mark.parametrize(
@@ -325,6 +322,7 @@ def test_graph_scores_have_finite_gradients(
 ) -> None:
     pred, target = score_inputs
     pred = pred.clone().requires_grad_()
+    target = target.clone().requires_grad_()
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
     result = loss(pred, target)
@@ -332,7 +330,51 @@ def test_graph_scores_have_finite_gradients(
 
     assert result.ndim == 0
     assert pred.grad is not None
+    assert target.grad is not None
     assert torch.isfinite(pred.grad).all()
+    assert torch.isfinite(target.grad).all()
+
+
+@pytest.mark.gpu
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for the compiled CSR check")
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
+def test_graph_scores_compile_with_checkpointing_and_nans(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    loss_cls: type[BaseLoss],
+) -> None:
+    prediction_values, target_values = score_inputs
+    prediction_values = prediction_values.float()
+    target_values = target_values.float()
+    prediction_values[0, 0, 0, 0, 0] = torch.nan
+    target_values[0, 0, 0, 1, 1] = torch.inf
+    results = []
+
+    for compiled in (False, True):
+        prediction = prediction_values.cuda().requires_grad_()
+        target = target_values.cuda().requires_grad_()
+        loss = loss_cls(
+            graph_data=graph_data,
+            loss_graph=loss_graph,
+            ignore_nans=True,
+        ).cuda()
+        if compiled:
+            loss.compile_for_training(dynamic=False)
+        output = checkpoint(loss, prediction, target, use_reentrant=False)
+        output.backward()
+        assert prediction.grad is not None
+        assert target.grad is not None
+        assert torch.isfinite(output)
+        assert torch.isfinite(prediction.grad).all()
+        assert torch.isfinite(target.grad).all()
+        results.append((output.detach(), prediction.grad.detach(), target.grad.detach()))
+
+    for compiled_tensor, eager_tensor in zip(results[1], results[0], strict=True):
+        torch.testing.assert_close(compiled_tensor, eager_tensor, rtol=4.0e-4, atol=4.0e-5)
 
 
 @pytest.mark.parametrize(
@@ -469,9 +511,8 @@ def test_graph_definition_applies_and_normalizes_weights(graph_data: HeteroData)
         },
     )
 
-    edge_index = loss.graph_provider.edge_index_base
-    edge_weights = loss.graph_provider.edge_attr[:, 0]
-    row_sums = torch.zeros(3).scatter_add_(0, edge_index[1], edge_weights)
+    matrix = loss.graph_provider.get_edges()
+    row_sums = torch.sparse.mm(matrix, torch.ones(3, 1)).squeeze(-1)
     torch.testing.assert_close(row_sums, torch.ones(3))
 
 
@@ -481,7 +522,7 @@ def test_graph_definition_defaults_to_unnormalized_unit_weights(graph_data: Hete
         loss_graph={"edges_name": ["data", "to", "data"]},
     )
 
-    torch.testing.assert_close(loss.graph_provider.edge_attr[:, 0], torch.ones(5))
+    torch.testing.assert_close(loss.graph_provider.get_edges().values(), torch.ones(5))
     assert not loss.graph.row_normalize
 
 
@@ -498,8 +539,10 @@ def test_graph_definition_applies_source_node_weights(graph_data: HeteroData) ->
     src = graph_data["data", "to", "data"].edge_index[0]
     expected = graph_data["data", "to", "data"].weight * graph_data["data"].area[src]
 
-    expected = expected.index_select(0, loss.graph_provider.perm)
-    torch.testing.assert_close(loss.graph_provider.edge_attr[:, 0], expected)
+    expected_matrix = torch.zeros(3, 3)
+    dst = graph_data["data", "to", "data"].edge_index[1]
+    expected_matrix.index_put_((dst, src), expected, accumulate=True)
+    torch.testing.assert_close(loss.graph_provider.get_edges().to_dense(), expected_matrix)
 
 
 @pytest.mark.parametrize(
@@ -557,6 +600,26 @@ def test_energy_scores_ignore_zero_weight_edges_without_nan_gradients(loss_cls: 
     assert torch.isfinite(result)
     assert pred.grad is not None
     assert torch.isfinite(pred.grad).all()
+
+
+@pytest.mark.parametrize("loss_cls", [GraphEnergyScoreLoss, GraphEdgeEnergyScoreLoss])
+def test_energy_scores_have_finite_zero_norm_gradients(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    loss_cls: type[BaseLoss],
+) -> None:
+    prediction = torch.zeros(2, 2, 4, 3, 2, requires_grad=True)
+    target = torch.zeros(2, 2, 1, 3, 2, requires_grad=True)
+    loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
+
+    result = loss(prediction, target)
+    result.backward()
+
+    torch.testing.assert_close(result, torch.tensor(0.0))
+    assert prediction.grad is not None
+    assert target.grad is not None
+    torch.testing.assert_close(prediction.grad, torch.zeros_like(prediction))
+    torch.testing.assert_close(target.grad, torch.zeros_like(target))
 
 
 @pytest.mark.parametrize(
