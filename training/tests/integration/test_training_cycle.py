@@ -522,6 +522,70 @@ def test_loading_strategy_loads_real_checkpoint(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_transfer_learning_into_fewer_variables_cycle(
+    global_config_with_checkpoint: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Issue #838 end-to-end: load a checkpoint into a model trained on FEWER variables.
+
+    The fixture seeds a checkpoint trained on the full variable set. Here we drop one
+    prognostic variable from the current dataset so the fine-tuned model has fewer
+    variables than the checkpoint, then load through ``TransferLearningLoader`` with
+    ``training.allow_variable_subset=True`` and run a short training cycle.
+
+    This was breaking before the #838 fix: the loader skips the variable-sized layers on
+    the shape mismatch, but ``_validate_transfer_learning_datasets`` ->
+    ``compare_variables`` then rejected the reduced set, so ``trainer.train()`` raised a
+    ValueError. The run completing is the proof the fix works end-to-end on a real model.
+
+    The dropped variable is chosen from the dataset at runtime (a prognostic that is not a
+    forcing/diagnostic and not a validation metric), so the scenario is self-contained; it
+    is flagged for domain review as a "realistic" transfer-learning example.
+    """
+    from anemoi.datasets import open_dataset
+
+    cfg, url = global_config_with_checkpoint
+    get_test_archive(url)
+
+    dataset_variables = list(open_dataset(cfg.system.input.dataset).variables)
+    protected = (
+        set(OmegaConf.select(cfg, "data.forcing", default=[]) or [])
+        | set(OmegaConf.select(cfg, "data.diagnostic", default=[]) or [])
+        | set(OmegaConf.select(cfg, "training.metrics.datasets.data", default=[]) or [])
+    )
+    droppable = [name for name in dataset_variables if name not in protected]
+    if not droppable:
+        pytest.skip("no prognostic variable available to drop for the fewer-variables scenario")
+    drop_var = droppable[-1]
+
+    with open_dict(cfg):
+        # Fewer variables than the checkpoint: drop one prognostic variable from the data.
+        cfg.dataloader.training.datasets.data.dataset_config.drop = [drop_var]
+        cfg.dataloader.validation.datasets.data.dataset_config.drop = [drop_var]
+        # Transfer-learning load, opting in to the reduced variable set (issue #838).
+        cfg.training.checkpoint.loading = {
+            "_target_": "anemoi.training.checkpoint.loading.strategies.TransferLearningLoader",
+        }
+        cfg.training.allow_variable_subset = True
+        cfg.diagnostics.plot.callbacks = []
+        cfg.diagnostics.callbacks = []
+
+    # Without allow_variable_subset (or before the fix) this raises ValueError at
+    # _validate_transfer_learning_datasets; completing the cycle is the #838 proof.
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    # The reduced-variable model was built and trained on fewer variables than the checkpoint.
+    assert drop_var not in trainer.data_indices["data"].name_to_index
+    assert len(trainer.data_indices["data"].name_to_index) == len(dataset_variables) - 1
+    # Transfer learning applied the compatible weights and marked the model initialised...
+    assert getattr(trainer.model, "weights_initialized", False) is True
+    # ...and training actually progressed on the reduced variable set.
+    assert trainer.model.trainer.global_step > 0
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_temporal_downscaler(
     temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
