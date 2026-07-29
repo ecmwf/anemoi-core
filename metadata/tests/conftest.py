@@ -14,8 +14,9 @@ import zipfile
 
 import pytest
 
-from anemoi.metadata.checkpoint import METADATA_PATH
 from anemoi.metadata.versions.v1 import MetadataV1
+from anemoi.utils.checkpoints import DEFAULT_FOLDER
+from anemoi.utils.checkpoints import DEFAULT_NAME
 
 # ---------------------------------------------------------------------------
 # Realistic per-dataset inference data (flat form, as training writes it)
@@ -198,7 +199,7 @@ def tmp_checkpoint(tmp_path, sample_metadata_v1) -> "pytest.FixtureRequest":
     ckpt_path = tmp_path / "model.ckpt"
     metadata_json = json.dumps(sample_metadata_v1.to_dict(), indent=2)
     with zipfile.ZipFile(ckpt_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(METADATA_PATH, metadata_json)
+        zf.writestr(f"{DEFAULT_FOLDER}/{DEFAULT_NAME}", metadata_json)
     return ckpt_path
 
 

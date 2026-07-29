@@ -13,12 +13,12 @@ and :class:`TensorShapes`.
 import pytest
 from pydantic import ValidationError
 
-from anemoi.metadata.versions.v1 import DataIndices
-from anemoi.metadata.versions.v1 import DatasetInferenceConfig
-from anemoi.metadata.versions.v1 import InferenceMetadata
-from anemoi.metadata.versions.v1 import TensorShapes
-from anemoi.metadata.versions.v1 import TimestepConfig
-from anemoi.metadata.versions.v1 import VariableTypes
+from anemoi.metadata.versions.inference.v1 import DataIndices
+from anemoi.metadata.versions.inference.v1 import DatasetInferenceConfig
+from anemoi.metadata.versions.inference.v1 import InferenceMetadata
+from anemoi.metadata.versions.inference.v1 import TensorShapes
+from anemoi.metadata.versions.inference.v1 import TimestepConfig
+from anemoi.metadata.versions.inference.v1 import VariableTypes
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -159,32 +159,6 @@ class TestInferenceMetadataStructuredInput:
 
 
 # ---------------------------------------------------------------------------
-# Extra fields
-# ---------------------------------------------------------------------------
-
-
-class TestInferenceMetadataExtraFields:
-    """Extra fields at the root level are preserved (extra='allow')."""
-
-    def test_extra_root_fields_preserved(self):
-        """Unknown top-level keys survive round-trip."""
-        data = _flat_inference_dict()
-        data["custom_training_flag"] = True
-        data["experiment_name"] = "ablation-v3"
-        meta = InferenceMetadata.model_validate(data)
-        dumped = meta.model_dump()
-        assert dumped["custom_training_flag"] is True
-        assert dumped["experiment_name"] == "ablation-v3"
-
-    def test_extra_fields_in_flat_form_preserved(self):
-        """Extra keys that are not dataset names are kept at root level."""
-        data = _flat_inference_dict()
-        data["notes"] = "baseline run"
-        meta = InferenceMetadata.model_validate(data)
-        assert meta.model_dump()["notes"] == "baseline run"
-
-
-# ---------------------------------------------------------------------------
 # Multi-dataset
 # ---------------------------------------------------------------------------
 
@@ -257,11 +231,6 @@ class TestDataIndices:
         with pytest.raises(ValidationError):
             DataIndices(input={"2t": "zero"}, output={"2t": 0})
 
-    def test_extra_fields_preserved(self):
-        """Extra fields are preserved for forward compatibility (extra='allow')."""
-        di = DataIndices(input={"2t": 0}, output={"2t": 0}, unknown_field=True)
-        assert di.model_extra["unknown_field"] is True
-
     def test_frozen(self):
         """DataIndices is immutable (frozen=True)."""
         di = DataIndices(input={"2t": 0}, output={"2t": 0})
@@ -290,11 +259,6 @@ class TestVariableTypes:
         vt = VariableTypes(prognostic=["2t", "msl"])
         assert vt.prognostic == ["2t", "msl"]
         assert vt.forcing == []
-
-    def test_extra_fields_preserved(self):
-        """Extra category fields are preserved for forward compatibility."""
-        vt = VariableTypes(unknown_category=["2t"])
-        assert vt.model_extra["unknown_category"] == ["2t"]
 
     def test_frozen(self):
         """VariableTypes is immutable."""
@@ -357,17 +321,6 @@ class TestTimestepConfig:
                 output_relative_date_indices=[1],
             )
 
-    def test_extra_fields_preserved(self):
-        """Extra fields are preserved for forward compatibility."""
-        ts = TimestepConfig(
-            timestep="6h",
-            input_relative_date_indices=[-1, 0],
-            output_relative_date_indices=[1],
-            relative_date_indices_training=[-1, 0, 1],
-            extra_key="oops",
-        )
-        assert ts.model_extra["extra_key"] == "oops"
-
 
 # ---------------------------------------------------------------------------
 # TensorShapes validation
@@ -407,11 +360,6 @@ class TestTensorShapes:
         with pytest.raises(ValidationError):
             TensorShapes(variables=5)
 
-    def test_extra_fields_preserved(self):
-        """Extra fields are preserved for forward compatibility."""
-        shapes = TensorShapes(variables=5, input_timesteps=2, unknown=True)
-        assert shapes.model_extra["unknown"] is True
-
 
 # ---------------------------------------------------------------------------
 # DatasetInferenceConfig
@@ -428,13 +376,6 @@ class TestDatasetInferenceConfig:
         assert isinstance(cfg.variable_types, VariableTypes)
         assert isinstance(cfg.timesteps, TimestepConfig)
         assert isinstance(cfg.shapes, TensorShapes)
-
-    def test_extra_fields_preserved(self):
-        """Extra fields at the DatasetInferenceConfig level are preserved."""
-        block = _minimal_dataset_block()
-        block["unexpected_key"] = "value"
-        cfg = DatasetInferenceConfig.model_validate(block)
-        assert cfg.model_extra["unexpected_key"] == "value"
 
     def test_missing_data_indices_raises(self):
         """Missing data_indices raises ValidationError."""

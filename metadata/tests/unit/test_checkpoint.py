@@ -18,9 +18,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from anemoi.metadata.checkpoint import DEFAULT_NAME
-from anemoi.metadata.checkpoint import LEGACY_METADATA_PATH
-from anemoi.metadata.checkpoint import METADATA_PATH
 from anemoi.metadata.checkpoint import extract_metadata_dict
 from anemoi.metadata.checkpoint import has_metadata
 from anemoi.metadata.checkpoint import load_metadata
@@ -30,6 +27,9 @@ from anemoi.metadata.checkpoint import save_metadata
 from anemoi.metadata.exceptions import CheckpointError
 from anemoi.metadata.registry import MetadataRegistry
 from anemoi.metadata.versions.v1 import MetadataV1
+from anemoi.utils.checkpoints import DEFAULT_FOLDER
+from anemoi.utils.checkpoints import DEFAULT_NAME
+from anemoi.utils.checkpoints import DEPRECATED_NAME
 
 # ---------------------------------------------------------------------------
 # save_metadata / load_metadata
@@ -240,7 +240,7 @@ class TestRemoveMetadata:
 
         with zipfile.ZipFile(ckpt, "r") as zf:
             assert f"{ckpt.stem}/weights.pt" in zf.namelist()
-            assert METADATA_PATH not in zf.namelist()
+            assert f"{DEFAULT_FOLDER}/{DEFAULT_NAME}" not in zf.namelist()
 
     def test_remove_nonexistent_file_raises(self, tmp_path):
         """remove_metadata() raises CheckpointError if file doesn't exist."""
@@ -305,7 +305,7 @@ class TestLegacyPath:
         """Create a ZIP with metadata at the legacy ai-models.json path."""
         ckpt = tmp_path / "legacy.ckpt"
         with zipfile.ZipFile(ckpt, "w") as zf:
-            zf.writestr(LEGACY_METADATA_PATH, json.dumps(data))
+            zf.writestr(f"{DEFAULT_FOLDER}/{DEPRECATED_NAME}", json.dumps(data))
         return ckpt
 
     def test_has_metadata_detects_legacy(self, tmp_path, sample_v1_dict):
@@ -355,7 +355,7 @@ class TestCheckpointErrors:
         """load_metadata() raises CheckpointError for malformed JSON."""
         ckpt = tmp_path / "bad_json.ckpt"
         with zipfile.ZipFile(ckpt, "w") as zf:
-            zf.writestr(METADATA_PATH, "{ this is not valid json }")
+            zf.writestr(f"{DEFAULT_FOLDER}/{DEFAULT_NAME}", "{ this is not valid json }")
         with pytest.raises(CheckpointError):
             load_metadata(ckpt)
 
@@ -570,6 +570,7 @@ class TestPrefixCollisionGuard:
         # Replace metadata.
         modified = sample_metadata_v1.to_dict()
         modified["metadata_inference"]["seed"] = 7777
+
         replace_metadata(ckpt, modified)
 
         # The similarly-named directory's file should survive.
