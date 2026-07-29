@@ -54,7 +54,7 @@ class DatasetView:
     Examples
     --------
     >>> metadata = Metadata.from_checkpoint("model.ckpt")
-    >>> view = metadata.dataset("era5_1deg")
+    >>> view = metadata.dataset("era5")
     >>> print(view.timestep)
     '6h'
     >>> print(view.multi_step_input)
