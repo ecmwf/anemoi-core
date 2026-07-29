@@ -497,8 +497,9 @@ or because the user wants to fine-tune the model from a specific point
 in the training.
 
 This is done by setting ``training.checkpoint.source`` to a ``RunSource``
-with the *run_id* of the run to restart. With ``fork: false`` (resume) the new
-checkpoints go in the same folder as the old ones:
+with the *run_id* of the run to restart. ``fork`` defaults to ``false``
+(resume), so it can be omitted; a resume keeps the new checkpoints in the same
+folder as the old ones:
 
 .. code:: yaml
 
@@ -507,7 +508,7 @@ checkpoints go in the same folder as the old ones:
        source:
          _target_: anemoi.training.checkpoint.sources.run.RunSource
          run_id: <run_id>
-         fork: false   # resume; set true to fork into a new run
+         # fork: false   # optional; false is the default (resume), set true to fork
 
 With ``fork: true`` the old run is unaffected and the new checkpoints go to a
 new folder with a fresh run_id — useful for starting multiple new runs from a
