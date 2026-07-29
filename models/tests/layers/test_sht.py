@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -96,7 +96,7 @@ def sht_setup(request):
 
 @pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_direct_inverse(sht_setup):
-    """direct followed by inverse returns the original (band-limited) field."""
+    """Direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]
@@ -114,7 +114,7 @@ def test_idempotency_direct_inverse(sht_setup):
 
 @pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_inverse_direct(sht_setup):
-    """inverse followed by direct returns the original spectral coefficients."""
+    """Inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]

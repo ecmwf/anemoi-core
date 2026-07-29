@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -37,6 +37,8 @@ class SpectralTransform(torch.nn.Module):
         data : torch.Tensor
             Input data in the spatial domain of expected shape
             `[batch, ensemble, points, variables]`.
+        kwargs : dict
+            Additional keyword arguments for the transform.
 
         Returns
         -------
@@ -54,7 +56,6 @@ class FFT2D(SpectralTransform):
         x_dim: int,
         y_dim: int,
         apply_filter: bool = False,
-        nodes_slice: tuple[int, int | None] | None = None,
         patch_size: tuple[int, int] | None = None,
         patch_stride: tuple[int, int] | None = None,
         patch_padding: bool = False,
@@ -89,9 +90,6 @@ class FFT2D(SpectralTransform):
         self.patch_padding = patch_padding
         self.patch_pad_y = 0
         self.patch_pad_x = 0
-        nodes_slice = nodes_slice or (0, None)  # we don't want einops to silently fail
-        # by slicing random parts of the input
-        self.nodes_slice = slice(*nodes_slice)
         self.apply_filter = apply_filter
 
         if self.patch_size is not None:
@@ -127,6 +125,17 @@ class FFT2D(SpectralTransform):
                 patch_y, patch_x = self.patch_size
                 self.filter = self.lowpass_filter(patch_x, patch_y)
 
+    def prepare_for_fft(self, data: torch.Tensor) -> torch.Tensor:
+        """Reshape data from flat ``(nodes, vars)`` to ``(y, x, vars)``."""
+        var = data.shape[-1]
+        try:
+            return einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
+        except Exception as e:
+            raise einops.EinopsError(
+                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
+                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
+            ) from e
+
     @staticmethod
     def lowpass_filter(x_dim: int, y_dim: int) -> torch.Tensor:
         fx = torch.fft.fftfreq(x_dim)
@@ -142,16 +151,8 @@ class FFT2D(SpectralTransform):
         self,
         data: torch.Tensor,
     ) -> torch.Tensor:
-        data = torch.index_select(data, -2, torch.arange(*self.nodes_slice.indices(data.size(-2)), device=data.device))
 
-        var = data.shape[-1]
-        try:
-            data = einops.rearrange(data, "... (y x) v -> ... y x v", x=self.x_dim, y=self.y_dim, v=var)
-        except Exception as e:
-            raise einops.EinopsError(
-                f"Possible dimension mismatch in einops.rearrange in FFT2D layer: "
-                f"expected (y * x) == last spatial dim with y={self.y_dim}, x={self.x_dim}"
-            ) from e
+        data = self.prepare_for_fft(data)
 
         if self.patch_size is None:
             fft = torch.fft.fft2(data, dim=(-2, -3))
@@ -380,17 +381,20 @@ class InverseSpectralTransform(torch.nn.Module):
 
 
 class InverseRegularSHT(InverseSpectralTransform):
-    """Inverse SHT on a regular lon-lat grid.
-
-    Parameters
-    ----------
-    nlat : int
-        Number of latitudes.
-    truncation : int | None
-        Spectral truncation. Defaults to nlat // 2 - 1.
-    """
+    """Inverse SHT on a regular lon-lat grid."""
 
     def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        """Initialize InverseRegularSHT.
+
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.nlon = 2 * nlat
@@ -403,18 +407,88 @@ class InverseRegularSHT(InverseSpectralTransform):
         return self._isht(data)
 
 
+class InverseReducedSHT(InverseSpectralTransform):
+    """Inverse SHT on a reduced Gaussian grid."""
+
+    def __init__(
+        self,
+        grid: str,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on a reduced Gaussian grid.
+
+        Parameters
+        ----------
+        grid : str
+            Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
+        truncation : int | None
+            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        """
+        super().__init__()
+
+        if grid not in ["n320", "N320"]:
+            raise ValueError("Only the N320 reduced Gaussian grid SHT is supported.")
+        else:
+            self.nlat = 2 * int(grid[1:])  # N320 has 640 latitudes from pole to pole
+
+        # Fetch regular grid data
+        try:
+            from anemoi.transform.grids.named import lookup
+        except ImportError:
+            raise ImportError(
+                "anemoi.transform is required for InverseReducedSHT transform. Install optional dependencies: pip install anemoi-models[spectra]"
+            )
+
+        # To generate a grid
+        # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
+
+        lats = lookup(grid)["latitudes"]
+
+        # Get latitudes of this grid
+        unique_lats = sorted(set(lats))
+
+        # Calculate longitudes per latitude
+        self.lons_per_lat = [int((lats == unique_lat).sum()) for unique_lat in unique_lats]
+
+        self._isht = InverseSphericalHarmonicTransform(
+            lons_per_lat=self.lons_per_lat,
+            truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
+        )
+
+    def forward(self, data: torch.Tensor) -> torch.Tensor:
+        return self._isht(data)
+
+
 class InverseOctahedralSHT(InverseSpectralTransform):
-    """Inverse SHT on an octahedral reduced grid.
+    """Inverse SHT on an octahedral reduced grid."""
 
-    Parameters
-    ----------
-    nlat : int
-        Number of latitudes.
-    truncation : int | None
-        Spectral truncation. Defaults to nlat // 2 - 1.
-    """
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        use_graphed_irfft: bool = False,
+        **kwargs,
+    ) -> None:
+        """Inverse SHT on an octahedral reduced grid.
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+        Parameters
+        ----------
+        nlat : int
+            Number of latitudes.
+        truncation : int | None
+            Spectral truncation. Defaults to nlat // 2 - 1.
+        use_graphed_irfft : bool
+            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
+            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
+        """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
@@ -422,6 +496,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
+            use_graphed_irfft=use_graphed_irfft,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:

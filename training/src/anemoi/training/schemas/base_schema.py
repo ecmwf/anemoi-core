@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -85,32 +85,75 @@ _DEPRECATED_TARGETS: dict[str, str] = {
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotEnsSample": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotEnsSample' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotHistogram": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotHistogram' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotLoss": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotLoss' "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotSpectrum": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotSpectrum' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.PlotSample": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.PlotSample' "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
         "instead and update your config accordingly."
     ),
     "anemoi.training.diagnostics.callbacks.plot_ens.GraphTrainableFeaturesPlot": (
         "This callback has been deprecated and removed, use "
-        "'anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot' "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotLoss": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.LossCurvePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotHistogram": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotSpectrum": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.PlotEnsSample": (
+        "This callback has been removed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
+        "with 'plot_fn._target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn' "
+        "instead and update your config accordingly."
+    ),
+    "anemoi.training.diagnostics.callbacks.plot.SpatialMapPlot": (
+        "This callback has been renamed, use "
+        "'anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot' "
         "instead and update your config accordingly."
     ),
     "anemoi.models.layers.activations.GLU": (
@@ -200,6 +243,31 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     """Training configuration."""
     config_validation: bool = True
     """Flag to disable validation of the configuration"""
+
+    @model_validator(mode="after")
+    def check_frequency_null_for_trajectory_datasets(self) -> Self:
+        """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
+        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+
+        all_splits = [
+            self.dataloader.training,
+            self.dataloader.validation,
+            self.dataloader.test,
+        ]
+        uses_trajectory = any(
+            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            for split in all_splits
+            for dataset in split.values()
+        )
+        if uses_trajectory and self.data.frequency is not None:
+            msg = (
+                "data.frequency must be null when using trajectory (forecast) datasets. "
+                "The step frequency is read directly from the dataset. "
+                f"Got data.frequency={self.data.frequency!r}."
+            )
+            error = "trajectory_frequency_conflict"
+            raise PydanticCustomError(error, msg)
+        return self
 
     @model_validator(mode="after")
     def set_read_group_size_if_not_provided(self) -> Self:

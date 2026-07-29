@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -16,6 +16,7 @@ from datetime import timedelta
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
@@ -152,7 +153,7 @@ def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
         )
         raise ImportError(msg) from err
 
-    if diagnostics_cfg.plot.datashader:
+    if OmegaConf.select(diagnostics_cfg.plot, "settings.datashader", default=True):
         try:
             import datashader  # noqa: F401
         except ImportError as err:
@@ -176,7 +177,10 @@ def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
             )
             raise ImportError(msg) from err
 
-    if diagnostics_cfg.plot.projection_kind == "lambert_conformal":
+    if (
+        OmegaConf.select(diagnostics_cfg.plot, "settings.projection_kind", default="equirectangular")
+        == "lambert_conformal"
+    ):
         try:
             import cartopy  # noqa: F401
         except ImportError as err:

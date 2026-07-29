@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,8 +14,8 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
+from anemoi.graphs.generate.masks import TORCH_CLUSTER_AVAILABLE
 from anemoi.graphs.generate.masks import AreaMaskBuilder
-from anemoi.graphs.utils import PYG_AVAILABLE
 
 
 def test_init():
@@ -62,7 +62,7 @@ def test_fit(graph_with_nodes: HeteroData, mask: str):
     mask_builder.fit(graph_with_nodes)
 
     assert getattr(mask_builder._backend, "_ref_vectors") is not None
-    if PYG_AVAILABLE:
+    if TORCH_CLUSTER_AVAILABLE:
         assert mask_builder._backend._ref_vectors.shape[1] == 3
         assert isinstance(mask_builder._backend._ref_vectors, torch.Tensor)
     else:

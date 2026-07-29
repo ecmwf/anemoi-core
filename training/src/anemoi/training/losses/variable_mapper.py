@@ -254,7 +254,7 @@ class LossVariableMapper(BaseLossWrapper):
         if isinstance(original_indexer, int):
             return mapped_indices[0] if len(mapped_indices) == 1 else mapped_indices
         if isinstance(original_indexer, torch.Tensor):
-            return torch.as_tensor(mapped_indices, device=original_indexer.device, dtype=torch.long)
+            return original_indexer.new_tensor(mapped_indices, dtype=torch.long)
         return mapped_indices
 
     def _remap_scaler_indices_for_filtered_pred(
@@ -340,6 +340,11 @@ class LossVariableMapper(BaseLossWrapper):
 
         pred_filtered = pred[..., pred_indices]
         target_filtered = target[..., target_indices]
+
+        # torch.compile performance change
+        # Make contiguous to prevent a changing stride forcing specialisation
+        pred_filtered = pred_filtered.contiguous()
+        target_filtered = target_filtered.contiguous()
 
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(

@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import torch
+from torch import Tensor
 
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
@@ -375,80 +376,201 @@ def _gt_bwd_src_pass(
     )
 
 
+#########################################
+# PyTorch Custom Operator for Triton GT #
+#########################################
+# These functions wrap the Triton kernels in PyTorch custom ops,
+# so that they can be used in a PyTorch autograd graph and compiled with torch.compile.
+# They include '_fake' versions which just do the relevant memory allocations
+# and return empty tensors, for use in torch.compile tracing.
+# The '_setup_context' function saves the necessary tensors for the backward pass.
+# for more details on pytorch custom ops see https://docs.pytorch.org/tutorials/advanced/python_custom_ops_functional.html
+
+
+@torch.library.custom_op("anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda")
+def graph_transformer_attention(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """Opaque custom op wrapping the Triton GraphTransformer attention.
+
+    Returns
+    -------
+    out : Tensor
+        Attention output cast back to ``q.dtype`` (the user-facing result).
+    out_saved : Tensor
+        Float32 attention output, kept for the backward pass.
+    m : Tensor
+        Float32 log-sum-exp normalizer, kept for the backward pass.
+    """
+    q, k, v, e = (x.contiguous() for x in (q, k, v, e))
+    row, colptr = (x.contiguous() for x in (row, colptr))
+
+    N_dst, H, C = q.shape
+    out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
+    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+
+    _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
+
+    out = out_saved.to(q.dtype)
+    # Custom-op outputs must not alias one another; ``.to`` returns ``self`` when
+    # ``q`` is already float32, so clone to keep ``out`` and ``out_saved`` distinct.
+    if out is out_saved:
+        out = out.clone()
+
+    return out, out_saved, m
+
+
+@graph_transformer_attention.register_fake
+def _graph_transformer_attention_fake(
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor]:
+    N_dst, H, C = q.shape
+    out = torch.empty((N_dst, H, C), device=q.device, dtype=q.dtype)
+    out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
+    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+    return out, out_saved, m
+
+
 # TODO(Jan): single bwd pass for non-bipartite graphs
+@torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
+def graph_transformer_attention_backward(
+    d_out: Tensor,
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    out_saved: Tensor,
+    m: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    """Opaque custom op wrapping the Triton GraphTransformer backward kernels.
+
+    Registered as its own custom op so that AOTAutograd does not trace into the
+    raw Triton kernel launches when compiling the backward graph.
+    """
+    d_out = d_out.contiguous()
+
+    N_dst, H, C = q.shape
+    N_src = k.shape[0]
+
+    def torch_dtype_to_triton(dtype):
+        if dtype == torch.float16:
+            return tl.float16
+        elif dtype == torch.bfloat16:
+            return tl.bfloat16
+        elif dtype == torch.float32:
+            return tl.float32
+        else:
+            raise ValueError(f"Unsupported dtype: {dtype}")
+
+    grad_dtype = torch_dtype_to_triton(d_out.dtype)
+
+    dQ = torch.empty_like(q)
+    dK = torch.empty_like(k)
+    dV = torch.empty_like(v)
+    dE = torch.empty_like(e)
+    D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+
+    # Pass A: destination nodes (computes D and dQ)
+    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+
+    # Pass B: source nodes (accumulate dK, dV, dE)
+    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
+
+    return dQ, dK, dV, dE
 
 
-class GraphTransformerFunction(torch.autograd.Function):
-    """Custom autograd for GraphTransformer using Triton kernels."""
+@graph_transformer_attention_backward.register_fake
+def _graph_transformer_attention_backward_fake(
+    d_out: Tensor,
+    q: Tensor,
+    k: Tensor,
+    v: Tensor,
+    e: Tensor,
+    out_saved: Tensor,
+    m: Tensor,
+    row: Tensor,
+    colptr: Tensor,
+    rowptr: Tensor,
+    edge_ids: Tensor,
+    edge_dst: Tensor,
+) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+    return (
+        torch.empty_like(q),
+        torch.empty_like(k),
+        torch.empty_like(v),
+        torch.empty_like(e),
+    )
 
-    def __init__(self):
-        if not torch.cuda.is_available():
-            raise ValueError(
-                "Error. The 'triton' backend was selected for the GraphTransformer but 'torch.cuda.is_available()' returned 'False'. The 'triton' backend is currently only supported on GPUs. To run on other device types, please select a different backend for the GraphTransformer in the models config. If you intend to run on GPUs, please ensure your torch install supports running on GPUs."
-            )
 
-    @staticmethod
-    def forward(ctx, q, k, v, e, csc, reverse):
-        """Args:
-        q: [N_dst, H, C]
-        k: [N_src, H, C]
-        v: [N_src, H, C]
-        e: [num_edges, H, C]
-        csc: (row, colptr)
-        reverse: (rowptr, edge_ids, edge_dst)
-        """
-        row, colptr = csc
-        rowptr, edge_ids, edge_dst = reverse
+def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
+    # Only the gradient w.r.t. the user-facing ``out`` is used; ``out_saved`` and
+    # ``m`` are internal saved tensors that are not consumed downstream.
+    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
-        # Ensure contiguous memory layout for Triton
-        q, k, v, e = [x.contiguous() for x in (q, k, v, e)]
-        row, colptr, rowptr, edge_ids, edge_dst = [x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst)]
+    dQ, dK, dV, dE = graph_transformer_attention_backward(
+        d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
+    )
 
-        N_dst, H, C = q.shape
-        out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
-        m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+    # Gradients for (q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst).
+    return dQ, dK, dV, dE, None, None, None, None, None
 
-        # fix: write output in float32 for backward stability, then cast back to input dtype at the end of forward
-        _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
 
-        # Save tensors for backward
-        ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
-        return out_saved.to(q.dtype)
+def _graph_transformer_attention_setup_context(ctx, inputs, output):
+    q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
+    _out, out_saved, m = output
 
-    @staticmethod
-    def backward(ctx, d_out):
-        d_out = d_out.contiguous()
-        q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+    # The forward op makes contiguous copies internally, but those are not the tensors
+    # passed here (setup_context receives the original op inputs). Save contiguous
+    # versions so the Triton backward kernels, which assume a contiguous layout, receive
+    # contiguous inputs.
+    q, k, v, e = (x.contiguous() for x in (q, k, v, e))
+    row, colptr, rowptr, edge_ids, edge_dst = (x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst))
 
-        N_dst, H, C = q.shape
-        N_src = k.shape[0]
+    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
 
-        # Infer gradient dtype from incoming gradient tensor
-        def torch_dtype_to_triton(dtype):
-            if dtype == torch.float16:
-                return tl.float16
-            elif dtype == torch.bfloat16:
-                return tl.bfloat16
-            elif dtype == torch.float32:
-                return tl.float32
-            else:
-                raise ValueError(f"Unsupported dtype: {dtype}")
 
-        grad_dtype = torch_dtype_to_triton(d_out.dtype)
+graph_transformer_attention.register_autograd(
+    _graph_transformer_attention_backward,
+    setup_context=_graph_transformer_attention_setup_context,
+)
 
-        # Allocate grads and intermediates
-        dQ = torch.empty_like(q)
-        dK = torch.empty_like(k)
-        dV = torch.empty_like(v)
-        dE = torch.empty_like(e)
-        D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
-        # Pass A: destination nodes (computes D and dQ)
-        _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+#######################
+# Triton GT interface #
+#######################
 
-        # Pass B: source nodes (accumulate dK, dV, dE)
-        _gt_bwd_src_pass[(N_src,)](
-            q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype
-        )
 
-        return dQ, dK, dV, dE, None, None
+def graph_transformer_attention_conv(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    edges: Tensor,
+    csc: tuple[Tensor, Tensor],
+    reverse: tuple[Tensor, Tensor, Tensor],
+) -> Tensor:
+    """torch.compile-friendly GraphTransformer attention."""
+    row, colptr = csc
+    rowptr, edge_ids, edge_dst = reverse
+    out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
+    return out

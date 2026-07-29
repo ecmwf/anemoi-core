@@ -1,3 +1,12 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 # This schema defines the expected structure of the metadata dictionary produced by the trainer.
 # We only check a partial schema here, since we are in the process of consolidating the metadata structure and content.
 # The goal is to prevent regressions in the metadata structure we are establishing for anemoi-inference

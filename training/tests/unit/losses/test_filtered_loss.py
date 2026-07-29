@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
+from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.index_space import IndexSpace
@@ -210,6 +211,37 @@ def _mapper(data_indices: IndexCollection, predicted: list[str], target: list[st
     return w
 
 
+class CapturingLoss(BaseLoss):
+    """A loss that captures the arguments passed to it for testing purposes."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls: list[dict[str, object]] = []
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        scaler_indices: tuple[object, ...] | None = None,
+        without_scalers: list[str] | list[int] | None = None,
+        grid_shard_slice: slice | None = None,
+        group: object | None = None,
+        squash_mode: str = "avg",
+        **kwargs: object,
+    ) -> torch.Tensor:
+        del squash, without_scalers, grid_shard_slice, group, squash_mode, kwargs
+        self.calls.append(
+            {
+                "pred": pred,
+                "target": target,
+                "scaler_indices": scaler_indices,
+            },
+        )
+        return torch.tensor(1.0, dtype=pred.dtype, device=pred.device)
+
+
 # --- VARIABLE-axis scaler filtering ------------------------------------------
 
 
@@ -354,6 +386,65 @@ class TestScalerIndicesRemapping:
 
         # MSE=(1-0)²=1, var_w[1]=3, 8 grid points → 24
         torch.testing.assert_close(loss, torch.tensor(24.0))
+
+    def test_tensor_scaler_indices_remap_to_tensor(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """Tensor scaler_indices stay tensors after global-to-local remapping."""
+        inner_loss = CapturingLoss()
+        w = LossVariableMapper(
+            loss=inner_loss,
+            predicted_variables=["var_0", "var_3"],
+            target_variables=["var_0", "var_3"],
+            data_indices=data_indices_forcing_gaps,
+        )
+
+        pred = torch.zeros(1, 1, 1, 8, 6)
+        target = torch.zeros(1, 1, 1, 8, 10)
+        requested_indices = torch.tensor([3, 0], dtype=torch.int32)
+
+        w(
+            pred,
+            target,
+            scaler_indices=(..., requested_indices),
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+
+        call = inner_loss.calls[-1]
+        remapped_scaler_indices = call["scaler_indices"]
+        assert isinstance(remapped_scaler_indices, tuple)
+        assert remapped_scaler_indices[0] is Ellipsis
+        assert isinstance(remapped_scaler_indices[1], torch.Tensor)
+        torch.testing.assert_close(remapped_scaler_indices[1], torch.tensor([1, 0], dtype=torch.long))
+        assert remapped_scaler_indices[1].device == requested_indices.device
+        assert requested_indices.dtype == torch.int32
+
+    def test_filtered_tensors_passed_to_loss_are_contiguous(self, data_indices_forcing_gaps: IndexCollection) -> None:
+        """Filtered pred/target tensors are made contiguous before entering the inner loss."""
+        inner_loss = CapturingLoss()
+        w = LossVariableMapper(
+            loss=inner_loss,
+            predicted_variables=["var_0", "var_3"],
+            target_variables=["var_0", "var_3"],
+            data_indices=data_indices_forcing_gaps,
+        )
+
+        pred = torch.zeros(1, 1, 1, 8, 6).transpose(2, 3)
+        target = torch.zeros(1, 1, 1, 8, 10).transpose(2, 3)
+
+        w(
+            pred,
+            target,
+            pred_layout=IndexSpace.DATA_OUTPUT,
+            target_layout=IndexSpace.DATA_FULL,
+        )
+
+        call = inner_loss.calls[-1]
+        assert isinstance(call["pred"], torch.Tensor)
+        assert isinstance(call["target"], torch.Tensor)
+        assert call["pred"].is_contiguous()
+        assert call["target"].is_contiguous()
+        assert call["pred"].shape[-1] == 2
+        assert call["target"].shape[-1] == 2
 
     def test_empty_remap_returns_zero(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """scaler_indices selecting no filtered variables → zero tensor."""

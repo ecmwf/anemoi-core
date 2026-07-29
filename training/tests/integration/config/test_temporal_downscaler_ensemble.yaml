@@ -1,15 +1,22 @@
 system:
   input:
-    dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+    dataset: anemoi-integration-tests/training/datasets/aifs-od-fc-oper-0001-mars-o48-2017-2017-6h-1h-v5-testing.zarr
     loss_matrices_path: "anemoi-integration-tests/training/assets/"
 
 data:
-  frequency: 6h
+  frequency: null
+  datasets:
+    data:
+      diagnostic: []
+      processors:
+        normalizer:
+          config:
+            std: []
 
 task:
   _target_: anemoi.training.tasks.TemporalDownscaler
-  input_timestep: 12h
-  output_timestep: 6h
+  input_timestep: 6h
+  output_timestep: 1h
   output_right_boundary: True
 
 
@@ -17,46 +24,16 @@ dataloader:
   training:
     datasets:
       data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
         end: 2017-01-08 12:00:00
   validation:
     datasets:
       data:
+        dataset_config:
+          step_start: 6
+          step_end: 12
+          step_frequency: 1
         start: 2017-01-08 18:00:00
-
-
-diagnostics:
-  plot:
-    parameters: [tp]
-    callbacks:
-      # Add plot callbacks here.
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotEnsSample
-        dataset_names: ["data"]
-        sample_idx: ${diagnostics.plot.sample_idx}
-        per_sample : 2
-        parameters: ${diagnostics.plot.parameters}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        #Defining the accumulation levels for precipitation related fields and the colormap
-        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100] # in mm
-        members: null  # None for all members, list for specific members
-
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotLoss
-        dataset_names: ["data"]
-        parameter_groups:
-          moisture: [tp, cp, tcw]
-          sfc_wind: [10u, 10v]
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        #! DEACTIVATING UNTIL PYSHTOOLS FIX FOR 3.13
-      # - _target_: anemoi.training.diagnostics.callbacks.plot.PlotSpectrum
-      #   dataset_names: ["data"]
-      #   sample_idx: ${diagnostics.plot.sample_idx}
-      #   parameters: ${diagnostics.plot.parameters}
-      #   every_n_batches: ${diagnostics.plot.frequency.batch}
-      - _target_: anemoi.training.diagnostics.callbacks.plot.PlotHistogram
-        dataset_names: ["data"]
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters: ${diagnostics.plot.parameters}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        precip_and_related_fields: ["tp", "cp"] # Optional: specify precip fields for special histogram treatment
-      - _target_: anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot
-        dataset_names: ["data"]
-        every_n_epochs: ${diagnostics.plot.frequency.epoch}

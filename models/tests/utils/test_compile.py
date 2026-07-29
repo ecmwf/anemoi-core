@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import importlib.util
 import io
 import logging
 import os
@@ -22,6 +23,10 @@ from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.utils.compile import _get_compile_entry
 from anemoi.models.utils.compile import _meets_library_versions_for_compile
 from anemoi.models.utils.compile import mark_for_compilation
+
+HAS_ANEMOI_TRAINING = False
+if importlib.util.find_spec("anemoi.training") is not None:
+    HAS_ANEMOI_TRAINING = True
 
 LOGGER = logging.getLogger(__name__)
 
@@ -51,21 +56,29 @@ def layer_kernel_compile_config() -> None:
 
 
 def graphtransformer_ens_compile_config() -> None:
-    return OmegaConf.create(
+    modules_to_compile = [
         {
-            "compile": [
-                {
-                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+            "module": "anemoi.models.layers.conv.GraphTransformerConv",
+        },
+        {
+            "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+            "options": {
+                "dynamic": False,
+            },
+        },
+    ]
+    if HAS_ANEMOI_TRAINING:
+        modules_to_compile.append(
+            {
+                "module": "anemoi.training.losses.CRPS",
+                "options": {
+                    "dynamic": False,
+                    "fullgraph": True,
+                    "mode": "max-autotune",
                 },
-                {
-                    "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
-                    "options": {
-                        "dynamic": False,
-                    },
-                },
-            ],
-        }
-    )
+            }
+        )
+    return OmegaConf.create({"compile": modules_to_compile})
 
 
 def test_compile_config_no_match() -> None:
