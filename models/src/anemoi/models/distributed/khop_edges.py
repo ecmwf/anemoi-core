@@ -82,7 +82,7 @@ class GraphPartition:
         edge_attr: Tensor,
         edge_index: Adj,
         cond: Optional[PairTensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        drop_unconnected_src_nodes: bool = True,
     ) -> tuple[PairTensor, Tensor, Adj, Tensor, Optional[PairTensor]]:
         """Materialise a single partition by slicing nodes, edges and conditioning.
 
@@ -101,10 +101,10 @@ class GraphPartition:
             Edge indices (assumed dst-sorted).
         cond : tuple[Tensor, Tensor], optional
             Conditioning tensors (cond_src, cond_dst).
-        model_comm_group : ProcessGroup, optional
-            Model communication group. Just used to optionally
-            skip dropping unconnected src nodes when compiling,
-            since that is a data-dependent operation.
+        drop_unconnected_src_nodes : bool, optional
+            Whether to skip dropping unconnected src nodes,
+            It is skipped when using torch.compile,
+            since it allocates a data-dependent (unbacked) sized tensor.
 
         Returns
         -------
@@ -125,9 +125,8 @@ class GraphPartition:
         # relabel dst indices to local [0, partition_dst_size)
         self._relabel_dst_nodes(edge_index_subset, partition_id)
 
-        # if (torch.compile.is_compiling() and model_comm_group is None):
-        if not model_is_distributed(model_comm_group):
-            # skip dropping unconnected src nodes when not distributed (single partition):
+        if not drop_unconnected_src_nodes:
+            # skip dropping unconnected src nodes.
             # torch.unique makes x_src_subset.shape[0] a data-dependent (unbacked) size,
             # which breaks torch.compile(fullgraph=True) downstream in index2ptr.
             x_src_subset, edge_index_subset, src_ids = x_src, edge_index_subset, torch.arange(x_src.size(0))
@@ -347,6 +346,7 @@ def shard_graph_to_local(
     shard_info: BipartiteGraphShardInfo,
     model_comm_group: Optional[ProcessGroup] = None,
     cond: Optional[PairTensor] = None,
+    drop_unconnected_src_nodes: bool = True,
 ) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]:
     """Shard graph tensors to the local rank using precomputed partition metadata.
 
@@ -369,6 +369,9 @@ def shard_graph_to_local(
         Model communication group.
     cond : tuple[Tensor, Tensor], optional
         Conditioning tensors (cond_src, cond_dst).
+    drop_unconnected_src_nodes : bool, optional
+        Whether to drop unconnected src nodes. This is skipped when using torch.compile,
+        since it allocates a data-dependent (unbacked) sized tensor.
 
     Returns
     -------
@@ -416,7 +419,11 @@ def shard_graph_to_local(
         gather_in_fwd=shard_info.src_is_sharded(),
     )
 
-    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+    if drop_unconnected_src_nodes:
+        x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+    else:
+        x_src_local = x_src_full
+        src_ids = torch.arange(x_src_full.size(0), device=x_src_full.device)
 
     # same for conditioning [if cond is not None]
     cond_local = None

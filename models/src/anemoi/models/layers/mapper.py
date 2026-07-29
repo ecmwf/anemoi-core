@@ -240,6 +240,13 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         self.shard_strategy = shard_strategy
 
+        self.compiled = False
+        # select different code paths if we are compiling
+        # explicit gradient checkpointing is disabled when torch.compile is used,
+        # as it interferes with cuda graphs and torch.compile has its own checkpointing
+        # Furthermore, unconnected src nodes are not dropped when compiling,
+        # as it creates data-dependent (unbacked) sized tensors.
+
         assert shard_strategy in ["heads", "edges"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'heads' and 'edges'."
@@ -284,6 +291,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             shard_info,
             model_comm_group,
             cond=cond,
+            drop_unconnected_src_nodes=(not self.compiled),
         )
 
         # build a second GraphPartition for local chunking within this shard
@@ -311,7 +319,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     ) -> Tensor:
         # O(1) slicing: extract subgraph for this chunk
         (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index, cond=cond, model_comm_group=model_comm_group
+            chunk_id, x, edge_attr, edge_index, cond=cond, drop_unconnected_src_nodes=(not self.compiled)
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -347,7 +355,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         **kwargs,
     ) -> PairTensor:
 
-        if self.gradient_checkpointing and torch.compiler.is_compiling():
+        # check on the first iteration
+        if not self.compiled and torch.compiler.is_compiling():
             # LOGGER.warning(
             #    "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
             #    "Disabling explicit gradient checkpointing for this function."
@@ -355,6 +364,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             #    "'torch._dynamo.config.activation_memory_budget'"
             # )
             self.gradient_checkpointing = False
+            self.compiled = True
 
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
