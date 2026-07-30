@@ -301,6 +301,7 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
         dist.all_to_all(output_list, input_list, group=group)
 
 
+# TODO(Cathal): add 'torch.library.opcheck' test once distibuted testing infrastructure is in place.
 @torch.library.custom_op("anemoi_distributed::alltoall_transpose", mutates_args=())
 def _alltoall_transpose_op(
     input_: Tensor,
