@@ -1101,6 +1101,12 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         self._cached_halo_cache_specs = None
         self._cached_partition = None
 
+    # Halo info is topology-only, data-dependent (torch.unique, `if num_halo_nodes > 0`,
+    # build_graph_partition degree/.item()) metadata that is built once and cached.
+    # It must not be traced by torch.compile — run it eagerly and let the compiled
+    # forward consume the cached tensors. (Requires the enclosing compile to allow
+    # graph breaks, i.e. fullgraph=False.)
+    @torch._dynamo.disable
     def _get_or_build_cached_halo_info(
         self,
         x: Tensor,
