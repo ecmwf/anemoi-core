@@ -102,6 +102,8 @@ def prepare_compilation(
     training_config: DictConfig,
 ) -> torch.nn.Module:
     """Reads model_config and marks the matching submodules in model for compilation."""
+    torch._dynamo.config.ignore_logger_methods.add(logging.Logger.info)
+    torch._dynamo.config.ignore_logger_methods.add(logging.Logger.warning)
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
         check_env_and_warn()  # warn if env settings interfere with compilation
