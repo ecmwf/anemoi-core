@@ -76,7 +76,8 @@ class Forecaster(BaseTask):
         self,
         input_offsets: list[str] | None = None,
         output_offsets: list[str] | None = None,
-        rollout_shift: str | None = "0H",
+        rollout_shift: str = "0H",
+        consistency_check: bool = True,
         multistep_input: int | None = None,
         multistep_output: int | None = None,
         timestep: str | None = None,
@@ -111,8 +112,12 @@ class Forecaster(BaseTask):
             rollout_shift = frequency_to_timedelta(rollout_shift)
 
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
-
         self._rollout_shift = rollout_shift
+
+        if consistency_check:
+            self._validate_offsets()
+            self._validate_rollout_shift()
+
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
         self._advance_map = self._compute_advance_map()
@@ -289,3 +294,63 @@ class Forecaster(BaseTask):
         offsets = self._offsets
         timestep = min(offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1))
         return frequency_to_string(timestep)
+
+    def _validate_offsets(self) -> None:
+        """Check that input and output offsets are well-formed for a forecasting task."""
+        if len(self._input_offsets) != len(set(self._input_offsets)):
+            msg = f"input_offsets contains duplicate values: {[frequency_to_string(v) for v in self._input_offsets]}"
+            raise ValueError(msg)
+        if len(self._output_offsets) != len(set(self._output_offsets)):
+            msg = f"output_offsets contains duplicate values: {[frequency_to_string(v) for v in self._output_offsets]}"
+            raise ValueError(msg)
+        if max(self._input_offsets) >= min(self._output_offsets):
+            msg = (
+                "All output offsets must be strictly greater than all input offsets "
+                "for a forecasting task. "
+                f"input_offsets={[frequency_to_string(v) for v in self._input_offsets]}, "
+                f"output_offsets={[frequency_to_string(v) for v in self._output_offsets]}"
+            )
+            raise ValueError(msg)
+
+    def _validate_rollout_shift(self) -> None:
+        """Check if the rollout shift is valid or replace 0 by the maximum valid shift.
+
+        A shift S is valid if it is strictly positive, the shifted input offsets
+        are contained in the union of input and output offsets, and no pairwise
+        difference of output offsets is a multiple of S (which would cause the
+        same output time step to be forecasted more than once across rollout steps).
+        """
+        max_input = max(self._input_offsets)
+        candidates = [o - max_input for o in self._output_offsets]
+        output_diffs = [o2 - o1 for o1 in self._output_offsets for o2 in self._output_offsets if o2 > o1]
+        valid = [
+            s
+            for s in candidates
+            if all(i + s in self._offsets for i in self._input_offsets[:-1])
+            and all(diff % s != datetime.timedelta(0) for diff in output_diffs)
+        ]
+
+        if self._rollout_shift == frequency_to_timedelta("0H"):
+            if not valid:
+                msg = (
+                    "No valid autoregressive rollout shift exists. "
+                    "This forecaster cannot be trained with rollout, "
+                    "nor can it predict autoregressively in inference. "
+                    "If you insist on training a forecaster with these offsets you can set "
+                    "`consistency_check=False` in the task configuration.\n"
+                    f"input_offsets={[frequency_to_string(v) for v in self._input_offsets]}, "
+                    f"output_offsets={[frequency_to_string(v) for v in self._output_offsets]}"
+                )
+                raise ValueError(msg)
+            LOGGER.info("Inferred rollout_shift=%s (maximum valid shift).", frequency_to_string(valid[-1]))
+            self._rollout_shift = valid[-1]
+
+        elif self._rollout_shift not in valid:
+            msg = (
+                f"rollout_shift={frequency_to_string(self._rollout_shift)!r} is not a valid autoregressive "
+                "rollout shift for the chosen input and output offsets.\n "
+                f"(valid shifts are: {[frequency_to_string(v) for v in valid]}). "
+                f"input_offsets={[frequency_to_string(v) for v in self._input_offsets]}, "
+                f"output_offsets={[frequency_to_string(v) for v in self._output_offsets]}"
+            )
+            raise ValueError(msg)

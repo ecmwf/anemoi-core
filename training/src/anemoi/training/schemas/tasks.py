@@ -39,13 +39,15 @@ class ForecasterSchema(BaseModel):
     multistep_output: PositiveInt | None = Field(default=None, example=1)
     "Legacy: number of output timesteps the model should predict."
     timestep: str | None = Field(default=None, example="6H")
-    "Legacy: timestep string (e.g. '6H') defining the frequency of the input and output steps."
+    "Legacy: timestep string defining the frequency of the input and output steps."
     input_offsets: list[str] | None = Field(default=None, example=["-6H", "0H"])
     "Offset-based: input time offsets as duration strings (e.g. ['-6H', '0H'])."
     output_offsets: list[str] | None = Field(default=None, example=["6H"])
     "Offset-based: output time offsets as duration strings (e.g. ['6H'])."
-    rollout_shift: str | None = Field(default="0H", example="6H")
-    "Offset-based: time shift applied to the offsets between rollout steps (e.g. '6H')."
+    rollout_shift: str = Field(default="0H", example="6H")
+    "Offset-based: time shift applied to the offsets between rollout steps."
+    consistency_check: bool = Field(default=True, example=True)
+    "Whether to validate the input/output offsets and rollout shift at task construction."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
