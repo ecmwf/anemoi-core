@@ -191,6 +191,25 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
         assert args[3] == 2  # batch size
 
 
+def test_rollout_eval_logs_loss_and_metrics():
+    callback = RolloutEval(rollout=[2], every_n_batches=1)
+    pl_module = MagicMock()
+    pl_module.loss.name = "mse"
+    pl_module.logger_enabled = True
+
+    callback._log(
+        pl_module,
+        loss=torch.tensor(3.0),
+        metrics={"data_mse_loss": torch.tensor(2.0)},
+        bs=2,
+    )
+
+    assert [call.args[0] for call in pl_module.log.call_args_list] == [
+        "val_r2_mse",
+        "val_r2_data_mse_loss",
+    ]
+
+
 def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
     from omegaconf import DictConfig
 
