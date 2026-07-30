@@ -78,7 +78,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         return self._model_metadata
 
-     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
+    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
          # when using time-based checkpointing there is a broadcast each iteration
          # This can get quite expensive when sharding to a large number of GPUs
          # per model
