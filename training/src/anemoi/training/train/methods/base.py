@@ -36,10 +36,12 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
+from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
@@ -90,6 +92,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ----------
     config : BaseSchema
         Configuration object defining all parameters.
+    task : BaseTask
+        Training task that defines the prediction workflow.
     graph_data : HeteroData
         Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
@@ -163,10 +167,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         ----------
         config : DictConfig
             Job configuration
+        task : BaseTask
+            Training task.
         graph_data : HeteroData
             Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
+        statistics_tendencies : dict
+            Statistics of data tendencies.
         data_indices : dict[str, IndexCollection]
             Indices of the training data,
         metadata : dict
@@ -288,6 +296,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+            )
+            self._initialise_updating_scalers(
+                scalers=dataset_scalers,
+                updating_scalers=dataset_updating_scalars,
+                loss_obj=self.loss[dataset_name],
+                metrics_dict=self.metrics[dataset_name],
             )
             self._scaling_values_log[dataset_name] = print_variable_scaling(
                 self.loss[dataset_name],
@@ -503,12 +517,35 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if scaler is None:  # If scaler is None, no update to be applied
             return
 
-        if self._can_update_scaler(loss_obj, name):
-            loss_obj.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+        self._apply_scaler_update(name, scaler[1], loss_obj, metrics_dict)
 
-        for metric in metrics_dict.values():  # If scalar in metrics, update it
-            if self._can_update_scaler(metric, name):
-                metric.update_scaler(scaler=scaler[1], name=name)  # Only update the values
+    @classmethod
+    def _initialise_updating_scalers(
+        cls,
+        scalers: dict[str, TENSOR_SPEC],
+        updating_scalers: dict[str, BaseUpdatingScaler],
+        loss_obj: torch.nn.Module,
+        metrics_dict: dict[str, torch.nn.Module],
+    ) -> None:
+        """Move updating scalers into runtime storage before training starts."""
+        for name in updating_scalers:
+            cls._apply_scaler_update(name, scalers[name][1], loss_obj, metrics_dict)
+
+    @classmethod
+    def _apply_scaler_update(
+        cls,
+        name: str,
+        scaler: torch.Tensor,
+        loss_obj: torch.nn.Module,
+        metrics_dict: dict[str, torch.nn.Module],
+    ) -> None:
+        """Apply one updating scaler to every loss or metric that uses it."""
+        if cls._can_update_scaler(loss_obj, name):
+            loss_obj.update_scaler(scaler=scaler, name=name)
+
+        for metric in metrics_dict.values():
+            if cls._can_update_scaler(metric, name):
+                metric.update_scaler(scaler=scaler, name=name)
 
     @staticmethod
     def _can_update_scaler(loss_or_metric: torch.nn.Module, scaler_name: str) -> bool:
@@ -582,6 +619,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
+        dataset_name : str
+            Dataset being processed.
         validation_mode : bool
             Whether in validation mode
 
@@ -632,6 +671,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Grid shard slice for distributed training
         dataset_name : str
             Dataset name for multi-dataset scenarios
+        pred_layout : IndexSpace | str | None
+            Variable layout of the predictions.
+        target_layout : IndexSpace | str | None
+            Variable layout of the targets.
         **_kwargs
             Additional arguments
 
@@ -681,8 +724,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
+        dataset_name : str | None
+            Dataset name for multi-dataset scenarios.
+        pred_layout : IndexSpace | str | None
+            Variable layout of the predictions.
+        target_layout : IndexSpace | str | None
+            Variable layout of the targets.
         rollout_step : int | None
             Current rollout step index, used to produce per-step metric key suffixes.
+        **_kwargs
+            Additional arguments.
 
         Returns
         -------
@@ -715,10 +766,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : torch.Tensor
             Target values
-        step : int, optional
-            Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
+        dataset_name : str | None, optional
+            Dataset being processed.
         **kwargs
             Additional arguments to pass to loss computation
 
@@ -771,8 +822,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Predicted values
         y : dict[str, torch.Tensor]
             Target values
-        step : int, optional
-            Current step
         validation_mode : bool, optional
             Whether to compute validation metrics
         **kwargs
@@ -966,12 +1015,24 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred: torch.Tensor
+        y_pred : torch.Tensor
             Predicted ensemble
-        y: torch.Tensor
+        y : torch.Tensor
             Ground truth (target).
-        step: int, optional
+        grid_shard_slice : slice | None, optional
+            Grid shard slice for distributed validation.
+        dataset_name : str | None, optional
+            Dataset being processed.
+        step : int | None, optional
             Step number
+        pred_layout : IndexSpace | str | None, optional
+            Variable layout of the predictions.
+        target_layout : IndexSpace | str | None, optional
+            Variable layout of the targets.
+        without_scalers : list[str] | list[int] | None, optional
+            Scalers to omit from metric calculation.
+        **_kwargs
+            Additional arguments.
 
         Returns
         -------

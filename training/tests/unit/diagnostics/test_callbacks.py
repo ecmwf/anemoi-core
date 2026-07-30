@@ -251,7 +251,10 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
 
     assert pl_module.allgather_batch.call_count == 2
     for child_loss in callback.loss["data"].losses:
-        torch.testing.assert_close(child_loss.loss.scaler.nan_mask_weights, torch.full((1, 3, 2), 2.0))
+        torch.testing.assert_close(
+            child_loss.loss.scaler.get_scaler_tensor("nan_mask_weights"),
+            torch.full((1, 3, 2), 2.0),
+        )
 
 
 # Progress bar callback tests
