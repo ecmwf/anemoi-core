@@ -74,19 +74,16 @@ class Forecaster(BaseTask):
 
     def __init__(
         self,
-        multistep_input: int,
-        multistep_output: int,
-        timestep: str,
+        input_offsets: list[str] | None = None,
+        output_offsets: list[str] | None = None,
+        rollout_shift: str | None = "0H",
+        multistep_input: int | None = None,
+        multistep_output: int | None = None,
+        timestep: str | None = None,
         rollout: dict | None = None,
         validation_rollout: int | None = None,
         **kwargs,
     ) -> None:
-
-        self.timestep = frequency_to_timedelta(timestep)
-        self.num_input_steps = multistep_input
-        self.num_output_steps = multistep_output
-        self.rollout = RolloutConfig(**(rollout or {}))
-        self.validation_rollout = validation_rollout
 
         if len(kwargs) > 0:
             LOGGER.warning(
@@ -95,11 +92,29 @@ class Forecaster(BaseTask):
                 kwargs,
             )
 
-        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
-        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
-        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
-        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+        if multistep_input is not None or multistep_output is not None or timestep is not None:
+            assert not input_offsets and not output_offsets and rollout_shift == "0H", (
+                "When using multistep_input, multistep_output, and timestep, input_offsets, "
+                " output_offsets and rollout_shift must not be provided."
+            )
+            timestep = frequency_to_timedelta(timestep)
+            input_offsets = sorted(-i * timestep for i in range(multistep_input))
+            output_offsets = sorted((i + 1) * timestep for i in range(multistep_output))
+            rollout_shift = timestep * multistep_output
+        else:
+            assert multistep_input is None and multistep_output is None and timestep is None, (
+                "When using input_offsets, output_offsets, and rollout_shift, multistep_input, "
+                "multistep_output, and timestep must not be provided."
+            )
+            input_offsets = sorted(frequency_to_timedelta(v) for v in input_offsets)
+            output_offsets = sorted(frequency_to_timedelta(v) for v in output_offsets)
+            rollout_shift = frequency_to_timedelta(rollout_shift)
+
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
+
+        self._rollout_shift = rollout_shift
+        self.rollout = RolloutConfig(**(rollout or {}))
+        self.validation_rollout = validation_rollout
         self._advance_map = self._compute_advance_map()
         self._plot_adapter = ForecasterPlotAdapter(self)
 
@@ -114,18 +129,13 @@ class Forecaster(BaseTask):
         """Get the metric name for the current step."""
         return f"_rstep{rollout_step}"
 
-    @property
-    def _step_shift(self) -> datetime.timedelta:
-        """Time shift between consecutive rollout steps."""
-        return self.timestep * self.num_output_steps
-
     def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
         """Pre-compute index mappings for input advancement during a rollout step."""
         out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
         in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
         advance_map = {"inin": [], "outin": []}
         for new_idx, in_offset in enumerate(self._input_offsets):
-            shifted_in = in_offset + self._step_shift
+            shifted_in = in_offset + self._rollout_shift
             if shifted_in in out_to_idx:
                 advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
             else:
@@ -136,7 +146,7 @@ class Forecaster(BaseTask):
         """Compute the full list of offsets needed for the current rollout configuration."""
         all_offsets = set(self._input_offsets)
         for step in range(rollout_step):
-            shift = self._step_shift * step
+            shift = self._rollout_shift * step
             for o in self._output_offsets:
                 all_offsets.add(o + shift)
         return sorted(all_offsets)
@@ -163,7 +173,7 @@ class Forecaster(BaseTask):
         **_kwargs,
     ) -> list[datetime.timedelta]:
         """Return output offsets shifted by ``rollout_step``."""
-        shift = self._step_shift * rollout_step
+        shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
     def _advance_dataset_input(
@@ -204,7 +214,6 @@ class Forecaster(BaseTask):
 
             if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
                 true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
-            ######
 
             x[:, new_idx] = output_mask.rollout_boundary(
                 x[:, new_idx],
@@ -277,4 +286,6 @@ class Forecaster(BaseTask):
 
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata."""
-        return frequency_to_string(self.timestep)
+        offsets = self._offsets
+        timestep = min(offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1))
+        return frequency_to_string(timestep)
