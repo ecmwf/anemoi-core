@@ -18,6 +18,7 @@ import torch
 import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from anemoi.training.utils.checkpoint import check_classes
 from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
@@ -48,7 +49,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         # when checkpointing by time, round to
         # the nearest N steps
         # This reduces broadcasts by a factor
-        # of
+        # of self._time_check_every_n_steps
         self._time_check_every_n_steps = 10
 
     @staticmethod
@@ -78,7 +79,14 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         return self._model_metadata
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx) -> None:
+    def on_train_batch_end(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        outputs: STEP_OUTPUT,
+        batch: any,
+        batch_idx: int,
+    ) -> None:
         # when using time-based checkpointing there is a broadcast each iteration
         # This can get quite expensive when sharding to a large number of GPUs
         # per model
