@@ -100,6 +100,7 @@ class Forecaster(BaseTask):
         # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
         output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
+        self._advance_map = self._compute_advance_map()
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -117,6 +118,19 @@ class Forecaster(BaseTask):
     def _step_shift(self) -> datetime.timedelta:
         """Time shift between consecutive rollout steps."""
         return self.timestep * self.num_output_steps
+
+    def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
+        """Pre-compute index mappings for input advancement during a rollout step."""
+        out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
+        in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
+        advance_map = {"inin": [], "outin": []}
+        for new_idx, in_offset in enumerate(self._input_offsets):
+            shifted_in = in_offset + self._step_shift
+            if shifted_in in out_to_idx:
+                advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
+            else:
+                advance_map["inin"].append((in_to_idx[shifted_in], new_idx))
+        return advance_map
 
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""
@@ -166,37 +180,41 @@ class Forecaster(BaseTask):
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
-        keep_steps = min(self.num_input_steps, self.num_output_steps)
+        # Return a fresh tensor: gradient computations need the version of x at each rollout step
+        x = x.clone()
 
-        x = x.roll(-keep_steps, dims=1)
+        # Shift part of input to be reused.
+        for old_idx, new_idx in self._advance_map["inin"]:
+            x[:, new_idx] = x[:, old_idx]
 
         # Compute batch indices for the output offsets of this rollout step
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
 
-        for i in range(keep_steps):
+        for out_idx, new_idx in self._advance_map["outin"]:
             # Get prognostic variables
-            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
+            x[:, new_idx, ..., data_indices.model.input.prognostic] = y_pred[
                 :,
-                -(i + 1),
+                out_idx,
                 ...,
                 data_indices.model.output.prognostic,
             ]
 
-            batch_time_index = output_batch_indices[-(i + 1)]
+            batch_time_index = output_batch_indices[out_idx]
             true_state = batch[:, batch_time_index]
 
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
+            ######
 
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
+            x[:, new_idx] = output_mask.rollout_boundary(
+                x[:, new_idx],
                 true_state,
                 data_indices,
                 grid_shard_slice=grid_shard_slice,
             )
 
             # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
+            x[:, new_idx, ..., data_indices.model.input.forcing] = batch[
                 :,
                 batch_time_index,
                 ...,
