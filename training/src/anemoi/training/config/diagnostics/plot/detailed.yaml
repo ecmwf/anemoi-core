@@ -76,3 +76,34 @@ callbacks:
       _partial_: true
       # Optional overrides (shown with defaults):
       # log_scale: false
+  - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+    tag_infix: zonal_cross
+    dataset_names: ${diagnostics.plot.datasets_to_plot}
+    sample_idx: ${diagnostics.plot.sample_idx}
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    parameters:
+      - t_50
+      - t_100
+      - t_250
+      - t_500
+      - t_700
+      - t_850
+      - t_1000
+      - z_50
+      - z_100
+      - z_250
+      - z_500
+      - z_700
+      - z_850
+      - z_1000
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.zonal_cross_section_plot_fn
+      _partial_: true
+      variable: [t, z]
+      axis: lat
+      # Optional overrides (shown with defaults):
+      # lat_min: null
+      # lat_max: null
+      # lon_min: null
+      # lon_max: null
+      # n_bins: 72

@@ -46,7 +46,7 @@ Built-in plot functions and their optional kwargs
 ``zonal_cross_section_plot_fn``
     Zonal-mean pressure-latitude or pressure-longitude cross-section (truth / pred / error).
 
-    - ``variable`` (str, default ``"t"``): variable prefix; selects ``t_50``, ``t_100``, … by parsing the pressure-level suffix.
+    - ``variable`` (str or list[str], default ``"t"``): variable prefix(es); each selects matching pressure-level variables (``t_50``, …). Multiple variables produce a grid of rows.
     - ``axis`` (str, default ``"lat"``): ``"lat"`` puts latitude on x-axis, ``"lon"`` puts longitude on x-axis.
     - ``lat_min``, ``lat_max`` (float or None, default ``None``): latitude bounding box; ``None`` means no restriction.
     - ``lon_min``, ``lon_max`` (float or None, default ``None``): longitude bounding box; ``None`` means no restriction.
@@ -164,7 +164,7 @@ def zonal_cross_section_plot_fn(
     latlons: np.ndarray,
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,  # noqa: ARG001
-    variable: str = "t",
+    variable: str | list[str] = "t",
     axis: str = "lat",
     lat_min: float | None = None,
     lat_max: float | None = None,
@@ -181,9 +181,10 @@ def zonal_cross_section_plot_fn(
 
     Parameters
     ----------
-    variable : str
-        Variable prefix to select (e.g. ``"t"`` picks ``t_50``, ``t_100``, …).
-        Pressure level is parsed from the numeric suffix.
+    variable : str or list[str]
+        Variable prefix(es) to plot (e.g. ``"t"`` or ``["t", "z"]``).
+        Each prefix selects matching pressure-level variables (``t_50``, …).
+        Multiple variables produce a grid: rows = variables, columns = truth/pred/error.
     axis : str
         ``"lat"`` → latitude on x-axis, average over selected longitudes.
         ``"lon"`` → longitude on x-axis, average over selected latitudes.
@@ -195,6 +196,8 @@ def zonal_cross_section_plot_fn(
         Number of bins along the plot axis (default 72 → 2.5° for lat).
     """
     import matplotlib.pyplot as plt
+
+    variables = [variable] if isinstance(variable, str) else list(variable)
 
     lats, lons = latlons[:, 0], latlons[:, 1]
     mask = np.ones(len(lats), dtype=bool)
@@ -211,24 +214,6 @@ def zonal_cross_section_plot_fn(
     axis_label = "Latitude (°)" if axis == "lat" else "Longitude (°)"
     axis_range = (-90.0, 90.0) if axis == "lat" else (-180.0, 180.0)
 
-    filtered = {}
-    for idx, v in parameters.items():
-        name = v[0] if isinstance(v, tuple) else v
-        if name.startswith(variable + "_"):
-            try:
-                filtered[idx] = (name, int(name.split("_")[-1]))
-            except ValueError:
-                continue
-
-    if not filtered or not mask.any():
-        fig, ax = plt.subplots(figsize=(6, 4))
-        ax.text(0.5, 0.5, "No data in selected region", ha="center", va="center", transform=ax.transAxes)
-        return fig
-
-    sorted_items = sorted(filtered.items(), key=lambda kv: kv[1][1])
-    indices = [idx for idx, _ in sorted_items]
-    pressure_levels = [meta[1] for _, meta in sorted_items]
-
     bins = np.linspace(axis_range[0], axis_range[1], n_bins + 1)
     bin_centres = 0.5 * (bins[:-1] + bins[1:])
     bin_idx = np.clip(np.digitize(plot_coords, bins) - 1, 0, n_bins - 1)
@@ -240,30 +225,56 @@ def zonal_cross_section_plot_fn(
             for b in range(n_bins)
         ])
 
-    truth_grid = np.stack([zonal_mean(y_true, i) for i in indices])  # (n_levels, n_bins)
-    pred_grid = np.stack([zonal_mean(y_pred, i) for i in indices])
-    err_grid = pred_grid - truth_grid
+    def build_grids(prefix: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[int]] | None:
+        filtered = {}
+        for idx, v in parameters.items():
+            name = v[0] if isinstance(v, tuple) else v
+            if name.startswith(prefix + "_"):
+                try:
+                    filtered[idx] = int(name.split("_")[-1])
+                except ValueError:
+                    continue
+        if not filtered:
+            return None
+        sorted_items = sorted(filtered.items(), key=lambda kv: kv[1])
+        indices = [idx for idx, _ in sorted_items]
+        pressure_levels = [level for _, level in sorted_items]
+        truth_grid = np.stack([zonal_mean(y_true, i) for i in indices])
+        pred_grid = np.stack([zonal_mean(y_pred, i) for i in indices])
+        return truth_grid, pred_grid, pred_grid - truth_grid, pressure_levels
 
-    vmin, vmax = np.nanmin(truth_grid), np.nanmax(truth_grid)
-    emax = np.nanmax(np.abs(err_grid))
+    rows = [(v, build_grids(v)) for v in variables]
+    rows = [(v, grids) for v, grids in rows if grids is not None]
 
-    fig, axs = plt.subplots(1, 3, figsize=(18, 5), constrained_layout=True)
-    for ax, data, title, kw in zip(
-        axs,
-        [truth_grid, pred_grid, err_grid],
-        [f"{variable} truth", f"{variable} pred", f"{variable} error (pred − truth)"],
-        [
-            {"vmin": vmin, "vmax": vmax, "cmap": "RdBu_r"},
-            {"vmin": vmin, "vmax": vmax, "cmap": "RdBu_r"},
-            {"vmin": -emax, "vmax": emax, "cmap": "bwr"},
-        ],
-    ):
-        im = ax.pcolormesh(bin_centres, pressure_levels, data, **kw)
-        ax.set_xlabel(axis_label)
-        ax.set_ylabel("Pressure (hPa)")
-        ax.invert_yaxis()
-        ax.set_title(title)
-        fig.colorbar(im, ax=ax, shrink=0.8)
+    if not rows or not mask.any():
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.text(0.5, 0.5, "No data in selected region", ha="center", va="center", transform=ax.transAxes)
+        return fig
+
+    n_rows = len(rows)
+    fig, axs = plt.subplots(n_rows, 3, figsize=(18, 5 * n_rows), constrained_layout=True)
+    if n_rows == 1:
+        axs = axs[np.newaxis, :]
+
+    for row_idx, (vname, (truth_grid, pred_grid, err_grid, pressure_levels)) in enumerate(rows):
+        vmin, vmax = np.nanmin(truth_grid), np.nanmax(truth_grid)
+        emax = np.nanmax(np.abs(err_grid))
+        for col_idx, (data, title, kw) in enumerate(zip(
+            [truth_grid, pred_grid, err_grid],
+            [f"{vname} truth", f"{vname} pred", f"{vname} error (pred − truth)"],
+            [
+                {"vmin": vmin, "vmax": vmax, "cmap": "RdBu_r"},
+                {"vmin": vmin, "vmax": vmax, "cmap": "RdBu_r"},
+                {"vmin": -emax, "vmax": emax, "cmap": "bwr"},
+            ],
+        )):
+            ax = axs[row_idx, col_idx]
+            im = ax.pcolormesh(bin_centres, pressure_levels, data, **kw)
+            ax.set_xlabel(axis_label)
+            ax.set_ylabel("Pressure (hPa)")
+            ax.invert_yaxis()
+            ax.set_title(title)
+            fig.colorbar(im, ax=ax, shrink=0.8)
 
     return fig
 
