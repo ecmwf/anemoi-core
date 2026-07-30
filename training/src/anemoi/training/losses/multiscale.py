@@ -419,4 +419,6 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 ),
             )
 
-        return torch.stack(weighted_losses)
+        # The scale dimension is internal to this wrapper. Return the same
+        # scalar or per-variable shape as the wrapped loss.
+        return torch.stack(weighted_losses).sum(dim=0)

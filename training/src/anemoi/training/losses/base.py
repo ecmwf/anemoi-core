@@ -240,7 +240,12 @@ class BaseLoss(nn.Module, ABC):
                 TensorDim.TIME,
                 TensorDim.ENSEMBLE_DIM,
             ),
-        ).squeeze()
+        )
+        # Remove the grid dimension while retaining one value per variable
+        # when squash=False.
+        out = out.squeeze(0)
+        if squash:
+            out = out.squeeze(-1)
 
         return out if group is None else reduce_tensor(out, group)
 
