@@ -16,7 +16,7 @@ debug:
 enable_checkpointing: True
 checkpoint:
   every_n_minutes:
-    save_frequency: 30 # Approximate, as this is checked at the end of training steps
+    save_frequency: 30 # Approximate, as this is checked at the end of every 10 training steps
     num_models_saved: 3 # If set to k, saves the 'last' k model weights in the training.
 
   every_n_epochs:
