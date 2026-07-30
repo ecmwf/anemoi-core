@@ -42,8 +42,6 @@ Built-in plot functions and their optional kwargs
 
     - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
       colour levels in mm for precipitation fields.
-    - ``n_plots_per_sample`` (int, default ``4``): number of fixed panels per
-      variable row (target, pred mean, mean error, ens sd).
 
 Rendering settings (datashader, projection, colormaps, precip_and_related_fields)
 are read from the ``settings`` object passed by the callback — configure them
@@ -158,7 +156,6 @@ def ensemble_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,
     accumulation_levels_plot: list | None = None,
-    n_plots_per_sample: int = 4,
     **_kwargs: Any,
 ) -> Figure:
     """Adapter for ``plot_predicted_ensemble`` (PlotEnsSample)."""
@@ -168,7 +165,6 @@ def ensemble_plot_fn(
     levels = accumulation_levels_plot if accumulation_levels_plot is not None else DEFAULT_ACCUMULATION_LEVELS
     return plot_predicted_ensemble(
         parameters=parameters,
-        n_plots_per_sample=n_plots_per_sample,
         latlons=latlons,
         clevels=levels,
         y_true=np.asarray(y_true).squeeze(),
