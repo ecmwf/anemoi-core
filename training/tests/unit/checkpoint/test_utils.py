@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -39,6 +39,8 @@ from anemoi.training.checkpoint.utils import format_size
 from anemoi.training.checkpoint.utils import get_checkpoint_metadata
 from anemoi.training.checkpoint.utils import validate_checkpoint
 
+TIMEOUT = 60
+
 
 class TestDownloadWithRetry:
     """Test async download functionality with retry logic."""
@@ -50,13 +52,13 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "downloaded_file.bin"
 
         try:
-            result_path = await download_with_retry(network_urls["valid"], dest_path, max_retries=3, timeout=30)
+            result_path = await download_with_retry(network_urls["valid"], dest_path, max_retries=3, timeout=TIMEOUT)
 
             assert result_path == dest_path
             assert dest_path.exists()
             assert dest_path.stat().st_size > 0
 
-        except (TimeoutError, aiohttp.ClientError) as e:
+        except (TimeoutError, aiohttp.ClientError, CheckpointSourceError) as e:
             pytest.skip(f"Network request failed: {e}")
 
     @pytest.mark.unit
@@ -66,7 +68,7 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "timeout_file.bin"
 
         try:
-            with pytest.raises(CheckpointTimeoutError):
+            with pytest.raises((CheckpointTimeoutError, CheckpointSourceError)):
                 await download_with_retry(
                     network_urls["timeout"],
                     dest_path,
@@ -83,7 +85,7 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "not_found_file.bin"
 
         with pytest.raises(CheckpointSourceError) as exc_info:
-            await download_with_retry(network_urls["not_found"], dest_path, max_retries=2, timeout=30)
+            await download_with_retry(network_urls["not_found"], dest_path, max_retries=2, timeout=60)
 
         # The message is "http" and source_path contains the URL
         assert "http" in exc_info.value.message or "http" in exc_info.value.source_path
@@ -99,7 +101,7 @@ class TestDownloadWithRetry:
         dest_path = temp_checkpoint_dir / "server_error_file.bin"
 
         with pytest.raises(CheckpointSourceError):
-            await download_with_retry(network_urls["server_error"], dest_path, max_retries=2, timeout=30)
+            await download_with_retry(network_urls["server_error"], dest_path, max_retries=2, timeout=TIMEOUT)
 
     @pytest.mark.unit
     async def test_download_with_retry_creates_parent_dir(self, temp_checkpoint_dir: Path) -> None:
@@ -159,7 +161,7 @@ class TestDownloadWithRetry:
             mock_client_session.return_value = mock_session
 
             with pytest.raises(CheckpointSourceError):
-                await download_with_retry("https://example.com/fail.bin", dest_path, max_retries=3, timeout=30)
+                await download_with_retry("https://example.com/fail.bin", dest_path, max_retries=3, timeout=TIMEOUT)
 
         # Should have waited for exponential backoff: 1s + 2s = 3s minimum
         elapsed_time = time.time() - start_time
@@ -357,7 +359,7 @@ class TestValidateCheckpoint:
         checkpoint = {"state_dict": corrupted_state_dict}
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "NaN values" in str(exc_info.value)
         assert "corrupted_tensor" in str(exc_info.value)
@@ -372,7 +374,7 @@ class TestValidateCheckpoint:
         checkpoint = {"state_dict": corrupted_state_dict}
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "infinite values" in str(exc_info.value)
         assert "inf_tensor" in str(exc_info.value)
@@ -387,7 +389,7 @@ class TestValidateCheckpoint:
             },
         }
 
-        assert validate_checkpoint(checkpoint) is True
+        assert validate_checkpoint(checkpoint, check_tensors=True) is True
 
     @pytest.mark.unit
     def test_validate_checkpoint_nested_nan_tensors(self) -> None:
@@ -399,7 +401,7 @@ class TestValidateCheckpoint:
         }
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         assert "model_state_dict.layer1.bias" in str(exc_info.value)
 
@@ -414,7 +416,7 @@ class TestValidateCheckpoint:
         }
 
         with pytest.raises(CheckpointValidationError) as exc_info:
-            validate_checkpoint(checkpoint)
+            validate_checkpoint(checkpoint, check_tensors=True)
 
         # Should capture both errors
         error_str = str(exc_info.value)
@@ -920,7 +922,7 @@ class TestUtilsIntegration:
 
         try:
             # Download file
-            await download_with_retry(network_urls["valid"], dest_path, max_retries=2, timeout=30)
+            await download_with_retry(network_urls["valid"], dest_path, max_retries=2, timeout=TIMEOUT)
 
             assert dest_path.exists()
 

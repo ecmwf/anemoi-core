@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -22,8 +22,11 @@ from torch.utils.data import IterableDataset
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import compute_valid_data_indices
+from anemoi.training.data.usable_indices import compute_valid_anchors
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -41,6 +44,8 @@ class MultiDataset(IterableDataset):
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
+        epoch: int = 0,
+        rollout: int = 1,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -55,20 +60,66 @@ class MultiDataset(IterableDataset):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "multi"
+        epoch : int, optional
+            Epoch used for deterministic epoch-dependent shuffling, by default 0
+        rollout : int, optional
+            Rollout length represented by the loaded relative date indices, by default 1
         """
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
+        self.epoch = epoch
+        self.rollout = rollout
 
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
+        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
+        # intersection would silently keep only sequence-0 samples and produce
+        # semantically meaningless alignment between the two encoders.
+        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
+        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
+        if single_seq and multi_seq:
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
+            )
+            raise ValueError(msg)
 
-        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
+        # Compute valid (sequence, position) anchors and a flat index over them
+        # that the shuffle/shard logic operates on.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+
+        # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
 
         self._lazy_init_model_and_reader_group_info()
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+
+        # Recompute valid (sequence, position) anchors for the updated rollout.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+
+        # Normalize the date indices to use slices where possible.
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -88,7 +139,7 @@ class MultiDataset(IterableDataset):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
-        self.shard_shapes = None
+        self.shard_sizes = None
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -152,7 +203,7 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_shapes: dict[str, list[int]],
+        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -170,8 +221,8 @@ class MultiDataset(IterableDataset):
             Reader group rank
         reader_group_size : int
             Reader group size
-        shard_shapes : dict[str, list[int]]
-            Shard shapes for all data readers
+        shard_sizes : dict[str, ShardSizes]
+            Shard sizes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -183,7 +234,7 @@ class MultiDataset(IterableDataset):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        self.shard_shapes = shard_shapes
+        self.shard_sizes = shard_sizes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 
@@ -264,17 +315,21 @@ class MultiDataset(IterableDataset):
         )
 
         base_seed = get_base_seed()
+        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
 
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
+        torch.manual_seed(seed)
+        random.seed(seed)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed=seed)
         sanity_rnd = self.rng.random(1)[0]
         LOGGER.info(
-            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
             worker_id,
             self.label,
             os.getpid(),
-            base_seed,
+            self.epoch,
+            self.rollout,
+            seed,
             sanity_rnd,
         )
 
@@ -295,18 +350,19 @@ class MultiDataset(IterableDataset):
         return slice(start, end)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
+        sequence, position = (int(v) for v in self.anchors[index])
         x = {}
         for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(index, self.relative_date_indices[name])
-            # self.shard_shapes is lazily initalised to None
-            # This if statement guards against the case where shard_shapes is not set
+            time_steps = offset_time_indices(position, self.relative_date_indices[name])
+            # self.shard_sizes is lazily initalised to None
+            # This if statement guards against the case where shard_sizes is not set
             # (e.g. if set_comm_group_info hasn't been called yet)
-            if self.shard_shapes is not None and self.shard_shapes[name] is not None:
-                start, end = get_partition_range(self.shard_shapes[name], self.reader_group_rank)
+            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
+                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
                 grid_indices = slice(start, end)
             else:
                 grid_indices = slice(None)
-            x[name] = dataset.get_sample(time_steps, grid_indices)
+            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
 
         return x
 

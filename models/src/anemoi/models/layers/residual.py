@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -21,11 +21,8 @@ from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
-from anemoi.models.distributed.graph import gather_channels
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_channels
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
@@ -44,7 +41,7 @@ class BaseResidualConnection(nn.Module, ABC):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
@@ -76,7 +73,7 @@ class SkipConnection(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
@@ -113,6 +110,8 @@ class TruncatedConnection(BaseResidualConnection):
         Name of the data nodes in ``graph``.
     autocast : bool, default False
         Whether to use automatic mixed precision for the projections.
+    sparse_projector_num_chunks : int, default 1
+        Number of chunks to use for sparse projection matmuls.
     row_normalize : bool, optional
         Normalize projection weights per target node so each row sums to 1.
     truncation_up_file_path : str, optional
@@ -156,6 +155,7 @@ class TruncatedConnection(BaseResidualConnection):
         truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
         data_node_name: str = "data",
         autocast: bool = False,
+        sparse_projector_num_chunks: int = 1,
         row_normalize: bool = False,
         # Deprecated: pass inside truncation_config instead.
         truncation_up_file_path: Optional[str] = None,
@@ -221,7 +221,7 @@ class TruncatedConnection(BaseResidualConnection):
             row_normalize=row_normalize,
         )
 
-        self.projector = SparseProjector(autocast=autocast)
+        self.projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
 
     @staticmethod
     def _normalise_truncation_config(
@@ -276,40 +276,25 @@ class TruncatedConnection(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
         """Apply truncated skip connection."""
         batch_size = x.shape[0]
         x = x[:, -1, ...]  # pick latest step
+
         x = einops.rearrange(x, "batch ensemble grid features -> (batch ensemble) grid features")
-        shard_shapes = apply_shard_shapes(x, -2, grid_shard_shapes) if grid_shard_shapes is not None else None
-        x = self._to_channel_shards(x, shard_shapes, model_comm_group)
+        channel_shard_sizes = get_shard_sizes(x, -1, model_comm_group)
+        if grid_shard_sizes is not None:  # grids sharding -> channel sharding
+            x = all_to_all_transpose(x, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
         x = self.projector(x, self.provider_down.get_edges(device=x.device))
         x = self.projector(x, self.provider_up.get_edges(device=x.device))
-        x = self._to_grid_shards(x, shard_shapes, model_comm_group)
-        x = einops.rearrange(
-            x,
-            "(batch ensemble) grid features -> batch ensemble grid features",
-            batch=batch_size,
-        )
+        if grid_shard_sizes is not None:  # channel sharding -> grid sharding
+            x = all_to_all_transpose(x, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+        x = einops.rearrange(x, "(batch ensemble) grid features -> batch ensemble grid features", batch=batch_size)
 
         return self._expand_time(x, n_step_output)
-
-    def _to_channel_shards(self, x, shard_shapes=None, model_comm_group=None):
-        """Move node-major tensors into the channel-sharded layout used by projection kernels."""
-        return self._reshard(x, shard_channels, shard_shapes, model_comm_group)
-
-    def _to_grid_shards(self, x, shard_shapes=None, model_comm_group=None):
-        """Restore projected tensors back to the original grid-sharded layout."""
-        return self._reshard(x, gather_channels, shard_shapes, model_comm_group)
-
-    def _reshard(self, x, fn, shard_shapes=None, model_comm_group=None):
-        """Apply a sharding transform only when shard metadata is available."""
-        if shard_shapes is not None:
-            x = fn(x, shard_shapes, model_comm_group)
-        return x
 
 
 def _ornstein_init_theta(
@@ -418,7 +403,7 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
@@ -579,31 +564,34 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         x_skip = x_skip * (1 - f.unsqueeze(-1))
         return walias * x + (1 - walias) * self.x_isht(x_skip)
 
-    def _apply_truncation(self, x_last: torch.Tensor, shard_shapes=None, model_comm_group=None) -> torch.Tensor:
-        if shard_shapes is not None:
-            x_last = gather_tensor(x_last, dim=-2, shapes=shard_shapes, mgroup=model_comm_group)
+    def _apply_truncation(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
+        channel_shard_sizes = get_shard_sizes(x_last, -1, model_comm_group)
+        if grid_shard_sizes is not None:
+            x_last = all_to_all_transpose(x_last, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
 
         x_last = einops.rearrange(x_last, "... values var -> ... var values")
         x_last[..., self._truncation_input_idx, :] = self.lpass_filter(x_last[..., self._truncation_input_idx, :])
         x_last = einops.rearrange(x_last, "... var values -> ... values var")
 
-        if shard_shapes is not None:
-            x_last = shard_tensor(x_last, dim=-2, shapes=shard_shapes, mgroup=model_comm_group)
+        if grid_shard_sizes is not None:
+            x_last = all_to_all_transpose(x_last, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
 
         return x_last
 
-    def _learnable(self, x_last: torch.Tensor, shard_shapes=None, model_comm_group=None) -> torch.Tensor:
+    def _learnable(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
         if self.truncate:
-            x_last = self._apply_truncation(x_last, shard_shapes=shard_shapes, model_comm_group=model_comm_group)
+            x_last = self._apply_truncation(
+                x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
+            )
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
         weight = einops.rearrange(weight, "... var values -> ... values var")
 
         # Slice weight to the local grid shard
-        if shard_shapes is not None:
+        if grid_shard_sizes is not None:
             rank = dist.get_rank(group=model_comm_group)
-            offset = sum(s[-2] for s in shard_shapes[:rank])
-            local_size = shard_shapes[rank][-2]
+            offset = sum(grid_shard_sizes[:rank])
+            local_size = grid_shard_sizes[rank]
             weight = weight[..., offset : offset + local_size, :]
 
         gain = 1 - torch.sigmoid(weight[0, ...]) * (1 - self.theta_buff) - self.theta_buff
@@ -615,14 +603,13 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     def forward(
         self,
         x: torch.Tensor,
-        grid_shard_shapes=None,
+        grid_shard_sizes=None,
         model_comm_group=None,
         n_step_output: int | None = None,
     ) -> torch.Tensor:
         x_last = x[:, -1, ...]
-        shard_shapes = apply_shard_shapes(x_last, -2, grid_shard_shapes) if grid_shard_shapes is not None else None
         out = torch.zeros_like(x_last)
         out[..., self._internal_input_idx] = self._learnable(
-            x_last, shard_shapes=shard_shapes, model_comm_group=model_comm_group
+            x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
         )
         return self._expand_time(out, n_step_output)

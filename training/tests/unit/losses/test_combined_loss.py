@@ -20,8 +20,8 @@ from torch_geometric.data import HeteroData
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
@@ -44,10 +44,9 @@ def test_combined_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.CombinedLoss",
                 "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss"},
-                    {"_target_": "anemoi.training.losses.MAELoss"},
+                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                 ],
-                "scalers": ["test"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -68,10 +67,9 @@ def test_combined_loss_invalid_loss_weights() -> None:
                 {
                     "_target_": "anemoi.training.losses.combined.CombinedLoss",
                     "losses": [
-                        {"_target_": "anemoi.training.losses.MSELoss"},
-                        {"_target_": "anemoi.training.losses.MAELoss"},
+                        {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
+                        {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test"]},
                     ],
-                    "scalers": ["test"],
                     "loss_weights": [1.0, 0.5, 1],
                 },
             ),
@@ -106,7 +104,6 @@ def test_combined_loss_seperate_scalers() -> None:
                     {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["test"]},
                     {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["test2"]},
                 ],
-                "scalers": ["test", "test2"],
                 "loss_weights": [1.0, 0.5],
             },
         ),
@@ -147,7 +144,6 @@ def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> Non
                         {
                             "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
                             "weights": [1.0],
-                            "keep_batch_sharded": False,
                             "multiscale_config": {
                                 "num_scales": 1,
                                 "base_num_nearest_neighbours": 1,
@@ -209,7 +205,6 @@ def test_combined_loss_with_filtered_target_only_subloss_preserves_scaler_remapp
                     },
                 ],
                 "loss_weights": [1.0, 0.5],
-                "scalers": ["*"],
             },
         ),
         scalers={
@@ -268,7 +263,6 @@ def test_combined_loss_propagates_needs_shard_layout_info() -> None:
         MultiscaleLossWrapper(
             per_scale_loss=MSELoss(),
             weights=[1.0],
-            keep_batch_sharded=True,
         ),
     )
 
@@ -278,18 +272,19 @@ def test_combined_loss_propagates_needs_shard_layout_info() -> None:
 def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: pytest.MonkeyPatch) -> None:
     pred = torch.zeros((1, 1, 1, 2, 1))
     target = torch.zeros((1, 1, 2, 1))
-    grid_shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    grid_shard_sizes = [1, 1]
+    channel_shard_sizes_pred = [1, 1]
+    channel_shard_sizes_y = [1, 1]
     weights = torch.ones((1, 1, 1, 1, 1))
     group = FakeGroup(size=2)
 
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=MSELoss(),
         weights=[1.0],
-        keep_batch_sharded=True,
     )
-    prepare_for_smoothing = MagicMock(return_value=(pred, target, grid_shard_shapes, grid_shard_shapes))
+    prepare_for_smoothing = MagicMock(return_value=(pred, target, channel_shard_sizes_pred, channel_shard_sizes_y))
     monkeypatch.setattr(multiscale_loss, "_prepare_for_smoothing", prepare_for_smoothing)
-    monkeypatch.setattr("anemoi.training.losses.multiscale.gather_channels", lambda x, *_args: x)
+    monkeypatch.setattr("anemoi.training.losses.multiscale.all_to_all_transpose", lambda x, *_args: x)
     monkeypatch.setattr("anemoi.training.losses.base.reduce_tensor", lambda x, *_args: x)
 
     loss = CombinedLoss(
@@ -297,17 +292,10 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
         WeightedMSELoss(),
     )
 
-    result = loss(
-        pred,
-        target,
-        weights=weights,
-        group=group,
-        grid_dim=-2,
-        grid_shard_shapes=grid_shard_shapes,
-    )
+    result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
 
     assert result.shape == (1,)
-    prepare_for_smoothing.assert_called_once_with(pred, target, group, -2, grid_shard_shapes)
+    prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
 
 
 def test_iter_leaf_losses_combined() -> None:
@@ -333,7 +321,7 @@ def test_combined_loss_with_spectral_crps_backward() -> None:
 
     # Match the typical tensor layout used by Anemoi losses:
     pred = torch.randn(batch, 1, ensemble, points, variables, requires_grad=True)
-    target = torch.randn(batch, 1, 1, points, variables)  # allow broadcasting over ensemble if supported
+    target = torch.randn(batch, 1, 1, points, variables)
 
     # Node weights are commonly required by the weighted loss base class; keep them neutral.
     node_weights = torch.ones(points)
@@ -370,7 +358,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     target = torch.zeros_like(pred)
 
     mse = WeightedMSELoss()
-    spectral = SpectralL2Loss(
+    spectral = PowerSpectrumLoss(
         transform="octahedral_sht",
         nlat=nlat,
     )

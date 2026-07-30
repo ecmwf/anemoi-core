@@ -20,7 +20,7 @@ class DummyGraphModel(BaseGraphModel):
     def _build_networks(self, model_config) -> None:
         self.seen_hidden_name = model_config.model.model.hidden_nodes_name
 
-    def _assemble_input(self, x, batch_size, grid_shard_shapes=None, model_comm_group=None):
+    def _assemble_input(self, x, batch_size, grid_shard_sizes=None, model_comm_group=None):
         return x
 
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):

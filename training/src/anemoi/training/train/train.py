@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -34,7 +34,6 @@ from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
@@ -44,10 +43,15 @@ from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
+from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import prepare_compilation
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
@@ -149,13 +153,18 @@ class AnemoiTrainer(ABC):
         return self.datamodule.data_indices
 
     @cached_property
+    def base_seed(self) -> int:
+        """Base seed shared by all ranks."""
+        return get_base_seed()
+
+    @cached_property
     def initial_seed(self) -> int:
         """Initial seed for the RNG.
 
         This sets the same initial seed for all ranks. Ranks are re-seeded in the
         strategy to account for model communication groups.
         """
-        initial_seed = get_base_seed()
+        initial_seed = derive_seed(self.base_seed, SeedContext.TRAINER)
         rnd_seed = pl.seed_everything(initial_seed, workers=True)
         np_rng = np.random.default_rng(rnd_seed)
         (torch.rand(1), np_rng.random())
@@ -221,7 +230,19 @@ class AnemoiTrainer(ABC):
                     and hasattr(data_node_cfg, "node_builder")
                     and hasattr(data_node_cfg.node_builder, "dataset")
                 ):
-                    data_node_cfg.node_builder.dataset = dataset_path
+                    # Build the dataset value for the graph node builder.
+                    # Start with the bare dataset path, then merge any keys from
+                    # dataset_config that are not part of DatasetConfigSchema
+                    # (e.g. check_variables_compatibility).  Schema-managed keys
+                    # are excluded to avoid forwarding complex validated objects
+                    # or None defaults (e.g. select: None, frequency: Frequency(...)).
+                    graph_dataset_value: str | dict = {"dataset": dataset_path}
+                    if isinstance(reader_cfg, (DictConfig, dict)):
+                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
+                        graph_dataset_value.update(
+                            {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
+                        )
+                    data_node_cfg.node_builder.dataset = graph_dataset_value
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
@@ -306,26 +327,38 @@ class AnemoiTrainer(ABC):
         if initialized_datasets:
             LOGGER.info("Randomly initialized weights for datasets: %s", initialized_datasets)
 
+    def _validate_transfer_learning_units(
+        self,
+        model: pl.LightningModule,
+    ) -> None:
+        """Validate variable unit compatibility between checkpoint and current dataset.
+
+        Compares the variables_metadata stored on the model (extracted from the checkpoint
+        during loading) with the current dataset's variables_metadata. For shared datasets,
+        the variables are assumed to match exactly.
+
+        Raises
+        ------
+        ValueError
+            If variables have incompatible units between checkpoint and dataset.
+
+        Warns
+        -----
+        If variables_metadata is missing from either the checkpoint or the current dataset,
+        a warning is logged and the check is skipped.
+        """
+        from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
+
+        ckpt_variables_metadata = getattr(model, "_ckpt_variables_metadata", None)
+        compat_cfg = self.config.training.get("check_variables_compatibility", {})
+        compat_options = (
+            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
+        )
+        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
+
     @cached_property
     def model(self) -> pl.LightningModule:
         """Provide the model instance."""
-        assert (
-            not (
-                "layer_kernels" in self.config.model.processor
-                and "GLU" in self.config.model.processor.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.processor.target_
-            )
-            and not (
-                "GLU" in self.config.model.encoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.encoder.target_
-            )
-            and not (
-                "GLU" in self.config.model.decoder.layer_kernels["Activation"]["_target_"]
-                and ".Transformer" in self.config.model.decoder.target_
-            )
-        ), "GLU activation function is not supported in Transformer models, due to fixed dimensions. "
-        "Please use a different activation function."
-
         kwargs = {
             "config": self.config,
             "task": self.task,
@@ -337,8 +370,9 @@ class AnemoiTrainer(ABC):
             "supporting_arrays": self.supporting_arrays,
         }
 
-        training_method = get_class(self.config.training.training_method)
-        model = training_method(**kwargs)  # Task -> pl.LightningModule
+        training_method_cfg = self.config.training.method
+        training_method_cls = get_class(training_method_cfg._target_)
+        model = instantiate_with_runtime_kwargs(training_method_cfg, **kwargs)  # Task -> pl.LightningModule
 
         # Load the model weights
         if self.load_weights_only:
@@ -351,23 +385,33 @@ class AnemoiTrainer(ABC):
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
                 # by the data indices from the new config
                 kwargs.pop("data_indices")
-                model = training_method.load_from_checkpoint(
+
+                # Load to CPU explictly, to avoid loading entire model on GPU initially
+                # Modifications to the model occur on cpu,
+                # The model will be sent to GPU when trainer.fit() is called
+                model = training_method_cls.load_from_checkpoint(
                     self.last_checkpoint,
                     **kwargs,
                     strict=False,
                     weights_only=False,  # required for Pytorch Lightning 2.6
+                    map_location="cpu",
                 )
 
             model.data_indices = self.data_indices
             # Validate data indices between checkpoint and current config
             self._validate_transfer_learning_datasets(model)
+            # Validate variable units between checkpoint and current dataset
+            self._validate_transfer_learning_units(model)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
             # Freeze the chosen model weights
             LOGGER.info("The following submodules will NOT be trained: %s", self.config.training.submodules_to_freeze)
             for submodule_name in self.config.training.submodules_to_freeze:
-                freeze_submodule_by_name(model, submodule_name)
-                LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                is_found = freeze_submodule_by_name(model.model.model, submodule_name)
+                if is_found:
+                    LOGGER.info("%s frozen successfully.", submodule_name.upper())
+                else:
+                    LOGGER.warning("Submodule %s not found. SKIPPING freezing.", submodule_name)
 
         return model
 
@@ -446,6 +490,7 @@ class AnemoiTrainer(ABC):
         """Metadata and provenance information."""
         metadata_inference = {
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "dataset_names": None,  # will be populated in DataModule
             "task": None,  # will be populated in BaseTrainingModule
@@ -461,6 +506,7 @@ class AnemoiTrainer(ABC):
             "version": "2.0",
             "config": self.config,
             "seed": self.initial_seed,
+            "base_seed": self.base_seed,
             "run_id": self.run_id,
             "task": None,  # will be populated in Task
             "dataset": None,  # will be populated in DataModule
@@ -528,6 +574,22 @@ class AnemoiTrainer(ABC):
 
         if self.config.system.hardware.accelerator == "cpu":
             LOGGER.info("WARNING: Accelerator set to CPU, this should only be used for debugging.")
+        # For GPU, check if 'cuda' is available
+        # For historical reasons, on AMD GPUs the API is still called 'cuda' even though ROCm is used.
+        if (
+            self.config.system.hardware.accelerator == "gpu" or self.config.system.hardware.accelerator == "cuda"
+        ) and not torch.cuda.is_available():
+            msg = (
+                "GPU accelerator requested but running on GPUs is not possible. "
+                "Possible reasons include no GPUs being available on the node,"
+                "or PyTorch not being installed with CUDA/ROCm support. "
+                "*Note* on aarch64 systems, the default torch wheel does not have CUDA/ROCm support."
+                "To install PyTorch with CUDA support on aarch64, you should pass the index-url argument to pip install"
+                "e.g. `pip install torch torchvision --index-url https://download.pytorch.org/whl/cu126`"
+                "Please check your setup and run "
+                "`python -c 'import torch; print(torch.cuda.is_available())'` to confirm GPU support.",
+            )
+            raise RuntimeError(msg)
         return self.config.system.hardware.accelerator
 
     def _log_information(self) -> None:
@@ -621,15 +683,6 @@ class AnemoiTrainer(ABC):
             )
             LOGGER.info("Dry run: %s", self.dry_run)
 
-    def prepare_compilation(self) -> None:
-
-        if hasattr(self.config.model, "compile"):
-            self.model = mark_for_compilation(self.model, self.config.model.compile)
-        if hasattr(self.config.training, "recompile_limit"):
-            torch._dynamo.config.cache_size_limit = int(self.config.training.recompile_limit)
-            torch._dynamo.config.accumulated_cache_size_limit = max(8 * int(self.config.training.recompile_limit), 256)
-            LOGGER.info("Recompile limit set to %d", torch._dynamo.config.cache_size_limit)
-
     @cached_property
     def strategy(self) -> Any:
         return instantiate(
@@ -690,7 +743,7 @@ class AnemoiTrainer(ABC):
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 
-        self.prepare_compilation()
+        self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
 
@@ -702,7 +755,7 @@ class AnemoiTrainer(ABC):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiTrainer(config).train()
 

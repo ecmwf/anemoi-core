@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: global
+  - training_loss: ensemble
   - optimization: default
   - weight_averaging: null
 
@@ -12,6 +13,15 @@ load_weights_only: False # only load model weights, do not restore optimiser sta
 update_ds_stats_on_ckpt_load:
   states: False # rebuild state processors from current dataset when loading a checkpoint
   tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
+
+# Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
+# dataset (fine-tuning / transfer learning). Set ignore_units/ignore_processing_period to True to
+# skip those checks globally, or to a list of variable names to skip only those variables.
+# For predicted-vs-target variable checks, configure check_variables_compatibility on the
+# loss entry that defines predicted_variables / target_variables.
+check_variables_compatibility:
+  ignore_units: False
+  ignore_processing_period: False
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -31,7 +41,8 @@ gradient_clip:
   algorithm: value
 
 # select model
-training_method: anemoi.training.train.methods.EnsembleTraining
+method:
+  _target_: anemoi.training.train.methods.EnsembleTraining
 
 # number of ensemble members per device
 ensemble_size_per_device: 4
@@ -42,6 +53,7 @@ strategy:
   num_gpus_per_ensemble: ${system.hardware.num_gpus_per_ensemble}
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
 
 # loss functions
 
@@ -49,35 +61,6 @@ strategy:
 # see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 # don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
-
-
-# loss function for the model
-# To train without multiscale loss, set it to the desired loss directly
-training_loss:
-  datasets:
-    data: # user-defined key in data
-      # loss class to initialise, can be anything subclassing torch.nn.Module
-      _target_: anemoi.training.losses.MultiscaleLossWrapper
-      # Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
-      # On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
-      multiscale_config: null  # null = single scale, no smoothing
-      weights: [1.0]
-
-      keep_batch_sharded: ${model.keep_batch_sharded}
-
-      per_scale_loss:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-
-        # Scalers to include in loss calculation
-        # A selection of available scalers are listed in training/scalers.
-        # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
-        # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-        # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-        ignore_nans: False
-        no_autocast: True
-        alpha: 0.95
-
 
 
 # Validation metrics calculation,
@@ -90,7 +73,7 @@ validation_metrics:
     data: # user-defined key in data
       # loss class to initialise, can be anything subclassing torch.nn.Module
       fkcrps:
-        _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+        _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
         ignore_nans: False
         alpha: 1.0
@@ -101,10 +84,8 @@ validation_metrics:
         multiscale_config: null
         weights: [1.0]
 
-        keep_batch_sharded: ${model.keep_batch_sharded}
-
         per_scale_loss:
-          _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+          _target_: anemoi.training.losses.CRPS
           scalers: ['node_weights', 'time_steps']
 
           # Scalers to include in loss calculation
@@ -160,7 +141,3 @@ max_steps: 150000
 
 
 submodules_to_freeze: []
-
-# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
-# A higher limit can result in better performance but will increase compilation time and disk space
-recompile_limit: 32

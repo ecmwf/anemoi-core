@@ -46,11 +46,13 @@ processor:
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: True # Transformer and GraphTransformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
+  shard_strategy: "edges"
   graph_attention_backend: "triton"  # Options: "triton", "pyg"
   edge_pre_mlp: False
   layer_kernels:
@@ -77,7 +79,8 @@ encoder:
   trainable_size: ${model.trainable_parameters.data2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   qk_norm: False
   cpu_offload: ${model.cpu_offload}
@@ -93,7 +96,8 @@ decoder:
   trainable_size: ${model.trainable_parameters.hidden2data}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer or Transformer only
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
   initialise_data_extractor_zero: False
   qk_norm: False
@@ -157,6 +161,15 @@ attributes:
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+  - module: anemoi.training.losses.CRPS
+    options:
+      dynamic: false
+      fullgraph: true
+      mode: max-autotune
+
+# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
+# A higher limit can result in better performance but will increase compilation time and disk space
+recompile_limit: 32 # need to increase recompile limit when compiling CRPS w dynamic=false
 
 # Bounding configuration
 bounding: #These are applied in order

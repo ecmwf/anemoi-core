@@ -1,0 +1,68 @@
+defaults:
+  - native_grid
+  - _self_
+
+# ============
+# Forecast (trajectory) dataloader
+#
+# Reads a 5-D ``trajectories``-layout dataset (shape
+# (base_dates, variables, ensembles, steps, cells)) through open_dataset.
+# Each base date (forecast initialisation) is an independent sequence and the
+# forecast step is the within-sequence position, so a sample never crosses an
+# initialisation boundary.
+#
+# - The ``trajectory`` block selects the TrajectoryDataset reader. ``sampling``
+#   controls how anchor positions are drawn within each forecast via ``stride``:
+#     * stride: null  : stride = window size (samples never share a step)
+#     * stride: 1     : every valid step position
+#     * stride: N     : fixed stride of N steps (overlapping when N < window)
+# - start/end filter base dates on the valid-time envelope (base + step range).
+# - Step subsetting (steps / step_start / step_end / step_frequency) can be
+#   added inside dataset_config and is forwarded to open_dataset.
+# ============
+
+# Sampling for trajectory windows within each forecast.
+# stride: null  → window size stride (non-overlapping, default)
+# stride: 1     → every valid position
+# stride: N     → fixed stride of N steps
+trajectory_sampling:
+  stride: null  # null = window size (non-overlapping)
+
+training:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: null
+      end: 2020
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+validation:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: 2021
+      end: 2021
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}
+
+test:
+  datasets:
+    data:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        step_start: 12      # first step in hours (inclusive)
+        step_end: 29        # last step in hours (inclusive)
+        step_frequency: 1   # stride in hours
+      start: 2022
+      end: null
+      trajectory:
+        sampling: ${dataloader.trajectory_sampling}

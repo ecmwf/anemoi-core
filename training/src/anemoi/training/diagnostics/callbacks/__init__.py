@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -16,6 +16,7 @@ from datetime import timedelta
 from hydra.errors import InstantiationException
 from hydra.utils import instantiate
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.callbacks import TQDMProgressBar
 
@@ -152,7 +153,7 @@ def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
         )
         raise ImportError(msg) from err
 
-    if diagnostics_cfg.plot.datashader:
+    if OmegaConf.select(diagnostics_cfg.plot, "settings.datashader", default=True):
         try:
             import datashader  # noqa: F401
         except ImportError as err:
@@ -176,7 +177,10 @@ def _check_plotting_dependencies(diagnostics_cfg: DictConfig) -> None:
             )
             raise ImportError(msg) from err
 
-    if diagnostics_cfg.plot.projection_kind == "lambert_conformal":
+    if (
+        OmegaConf.select(diagnostics_cfg.plot, "settings.projection_kind", default="equirectangular")
+        == "lambert_conformal"
+    ):
         try:
             import cartopy  # noqa: F401
         except ImportError as err:
@@ -241,8 +245,7 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
           frequency: 12
     ```
 
-    Set `context.diagnostics.plot.callbacks` to a list of plot callback configurations
-    will only be added if `context.diagnostics.plot.enabled` is set to True.
+    Set `context.diagnostics.plot.callbacks` to a list of plot callback configurations.
 
     Plotting callbacks automatically receive global plotting settings from `context.diagnostics.plot`
     (datashader, projection_kind, asynchronous, save_basedir, colormaps, precip_and_related_fields,
@@ -279,10 +282,11 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     trainer_callbacks.extend(instantiate(callback) for callback in diagnostics_cfg.callbacks)
 
     # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
-    if getattr(diagnostics_cfg.plot, "enabled", False) and diagnostics_cfg.plot.callbacks:
+    plot_cfg = getattr(diagnostics_cfg, "plot", None)
+    if plot_cfg and plot_cfg.callbacks:
         _check_plotting_dependencies(diagnostics_cfg)
-        plotting_settings = PlottingSettings.from_plot_config(diagnostics_cfg.plot, context.plots_output)
-        for callback_cfg in diagnostics_cfg.plot.callbacks:
+        plotting_settings = PlottingSettings.from_plot_config(plot_cfg, context.plots_output)
+        for callback_cfg in plot_cfg.callbacks:
             callback_cfg_dict = dict(callback_cfg)
             callback_cfg_dict["plotting_settings"] = plotting_settings
             trainer_callbacks.append(instantiate(callback_cfg_dict))

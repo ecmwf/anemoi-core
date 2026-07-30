@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -30,7 +31,6 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.shapes import apply_shard_shapes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -40,13 +40,18 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
+from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+
+_chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
+_trainable_edge_perm_fix_migration = importlib.import_module(
+    "anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix",
+).migrate
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
-
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -54,6 +59,7 @@ if TYPE_CHECKING:
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -221,6 +227,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        self._resolve_subgrid(loss_configs)
+
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
@@ -270,6 +278,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_node_name=data_node_name,
             )
 
+            # Check unit compatibility between predicted and target variables
+            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
+            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
+
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
@@ -301,12 +313,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_shapes, self.grid_sizes = {}, {}
+        self.shard_sizes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
             self.grid_sizes[dataset_name] = graph_data[
                 dataset_name
             ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_shapes[dataset_name] = get_balanced_partition_sizes(
+            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
             )
@@ -338,7 +350,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
-        self.grid_shard_shapes = dict.fromkeys(self.dataset_names, None)
+        self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
     @property
@@ -419,7 +431,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_shapes=self.grid_shard_shapes,
+            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
@@ -453,13 +465,27 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if full_key.startswith(processor_prefixes):
                 state_dict[full_key] = value
 
+    def on_save_checkpoint(self, checkpoint: dict) -> None:
+        checkpoint["task_state"] = self.task.training_runtime_state_dict()
+
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+        # Apply migrations to handle state_dict key changes from older checkpoints.
+        # These are idempotent: already-migrated checkpoints are unaffected.
+        _trainable_edge_perm_fix_migration(checkpoint, model=self)
         self._update_checkpoint_state_dict_for_load(checkpoint)
 
         self._ckpt_model_name_to_index = {
             dataset_name: data_indices.name_to_index
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
+
+        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
+        # Extract variables_metadata for unit compatibility check
+        self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+            checkpoint,
+            self._ckpt_model_name_to_index,
+        )
 
     def _update_scaler_for_dataset(
         self,
@@ -564,9 +590,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         tuple[torch.Tensor, torch.Tensor, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
-        # Handle multi-dataset case for grid shard slice and shapes
+        # Handle multi-dataset case for grid shard slice and sizes
         grid_shard_slice = self.grid_shard_slice[dataset_name]
-        grid_shard_shapes = self.grid_shard_shapes[dataset_name]
+        grid_shard_sizes = self.grid_shard_sizes[dataset_name]
 
         is_sharded = grid_shard_slice is not None
 
@@ -575,9 +601,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         )
 
         if is_sharded and not sharding_supported:  # gather tensors if loss or metrics do not support sharding
-            shard_shapes = apply_shard_shapes(y_pred, self.grid_dim, grid_shard_shapes)
-            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, shard_shapes, self.model_comm_group)
-            y_full = gather_tensor(torch.clone(y), self.grid_dim, shard_shapes, self.model_comm_group)
+            y_pred_full = gather_tensor(torch.clone(y_pred), self.grid_dim, grid_shard_sizes, self.model_comm_group)
+            y_full = gather_tensor(torch.clone(y), self.grid_dim, grid_shard_sizes, self.model_comm_group)
             final_grid_shard_slice = None
         else:
             y_pred_full, y_full = y_pred, y
@@ -625,9 +650,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if target_layout is not None:
             loss_kwargs["target_layout"] = target_layout
         if getattr(loss, "needs_shard_layout_info", False):
+            # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors were
+            # gathered to the full grid (grid_shard_slice is None), the loss must be told it is
+            # not sharded, otherwise it would re-shard an already-full tensor. See _prepare_tensors_for_loss.
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
-                grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
             )
 
         return loss(y_pred, y, **loss_kwargs)
@@ -813,7 +841,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def _setup_batch_sharding(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         """Setup batch sharding before every step.
 
-        If the batch is sharded, it will be setup with the grid shard shapes and slice.
+        If the batch is sharded, it will be setup with the grid shard sizes and slice.
         Otherwise, the batch will be allgathered.
 
         Parameters
@@ -827,19 +855,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Batch after setup
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
-        self.grid_shard_shapes = {}
+        self.grid_shard_sizes = {}
         self.grid_shard_slice = {}
 
         for dataset_name in self.dataset_names:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
-                self.grid_shard_shapes[dataset_name] = self.shard_shapes[dataset_name]
+                self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
                 start, end = get_partition_range(
-                    partition_sizes=self.grid_shard_shapes[dataset_name],
+                    partition_sizes=self.grid_shard_sizes[dataset_name],
                     partition_id=self.reader_group_rank,
                 )
                 self.grid_shard_slice[dataset_name] = slice(start, end)
             else:
-                self.grid_shard_shapes[dataset_name] = None
+                self.grid_shard_sizes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
                 batch[dataset_name] = self.allgather_batch(batch[dataset_name], dataset_name)
         return batch
@@ -892,7 +920,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, Mapping[str, torch.Tensor], list[dict[str, torch.Tensor]]]:
+    ) -> TrainingStepOutput:
         pass
 
     def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
@@ -911,21 +939,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Allgathered (full) batch
         """
         grid_size = self.grid_sizes[dataset_name]
-        grid_shard_shapes = self.shard_shapes[dataset_name]
+        grid_shard_sizes = self.shard_sizes[dataset_name]
 
         if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
             return batch  # already have the full grid
 
-        shard_shapes = apply_shard_shapes(batch, self.grid_dim, grid_shard_shapes)
-        tensor_list = [torch.empty(shard_shape, device=batch.device, dtype=batch.dtype) for shard_shape in shard_shapes]
-
-        torch.distributed.all_gather(
-            tensor_list,
-            batch.contiguous(),
-            group=self.reader_groups[self.reader_group_id],
+        return gather_tensor(
+            batch,
+            self.grid_dim,
+            grid_shard_sizes,
+            self.reader_groups[self.reader_group_id],
         )
-
-        return torch.cat(tensor_list, dim=self.grid_dim)
 
     def calculate_val_metrics(
         self,
@@ -936,6 +960,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         step: int | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
+        without_scalers: list[str] | list[int] | None = None,
         **_kwargs,
     ) -> dict[str, torch.Tensor]:
         """Calculate metrics on the validation output.
@@ -983,22 +1008,34 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     )
                     raise ValueError(exception_msg)
 
+                scaler_index = torch.as_tensor(indices, device=y_pred_postprocessed.device, dtype=torch.long)
                 metric_kwargs = {
-                    "scaler_indices": (..., indices),
+                    "scaler_indices": (..., scaler_index),
                     "grid_shard_slice": grid_shard_slice,
                     "group": self.model_comm_group,
                 }
+                # tensor 'scaler_indices[1]' size mismatch at index 0. expected 13, actual 1"
+                torch._dynamo.mark_dynamic(metric_kwargs["scaler_indices"][-1], 0)
                 if pred_layout is not None:
                     metric_kwargs["pred_layout"] = pred_layout
                 if target_layout is not None:
                     metric_kwargs["target_layout"] = target_layout
+                if without_scalers is not None:
+                    metric_kwargs["without_scalers"] = without_scalers
                 if getattr(metric, "needs_shard_layout_info", False):
+                    # grid_shard_sizes must stay consistent with grid_shard_slice: if the tensors
+                    # were gathered to the full grid (grid_shard_slice is None), the metric must be
+                    # told it is not sharded, otherwise it would re-shard an already-full tensor.
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
-                        grid_shard_shapes=self.grid_shard_shapes[dataset_name],
+                        grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
-                metrics[metric_step_name] = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)
+                # Detach and clone the metric value to avoid in-place modifications affecting the original tensor
+                # This was impacting cuda graphs
+                # TODO(cathal): double check now that everything compiles
+                metrics[metric_step_name] = metric_value.detach().clone()
 
         return metrics
 
@@ -1008,8 +1045,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Get batch size (handle dict of tensors)
         batch_size = next(iter(batch.values())).shape[0]
 
-        train_loss, *_ = self._step(batch)
-        train_loss = train_loss.sum()
+        step_output = self._step(batch)
+        train_loss = step_output.loss.sum()
 
         self.log(
             "train_" + self._get_loss_name() + "_loss",
@@ -1026,15 +1063,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return train_loss
 
-    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> None:
+    def validation_step(self, batch: dict[str, torch.Tensor], batch_idx: int) -> TrainingStepOutput:
         """Calculate the loss over a validation batch using the training loss function.
 
         Parameters
         ----------
         batch : dict[str, torch.Tensor]
-            Validation batch
+            Validation batch.
         batch_idx : int
-            Batch inces
+            Batch index.
+
+        Returns
+        -------
+        TrainingStepOutput
+            Output of the validation step.
         """
         del batch_idx
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
@@ -1043,7 +1085,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         batch_size = next(iter(batch.values())).shape[0]
 
         with torch.no_grad():
-            val_loss_scales, metrics, *args = self._step(batch, validation_mode=True)
+            step_output = self._step(batch, validation_mode=True)
+        val_loss_scales = step_output.loss
+        metrics = step_output.metrics
         val_loss = val_loss_scales.sum()
 
         self.log(
@@ -1090,7 +1134,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     sync_dist=True,
                 )
 
-        return val_loss, *args
+        return step_output
 
     def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.
@@ -1115,6 +1159,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        self.trainer.datamodule.set_epoch(self.current_epoch + 1)
 
     def configure_optimizers(
         self,
@@ -1144,3 +1189,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
             self.logger.log_hyperparams(hyper_params)
+
+    def _resolve_subgrid(self, config: dict) -> None:
+        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
+            for k, v in per_dataset_config.items():
+                if isinstance(v, dict):
+                    per_dataset_resolve(v, dataset_name)
+                elif (k, v) == ("subgrid", "output_mask"):
+                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
+
+        for dataset_name, dataset_config in config.items():
+            if dataset_config is not None:
+                per_dataset_resolve(dataset_config, dataset_name)

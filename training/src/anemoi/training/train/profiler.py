@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -167,7 +167,13 @@ class AnemoiProfiler(AnemoiTrainer):
             self.to_wandb()
 
         elif self.logger and self.logger.logger_name == "mlflow":
-            self.to_mlflow()
+            if self.config.diagnostics.log.mlflow.offline:
+                # Offline mlflow writes to a throwaway local file store with no server backing it;
+                # logging the profiler reports there has no value and the offline FileStore is only
+                # partially initialised (e.g. missing the .trash folder that log_table scans).
+                LOGGER.info("MLflow is offline; skipping profiler report logging to the local store.")
+            else:
+                self.to_mlflow()
 
     def report(self) -> str:
         """Print report to console."""
@@ -345,7 +351,7 @@ class AnemoiProfiler(AnemoiTrainer):
         self.export_to_logger()
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiProfiler(config).profile()
 

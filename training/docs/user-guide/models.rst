@@ -220,7 +220,6 @@ geometric progression of KNN smoothers:
          your_dataset_name:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
            weights: [0.5, 0.25, 0.15, 0.1]
-           keep_batch_sharded: false
            multiscale_config:
              num_scales: 3          # builds 3 smoothed + 1 full-res = 4 scales
              base_num_nearest_neighbours: 4
@@ -240,7 +239,6 @@ geometric progression of KNN smoothers:
          your_dataset_name:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
            weights: [0.5, 0.25, 0.15, 0.1]
-           keep_batch_sharded: false
            multiscale_config:
              loss_matrices_path: /path/to/matrices
              loss_matrices:

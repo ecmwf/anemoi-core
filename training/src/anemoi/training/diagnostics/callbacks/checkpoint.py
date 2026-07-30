@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -139,7 +139,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check that model's metadata does not contain Pydantic schemas references."""
-        del pl_module
+        super().on_train_start(trainer, pl_module)
 
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)

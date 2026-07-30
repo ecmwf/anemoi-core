@@ -15,7 +15,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
-from anemoi.training.losses import AlmostFairKernelCRPS
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
@@ -69,7 +69,7 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
 
     pred = torch.zeros(tensor_shape)
     pred[0, 0, :, 0] = torch.tensor([1.0, 0.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], 1, tensor_shape[3], tensor_shape[4]])
 
     # With only one "grid point" differing by 1 in all
     # variables, the loss should be 1.0
@@ -78,13 +78,14 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     return pred, target, loss_result
 
 
-def test_multi_scale_instantiation(loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor]) -> None:
+def test_multi_scale_instantiation(
+    loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
+) -> None:
     """Test multiscale loss instantiation with single scale."""
-    per_scale_loss = AlmostFairKernelCRPS()
+    per_scale_loss = CRPS()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred, target, loss_result = loss_inputs_multiscale
@@ -100,12 +101,11 @@ def test_multiscale_weights_length_mismatch_raises() -> None:
         MultiscaleLossWrapper(
             per_scale_loss=per_scale_loss,
             weights=[1.0],  # 1 weight but multiscale_config gives 2 scales
-            keep_batch_sharded=False,
             multiscale_config={"loss_matrices": [None, None]},
         )
 
 
-@pytest.mark.parametrize("per_scale_loss", [AlmostFairKernelCRPS(), MSELoss()])
+@pytest.mark.parametrize("per_scale_loss", [CRPS(), MSELoss()])
 @pytest.mark.parametrize("weights", [torch.tensor([0.3, 0.7]), torch.tensor([1.0, 2.0])])
 def test_multi_scale(
     loss_inputs_multiscale: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
@@ -135,8 +135,9 @@ def test_multi_scale(
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=weights,
-        keep_batch_sharded=False,
     )
+
+    assert smoothing_provider.projection_matrix.layout == torch.sparse_csr
 
     pred, target, _ = loss_inputs_multiscale
     loss = multiscale_loss(pred, target, squash=True)
@@ -147,7 +148,10 @@ def test_multi_scale(
 
     assert isinstance(loss, torch.Tensor)
     # better to have a nvar > 1 because otherwise pred.shape[-1] == 1 and loss.shape == (2) which makes the test fail
-    assert loss.shape == (2, pred.shape[-1]), "Loss should have shape (num_scales, num_variables) when squash=False"
+    assert loss.shape == (
+        2,
+        pred.shape[-1],
+    ), "Loss should have shape (num_scales, num_variables) when squash=False"
 
 
 def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
@@ -156,20 +160,19 @@ def test_multiscale_loss_equivalent_to_per_scale_loss() -> None:
 
     pred = torch.zeros(tensor_shape)
     pred[0, 0, :, 0] = torch.tensor([1.0])
-    target = torch.zeros([tensor_shape[0], tensor_shape[1], tensor_shape[3], tensor_shape[4]])  # no ensemble dim
+    target = torch.zeros([tensor_shape[0], tensor_shape[1], 1, tensor_shape[3], tensor_shape[4]])
 
-    per_scale_loss = AlmostFairKernelCRPS()
+    per_scale_loss = CRPS()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     loss = multiscale_loss(pred, target)
-    loss_kcrps = per_scale_loss(pred, target)
+    loss_crps = per_scale_loss(pred, target)
 
     assert isinstance(loss, torch.Tensor)
-    assert torch.allclose(loss, loss_kcrps), "Loss for single/original scale should be equal to the kcrps"
+    assert torch.allclose(loss, loss_crps), "Loss for single/original scale should be equal to the CRPS"
 
 
 def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
@@ -180,7 +183,6 @@ def test_multiscale_forwards_layout_kwargs_to_filtered_per_scale_loss() -> None:
             {
                 "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
                 "weights": [1.0],
-                "keep_batch_sharded": False,
                 "loss_matrices": [None],
                 "per_scale_loss": {
                     "_target_": "anemoi.training.losses.MSELoss",
@@ -210,14 +212,13 @@ def test_multiscale_loss_forwards_scaler_indices() -> None:
     pred = torch.zeros((1, 1, 1, 2, 2))
     pred[0, 0, 0, 0, 0] = 10.0
     pred[0, 0, 0, 0, 1] = 1.0
-    target = torch.zeros((1, 1, 2, 2))
+    target = torch.zeros((1, 1, 1, 2, 2))
 
     per_scale_loss = MSELoss()
     per_scale_loss.add_scaler(TensorDim.GRID, torch.ones(2), name="grid_weights")
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     scaler_indices = (..., [1])
@@ -232,11 +233,10 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
     sentinel_group = FakeGroup(size=1)
 
     multiscale_loss(
@@ -258,25 +258,28 @@ def test_multiscale_loss_forwards_group_and_without_scalers() -> None:
     ]
 
 
-def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixture) -> None:
+def test_multiscale_loss_uses_grid_shard_sizes_for_sharding(
+    mocker: MockerFixture,
+) -> None:
     per_scale_loss = TrackingLoss()
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=True,
     )
     group = FakeGroup(size=2)
-    shard_shapes = [(1, 2, 1), (1, 2, 1)]
+    grid_shard_sizes = [1, 1]
+    channel_shard_sizes_pred = [1, 1]
+    channel_shard_sizes_y = [1, 1]
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
 
     prepare = mocker.patch.object(
         multiscale_loss,
         "_prepare_for_smoothing",
-        return_value=(pred, target, shard_shapes, shard_shapes),
+        return_value=(pred, target, channel_shard_sizes_pred, channel_shard_sizes_y),
     )
-    gather = mocker.patch(
-        "anemoi.training.losses.multiscale.gather_channels",
+    a2a = mocker.patch(
+        "anemoi.training.losses.multiscale.all_to_all_transpose",
         side_effect=lambda x, *_args: x,
     )
 
@@ -284,12 +287,12 @@ def test_multiscale_loss_uses_grid_shard_shapes_for_sharding(mocker: MockerFixtu
         pred,
         target,
         group=group,
-        grid_dim=-2,
-        grid_shard_shapes=shard_shapes,
+        grid_shard_sizes=grid_shard_sizes,
     )
 
-    prepare.assert_called_once_with(pred, target, group, -2, shard_shapes)
-    assert gather.call_count == 2
+    prepare.assert_called_once_with(pred, target, group, grid_shard_sizes)
+    # Two all_to_all_transpose calls: one for y_pred_ens_tmp, one for y_tmp
+    assert a2a.call_count == 2
 
 
 def test_multiscale_loss_forwards_extra_kwargs() -> None:
@@ -297,11 +300,10 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
     multiscale_loss = MultiscaleLossWrapper(
         per_scale_loss=per_scale_loss,
         weights=[1.0],
-        keep_batch_sharded=False,
     )
 
     pred = torch.zeros((1, 1, 1, 2, 1))
-    target = torch.zeros((1, 1, 2, 1))
+    target = torch.zeros((1, 1, 1, 2, 1))
     sentinel = object()
 
     multiscale_loss(
@@ -319,3 +321,27 @@ def test_multiscale_loss_forwards_extra_kwargs() -> None:
             "kwargs": {"custom_kwarg": sentinel},
         },
     ]
+
+
+def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
+    """deepcopy(MultiscaleLossWrapper) must not raise with CSR smoothing matrices."""
+    import copy
+
+    graph = HeteroData()
+    graph["src"].num_nodes = 4
+    graph["dst"].num_nodes = 4
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 0]])
+    graph[("src", "to", "dst")].edge_weight = torch.ones(4)
+
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        return_value=[provider],
+    )
+    loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
+    copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors

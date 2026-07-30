@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0
@@ -9,8 +9,11 @@
 
 """Plot adapter: single entry point for diagnostics callbacks.
 
-Groups the five plot-related hooks so task classes expose one attribute
+Groups the plot-related hooks so task classes expose one attribute
 (plot_adapter) instead of five small methods.
+
+The EnsemblePlotAdapterWrapper allows to wrap any task-specific adapter,
+adding ensemble member handling without modifying the inner adapter's logic.
 """
 
 from __future__ import annotations
@@ -32,11 +35,32 @@ class BasePlotAdapter(ABC):
     def __init__(self, task: BaseTask) -> None:
         self._task = task
 
+    @property
+    def is_ensemble(self) -> bool:
+        return False
+
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """Default ``members`` selection for plot callbacks that don't request a specific subset.
+
+        ``0`` (first member / deterministic view) for non-ensemble adapters;
+        overridden by :class:`EnsemblePlotAdapterWrapper` to select all members.
+        """
+        return 0
+
     def get_loss_plot_batch_start(self, **_kwargs) -> int:
         return 0
 
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return output_tensor
+
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:  # noqa: ARG002
+        """Select ensemble members from tensor. No-op for non-ensemble adapters."""
+        return tensor
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Prepare batch for loss plotting. No-op for non-ensemble adapters."""
+        return batch
 
     @abstractmethod
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
@@ -45,7 +69,10 @@ class BasePlotAdapter(ABC):
 
 
 class ForecasterPlotAdapter(BasePlotAdapter):
-    """Rollout forecaster: multiple loss plots, n_step_output targets per step, multi-step iter."""
+    """Plot Adapter to adapt plots to the rollout set-up of the Forecaster Task.
+
+    Handles multiple loss plots, n_step_output targets per step, multi-step iter.
+    """
 
     def get_init_step(self) -> int:
         return -1
@@ -60,7 +87,8 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
-        for rollout_step in range(self._task.validation_rollout):
+        for validation_step_kwargs in self._task.steps("validation"):
+            rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
             output_data = data[output_time_indices, ...]
@@ -73,7 +101,10 @@ class ForecasterPlotAdapter(BasePlotAdapter):
 
 
 class TemporalDownscalerPlotAdapter(BasePlotAdapter):
-    """Temporal downscaling: also squeeze (1, n_step_output, ...) -> (n_step_output, ...)."""
+    """Plot Adapter for TemporalDownscaler Task.
+
+    Handles squeezing (1, n_step_output, ...) -> (n_step_output, ...).
+    """
 
     def get_init_step(self) -> int:
         return 0
@@ -101,9 +132,65 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
-    """Autoencoder: single (sample, recon, tag) yield."""
+    """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         sample = data[0, ...].squeeze()
         recon = output_tensor[0, ...].squeeze()
         yield sample, sample, recon, "recon"
+
+
+class EnsemblePlotAdapterWrapper(BasePlotAdapter):
+    """Wraps any task-specific adapter, adding ensemble member handling.
+
+    This adapter decorates an inner (task-specific) adapter to handle the
+    extra ensemble dimension present in ensemble training outputs.
+    Batch shape convention: (B, T, E, G, V) where E is ensemble members.
+    """
+
+    def __init__(self, inner: BasePlotAdapter) -> None:
+        self._inner = inner
+        self._task = inner._task
+
+    @property
+    def is_ensemble(self) -> bool:
+        return True
+
+    @property
+    def default_plot_members(self) -> int | list[int] | None:
+        """All members by default for ensemble runs (``None`` = no selection/all)."""
+        return None
+
+    def get_loss_plot_batch_start(self, **kwargs) -> int:
+        return self._inner.get_loss_plot_batch_start(**kwargs)
+
+    def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
+        return self._inner.prepare_plot_output_tensor(output_tensor)
+
+    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:
+        """Slice ensemble members from dim 2 of the output tensor.
+
+        Parameters
+        ----------
+        tensor : Any
+            Tensor with shape (..., members, grid, vars).
+        members : int | list[int] | None
+            Members to select. None returns all members, int/list selects specific members.
+
+        Returns
+        -------
+        Any
+            Tensor with selected ensemble members.
+        """
+        if members is None:
+            return tensor
+        if not isinstance(members, list):
+            members = [members]
+        return tensor[:, :, members, ...]
+
+    def prepare_loss_batch(self, batch: dict) -> dict:
+        """Return the batch for loss plotting."""
+        return batch
+
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        yield from self._inner.iter_plot_samples(data, output_tensor)

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,11 +14,13 @@ from .builders.icon import ICONTopologicalDecoderEdges
 from .builders.icon import ICONTopologicalEncoderEdges
 from .builders.icon import ICONTopologicalProcessorEdges
 from .builders.knn import KNNEdges
+from .builders.knn import MutualKNNEdges
 from .builders.knn import ReversedKNNEdges
 from .builders.multi_scale import MultiScaleEdges
 
 __all__ = [
     "KNNEdges",
+    "MutualKNNEdges",
     "CutOffEdges",
     "HEALPixMultiScaleEdges",
     "MultiScaleEdges",

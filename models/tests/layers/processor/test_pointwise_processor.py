@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,6 +15,7 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.processor import PointWiseMLPProcessor
 from anemoi.models.layers.utils import load_layer_kernels
@@ -66,17 +67,17 @@ def test_pointwisemlp_processor_with_sharding_dropout_forward(pointwisemlp_proce
     x = torch.rand(
         gridsize, pointwisemlp_processor_init.num_channels, device=next(pointwisemlp_processor.parameters()).device
     )
-    shard_shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[gridsize])
 
     # Mock distributed group
     fake_model_comm_group = MagicMock()
-    fake_model_comm_group.size.return_value = 2
+    fake_model_comm_group.size.return_value = 1
 
     with pytest.raises(ValueError, match="Dropout is not supported when model is sharded"):
         pointwisemlp_processor.forward(
             x,
             batch_size,
-            shard_shapes,
+            shard_info,
             model_comm_group=fake_model_comm_group,
         )
 
@@ -87,9 +88,9 @@ def test_pointwisemlp_processor_forward(pointwisemlp_processor, pointwisemlp_pro
     x = torch.rand(
         gridsize, pointwisemlp_processor_init.num_channels, device=next(pointwisemlp_processor.parameters()).device
     )
-    shard_shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[gridsize])
 
-    output = pointwisemlp_processor.forward(x, batch_size, shard_shapes)
+    output = pointwisemlp_processor.forward(x, batch_size, shard_info)
     assert output.shape == x.shape
 
     # Generate dummy target and loss function

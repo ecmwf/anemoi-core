@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -32,6 +32,7 @@ class BaseTendencyScaler(BaseScaler):
         data_indices: IndexCollection,
         statistics: dict,
         statistics_tendencies: Mapping | None,
+        timestep: str | None = None,
         norm: str | None = None,
         **kwargs,
     ) -> None:
@@ -45,6 +46,8 @@ class BaseTendencyScaler(BaseScaler):
             Data statistics dictionary
         statistics_tendencies : dict
             Data statistics dictionary for tendencies
+        timestep : str, optional
+            Tendency statistics lead time. Defaults to the first available lead time.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
@@ -63,11 +66,13 @@ class BaseTendencyScaler(BaseScaler):
             assert lead_times is not None, "lead_times must be a non-empty list"
             lead_times = list(lead_times)
             assert lead_times, "lead_times must be a non-empty list"
-            self.timestep = lead_times[0]
-            LOGGER.warning(
-                "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
-                self.timestep,
-            )
+            if timestep is None:
+                timestep = lead_times[0]
+                LOGGER.warning(
+                    "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
+                    timestep,
+                )
+            self.timestep = timestep
             self.statistics_tendencies = statistics_tendencies.get(self.timestep)
             assert self.statistics_tendencies is not None, f"No tendency statistics for timestep '{self.timestep}'."
         else:

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -21,12 +21,14 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import _get_progress_bar_callback
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.callbacks.evaluation import RolloutEval
+from anemoi.training.train.step_output import TrainingStepOutput
 
 NUM_FIXED_CALLBACKS = 3  # ParentUUIDCallback, CheckVariableOrder, RegisterMigrations
 
 default_config = """
 training:
-  training_method: anemoi.training.train.tasks.GraphEnsForecaster
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
   multistep_input : 1
 
 diagnostics:
@@ -135,15 +137,14 @@ def test_add_plotting_callback(monkeypatch):
     # Add plotting callback
     import anemoi.training.diagnostics.callbacks.plot as plot
 
-    class PlotLoss:
+    class LossCurvePlot:
         def __init__(self, plotting_settings=None):
             pass
 
-    monkeypatch.setattr(plot, "PlotLoss", PlotLoss)
+    monkeypatch.setattr(plot, "LossCurvePlot", LossCurvePlot)
 
     config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.diagnostics.plot.enabled = True
-    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.PlotLoss"}]
+    config.diagnostics.plot.callbacks = [{"_target_": "anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"}]
     context = CallbacksContext(
         diagnostics=config.diagnostics,
         checkpoints_output=omegaconf.OmegaConf.create({"root": ".test_checkpoints"}),
@@ -165,11 +166,11 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
     pl_module.device = torch.device("cpu")
     pl_module.n_step_input = 1
     pl_module.n_step_output = 1
-    # _step returns aggregated (loss, metrics, y_preds) over all rollout steps
-    pl_module._step.return_value = (
-        torch.tensor(0.125),
-        {"metric1": torch.tensor(0.25)},
-        None,
+    # _step returns aggregated output over all rollout steps.
+    pl_module._step.return_value = TrainingStepOutput(
+        loss=torch.tensor(0.125),
+        metrics={"metric1": torch.tensor(0.25)},
+        predictions=[],
     )
 
     trainer = MagicMock()
@@ -190,7 +191,7 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
         assert args[3] == 2  # batch size
 
 
-def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
+def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
     from omegaconf import DictConfig
 
     import anemoi.training.diagnostics.callbacks.plot as plot_mod
@@ -214,35 +215,21 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
         data_indices=data_indices,
     )
 
-    callback = plot_mod.PlotLoss.__new__(plot_mod.PlotLoss)
+    callback = plot_mod.LossCurvePlot.__new__(plot_mod.LossCurvePlot)
     callback.every_n_batches = 1
     callback.dataset_names = ["data"]
     callback.parameter_groups = {}
 
-    trainer = MagicMock()
     pl_module = MagicMock()
     pl_module.loss = {"data": combined_loss}
     pl_module.grid_dim = -2
     pl_module.grid_indices = {"data": MagicMock()}
     pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
 
-    super_called = []
+    # _prepare_batch is overridden in LossCurvePlot to snapshot and gather nan_mask_weights
+    # before delegating batch preparation to the plot adapter. Call it directly.
+    callback._prepare_batch(pl_module, batch={"data": torch.zeros((1, 1, 1, 3, 2))})
 
-    def _stub_super(self, *_args, **_kwargs) -> None:
-        del self
-        super_called.append(True)
-
-    monkeypatch.setattr(plot_mod.BasePerBatchPlotCallback, "on_validation_batch_end", _stub_super, raising=True)
-
-    callback.on_validation_batch_end(
-        trainer=trainer,
-        pl_module=pl_module,
-        output=(torch.tensor(0.0), []),
-        batch={"data": torch.zeros((1, 1, 1, 3, 2))},
-        batch_idx=0,
-    )
-
-    assert super_called == [True]
     assert pl_module.allgather_batch.call_count == 2
     for child_loss in callback.loss["data"].losses:
         torch.testing.assert_close(child_loss.loss.scaler.nan_mask_weights, torch.full((1, 3, 2), 2.0))
@@ -251,7 +238,8 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses(monkeypatch):
 # Progress bar callback tests
 progress_bar_config = """
 training:
-  training_method: anemoi.training.train.tasks.GraphEnsForecaster
+  method:
+    _target_: anemoi.training.train.methods.EnsembleTraining
 
 diagnostics:
   callbacks: []

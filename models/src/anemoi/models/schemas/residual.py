@@ -1,3 +1,13 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+from enum import Enum
 from typing import Annotated
 from typing import Literal
 from typing import Self
@@ -51,6 +61,9 @@ class TruncatedConnectionSchema(BaseModel):
     truncation_config: TruncationConfigDiskSchema | TruncationConfigOnTheFlySchema | None = None
     edge_weight_attribute: str | None = None
     src_node_weight_attribute: str | None = None
+    truncation_down_edges_name: tuple[str, str, str] | None = None
+    truncation_up_edges_name: tuple[str, str, str] | None = None
+    data_node_name: str | None = None
     autocast: bool = False
     row_normalize: bool = False
     # Deprecated: pass inside truncation_config instead.
@@ -74,6 +87,17 @@ class ScalarOrnsteinConnectionSchema(BaseModel):
         True,
         description="Whether theta is a trainable parameter.",
     )
+    regressors: list[str] | None = Field(
+        None,
+        description="Variable names to use as regressors.",
+    )
+
+
+class SpectralOrnsteinSupportedGrids(str, Enum):
+    """Supported grid types for SpectralOrnsteinConnection."""
+
+    REGULAR = "regular"
+    OCTAHEDRAL = "octahedral"
 
 
 class SpectralOrnsteinConnectionSchema(BaseModel):
@@ -84,9 +108,9 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         2,
         description="Maximum spherical harmonic degree for the theta/mu coefficients.",
     )
-    grid: str = Field(
-        "legendre-gauss",
-        description='Grid type: "legendre-gauss" for regular lat-lon, "octahedral" for octahedral reduced grids.',
+    grid: SpectralOrnsteinSupportedGrids = Field(
+        SpectralOrnsteinSupportedGrids.REGULAR,
+        description='Grid type: "regular" for regular lat-lon, "octahedral" for octahedral reduced grids.',
     )
     theta_init: float = Field(
         0.0,
@@ -96,7 +120,7 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
         0.0,
         description="Lower bound buffer for theta.",
     )
-    zmean_term: bool = Field(
+    use_mean: bool = Field(
         True,
         description="Whether to include a zonal mean (mu) term.",
     )

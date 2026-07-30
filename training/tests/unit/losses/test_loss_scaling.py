@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -21,6 +21,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
+from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -69,8 +70,9 @@ def fake_data(
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     statistics = {"stdev": [0.0, 10.0, 10, 10, 7.0, 3.0, 1.0, 2.0, 3.5]}
     statistics_tendencies = {
-        "lead_times": ["6h"],
+        "lead_times": ["6h", "12h"],
         "6h": {"stdev": [0.0, 5, 5, 5, 4.0, 7.5, 8.6, 1, 10]},
+        "12h": {"stdev": [0.0, 2, 2, 2, 8.0, 9.0, 4.0, 2, 10]},
     }
     return config, data_indices, statistics, statistics_tendencies
 
@@ -230,6 +232,10 @@ std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScale
 
 var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "6h"}
 
+std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12h"}
+
+var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12h"}
+
 no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
 
 graph_node_scaler = {
@@ -377,6 +383,36 @@ def test_variable_loss_scaling_vals(
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
 
     assert torch.allclose(final_variable_scaling, expected_scaling)
+
+
+@pytest.mark.parametrize(
+    ("fake_data", "expected_scaling"),
+    [
+        (std_dev_scaler_12h, 5.0),
+        (var_scaler_12h, 25.0),
+    ],
+    indirect=["fake_data"],
+)
+def test_tendency_scaler_uses_configured_timestep(
+    fake_data: tuple[DictConfig, IndexCollection, torch.Tensor, torch.Tensor],
+    expected_scaling: float,
+    graph_with_nodes: HeteroData,
+) -> None:
+    config, data_indices, statistics, statistics_tendencies = fake_data
+
+    scalers, _ = create_scalers(
+        config.training.scalers.builders,
+        data_indices=data_indices,
+        graph_data=graph_with_nodes,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        metadata_extractor=ExtractVariableGroupAndLevel(config.training.variable_groups),
+        output_mask=NoOutputMask(),
+    )
+
+    variable_idx = data_indices.model.output.name_to_index["y_50"]
+
+    assert scalers["additional_scaler"][1][variable_idx] == expected_scaling
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
@@ -557,3 +593,24 @@ def test_lead_time_decay_loss_scaling(
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
     assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
+
+
+# ---------------------------------------------------------------------------
+# Spectral dimension scaler tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("n_spectral_modes", "spectral_dims"),
+    [(4, 4), (16, 16), (64, 64 * 64), (193, 193)],
+)
+def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> None:
+    """SpectralDimensionScaler: scaler values should all be identical (uniform)."""
+    scaler = SpectralDimensionScaler(n_spectral_modes=n_spectral_modes, spectral_dims=spectral_dims)
+    values = scaler.get_scaling_values()
+
+    assert values.shape == (spectral_dims,), f"Expected scaler to have shape ({spectral_dims},), got {values.shape}"
+    assert torch.allclose(values, values[0].expand_as(values)), f"Values are not uniform: {values}"
+    assert values[0].item() == pytest.approx(
+        1.0 / n_spectral_modes,
+    ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"

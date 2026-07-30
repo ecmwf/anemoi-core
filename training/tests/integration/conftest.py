@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -8,11 +8,14 @@
 # nor does it submit to any jurisdiction.
 
 
+import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Union
 
+import psutil
 import pytest
 import torch
 from hydra import compose
@@ -27,6 +30,50 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 LOGGER = logging.getLogger(__name__)
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# is run by pytest during initalisation
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    # suppress logging spam when using torch compile
+    logging.getLogger("torch.__trace").setLevel(logging.WARNING)
+    logging.getLogger("torch.__trace").propagate = False
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# it runs before every integration test
+@pytest.fixture(autouse=True)
+def _reset_torch_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset torch compile state before each test."""
+    import torch._dynamo
+
+    inductor_cache = tmp_path / "torchinductor_cache"
+    shutil.rmtree(inductor_cache, ignore_errors=True)
+    inductor_cache.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
+
+    torch._dynamo.reset()
+    return
+
+
+@pytest.fixture(autouse=True)
+def log_memory_usage(request: pytest.FixtureRequest) -> None:
+    """Log CPU RSS before and after each test to help debug memory leaks."""
+    process = psutil.Process()
+    rss_before = process.memory_info().rss / 1024**3
+    LOGGER.info("MEMORY [%s] before: %.2f GB RSS", request.node.name, rss_before)
+    yield
+    gc.collect()
+    rss_after = process.memory_info().rss / 1024**3
+    LOGGER.info(
+        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)",
+        request.node.name,
+        rss_after,
+        rss_after - rss_before,
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -250,23 +297,40 @@ def lam_config_with_graph(
     return cfg, urls
 
 
+def _get_multiscale_cfgs(training_loss_cfg: DictConfig) -> list[DictConfig]:
+    """Extract multiscale_config dicts that contain loss_matrices."""
+    multiscale_cfg = training_loss_cfg.get("multiscale_config")
+    if multiscale_cfg is not None and "loss_matrices" in multiscale_cfg:
+        return [multiscale_cfg]
+    if "losses" in training_loss_cfg:
+        results = []
+        for sub_loss in training_loss_cfg.losses:
+            mc = sub_loss.get("multiscale_config")
+            if mc is not None and "loss_matrices" in mc:
+                results.append(mc)
+        return results
+    return []
+
+
 def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> DictConfig:
     url_loss_matrices = cfg.system.input.loss_matrices_path
     tmp_path_loss_matrices = None
 
     training_losses_cfg = get_multiple_datasets_config(cfg.training.training_loss)
     for dataset_name, training_loss_cfg in training_losses_cfg.items():
-        multiscale_cfg = training_loss_cfg.get("multiscale_config")
-        if multiscale_cfg is None:
-            continue
-        for file in multiscale_cfg.get("loss_matrices") or []:
-            if file is not None:
-                tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+        multiscale_cfgs = _get_multiscale_cfgs(training_loss_cfg)
+
+        for multiscale_cfg in multiscale_cfgs:
+            for file in multiscale_cfg.get("loss_matrices") or []:
+                if file is not None:
+                    tmp_path_loss_matrices = get_test_data(url_loss_matrices + file)
+            if tmp_path_loss_matrices is not None:
+                OmegaConf.set_struct(multiscale_cfg, False)
+                multiscale_cfg.loss_matrices_path = str(Path(tmp_path_loss_matrices).parent)
+
         if tmp_path_loss_matrices is not None:
             resolved_path = str(Path(tmp_path_loss_matrices).parent)
             cfg.system.input.loss_matrices_path = Path(tmp_path_loss_matrices).parent
-            OmegaConf.set_struct(multiscale_cfg, False)
-            multiscale_cfg.loss_matrices_path = resolved_path
 
             val_multiscale_cfg = cfg.training.validation_metrics.datasets[dataset_name].multiscale.multiscale_config
             OmegaConf.set_struct(val_multiscale_cfg, False)
@@ -456,14 +520,16 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        "diffusiontend",
+        "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
     ids=[
         "lam",
         "graphtransformer",
         "stretched",
         "ensemble_crps",
-        "diffusiontend",
+        "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
 )
 def benchmark_config(
@@ -488,12 +554,12 @@ def benchmark_config(
     elif test_case == "ensemble_crps":
         overrides = ["model=graphtransformer_ens", "graph=multi_scale"]
         base_config = "ensemble_crps"
-    elif test_case == "diffusiontend":
-        overrides = [
-            "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
-        ]
-        base_config = "diffusion"
+    elif test_case == "edm_diffusion_tendency":
+        overrides = []
+        base_config = "transport_edm_diffusion_tendency"
+    elif test_case == "temporal_downscaler_ensemble":
+        overrides = []
+        base_config = "temporal_downscaler_ensemble"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
@@ -507,6 +573,7 @@ def benchmark_config(
     use_case_modifications = OmegaConf.load(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
+    OmegaConf.set_struct(template.data, False)
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
@@ -575,7 +642,7 @@ def temporal_downscaler_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_temporal_downscaler",
     ):
-        template = compose(config_name="temporal_downscaler.yaml")
+        template = compose(config_name="temporal_downscaler_ensemble.yaml")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_temporal_downscaler.yaml",
@@ -615,26 +682,43 @@ def imerg_target_config(
 
 
 @pytest.fixture(
-    params=[
-        [],
-        [
-            "model=graphtransformer_diffusiontend",
-            "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
-        ],
-    ],
-    ids=["diffusion", "diffusiontend"],
+    params=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
+    ids=["transport_edm_diffusion", "transport_edm_diffusion_tendency"],
 )
-def diffusion_config(
+def edm_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: OmegaConf,
     get_tmp_path: GetTmpPath,
 ) -> tuple[OmegaConf, str]:
-    overrides = request.param
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_edm_transport"):
+        template = compose(config_name=request.param)
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_diffusion"):
-        template = compose(config_name="diffusion", overrides=overrides)
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
-    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_diffusion.yaml")
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    return cfg, url_dataset
+
+
+@pytest.fixture(
+    params=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+    ids=["transport_stochastic_interpolant", "transport_stochastic_interpolant_tendency"],
+)
+def stochastic_interpolant_config(
+    request: pytest.FixtureRequest,
+    testing_modifications_with_temp_dir: OmegaConf,
+    get_tmp_path: GetTmpPath,
+) -> tuple[OmegaConf, str]:
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_stochastic_interpolant",
+    ):
+        template = compose(config_name=request.param)
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
     tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
     use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
 
@@ -647,30 +731,38 @@ def diffusion_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_diffusion",
-                "training.training_method=anemoi.training.train.methods.DiffusionTraining",
+                "model=graphtransformer_transport_edm",
+                "training=multi_transport",
+                "training.transport.prediction_mode=state",
+                "training.transport.objective=edm_diffusion",
             ],
-            id="diffusion",
+            id="edm_diffusion",
         ),
         pytest.param(
             [
-                "model=graphtransformer_diffusiontend",
-                "training.training_method=anemoi.training.train.methods.DiffusionTendencyTraining",
+                "model=graphtransformer_transport_tendency_edm",
+                "training=multi_transport",
+                "training.transport.prediction_mode=tendency",
+                "training.transport.objective=edm_diffusion",
             ],
-            id="diffusiontend",
+            id="edm_diffusion_tendency",
         ),
     ],
-    ids=["diffusion", "diffusiontend"],
+    ids=["edm_diffusion", "edm_diffusion_tendency"],
 )
-def multidatasets_diffusion_config(
+def multidatasets_edm_transport_config(
     request: pytest.FixtureRequest,
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
     overrides = request.param
-    is_tendency = any("graphtransformer_diffusiontend" in override for override in overrides)
+    is_tendency = any("graphtransformer_transport_tendency" in override for override in overrides)
 
-    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multi_diffusion"):
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_multi_edm_transport",
+    ):
         template = compose(config_name="multi", overrides=overrides)
 
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidatasets.yaml")
@@ -693,7 +785,7 @@ def multidatasets_diffusion_config(
 
     cfg.diagnostics.plot.callbacks = (
         []
-    )  # remove plotting callbacks as they are tested in multidatasets and diffusion test cases
+    )  # remove plotting callbacks as they are tested in multidatasets and EDM transport test cases
     return cfg, [url_dataset, url_dataset_b]
 
 

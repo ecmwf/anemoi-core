@@ -1,6 +1,7 @@
 ---
 defaults:
   - scalers: multi
+  - training_loss: single
   - optimization: default
   - weight_averaging: null
 
@@ -12,6 +13,15 @@ load_weights_only: False # only load model weights, do not restore optimiser sta
 update_ds_stats_on_ckpt_load:
   states: False # rebuild state processors from current dataset when loading a checkpoint
   tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
+
+# Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
+# dataset (fine-tuning / transfer learning / resuming). Set ignore_units/ignore_processing_period to
+# True to skip those checks globally, or to a list of variable names to skip only those variables.
+# For predicted-vs-target variable checks, configure check_variables_compatibility on the
+# loss entry that defines predicted_variables / target_variables.
+check_variables_compatibility:
+  ignore_units: False
+  ignore_processing_period: False
 
 # run in deterministic mode ; slows down
 deterministic: False
@@ -35,13 +45,15 @@ gradient_clip:
 # =====================================================================
 
 # select model
-training_method: anemoi.training.train.methods.SingleTraining
+method:
+  _target_: anemoi.training.train.methods.SingleTraining
 
 # select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
   read_group_size: ${dataloader.read_group_size}
+  use_local_synchronization: True
 
 # loss functions
 
@@ -56,7 +68,6 @@ max_steps: 150000
 
 
 submodules_to_freeze: []
-
 # Dataset-specific loss and metrics configuration
 training_loss:
   datasets:

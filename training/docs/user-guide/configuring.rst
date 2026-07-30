@@ -43,6 +43,12 @@ which implements:
    - input: example
    - output: example
 
+Config files are resolved in decreasing priority order: a path supplied via
+``--config-path`` always takes precedence, followed by the current working
+directory, and finally the packaged defaults shipped with ``anemoi-training``.
+A file or group override found in a higher-priority location shadows any
+matching file in a lower-priority location.
+
 *****************************
  YAML-based config overrides
 *****************************
@@ -150,10 +156,6 @@ match the dataset you provide.
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
 
-   training:
-      lr:
-         rate: 1e-3
-
 When we save this `example.yaml` file, we can run the training with this
 config using:
 
@@ -176,13 +178,13 @@ or override individual config entries such as
 
 .. code:: bash
 
-   anemoi-training train diagnostics.plot.enabled=False
+   anemoi-training train system.hardware.num_gpus_per_node=1
 
 or combine everything together
 
 .. code:: bash
 
-   anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
+   anemoi-training train --config-name=debug.yaml model=transformer system.hardware.num_gpus_per_node=1
 
 .. _config-validation:
 
@@ -197,6 +199,15 @@ run using the following command:
 
    anemoi-training config validate --config-name debug.yaml
 
+By default the config is looked up on the search path described above (the
+current working directory and the packaged defaults). To validate a config
+that lives somewhere else without changing directory, point ``--config-path``
+at its directory, exactly as for ``anemoi-training train``:
+
+.. code:: bash
+
+   anemoi-training config validate --config-path /path/to/configs --config-name debug.yaml
+
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
 the command will show an output similar to:
@@ -204,9 +215,8 @@ the command will show an output similar to:
 .. code:: bash
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    cfg = BaseSchema(**cfg)
    2025-01-28 09:37:23 INFO Config files validated.
 
@@ -231,9 +241,8 @@ values:
    2025-02-16 17:48:38 INFO Validating configs.
    2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has
    set the config_validation flag to false.So this command will validate the config regardless of the flag.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    2025-02-16 17:48:39 WARNING Environment variable EXP_NAME not found, masking with default
    2025-02-16 17:48:39 WARNING Environment variable RUN_NAME not found, masking with default
    2025-02-16 17:48:39 WARNING Environment variable SLURM_GPUS_PER_NODE not found, masking with 0
@@ -276,9 +285,8 @@ the following error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    diagnostics.log
     Input should be a valid dictionary or instance of LoggingSchema [type=model_type, input_value=None, input_type=NoneType]
@@ -333,9 +341,8 @@ error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    diagnostics.log.mlflow.offline
    Field required [type=missing, input_value={'enabled': True, 'authen...onfig'], 'ofline': True}, input_type=DictConfig]
@@ -400,9 +407,8 @@ with the following error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    2025-01-28 10:14:49 ERROR
    💣 14 validation error for BaseSchema

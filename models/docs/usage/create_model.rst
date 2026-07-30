@@ -259,7 +259,7 @@ processor below:
      num_chunks: 2
      layer_kernels:
        Activation:
-         _target_: anemoi.models.layers.activation.GLU
+         _target_: torch.nn.SiLU
 
 Available Layer Kernels
 =======================
@@ -292,9 +292,11 @@ Examples for suitable alternatives within Anemoi are:
 
 **Activation functions** (see :doc:`modules/activations`):
 
--  ``anemoi.models.layers.activation.GLU``
--  ``anemoi.models.layers.activation.SwiGLU``
--  ``anemoi.models.layers.activation.Sine``
+-  ``anemoi.models.layers.activations.Sine``
+-  ``torch.nn.SiLU``, ``torch.nn.ReLU``, or any ``torch.nn`` activation
+
+For gated variants (GLU, SwiGLU, GEGLU, ReGLU), use ``mlp_implementation``
+on the processor/encoder/decoder instead of ``layer_kernels.Activation``.
 
 The ``_target_`` can be any local or installed class (see Hydra
 documentation [#f4]_).
@@ -308,6 +310,39 @@ Layer kernels are particularly useful when:
 #. You want to experiment with different normalization techniques
 #. You need to customize the behaviour of specific layers in different
    parts of the model
+
+.. _mlp-implementations:
+
+**********************
+ MLP Implementations
+**********************
+
+Transformer and GraphTransformer components support selecting the
+feed-forward implementation via ``mlp_implementation``:
+
+.. code:: yaml
+
+   processor:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp  # options: mlp, glu, swiglu, geglu, reglu
+
+   encoder:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp
+
+   decoder:
+     mlp_hidden_ratio: 4
+     mlp_implementation: mlp
+
+Recommended ``mlp_hidden_ratio``:
+
+- ``mlp``: ``4``
+- gated variants (``glu``, ``swiglu``, ``geglu``, ``reglu``): ``~2.67``
+  (for comparable parameter count/compute to ``mlp:4``)
+
+For GNN components, the same ``mlp_implementation`` and
+``mlp_hidden_ratio`` options are available. GNNs additionally support
+``mlp_extra_layers`` to control MLP depth (number of hidden layers).
 
 .. rubric:: Footnotes
 

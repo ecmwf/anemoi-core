@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -26,12 +26,74 @@ import torch
 LOGGER = logging.getLogger(__name__)
 
 
+def detect_format_from_data(
+    checkpoint_data: dict[str, Any],
+) -> Literal["lightning", "pytorch", "state_dict"]:
+    """Detect checkpoint format from already-loaded data by inspecting dict keys.
+
+    This avoids re-loading the checkpoint from disk when the data is already
+    in memory (e.g. after a source stage has loaded it).
+
+    Parameters
+    ----------
+    checkpoint_data : dict
+        Already-loaded checkpoint data dictionary
+
+    Returns
+    -------
+    str
+        Format of the checkpoint: "lightning", "pytorch", or "state_dict"
+    """
+    if not isinstance(checkpoint_data, dict):
+        return "pytorch"
+
+    # Lightning checkpoint signature. Tested against pytorch-lightning 2.0-2.4
+    # and torch 2.2-2.6. The version key is the most stable marker; the
+    # auxiliary key set guards against the version key being renamed in a
+    # future release by requiring two independent Lightning-specific keys
+    # to coexist. Keep the auxiliary set narrow (exclude `hyper_parameters`
+    # which user-saved PyTorch checkpoints sometimes also carry).
+    lightning_version_key = "pytorch-lightning_version"
+    lightning_auxiliary_keys = {
+        "callbacks",
+        "optimizer_states",  # Lightning uses plural
+        "lr_schedulers",  # Lightning uses plural
+        "loops",
+    }
+
+    if lightning_version_key in checkpoint_data:
+        return "lightning"
+    if sum(1 for k in lightning_auxiliary_keys if k in checkpoint_data) >= 2:
+        return "lightning"
+
+    # Check for PyTorch-specific structure
+    pytorch_keys = {
+        "model_state_dict",  # PyTorch uses this specific key
+        "optimizer_state_dict",  # PyTorch uses singular
+        "scheduler_state_dict",  # PyTorch uses singular
+    }
+
+    if any(key in checkpoint_data for key in pytorch_keys):
+        return "pytorch"
+
+    # If it's just a dict of tensors, it's a state dict
+    if checkpoint_data and all(isinstance(v, torch.Tensor) for v in checkpoint_data.values()):
+        return "state_dict"
+
+    # Default to pytorch for structured checkpoints that don't match specific patterns
+    return "pytorch"
+
+
+_SUPPORTED_EXTENSIONS = frozenset({".ckpt", ".pt", ".pth", ".bin"})
+
+
 def detect_checkpoint_format(
     checkpoint_path: Path | str,
 ) -> Literal["lightning", "pytorch", "state_dict"]:
     """Detect the format of a checkpoint file.
 
     Uses file extension and structure inspection to determine format.
+    For already-loaded data, prefer :func:`detect_format_from_data`.
 
     Parameters
     ----------
@@ -42,78 +104,39 @@ def detect_checkpoint_format(
     -------
     str
         Format of the checkpoint: "lightning", "pytorch", or "state_dict"
+
+    Raises
+    ------
+    CheckpointLoadError
+        If the checkpoint file cannot be loaded (corrupted, empty, etc.)
+    CheckpointConfigError
+        If the file extension is not supported
     """
     path = Path(checkpoint_path)
 
     # Check file extension first
     extension = path.suffix.lower()
 
-    # For .ckpt, .pt, .pth, .bin extensions, load and inspect structure
-    if extension in [".ckpt", ".pt", ".pth", ".bin"]:
-        try:
-            checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    if extension not in _SUPPORTED_EXTENSIONS:
+        from .exceptions import CheckpointConfigError
 
-            if not isinstance(checkpoint, dict):
-                # Non-dict checkpoint, likely a raw model
-                return "pytorch"
+        msg = (
+            f"Unsupported checkpoint file extension '{extension}' for {path}. "
+            f"Supported extensions: {', '.join(sorted(_SUPPORTED_EXTENSIONS))}"
+        )
+        raise CheckpointConfigError(msg)
 
-            # Check for Lightning-specific keys (exclude generic training state keys)
-            lightning_specific_keys = {
-                "pytorch-lightning_version",
-                "callbacks",
-                "optimizer_states",  # Lightning uses plural
-                "lr_schedulers",  # Lightning uses plural
-                "loops",
-                "hyper_parameters",
-            }
+    # For supported extensions, load and inspect structure
+    try:
+        # SECURITY: weights_only=False is required for Anemoi checkpoints that
+        # contain non-tensor metadata (hyper_parameters, callbacks, etc.).
+        checkpoint = torch.load(path, map_location="cpu", weights_only=False)
+    except (OSError, RuntimeError, pickle.UnpicklingError, EOFError) as e:
+        from .exceptions import CheckpointLoadError
 
-            # Check for Lightning-specific keys first
-            if any(key in checkpoint for key in lightning_specific_keys):
-                return "lightning"
+        raise CheckpointLoadError(path, e) from e
 
-            # Check for PyTorch-specific structure
-            pytorch_keys = {
-                "model_state_dict",  # PyTorch uses this specific key
-                "optimizer_state_dict",  # PyTorch uses singular
-                "scheduler_state_dict",  # PyTorch uses singular
-            }
-
-            if any(key in checkpoint for key in pytorch_keys):
-                return "pytorch"
-
-            # If it's just a dict of tensors, it's a state dict
-            if checkpoint and all(isinstance(v, torch.Tensor) for v in checkpoint.values()):
-                return "state_dict"
-
-        except (OSError, RuntimeError, pickle.UnpicklingError, EOFError) as e:
-            # If we can't load it (file corruption, empty file, etc.), default to lightning
-            import logging
-
-            logger = logging.getLogger(__name__)
-            logger.warning(
-                "Failed to inspect checkpoint file %s for format detection: %s. "
-                "Defaulting to 'lightning' format. "
-                "If this is incorrect, specify the format explicitly.",
-                path,
-                e,
-            )
-            return "lightning"
-        else:
-            # Default to pytorch for structured checkpoints that don't match specific patterns
-            return "pytorch"
-
-    # Default to lightning for unknown extensions
-    import logging
-
-    logger = logging.getLogger(__name__)
-    logger.info(
-        "Unknown checkpoint file extension '%s' for %s. "
-        "Defaulting to 'lightning' format. "
-        "Supported extensions: .ckpt, .pt, .pth, .bin",
-        extension,
-        path,
-    )
-    return "lightning"
+    return detect_format_from_data(checkpoint)
 
 
 def load_checkpoint(
@@ -127,7 +150,7 @@ def load_checkpoint(
     checkpoint_path : Path or str
         Path to the checkpoint file
     checkpoint_format : str, optional
-        Format of the checkpoint. If None, will auto-detect.
+        Format of the checkpoint. If None, will auto-detect from data.
 
     Returns
     -------
@@ -136,11 +159,13 @@ def load_checkpoint(
     """
     path = Path(checkpoint_path)
 
-    if checkpoint_format is None:
-        checkpoint_format = detect_checkpoint_format(path)
+    if not path.exists():
+        from .exceptions import CheckpointNotFoundError
+
+        raise CheckpointNotFoundError(path)
 
     try:
-        return torch.load(path, map_location="cpu", weights_only=False)
+        data = torch.load(path, map_location="cpu", weights_only=False)
 
     except FileNotFoundError:
         from .exceptions import CheckpointNotFoundError
@@ -151,6 +176,12 @@ def load_checkpoint(
         from .exceptions import CheckpointLoadError
 
         raise CheckpointLoadError(path, e) from e
+
+    if checkpoint_format is None:
+        LOGGER.debug("Auto-detecting checkpoint format from loaded data")
+        detect_format_from_data(data)
+
+    return data
 
 
 def extract_state_dict(checkpoint_data: dict[str, Any]) -> dict[str, Any]:
@@ -223,7 +254,7 @@ def extract_state_dict(checkpoint_data: dict[str, Any]) -> dict[str, Any]:
 def save_checkpoint(
     checkpoint_data: dict[str, Any],
     checkpoint_path: Path | str,
-    checkpoint_format: Literal["lightning", "pytorch", "state_dict"] = "pytorch",
+    checkpoint_format: Literal["lightning", "pytorch", "state_dict"] = "pytorch",  # noqa: ARG001
     anemoi_metadata: dict[str, Any] | None = None,
     supporting_arrays: dict[str, Any] | None = None,
 ) -> None:
@@ -249,7 +280,7 @@ def save_checkpoint(
     _ensure_directory_exists(path.parent)
 
     # Save checkpoint in the appropriate format
-    _save_checkpoint_file(checkpoint_data, path, checkpoint_format)
+    _save_checkpoint_file(checkpoint_data, path)
 
     # Save Anemoi metadata if provided
     _handle_anemoi_metadata(path, anemoi_metadata, supporting_arrays)
@@ -319,9 +350,10 @@ def _build_directory_error_message(directory: Path, error: OSError) -> str:
 def _save_checkpoint_file(
     checkpoint_data: dict[str, Any],
     path: Path,
-    checkpoint_format: str,  # noqa: ARG001
 ) -> None:
-    """Save checkpoint file in the specified format.
+    """Save checkpoint file using ``torch.save``.
+
+    All checkpoint formats are saved via ``torch.save``.
 
     Parameters
     ----------
@@ -329,8 +361,6 @@ def _save_checkpoint_file(
         Data to save
     path : Path
         File path to save to
-    checkpoint_format : str
-        Format to use for saving
 
     Raises
     ------
@@ -518,8 +548,11 @@ def convert_lightning_to_pytorch(
     return pytorch_checkpoint
 
 
-def is_format_available(checkpoint_format: Literal["lightning", "pytorch", "state_dict"]) -> bool:  # noqa: ARG001
+def is_format_available(checkpoint_format: Literal["lightning", "pytorch", "state_dict"]) -> bool:
     """Check if a checkpoint format is available for use.
+
+    All supported formats (``"lightning"``, ``"pytorch"``, ``"state_dict"``)
+    are always available because they only depend on PyTorch.
 
     Parameters
     ----------
@@ -531,4 +564,4 @@ def is_format_available(checkpoint_format: Literal["lightning", "pytorch", "stat
     bool
         True if the format is available
     """
-    return True  # All formats are always available
+    return checkpoint_format in {"lightning", "pytorch", "state_dict"}

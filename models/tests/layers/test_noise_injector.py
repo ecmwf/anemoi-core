@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -54,7 +54,7 @@ def test_noise_conditioning_graph_projection_shape() -> None:
         batch_size=batch_size,
         ensemble_size=ensemble_size,
         grid_size=hidden_nodes,
-        shard_shapes_ref=[],
+        grid_shard_sizes=[],
     )
 
     assert noise is not None
