@@ -108,7 +108,7 @@ class BaseDDPStrategy(DDPStrategy):
         **kwargs : dict
             Additional keyword arguments.
         """
-        super().__init__(**kwargs)
+        super().__init__(**kwargs, broadcast_buffers=False)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.use_local_synchronization = use_local_synchronization
