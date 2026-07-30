@@ -286,7 +286,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             cond=cond,
             # avoid dropping unconnected source nodes when using torch.compile()
             # as it creates data-dependent shapes which can't be compiled
-            drop_unconnected_src_nodes=(not torch.compiler.is_compiling()),
+            drop_unconnected_src_nodes=True,  # (not torch.compiler.is_compiling()),
         )
 
         # build a second GraphPartition for local chunking within this shard
@@ -321,7 +321,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             cond=cond,
             # avoid dropping unconnected source nodes when using torch.compile()
             # as it creates data-dependent shapes which can't be compiled
-            drop_unconnected_src_nodes=(not torch.compiler.is_compiling()),
+            drop_unconnected_src_nodes=True,  # (not torch.compiler.is_compiling())
         )
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
@@ -342,7 +342,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
 
         return self.post_process(x_dst_out)
 
-    @torch.compile(dynamic=False, fullgraph=True, mode="max-autotune")
     def mapper_forward_with_edge_sharding(
         self,
         x: PairTensor,
@@ -356,16 +355,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
-
-        if torch.compiler.is_compiling():
-            # LOGGER.warning(
-            #    "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
-            #    "Disabling explicit gradient checkpointing for this function."
-            #    "Note: torch.compile will apply its own implicit checkpointing, determined by "
-            #    "'torch._dynamo.config.activation_memory_budget'"
-            # )
-            self.gradient_checkpointing = False
-            self.num_chunks = 1
 
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
@@ -488,6 +477,16 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             "edges_are_dst_sorted": edges_are_dst_sorted,
             **kwargs,
         }
+
+        if torch.compiler.is_compiling():
+            # LOGGER.warning(
+            #    "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
+            #    "Disabling explicit gradient checkpointing for this function."
+            #    "Note: torch.compile will apply its own implicit checkpointing, determined by "
+            #    "'torch._dynamo.config.activation_memory_budget'"
+            # )
+            self.gradient_checkpointing = False
+            self.num_chunks = 1
 
         if self.shard_strategy == "edges":
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
