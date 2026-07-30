@@ -34,12 +34,18 @@ class ForecasterSchema(BaseModel):
 
     target_: Literal["anemoi.training.tasks.Forecaster"] = Field(..., alias="_target_")
     "Task class path for the forecasting task."
-    multistep_input: PositiveInt = Field(example=2)
-    "Number of input timesteps provided to the model."
-    multistep_output: PositiveInt = Field(example=1)
-    "Number of output timesteps the model should predict."
-    timestep: str = Field(example="6H")
-    "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
+    multistep_input: PositiveInt | None = Field(default=None, example=2)
+    "Legacy: number of input timesteps provided to the model."
+    multistep_output: PositiveInt | None = Field(default=None, example=1)
+    "Legacy: number of output timesteps the model should predict."
+    timestep: str | None = Field(default=None, example="6H")
+    "Legacy: timestep string (e.g. '6H') defining the frequency of the input and output steps."
+    input_offsets: list[str] | None = Field(default=None, example=["-6H", "0H"])
+    "Offset-based: input time offsets as duration strings (e.g. ['-6H', '0H'])."
+    output_offsets: list[str] | None = Field(default=None, example=["6H"])
+    "Offset-based: output time offsets as duration strings (e.g. ['6H'])."
+    rollout_shift: str | None = Field(default="0H", example="6H")
+    "Offset-based: time shift applied to the offsets between rollout steps (e.g. '6H')."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
