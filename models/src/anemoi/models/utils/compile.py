@@ -63,9 +63,8 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
     Modules are not compiled here. The compilation will occur
     automatically before the first forward iteration.
 
-    A module can define ``compile_for_training()`` to select a smaller part of
-    its calculation for compilation. Other modules use the standard
-    ``torch.nn.Module.compile()`` method.
+    A module may define ``compile_for_training()`` to select what should
+    be compiled. All other modules use ``torch.nn.Module.compile()``.
 
     returns an updated model, with modules marked for compilation
     """

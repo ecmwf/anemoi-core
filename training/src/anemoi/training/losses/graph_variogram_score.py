@@ -74,7 +74,7 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         assert destination_index is not None
         assert edge_weights is not None
         ensemble_size = y_pred_ens.shape[2]
-        node_valid, edge_valid, valid_weight_sum = self._validity_tensors(
+        node_valid, edge_valid, valid_weight_sum = self._compute_edge_validity(
             y_pred_ens,
             y,
             source_index,

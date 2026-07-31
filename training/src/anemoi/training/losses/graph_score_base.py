@@ -7,19 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Common CSR operations and lifecycle for graph scores.
-
-Graph scores retain the model layout throughout their numerical kernel:
-
-- prediction: ``(B, T, M, N, V)``
-- target: ``(B, T, N, V)``
-- local score: ``(B, T, N, V)``
-
-The graph is a destination-by-source CSR matrix ``A[N, N]``. Batch, time,
-ensemble, and variable dimensions are treated as dense right-hand sides, so
-the sparse graph is never copied across the batch.
-"""
-
 from abc import abstractmethod
 from contextlib import nullcontext
 
@@ -121,7 +108,7 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int,
         grid_shard_sizes: ShardSizes,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
-        """Bring values from all nodes together while sharding variables."""
+        """Gather all node values and shard the variable axis."""
         channel_shard_sizes_pred = get_shard_sizes(y_pred_ens, TensorDim.VARIABLE, group)
         channel_shard_sizes_target = get_shard_sizes(y, TensorDim.VARIABLE, group)
         if channel_shard_sizes_pred != channel_shard_sizes_target:
@@ -228,9 +215,7 @@ class BaseGraphScoreLoss(BaseLoss):
         if not self.uses_edge_tensors:
             return matrix, None, None, None
         source_index, destination_index, edge_weights = self.graph.edge_tensors(matrix)
-        # Nonlinear edge scores use CSR storage to obtain the shared edge
-        # tensors, but must not pass a sparse tensor into their dense compiled
-        # kernel. Doing so prevents Dynamo/Inductor from fusing that kernel.
+        # Use src / dst idx and edge weights to allow Dynamo/Inductor fusion.
         return None, source_index, destination_index, edge_weights
 
     @abstractmethod

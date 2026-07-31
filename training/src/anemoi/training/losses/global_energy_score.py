@@ -34,8 +34,8 @@ class GlobalEnergyScoreLoss(BaseLoss):
     norm. Forecast output steps are scored separately and then summed.
 
     For diagnostics, the joint score is repeated for every selected variable.
-    These repeated values all describe the same joint field rather than
-    separate single-variable scores.
+    Each repeated value represents the same joint field, not an individual
+    variable score.
     """
 
     def __init__(
@@ -74,7 +74,7 @@ class GlobalEnergyScoreLoss(BaseLoss):
     @staticmethod
     def _validate_norm_scaler(scaler: torch.Tensor) -> None:
         scaler = torch.as_tensor(scaler)
-        # A weighted Euclidean norm requires finite, real, non-negative weights.
+        # A weighted Euclidean norm requires finite real weights greater than or equal to zero.
         if torch.is_complex(scaler) or not torch.isfinite(scaler).all():
             msg = "Global energy score weights must be finite real values."
             raise ValueError(msg)

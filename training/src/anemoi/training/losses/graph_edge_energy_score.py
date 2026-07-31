@@ -18,11 +18,11 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
-    """Energy score over graph-edge differences using sparse moments.
+    """Energy score for graph edge differences.
 
-    For node differences ``q``, the weighted squared edge norm is evaluated as
-    ``A @ q**2 - 2*q*(A @ q) + q**2*(A @ 1)``. This avoids materializing an
-    edge tensor while retaining the exact edge-difference definition.
+    For node differences ``q``, the weighted squared edge norm is
+    ``A @ q**2 - 2*q*(A @ q) + q**2*(A @ 1)``. This identity avoids an
+    edge tensor.
     """
 
     uses_row_weight_sums: bool = True
@@ -70,8 +70,8 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
         if node_valid is not None:
             safe_differences = torch.where(node_valid, differences, torch.zeros_like(differences))
 
-        # Edge differences are invariant to a constant spatial offset. Removing
-        # an anchor before forming sparse moments reduces cancellation.
+        # Edge differences are invariant to a constant spatial offset.
+        # Improve stability of computation
         safe_differences = safe_differences - safe_differences[..., :1, :]
         if node_valid is not None:
             safe_differences = torch.where(

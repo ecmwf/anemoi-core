@@ -54,7 +54,7 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
         destination_index: torch.Tensor | None,
         edge_weights: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Evaluate member-observation and unordered member-pair distances."""
+        """Evaluate distances from each member to the observation and between unordered member pairs."""
         assert source_index is None
         assert destination_index is None
         assert edge_weights is None

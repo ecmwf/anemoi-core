@@ -44,7 +44,7 @@ class GraphScoreGraph(nn.Module):
         return (self.num_dst_nodes, self.num_src_nodes)
 
     def get_matrix(self, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
-        """Return the graph as a destination-by-source CSR matrix."""
+        """Return a CSR matrix whose rows represent destinations and columns represent sources."""
         return self.graph_provider.get_edges(device=device, dtype=dtype)
 
     @staticmethod
@@ -55,9 +55,9 @@ class GraphScoreGraph(nn.Module):
             raise TypeError(msg)
         row_counts = matrix.crow_indices()[1:] - matrix.crow_indices()[:-1]
         destinations = torch.arange(matrix.shape[0], device=matrix.device).repeat_interleave(row_counts)
-        # CSR metadata tensors are views whose base is the sparse matrix.
-        # Dense kernels compiled by Dynamo must receive independent tensors so
-        # fake-tensor conversion does not attempt an unsupported CSR view.
+        # CSR metadata tensors are views of the sparse matrix. Dense Dynamo kernels
+        # require independent tensors; otherwise FakeTensor conversion attempts an
+        # unsupported CSR view.
         return matrix.col_indices().clone(), destinations, matrix.values().clone()
 
     @classmethod

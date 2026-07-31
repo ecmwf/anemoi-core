@@ -706,7 +706,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             tgt_spec = self._to_spectral_flat(target)
 
             if self.coefficient_magnitude:
-                # Taking the modulus compares coefficient amplitudes without using phase.
+                # The modulus compares coefficient amplitudes and discards phase.
                 pred_spec = torch.abs(pred_spec)
                 tgt_spec = torch.abs(tgt_spec)
 

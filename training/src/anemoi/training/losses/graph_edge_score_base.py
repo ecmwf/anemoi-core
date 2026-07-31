@@ -36,10 +36,10 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         source_index: torch.Tensor,
         destination_index: torch.Tensor,
     ) -> torch.Tensor:
-        """Return ``source - destination`` for each CSR non-zero."""
+        """Return ``source - destination`` for each nonzero CSR entry."""
         return node_values[..., source_index, :] - node_values[..., destination_index, :]
 
-    def _validity_tensors(
+    def _compute_edge_validity(
         self,
         y_pred_ens: torch.Tensor,
         y: torch.Tensor,
@@ -47,7 +47,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         destination_index: torch.Tensor,
         edge_weights: torch.Tensor,
     ) -> tuple[torch.Tensor | None, torch.Tensor | None, torch.Tensor | None]:
-        """Return node, edge, and incoming-weight validity tensors."""
+        """Compute node and edge validity plus valid weight sums per destination."""
         if not self.ignore_nans:
             return None, None, None
         node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
@@ -69,7 +69,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         edge_valid: torch.Tensor | None,
         valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
-        """Take a weighted CSR-row sum, including dynamic NaN normalization."""
+        """Return a weighted sum for each CSR row with NaN normalization."""
         weight_shape = (1,) * (edge_values.ndim - 2) + (-1, 1)
         weights = edge_weights.to(dtype=edge_values.dtype).view(weight_shape)
         if edge_valid is not None:

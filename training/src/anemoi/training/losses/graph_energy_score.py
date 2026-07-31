@@ -18,11 +18,11 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEnergyScoreLoss(BaseGraphEnergyScoreLoss):
-    """Energy score using CSR-projected graph-neighbourhood norms.
+    """Energy score based on CSR graph neighbourhood norms.
 
     Without ``loss_graph``, the norm is pointwise and the score is equivalent
-    to CRPS. With a graph, each norm is ``sqrt(A @ q**2)`` where ``A`` is the
-    configured destination-by-source CSR matrix.
+    to CRPS. With a graph, each norm is ``sqrt(A @ q**2)``. Rows of ``A``
+    represent destination nodes and columns represent source nodes.
     """
 
     def __init__(
