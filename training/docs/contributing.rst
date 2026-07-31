@@ -20,7 +20,7 @@ to Anemoi Training.
 A weekly bulletin summarising PR activity across ``anemoi-training``,
 ``anemoi-models``, and ``anemoi-graphs`` -- including any breaking or
 config-schema changes -- is automatically posted to `issue #1262
-<https://github.com/ecmwf/anemoi-core/issues/1262>`_. You can receive 
+<https://github.com/ecmwf/anemoi-core/issues/1262>`_. You can receive
 notifications for this issue by clicking the "Subscribe" button on GitHub.
 
 ##########################
