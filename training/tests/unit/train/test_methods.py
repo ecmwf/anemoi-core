@@ -997,6 +997,59 @@ def test_single_training_advance_input_called_between_rollout_steps(
         assert kwargs["grid_shard_slice"] is module.grid_shard_slice
 
 
+def test_single_training_forcing_advances_across_rollout_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each forcing variables in input are refreshed from the batch before each rollout step."""
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["force"])}
+
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 3, "maximum": 3},
+    )
+    module = _make_single_training(task, data_indices)
+
+    # Capture the model input tensor at each rollout step by wrapping forward.
+    captured: list[torch.Tensor] = []
+    real_forward = module.forward
+
+    def spy_forward(x: dict[str, torch.Tensor], *args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+        captured.append(x["data"].clone())
+        return real_forward(x, *args, **kwargs)
+
+    monkeypatch.setattr(module, "forward", spy_forward)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(
+        module,
+        "compute_loss_metrics",
+        lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred),
+    )
+
+    # Full training offsets are [-6h, 0h, 6h, 12h, 18h] -> batch time dim of 5.
+    # Forcing (variable index 1) carries a distinctive value per time step so we can
+    # verify which batch time each advanced input pulled its forcing from.
+    force_col = name_to_index["force"]
+    b, e, g, v = 1, 1, 3, len(name_to_index)
+    batch_data = torch.zeros(b, 5, e, g, v)
+    for t in range(5):
+        batch_data[:, t, ..., force_col] = 100.0 + 10.0 * t
+    batch = {"data": batch_data}
+
+    module._step(batch, validation_mode=False)
+
+    assert len(captured) == 3
+    expected_forcing = [110.0, 120.0, 130.0]
+    for step, (x_in, expected) in enumerate(zip(captured, expected_forcing, strict=True)):
+        got = x_in[:, -1, ..., force_col]
+        assert torch.all(got == expected), (
+            f"rollout step {step}: newest input forcing should be {expected} "
+            f"(refreshed from batch), got {got.unique().tolist()}."
+        )
+
+
 # ── TransportTraining EDM transport _step integration ─────────────────────────────
 
 
