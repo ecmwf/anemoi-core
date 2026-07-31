@@ -20,7 +20,7 @@ def normalize_time_indices(time_indices: TimeIndices) -> TimeIndices:
 
     Using a list/array of integers triggers advanced indexing in NumPy and
     PyTorch, while slices use the cheaper basic-indexing path. We preserve
-    sparse selections as explicit indices.
+    non-contiguous selections as explicit indices.
     """
     if isinstance(time_indices, (slice, int)):
         return time_indices

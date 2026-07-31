@@ -35,8 +35,8 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         data_indices: dict,
         statistics: dict,
         graph_data: HeteroData,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: int | dict[str, int],
+        n_step_output: int | dict[str, int],
     ) -> None:
         """Initializes the graph neural network.
 

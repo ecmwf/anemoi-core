@@ -7,7 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
 from functools import cached_property
 
@@ -19,9 +18,13 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.relative_time_indices import resolve_config_frequency
+from anemoi.training.data.relative_time_indices import resolve_relative_date_indices
+from anemoi.training.data.relative_time_indices import resolve_task_relative_indices_by_dataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
+from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
@@ -141,11 +144,26 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        frequency_seconds = {name: frequency_to_seconds(reader.frequency) for name, reader in data_readers.items()}
+        use_mixed_frequency_alignment = len(set(frequency_seconds.values())) != 1
+        if use_mixed_frequency_alignment:
+            shared_frequency = resolve_config_frequency(self.config, task=self.task)
+            return MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=resolve_relative_date_indices(
+                    self.config,
+                    task=self.task,
+                    mode=label,
+                    logger=LOGGER,
+                ),
+                frequency=shared_frequency,
+                shuffle=shuffle,
+                label=label,
+            )
 
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=relative_date_indices,
+            relative_date_indices=compute_relative_date_indices(self.task, data_readers, mode=label),
             shuffle=shuffle,
             label=label,
             epoch=self.epoch,
@@ -230,8 +248,36 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
+        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, dict[str, list[int]]]:
+            if dataset.relative_date_indices_are_native:
+                return {}
+
+            input_relative_indices_by_dataset, target_relative_indices_by_dataset = (
+                resolve_task_relative_indices_by_dataset(
+                    self.task,
+                    dataset.model_relative_date_indices_by_dataset,
+                    mode=label,
+                )
+            )
+
+            return {
+                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
+                f"relative_date_input_indices_{label}_by_dataset": input_relative_indices_by_dataset,
+                f"relative_date_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_target_indices_{label}_by_dataset": target_relative_indices_by_dataset,
+            }
+
+        timesteps = _dataset_timing_metadata(self.ds_train, "training")
+        if len(self.valid_dataloader_config) > 0:
+            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
+
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
+            if len(timesteps) > 0:
+                metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,

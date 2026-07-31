@@ -46,8 +46,6 @@ class DataSchema(PydanticBaseModel):
         The resolution of the data.
     frequency : str
         The frequency of the data.
-    timestep : str
-        The timestep of the data.
     datasets : dict[str, DatasetDataSchema] | None
         "Dictionary mapping dataset names to their configurations."
     num_features : int, optional

@@ -31,7 +31,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         return (
-            self.n_step_output * self.num_input_channels_decoding_forcings[dataset_name]
+            self._get_n_step_output(dataset_name) * self.num_input_channels_decoding_forcings[dataset_name]
             + self.node_attributes.attr_ndims[dataset_name]
         )
 
@@ -49,7 +49,11 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        x_input = x[:, : self.n_step_input, ...]
+        x_input = x[
+            :,
+            : self._get_n_step_input(dataset_name),
+            ...,
+        ]
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
@@ -75,7 +79,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
                 "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
                 batch=batch_size,
                 ensemble=ensemble_size,
-                time=self.n_step_output,
+                time=self._get_n_step_output(dataset_name),
             )
             .to(dtype=dtype)
             .clone()
@@ -101,7 +105,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_target = shard_tensor(node_attributes_target, 0, grid_shard_sizes, model_comm_group)
 
-        x_forcing = x[:, : self.n_step_output, ...]
+        x_forcing = x[:, : self._get_n_step_output(dataset_name), ...]
         # normalize and add data positional info (lat/lon)
         x_target_latent = torch.cat(
             (
