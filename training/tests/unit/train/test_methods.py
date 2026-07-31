@@ -955,10 +955,10 @@ def test_single_training_loss_is_averaged_over_num_steps(
     assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
 
 
-def test_single_training_advance_input_called_once_per_step(
+def test_single_training_advance_input_called_between_rollout_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """advance_input is invoked exactly once per rollout step."""
+    """advance_input is invoked once for each rollout step except the last."""
     data_indices = _data_indices_single()
     task = Forecaster(
         multistep_input=1,
@@ -991,7 +991,7 @@ def test_single_training_advance_input_called_once_per_step(
     batch = {"data": torch.randn(b, 2, e, g, v)}
     module._step(batch, validation_mode=False)
 
-    assert len(advance_calls) == task.num_steps
+    assert len(advance_calls) == task.num_steps - 1
     for kwargs in advance_calls:
         assert kwargs["output_mask"] is module.output_mask
         assert kwargs["grid_shard_slice"] is module.grid_shard_slice
