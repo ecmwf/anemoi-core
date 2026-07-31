@@ -42,7 +42,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
     def _compute_edge_validity(
         self,
         y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_target: torch.Tensor,
         source_index: torch.Tensor,
         destination_index: torch.Tensor,
         edge_weights: torch.Tensor,
@@ -50,7 +50,7 @@ class BaseGraphEdgeScoreLoss(BaseGraphScoreLoss):
         """Compute node and edge validity plus valid weight sums per destination."""
         if not self.ignore_nans:
             return None, None, None
-        node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
+        node_valid = torch.isfinite(y_target) & torch.isfinite(y_pred_ens).all(dim=2)
         edge_valid = node_valid[..., source_index, :] & node_valid[..., destination_index, :]
         weight_shape = (1,) * (edge_valid.ndim - 2) + (-1, 1)
         valid_edge_weights = edge_valid.to(dtype=y_pred_ens.dtype) * edge_weights.view(weight_shape)

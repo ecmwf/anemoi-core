@@ -51,7 +51,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_target: torch.Tensor,
         matrix: torch.Tensor | None,
         source_index: torch.Tensor | None,
         destination_index: torch.Tensor | None,
@@ -64,13 +64,13 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         ensemble_size = y_pred_ens.shape[2]
         node_valid, edge_valid, valid_weight_sum = self._compute_edge_validity(
             y_pred_ens,
-            y,
+            y_target,
             source_index,
             destination_index,
             edge_weights,
         )
 
-        observed_edge = self._edge_difference(y, source_index, destination_index)
+        observed_edge = self._edge_difference(y_target, source_index, destination_index)
         observation_sum = torch.zeros_like(observed_edge)
         pair_sum = torch.zeros_like(observed_edge)
         for first in range(ensemble_size):
@@ -108,7 +108,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
             edge_score,
             destination_index,
             edge_weights,
-            y.shape[-2],
+            y_target.shape[-2],
             node_valid=node_valid,
             edge_valid=edge_valid,
             valid_weight_sum=valid_weight_sum,

@@ -63,7 +63,7 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_target: torch.Tensor,
         matrix: torch.Tensor | None,
         source_index: torch.Tensor | None,
         destination_index: torch.Tensor | None,
@@ -76,14 +76,14 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         ensemble_size = y_pred_ens.shape[2]
         node_valid, edge_valid, valid_weight_sum = self._compute_edge_validity(
             y_pred_ens,
-            y,
+            y_target,
             source_index,
             destination_index,
             edge_weights,
         )
 
         observed_variogram = self._edge_variogram(
-            y,
+            y_target,
             source_index,
             destination_index,
             edge_valid,
@@ -119,7 +119,7 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
             edge_score,
             destination_index,
             edge_weights,
-            y.shape[-2],
+            y_target.shape[-2],
             node_valid=node_valid,
             edge_valid=edge_valid,
             valid_weight_sum=valid_weight_sum,

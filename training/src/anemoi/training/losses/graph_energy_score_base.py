@@ -48,7 +48,7 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
     def _compute_local_score_tensor(
         self,
         y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_target: torch.Tensor,
         matrix: torch.Tensor | None,
         source_index: torch.Tensor | None,
         destination_index: torch.Tensor | None,
@@ -63,7 +63,7 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
         node_valid = None
         valid_weight_sum = None
         if self.ignore_nans:
-            node_valid = torch.isfinite(y) & torch.isfinite(y_pred_ens).all(dim=2)
+            node_valid = torch.isfinite(y_target) & torch.isfinite(y_pred_ens).all(dim=2)
             if matrix is not None:
                 valid_weight_sum = csr_matmul(matrix, node_valid.to(dtype=y_pred_ens.dtype))
 
@@ -78,17 +78,17 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
             )
             row_weight_sum = torch.sparse.mm(matrix, ones).squeeze(-1)
 
-        observation_sum = torch.zeros_like(y)
+        observation_sum = torch.zeros_like(y_target)
         for member in range(ensemble_size):
             observation_sum = observation_sum + self._neighbourhood_norm(
-                y_pred_ens[:, :, member] - y,
+                y_pred_ens[:, :, member] - y_target,
                 matrix,
                 row_weight_sum,
                 node_valid,
                 valid_weight_sum,
             )
 
-        pair_sum = torch.zeros_like(y)
+        pair_sum = torch.zeros_like(y_target)
         for first in range(ensemble_size):
             for second in range(first + 1, ensemble_size):
                 pair_sum = pair_sum + self._neighbourhood_norm(
