@@ -3,7 +3,6 @@ name: Weekly PR Bulletin
 on:
   schedule:
     - cron: "0 14 * * 5"  # Every Friday at 14:00 UTC
-  workflow_dispatch:      # Allow manual trigger
 
 permissions:
   contents: read
