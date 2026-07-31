@@ -13,6 +13,16 @@ collaboration on GitHub, writing documentation, testing, and code style.
 The following sections provide additional information for contributing
 to Anemoi Training.
 
+*******************
+ Weekly PR Bulletin
+*******************
+
+A weekly bulletin summarising PR activity across ``anemoi-training``,
+``anemoi-models``, and ``anemoi-graphs`` -- including any breaking or
+config-schema changes -- is automatically posted to `issue #1262
+<https://github.com/ecmwf/anemoi-core/issues/1262>`_. You can receive
+notifications for this issue by clicking the "Subscribe" button on GitHub.
+
 ##########################
  Configuration guidelines
 ##########################
