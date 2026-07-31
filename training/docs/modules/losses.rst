@@ -73,10 +73,15 @@ The following probabilistic loss functions are available by default:
      materialization of the full pairwise tensor.
    - ``stable``: materializes pairwise tensors and uses the numerically
      stable all-pairs formulation.
--  ``GlobalEnergyScoreLoss``: Energy score over the full spatial field.
-   Set ``joint_variables: true`` to include all selected variables in the
-   same distance. Otherwise, a spatial distance is calculated separately for
-   each variable.
+-  ``EnergyScoreLoss``: Energy score with a configurable joint outcome.
+   Set ``norm_over`` to ``spatial`` for one spatial score per variable,
+   ``variables`` for one joint variable score per grid node, or
+   ``spatial_and_variables`` for one score over the complete field.
+   Scalers on dimensions included in ``norm_over`` define the weighted norm
+   ``sqrt(sum(weight * difference**2))``. Other scalers multiply the completed
+   score directly, so the same scaler can have a different effective strength
+   when ``norm_over`` changes. In ``variables`` mode, node weights are applied
+   after the norm and should normally sum to one, as for pointwise losses.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -147,8 +152,8 @@ Combining ensemble scores
 are examples and should be tuned for the scales of the scores and the purpose
 of the additional term.
 
-Graph energy with a weak global anchor
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Graph energy with a weak full-field anchor
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 This combines neighbourhood structure from the graph energy score with a
 smaller energy score over the complete spatial and variable field:
@@ -167,17 +172,18 @@ smaller energy score over the complete spatial and variable field:
                scalers: [node_weights]
                loss_graph:
                  edges_name: [data, to, data]
-             - _target_: anemoi.training.losses.GlobalEnergyScoreLoss
+             - _target_: anemoi.training.losses.EnergyScoreLoss
                fair: true
-               joint_variables: true
+               norm_over: spatial_and_variables
                scalers: [node_weights]
 
-Here, ``joint_variables: true`` gives one energy score over space and all
-selected variables. Set it to ``false`` to calculate a separate spatial score
-for each variable.
+Here, ``norm_over: spatial_and_variables`` gives one energy score over space
+and all selected variables. Use ``spatial`` to calculate a separate spatial
+score for each variable, or ``variables`` to calculate a joint variable score
+at each grid node.
 
-Global energy at multiple scales
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Energy score at multiple scales
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Any ensemble score accepted as ``per_scale_loss`` can be evaluated on the
 successive spatial fields produced by ``MultiscaleLossWrapper``:
@@ -196,9 +202,9 @@ successive spatial fields produced by ``MultiscaleLossWrapper``:
              base_sigma: 0.1
              scale_factor: 2
            per_scale_loss:
-             _target_: anemoi.training.losses.GlobalEnergyScoreLoss
+             _target_: anemoi.training.losses.EnergyScoreLoss
              fair: true
-             joint_variables: true
+             norm_over: spatial_and_variables
              scalers: [node_weights]
 
 Multiscale CRPS with an edge CRPS for one variable

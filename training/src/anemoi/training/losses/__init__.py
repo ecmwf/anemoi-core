@@ -9,7 +9,7 @@
 
 from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
-from .global_energy_score import GlobalEnergyScoreLoss
+from .energy_score import EnergyScoreLoss
 from .graph_edge_crps import GraphEdgeCRPSLoss
 from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
 from .graph_energy_score import GraphEnergyScoreLoss
@@ -34,8 +34,8 @@ from .weighted_mse import WeightedMSELoss
 __all__ = [
     "CRPS",
     "CombinedLoss",
+    "EnergyScoreLoss",
     "FourierCorrelationLoss",
-    "GlobalEnergyScoreLoss",
     "GraphEdgeCRPSLoss",
     "GraphEdgeEnergyScoreLoss",
     "GraphEnergyScoreLoss",

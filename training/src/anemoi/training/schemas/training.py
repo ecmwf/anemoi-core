@@ -368,10 +368,10 @@ class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
     loss_graph: GraphScoreGraphSchema | None = None
 
 
-class GlobalEnergyScoreLossSchema(EnsembleScoreLossSchema):
-    target_: Literal["anemoi.training.losses.GlobalEnergyScoreLoss"] = Field(..., alias="_target_")
+class EnergyScoreLossSchema(EnsembleScoreLossSchema):
+    target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
     fair: bool = True
-    joint_variables: bool = False
+    norm_over: Literal["spatial", "variables", "spatial_and_variables"] = "spatial"
 
 
 class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
@@ -470,7 +470,7 @@ class MultiScaleLossSchema(BaseModel):
         CRPSSchema
         | TimeAggregateLossWrapperSchema
         | GraphEnergyScoreLossSchema
-        | GlobalEnergyScoreLossSchema
+        | EnergyScoreLossSchema
         | GraphVariogramScoreLossSchema
         | GraphEdgeCRPSLossSchema
         | GraphEdgeEnergyScoreLossSchema
@@ -611,7 +611,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
     "anemoi.training.losses.CRPS": "crps",
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
-    "anemoi.training.losses.GlobalEnergyScoreLoss": "global_energy_score",
+    "anemoi.training.losses.EnergyScoreLoss": "energy_score",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -650,7 +650,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
             | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
-            | Annotated[GlobalEnergyScoreLossSchema, Tag("global_energy_score")]
+            | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
             | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
             | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
@@ -710,7 +710,7 @@ LossSchemas = Annotated[
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
     | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
-    | Annotated[GlobalEnergyScoreLossSchema, Tag("global_energy_score")]
+    | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
     | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
     | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
