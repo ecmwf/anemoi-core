@@ -29,6 +29,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 def reduce_to_last_dim(x: np.ndarray) -> np.ndarray:
+    """Sum all dimensions of *x* except the last one."""
     if x.ndim > 1:
         return x.sum(axis=tuple(range(x.ndim - 1)))
     return x
