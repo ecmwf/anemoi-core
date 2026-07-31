@@ -38,7 +38,7 @@ class ConcreteGraphTransformerBaseMapper(GraphTransformerBaseMapper):
 
 @dataclass
 class MapperConfig:
-    in_channels_src: int = 3
+    in_channels_src: int = 5
     in_channels_dst: int = 3
     hidden_dim: int = 256
     num_chunks: int = 2
