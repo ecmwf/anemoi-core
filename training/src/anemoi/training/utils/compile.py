@@ -140,11 +140,18 @@ def load_compile_cache(compile_cache_file: str) -> None:
     By default, these caches are stored under 'TORCHINDUCTOR_CACHE_DIR'.
     """
     # TMPDIR must be the same name across all ranks and jobs..can't use TMPDIR if it has a process pid in it
-    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("SCRATCH") + "/anemoi_compile_cache"
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
+    os.environ["TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE"] = (
+        "0"  # disable local cache for autotuning, since it contains hardcoded paths which
+        # breaks when loading the cache on a different node
+    )
     # only local rank should load the cache, since it is shared across all ranks on a node
     gpus_per_node = 4  # TODO(cathal): get this from config
     # TODO(cathal): torch distributed is not initialized at this point (called from training/train.py)
     if torch.distributed.is_initialized() and torch.distributed.get_rank() % gpus_per_node != 0:
+        return
+
+    if compile_cache_file is None:
         return
 
     path = Path(compile_cache_file)
@@ -171,6 +178,9 @@ def save_compile_cache(compile_cache_file: str) -> None:
     # if this has a process pid e.g. the default, this will lead to perm denied
 
     if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
+        return
+
+    if compile_cache_file is None:
         return
 
     path = Path(compile_cache_file)
