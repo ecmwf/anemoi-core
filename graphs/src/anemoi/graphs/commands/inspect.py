@@ -77,9 +77,9 @@ class Inspect(Command):
         kwargs = vars(args)
 
         if kwargs.get("description", False):
-            GraphDescriptor(kwargs["path"]).describe()
+            GraphDescriptor(kwargs["path"], weights_only=True).describe()
 
-        inspector = GraphInspector(**kwargs)
+        inspector = GraphInspector(weights_only=True, **kwargs)
         inspector.inspect()
 
 
