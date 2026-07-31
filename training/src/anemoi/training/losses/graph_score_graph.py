@@ -47,9 +47,19 @@ class GraphScoreGraph(nn.Module):
         """Return a CSR matrix whose rows represent destinations and columns represent sources."""
         return self.graph_provider.get_edges(device=device, dtype=dtype)
 
+    def get_edge_tensors(
+        self,
+        *,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return source indices, destination indices, and weights for the requested device and dtype."""
+        matrix = self.get_matrix(device=device, dtype=dtype)
+        return self._edge_tensors_from_matrix(matrix)
+
     @staticmethod
-    def edge_tensors(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return source indices, destination indices, and weights from CSR storage."""
+    def _edge_tensors_from_matrix(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Convert a CSR matrix into source indices, destination indices, and weights."""
         if matrix.layout != torch.sparse_csr:
             msg = f"Graph scores require a CSR matrix, got {matrix.layout}."
             raise TypeError(msg)

@@ -211,12 +211,15 @@ class BaseGraphScoreLoss(BaseLoss):
         """Prepare CSR tensors eagerly for the compiled numerical kernel."""
         if self.graph is None:
             return None, None, None, None
+        if self.uses_edge_tensors:
+            source_index, destination_index, edge_weights = self.graph.get_edge_tensors(
+                device=reference.device,
+                dtype=reference.dtype,
+            )
+            # Use src / dst idx and edge weights to allow Dynamo/Inductor fusion.
+            return None, source_index, destination_index, edge_weights
         matrix = self.graph.get_matrix(device=reference.device, dtype=reference.dtype)
-        if not self.uses_edge_tensors:
-            return matrix, None, None, None
-        source_index, destination_index, edge_weights = self.graph.edge_tensors(matrix)
-        # Use src / dst idx and edge weights to allow Dynamo/Inductor fusion.
-        return None, source_index, destination_index, edge_weights
+        return matrix, None, None, None
 
     @abstractmethod
     def _compute_local_score_tensor(

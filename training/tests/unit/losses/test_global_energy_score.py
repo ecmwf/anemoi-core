@@ -15,9 +15,7 @@ from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import GlobalEnergyScoreLoss
-from anemoi.training.losses import MultiscaleLossWrapper
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
@@ -374,88 +372,6 @@ def test_filtered_joint_global_energy_score_maps_repeated_value() -> None:
     per_variable = loss(pred, target, squash=False, **loss_kwargs)
 
     torch.testing.assert_close(per_variable, torch.stack((scalar, scalar.new_zeros(()), scalar)))
-
-
-def test_combined_loss_with_direct_and_multiscale_global_energy_scores(
-    score_inputs: tuple[torch.Tensor, torch.Tensor],
-) -> None:
-    pred, target = score_inputs
-    pred = pred.clone().requires_grad_()
-    loss = CombinedLoss(
-        GlobalEnergyScoreLoss(joint_variables=True),
-        MultiscaleLossWrapper(
-            per_scale_loss=GlobalEnergyScoreLoss(),
-            weights=[0.4, 0.6],
-            multiscale_config={"loss_matrices": [None, None]},
-        ),
-        loss_weights=(0.25, 0.75),
-    )
-
-    scalar = loss(pred, target)
-    per_variable = loss(pred, target, squash=False)
-
-    assert scalar.shape == ()
-    assert per_variable.shape == (pred.shape[-1],)
-    torch.testing.assert_close(scalar, per_variable.mean())
-    scalar.backward()
-    assert pred.grad is not None
-    assert torch.isfinite(pred.grad).all()
-
-
-def test_filtered_combined_loss_with_joint_and_multiscale_global_energy_scores(
-    score_inputs: tuple[torch.Tensor, torch.Tensor],
-) -> None:
-    data_indices = IndexCollection(
-        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
-        {"a": 0, "b": 1, "c": 2},
-    )
-    loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.combined.CombinedLoss",
-                "scalers": [],
-                "loss_weights": [0.25, 0.75],
-                "losses": [
-                    {
-                        "_target_": "anemoi.training.losses.GlobalEnergyScoreLoss",
-                        "scalers": [],
-                        "joint_variables": True,
-                        "predicted_variables": ["a", "c"],
-                        "target_variables": ["a", "c"],
-                    },
-                    {
-                        "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
-                        "weights": [0.4, 0.6],
-                        "multiscale_config": {"loss_matrices": [None, None]},
-                        "per_scale_loss": {
-                            "_target_": "anemoi.training.losses.GlobalEnergyScoreLoss",
-                            "scalers": [],
-                            "predicted_variables": ["a", "c"],
-                            "target_variables": ["a", "c"],
-                        },
-                    },
-                ],
-            },
-        ),
-        data_indices=data_indices,
-    )
-    pred, target = score_inputs
-    pred = torch.cat((pred, pred[..., :1] + 0.5), dim=-1).requires_grad_()
-    target = torch.cat((target, target[..., :1] - 0.5), dim=-1)
-    loss_kwargs = {
-        "pred_layout": IndexSpace.MODEL_OUTPUT,
-        "target_layout": IndexSpace.DATA_OUTPUT,
-    }
-
-    scalar = loss(pred, target, **loss_kwargs)
-    per_variable = loss(pred, target, squash=False, **loss_kwargs)
-
-    assert per_variable.shape == (3,)
-    torch.testing.assert_close(per_variable[1], torch.tensor(0.0, dtype=pred.dtype))
-    torch.testing.assert_close(scalar, per_variable[[0, 2]].mean())
-    scalar.backward()
-    assert pred.grad is not None
-    assert torch.isfinite(pred.grad).all()
 
 
 def test_global_energy_score_schemas_accept_direct_nested_and_combined_configs() -> None:

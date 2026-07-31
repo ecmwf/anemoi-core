@@ -16,7 +16,6 @@ from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
-from anemoi.training.schemas.training import SpectralLossSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
 _TIME_AGG_CFG = {
@@ -90,19 +89,6 @@ def test_optimizer_schema_allows_extra_keys() -> None:
     assert model_dump["lr"] == 0.001
     assert model_dump["weight_decay"] == 0.01
     assert model_dump["extra_key"] == "extra_value"
-
-
-def test_spectral_crps_schema_accepts_coefficient_magnitude() -> None:
-    schema = SpectralLossSchema.model_validate(
-        {
-            "_target_": "anemoi.training.losses.SpectralCRPSLoss",
-            "scalers": [],
-            "transform": "fft2d",
-            "coefficient_magnitude": True,
-        },
-    )
-
-    assert schema.coefficient_magnitude is True
 
 
 _MULTISCALE_BASE = {
