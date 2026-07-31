@@ -191,6 +191,27 @@ class BaseGraphScoreLoss(BaseLoss):
             )
             raise ValueError(msg)
 
+    @staticmethod
+    def _align_input_dtypes(
+        y_pred_ens: torch.Tensor,
+        y: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Ensure that predictions and targets have the correct dtype."""
+        allowed_dtypes = (torch.float32, torch.float64)
+        if y_pred_ens.dtype not in allowed_dtypes or y.dtype not in allowed_dtypes:
+            msg = (
+                "Graph score inputs must be float32 or float64, "
+                f"but received prediction dtype {y_pred_ens.dtype} "
+                f"and target dtype {y.dtype}."
+            )
+            raise TypeError(msg)
+
+        score_dtype = torch.promote_types(y_pred_ens.dtype, y.dtype)
+        return (
+            y_pred_ens.to(dtype=score_dtype),
+            y.to(dtype=score_dtype),
+        )
+
     def _graph_kernel_tensors(
         self,
         reference: torch.Tensor,
@@ -279,6 +300,10 @@ class BaseGraphScoreLoss(BaseLoss):
 
         self._validate_graph_grid_size(pred_for_score)
         target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
+        pred_for_score, target_for_score = self._align_input_dtypes(
+            pred_for_score,
+            target_for_score,
+        )
         graph_tensors = self._graph_kernel_tensors(pred_for_score)
         context = (
             torch.amp.autocast(device_type=pred_for_score.device.type, enabled=False)

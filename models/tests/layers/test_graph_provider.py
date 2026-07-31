@@ -178,6 +178,23 @@ def test_projection_graph_provider_row_normalizes_csr_matrix() -> None:
     assert torch.allclose(edges.to_dense(), expected, atol=1e-6)
 
 
+def test_projection_graph_provider_retains_requested_dtype() -> None:
+    graph = HeteroData()
+    graph["src"].num_nodes = 3
+    graph["dst"].num_nodes = 2
+    graph[("src", "to", "dst")].edge_index = torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
+
+    provider = ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("src", "to", "dst"),
+    )
+
+    float64_matrix = provider.get_edges(dtype=torch.float64)
+
+    assert float64_matrix.dtype == torch.float64
+    assert provider.get_edges(dtype=torch.float64) is float64_matrix
+
+
 def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
     file_path = tmp_path / "projection.npz"
     expected = torch.tensor([[0.25, 0.75, 0.0], [0.4, 0.0, 0.6]], dtype=torch.float32)

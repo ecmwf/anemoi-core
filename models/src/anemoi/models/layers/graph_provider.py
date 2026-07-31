@@ -629,6 +629,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         """Return the sparse projection matrix.
 
@@ -646,15 +647,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Unused for sparse providers
         device : torch.device, optional
             Target device for matrix
+        dtype : torch.dtype, optional
+            Target dtype for matrix
 
         Returns
         -------
         Tensor
             Sparse projection matrix
         """
-        if device is not None:
-            # sparse tensors can't be registered as buffers with ddp, so move on demand
-            self.projection_matrix = self.projection_matrix.to(device)
+        if device is not None or dtype is not None:
+            # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
+            self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
     @classmethod

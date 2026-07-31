@@ -45,10 +45,7 @@ class GraphScoreGraph(nn.Module):
 
     def get_matrix(self, *, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
         """Return the graph as a destination-by-source CSR matrix."""
-        matrix = self.graph_provider.get_edges(device=device)
-        if matrix.dtype != dtype:
-            matrix = matrix.to(dtype=dtype)
-        return matrix
+        return self.graph_provider.get_edges(device=device, dtype=dtype)
 
     @staticmethod
     def edge_tensors(matrix: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:

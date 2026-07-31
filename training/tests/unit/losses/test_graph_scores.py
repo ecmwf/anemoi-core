@@ -335,6 +335,87 @@ def test_graph_scores_have_finite_gradients(
     assert torch.isfinite(target.grad).all()
 
 
+@pytest.mark.parametrize(
+    "loss_cls",
+    [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],
+)
+@pytest.mark.parametrize("ignore_nans", [False, True])
+def test_graph_scores_align_mixed_input_dtypes(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    loss_cls: type[BaseLoss],
+    ignore_nans: bool,
+) -> None:
+    prediction_values, target_values = score_inputs
+    prediction_values = prediction_values.to(dtype=torch.float32)
+    target_values = target_values.to(dtype=torch.float64)
+    if ignore_nans:
+        prediction_values[0, 0, 0, 0, 0] = torch.nan
+        target_values[0, 0, 0, 1, 1] = torch.inf
+
+    mixed_prediction = prediction_values.clone().requires_grad_()
+    mixed_target = target_values.clone().requires_grad_()
+    mixed_loss = loss_cls(
+        graph_data=graph_data,
+        loss_graph=loss_graph,
+        ignore_nans=ignore_nans,
+    )
+    mixed_output = mixed_loss(mixed_prediction, mixed_target, squash=False)
+    mixed_output.sum().backward()
+
+    reference_prediction = prediction_values.double().requires_grad_()
+    reference_target = target_values.clone().requires_grad_()
+    reference_loss = loss_cls(
+        graph_data=graph_data,
+        loss_graph=loss_graph,
+        ignore_nans=ignore_nans,
+    )
+    reference_output = reference_loss(reference_prediction, reference_target, squash=False)
+    reference_output.sum().backward()
+
+    assert mixed_output.dtype == torch.float64
+    torch.testing.assert_close(mixed_output, reference_output)
+    assert mixed_prediction.grad is not None
+    assert reference_prediction.grad is not None
+    torch.testing.assert_close(
+        mixed_prediction.grad,
+        reference_prediction.grad.to(dtype=mixed_prediction.dtype),
+    )
+    assert mixed_target.grad is not None
+    assert reference_target.grad is not None
+    torch.testing.assert_close(mixed_target.grad, reference_target.grad)
+    assert torch.isfinite(mixed_output).all()
+    assert torch.isfinite(mixed_prediction.grad).all()
+    assert torch.isfinite(mixed_target.grad).all()
+
+
+@pytest.mark.parametrize(
+    ("prediction_dtype", "target_dtype"),
+    [
+        (torch.float16, torch.float16),
+        (torch.bfloat16, torch.bfloat16),
+        (torch.float16, torch.float32),
+        (torch.float32, torch.bfloat16),
+    ],
+)
+def test_graph_scores_reject_unsupported_input_dtypes(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    prediction_dtype: torch.dtype,
+    target_dtype: torch.dtype,
+) -> None:
+    prediction, target = score_inputs
+    loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
+
+    with pytest.raises(TypeError, match="Graph score inputs must be float32 or float64") as exc_info:
+        loss(prediction.to(dtype=prediction_dtype), target.to(dtype=target_dtype))
+
+    assert f"prediction dtype {prediction_dtype}" in str(exc_info.value)
+    assert f"target dtype {target_dtype}" in str(exc_info.value)
+
+
 @pytest.mark.gpu
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required for the compiled CSR check")
 @pytest.mark.parametrize(
