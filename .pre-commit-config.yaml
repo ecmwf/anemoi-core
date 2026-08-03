@@ -32,7 +32,7 @@ repos:
   - id: black
     args: [--line-length=120]
 - repo: https://github.com/pycqa/isort
-  rev: 9.0.0a3
+  rev: 9.0.0b1
   hooks:
   - id: isort
     args:
@@ -41,7 +41,7 @@ repos:
     - --profile black
     - --project anemoi
 - repo: https://github.com/astral-sh/ruff-pre-commit
-  rev: v0.15.15
+  rev: v0.16.1
   hooks:
   - id: ruff
     args:
@@ -71,12 +71,12 @@ repos:
     - --license
     - tools/pre-commit-copyright-notice.txt
 - repo: https://github.com/tox-dev/pyproject-fmt
-  rev: "v2.23.0"
+  rev: "v2.26.0"
   hooks:
   - id: pyproject-fmt
     args: ["--max-supported-python", "3.12"]
 - repo: https://github.com/jshwi/docsig # Check docstrings against function sig
-  rev: v0.86.0
+  rev: v0.93.0
   hooks:
   - id: docsig
     args:
