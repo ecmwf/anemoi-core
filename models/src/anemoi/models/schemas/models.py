@@ -17,6 +17,8 @@ from typing import Literal
 from typing import Optional
 from typing import Union
 
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -25,12 +27,14 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.models.transport.settings import EdmSettings
 from anemoi.models.transport.settings import NoiseConditioningSettings
 from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
+from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -247,6 +251,42 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class EncodersSchema(BaseModel):
+    """Encoder schema"""
+
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the encoder is applicable."
+    mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
+class DecodersSchema(BaseModel):
+    """Decoder schema"""
+
+    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the decoder is applicable."
+    input_target_features: list[
+        Literal["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
+    ] = Field(default_factory=lambda: ["encoded_data"])
+    "Whether to use the encoded latents from the encoder."
+    mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
@@ -258,12 +298,14 @@ class BaseModelSchema(PydanticBaseModel):
     "Model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
-    bounding: list[Bounding]
+    bounding: DatasetDict[list[Bounding]]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: OutputMaskSchemas  # !TODO CHECK!
+    output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,
@@ -274,36 +316,29 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
+    residual: DatasetDict[ResidualConnectionSchema]
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+
+    @model_validator(mode="before")
+    @classmethod
+    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
+        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
+        for field in ("encoders", "decoders"):
+            if field in data:
+                if isinstance(data[field], dict):
+                    data[field] = {str(k): v for k, v in data[field].items()}
+                elif isinstance(data[field], DictConfig):
+                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
+        return data
 
 
 class NoOpNoiseInjectorSchema(BaseModel):
@@ -373,12 +408,22 @@ class TransportModelSchema(BaseModelSchema):
     @model_validator(mode="after")
     def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
-            msg = (
-                "Transport models do not support bounding layers. "
-                f"Found {len(self.bounding)} bounding configuration(s). "
-                "Please remove all bounding configurations for transport models."
-            )
-            raise ValueError(msg)
+            if "datasets" in self.bounding:
+                for dataset_name, bounding_list in self.bounding["datasets"].items():
+                    if (bounding_list is not None) and len(bounding_list) > 0:
+                        msg = (
+                            "Transport models do not support bounding layers. "
+                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
+                            f"Please remove all bounding configurations for transport models."
+                        )
+                        raise ValueError(msg)
+            elif len(self.bounding) > 0:
+                msg = (
+                    "Transport models do not support bounding layers. "
+                    f"Found {len(self.bounding)} bounding configuration(s). "
+                    f"Please remove all bounding configurations for transport models."
+                )
+                raise ValueError(msg)
         return self
 
 

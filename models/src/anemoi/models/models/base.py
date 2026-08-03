@@ -34,9 +34,12 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import broadcast_config_keys
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+VALID_TARGET_FEATURES = ["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
 
 
 def split_graph_config(
@@ -147,6 +150,8 @@ class BaseGraphModel(nn.Module):
         # The model should not know about the dataset names.
         self.use_encoder_data_output = defaultdict(bool, {"data": True, "grid": True})
 
+        self._build_dataset_routing(model_config.model.encoders, model_config.model.decoders)
+
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
@@ -155,20 +160,58 @@ class BaseGraphModel(nn.Module):
         self._build_networks(model_config, self._graph_data, dynamic_graph_config.edges)
 
         # build residual connection
-        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
+        self._build_residual(
+            get_multiple_datasets_config(model_config.model.residual),
+            sparse_projector_config=model_config.model.get("sparse_projector", {}),
+        )
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        self.boundings = build_boundings(model_config.model.bounding, dataset_names=self.dataset_names)
+        # Multi-dataset: create ModuleDict with ModuleList per dataset
+        self.boundings = build_boundings(
+            get_multiple_datasets_config(model_config.model.get("bounding", [])),
+            data_indices=self.data_indices,
+            statistics=self.statistics,
+        )
 
-    def _hidden_coordinates(self) -> torch.Tensor:
-        return self._graph_data[self._graph_name_hidden].x
+    def _build_dataset_routing(self, encoders_config: DotDict, decoders_config: DotDict) -> None:
+        """Builds the dataset routing for encoders and decoders."""
+        self.dataset2encoder: dict[str, str] = {}
+        self.encoder2datasets: dict[str, list[str]] = {}
+        for encoder_name, encoder_config in encoders_config.items():
+            datasets_to_encode = encoder_config["datasets"]
+            self.encoder2datasets[encoder_name] = datasets_to_encode
+            for d in datasets_to_encode:
+                self.dataset2encoder[d] = encoder_name
+
+        self.dataset2decoder: dict[str, str] = {}
+        self.decoder2datasets: dict[str, list[str]] = {}
+        self.decoders_target_input: dict[str, list[str]] = {}
+        for decoder_name, decoder_config in decoders_config.items():
+            datasets_to_decode = decoder_config["datasets"]
+            self.decoder2datasets[decoder_name] = datasets_to_decode
+            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
+            for d in datasets_to_decode:
+                self.dataset2decoder[d] = decoder_name
+
+            decoder_target_features = decoder_config.input_target_features
+            invalid = set(decoder_target_features) - set(VALID_TARGET_FEATURES)
+            assert not invalid, (
+                f"Decoder '{decoder_name}' has invalid input_target_features: {invalid}. "
+                f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
+            )
+            self.decoders_target_input[decoder_name] = decoder_config.input_target_features
+
+        self.input_datasets = list(self.dataset2encoder.keys())
+        self.target_datasets = list(self.dataset2decoder.keys())
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        """Compute per-dataset input/output channel counts, dimensions and internal data indices."""
         # Multi-dataset: create dictionaries for each property
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_forcings = {}
         self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
@@ -186,6 +229,7 @@ class BaseGraphModel(nn.Module):
             ]
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_input_channels_decoding_forcings[dataset_name] = len(
                 self._decoding_forcing_input_idx[dataset_name]
@@ -236,24 +280,50 @@ class BaseGraphModel(nn.Module):
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        """Calculate the encoder input dimension for a given dataset."""
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
+
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
-        if self.use_encoder_data_output[dataset_name]:
-            return self._calculate_input_dim(dataset_name)
-        else:
-            return (
-                self.num_input_channels_decoding_forcings[dataset_name]
-                + COORDS_DIM
-                + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+        """Calculate the decoder target input dimension for a given dataset.
+
+        Decoder target features are per-node vectors attached to the destination nodes of the
+        hidden-to-data decoder. The returned width is the sum
+        of the feature blocks listed in ``decoders_target_input`` for this dataset's decoder.
+        """
+        num_features = 0
+        if dataset_name not in self.dataset2decoder:
+            LOGGER.warning(
+                f"Dataset '{dataset_name}' does not have a decoder associated with it. "
+                f"Target dimension will be calculated as 0.",
             )
+            return num_features
+
+        for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
+            if target_feature == "coordinates":
+                num_features += 4
+            elif target_feature == "forcings":
+                num_features += self.n_step_output * self.num_input_channels_forcings[dataset_name]
+            elif target_feature == "prognostics":
+                num_features += self.n_step_input * self.num_input_channels_prognostic[dataset_name]
+            elif target_feature == "trainable_parameters":
+                num_features += self.node_attributes.num_trainable_parameters[dataset_name]
+            elif target_feature == "encoded_data":
+                # TODO: Get this from self.encoder[self.dataset2decoder[dataset_name]].???
+                num_features += self._calculate_input_dim(dataset_name)
+            else:
+                raise ValueError(f"The key {target_feature} is not valid.")
+
+        return num_features
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
-        if self.is_dataset_static[dataset_name]:
-            return self.n_step_output * self.num_output_channels[dataset_name]
-
-        # time is already part of the grid dimension
-        return self.num_output_channels[dataset_name]
+        """Calculate the decoder output dimension for a given dataset."""
+        return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
@@ -366,20 +436,16 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
+    def _build_residual(self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict) -> None:
+        """Instantiate the per-dataset residual connection modules."""
         self.residual = torch.nn.ModuleDict()
-        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
-        for dataset_name in self.dataset_names:
-            if not self.is_dataset_static[dataset_name]:
-                LOGGER.info(f"Skipping residual connection for static dataset: {dataset_name}")
-                continue
-
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+        for dataset_name, residual_config in residual_configs.items():
+            assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                data_node_name=data_node_name,
+                data_node_name=dataset_name,
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,

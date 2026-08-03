@@ -12,11 +12,14 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
+# from typing import Optional
 
 import torch
 from hydra.utils import instantiate
 from torch import nn
 
+from anemoi.models.data_indices.collection import IndexCollection
+# from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
 
 
@@ -239,24 +242,87 @@ class LeakyFractionBounding(FractionBounding):
         return data
 
 
-def build_boundings(boundings_config: list[Any] | None, dataset_names: list[str]) -> nn.ModuleDict:
-    """Build the model-output bounding modules from configuration.
+def _build_dataset_boundings(
+    bounding_cfgs: Any,
+    data_indices: IndexCollection,
+    statistics: dict | None,
+) -> nn.ModuleList:
+    """Build the list of model-output bounding modules from configuration.
+
+    This is a thin factory over Hydra's ``instantiate`` that reads the iterable
+    ``model_config.model.bounding`` and instantiates each entry while injecting
+    the common keyword arguments required by bounding modules:
+    ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
+    is returned as an ``nn.ModuleList`` preserving the order of the config.
 
     Parameters
     ----------
-    boundings_config : Any
-        Object with a ``model`` attribute containing an iterable ``bounding``.
+    model_config : Any
+        Object with a ``model`` attribute containing an iterable ``bounding``
+        (e.g. a list of Hydra configs). If absent or empty, an empty
+        ``nn.ModuleList`` is returned.
+    data_indices : IndexCollection
+        Object providing the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict[str, dict] | None
+        Optional dataset/model statistics passed to each bounding module. Use
+        ``None`` if not required by the configured classes.
 
     Returns
     -------
     nn.ModuleDict
         Mapping of dataset name to nn.Sequential of bounding modules.
     """
-    if boundings_config is None:
-        return nn.ModuleDict({dataset_name: nn.Identity() for dataset_name in dataset_names})
+    return nn.ModuleList(
+        [
+            instantiate(
+                cfg,
+                name_to_index=data_indices.model.output.name_to_index,
+                statistics=statistics,
+                name_to_index_stats=data_indices.data.input.name_to_index,
+            )
+            for cfg in bounding_cfgs
+        ]
+    )
 
-    boundings = nn.ModuleDict({})
-    for dataset_name in dataset_names:
-        boundings[dataset_name] = nn.Sequential(*[instantiate(cfg) for cfg in boundings_config])
 
-    return boundings
+def build_boundings(
+    boundings_config: dict[str, list],
+    data_indices: dict[str, IndexCollection],
+    statistics: dict[str, dict] | None,
+) -> nn.ModuleDict:
+    """Build the model-output bounding modules from configuration.
+
+    This is a thin factory that creates a ``nn.ModuleDict`` of bounding
+    modules by invoking ``_build_dataset_boundings`` for each dataset
+    specified in ``data_indices``.
+
+    Parameters
+    ----------
+    boundings_config : dict[str, list]
+        Dictionary containing iterables ``bounding`` (e.g. a list of Hydra configs).
+        If absent or empty, an empty ``nn.ModuleDict`` is returned.
+    data_indices : dict[str, IndexCollection]
+        Dictionary mapping dataset names to data indices objects. Each
+        data indices object must provide the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict[str, dict] | None
+        Dictionary mapping dataset names to optional dataset/model statistics
+        passed to each bounding module. Use ``None`` if not required by the
+        configured classes.
+    """
+    bounding_modules = nn.ModuleDict()
+    for dataset_name in data_indices.keys():
+        bounding_modules[dataset_name] = _build_dataset_boundings(
+            boundings_config.get(dataset_name, []),
+            data_indices=data_indices[dataset_name],
+            statistics=statistics[dataset_name],
+        )
+
+    return bounding_modules

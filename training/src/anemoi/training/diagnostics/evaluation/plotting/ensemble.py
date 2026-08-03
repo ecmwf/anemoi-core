@@ -73,6 +73,8 @@ def plot_ensemble_sample(
         Colormap for the plot
     error_cmap : Colormap, optional
         Colormap for the error plot
+    data_crs : object, optional
+        Cartopy CRS describing the coordinate system of lon/lat, by default None
 
     Returns
     -------
@@ -159,7 +161,6 @@ def plot_ensemble_sample(
 
 def plot_predicted_ensemble(
     parameters: dict[int, str],
-    n_plots_per_sample: int,
     latlons: np.ndarray,
     clevels: float,
     y_true: np.ndarray,
@@ -175,9 +176,6 @@ def plot_predicted_ensemble(
     ----------
     parameters : Dict[int, str]
         Dictionary of target variables
-    n_plots_per_sample : int
-        Number of fixed panels per variable row (target, pred mean, mean error, ens sd = 4).
-        Ensemble member panels are added on top of this count.
     latlons : np.ndarray
         Latitudes and longitudes
     clevels : float
@@ -202,7 +200,9 @@ def plot_predicted_ensemble(
     """
     nens = y_pred.shape[0] if len(y_pred.shape) == 3 else 1
 
-    n_plots_x, n_plots_y = len(parameters), nens + n_plots_per_sample
+    # 4 fixed panels per variable row (target, pred mean, ens mean err, ens sd),
+    # matching the axes plot_ensemble_sample writes to, plus one panel per member
+    n_plots_x, n_plots_y = len(parameters), nens + 4
     LOGGER.debug("n_plots_x = %d, n_plots_y = %d", n_plots_x, n_plots_y)
 
     plot_kind = "equirectangular" if datashader else projection_kind
