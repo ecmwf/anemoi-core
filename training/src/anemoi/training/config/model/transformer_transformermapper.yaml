@@ -45,7 +45,7 @@ processor:
 encoders:
   0:
     datasets: [ "data" ]
-    dataset_fusing_strategy:  "not-supported" # Options: "not-supported" (only option now)
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.TransformerForwardMapper
       cpu_offload: ${model.cpu_offload}

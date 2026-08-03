@@ -108,7 +108,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
                 edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(dataset_name, "to", self._graph_name_hidden)],
-                src_size=self.node_attributes.num_nodes[dataset_name],
+                src_size=self.node_attributes.num_nodes.get(dataset_name, None),
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
@@ -175,7 +175,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(self._graph_name_hidden, "to", dataset_name)],
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
+                dst_size=self.node_attributes.num_nodes.get(dataset_name, None),
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
 

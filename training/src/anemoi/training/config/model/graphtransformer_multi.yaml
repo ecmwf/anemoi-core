@@ -43,7 +43,7 @@ processor:
 encoders:
   global: # user-defined key. It will appear in the state-dict
     datasets: [ "data1", "data2", "data3" ]
-    dataset_fusing_strategy:  "not-supported" # Options: "not-supported" (only option now)
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
@@ -62,7 +62,7 @@ encoders:
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
     datasets: [ "cerra" ]
-    dataset_fusing_strategy:  "not-supported" # Options: "not-supported" (only option now)
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

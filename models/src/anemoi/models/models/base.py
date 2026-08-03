@@ -42,6 +42,10 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
+# Encoder dataset-fusing strategies currently implemented. Extend as new strategies
+# (e.g. "concat_channels", "concat_grids", "sequential") are added.
+SUPPORTED_FUSING_STRATEGIES = {"not_supported"}
+
 
 def split_graph_config(
     graph_config: DotDict,
@@ -224,19 +228,22 @@ class BaseGraphModel(nn.Module):
 
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""
-        not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
-        assert all(
-            d in self.input_datasets for d in self.dataset2encoder.keys()
-        ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+        not_input_datasets = set(self.dataset2encoder) - set(self.input_dim)
+        assert (
+            not not_input_datasets
+        ), f"Datasets {not_input_datasets} are referenced by encoders but missing from data_indices provided to the model. "
 
-        not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
-        assert all(
-            d in self.target_datasets for d in self.dataset2decoder.keys()
-        ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+        not_target_datasets = set(self.dataset2decoder) - set(self.output_dim)
+        assert (
+            not not_target_datasets
+        ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-            if fusing_strategy not in ("not_supported"):
-                raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
+            if fusing_strategy not in SUPPORTED_FUSING_STRATEGIES:
+                raise ValueError(
+                    f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
+                    + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
+                )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -312,15 +319,6 @@ class BaseGraphModel(nn.Module):
             assert (
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # # Default behaviour is to pass the same input as to the encoder.
