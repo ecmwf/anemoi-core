@@ -18,6 +18,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -34,6 +35,7 @@ class BaseTendencyScaler(BaseScaler):
         statistics_tendencies: Mapping | None,
         timestep: str | None = None,
         norm: str | None = None,
+        task: object | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -47,9 +49,13 @@ class BaseTendencyScaler(BaseScaler):
         statistics_tendencies : dict
             Data statistics dictionary for tendencies
         timestep : str, optional
-            Tendency statistics lead time. Defaults to the first available lead time.
+            Tendency statistics lead time. Defaults to ``task.tendency_delta``,
+            then ``task.output_timestep``, then the first available lead time.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+        task : object, optional
+            Training task. Used to derive a default timestep from ``tendency_delta``
+            or ``output_timestep`` when ``timestep`` is not provided.
         """
         super().__init__(norm=norm)
         del kwargs
@@ -64,10 +70,15 @@ class BaseTendencyScaler(BaseScaler):
 
             lead_times = statistics_tendencies.get("lead_times")
             assert lead_times is not None, "lead_times must be a non-empty list"
-            lead_times = list(lead_times)
-            assert lead_times, "lead_times must be a non-empty list"
+            assert list(lead_times), "lead_times must be a non-empty list"
             if timestep is None:
-                timestep = lead_times[0]
+                tendency_delta = getattr(task, "tendency_delta", None)
+                if tendency_delta is not None:
+                    timestep = frequency_to_string(tendency_delta)
+            if timestep is None:
+                timestep = getattr(task, "output_timestep", None)
+            if timestep is None:
+                timestep = list(lead_times)[0]
                 LOGGER.warning(
                     "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
                     timestep,
