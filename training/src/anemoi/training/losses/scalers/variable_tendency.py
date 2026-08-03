@@ -76,8 +76,6 @@ class BaseTendencyScaler(BaseScaler):
                 if tendency_delta is not None:
                     timestep = frequency_to_string(tendency_delta)
             if timestep is None:
-                timestep = getattr(task, "output_timestep", None)
-            if timestep is None:
                 timestep = next(iter(lead_times))
                 LOGGER.warning(
                     "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",

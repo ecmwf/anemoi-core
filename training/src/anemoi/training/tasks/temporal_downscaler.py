@@ -31,7 +31,6 @@ class TemporalDownscaler(BaseSingleStepTask):
         **_kwargs,
     ) -> None:
         self.input_timestep = input_timestep
-        self.output_timestep = output_timestep
         input_timedelta = as_timedelta(input_timestep)
         output_timedelta = as_timedelta(output_timestep)
 

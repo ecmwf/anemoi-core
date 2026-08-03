@@ -423,29 +423,7 @@ def test_tendency_scaler_defaults_to_task_tendency_delta() -> None:
 
     from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
 
-    task = SimpleNamespace(tendency_delta=datetime.timedelta(hours=2), output_timestep="2h")
-    statistics_tendencies = {
-        "lead_times": ["2h", "4h"],
-        "2h": {"stdev": [1.0, 2.0]},
-        "4h": {"stdev": [1.0, 2.0]},
-    }
-    scaler = StdevTendencyScaler(
-        data_indices=MagicMock(),
-        statistics={"stdev": [1.0, 2.0]},
-        statistics_tendencies=statistics_tendencies,
-        task=task,
-    )
-    assert scaler.timestep == "2h"
-
-
-def test_tendency_scaler_falls_back_to_output_timestep() -> None:
-    """BaseTendencyScaler falls back to task.output_timestep when tendency_delta is absent."""
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
-
-    task = SimpleNamespace(output_timestep="2h")  # no tendency_delta
+    task = SimpleNamespace(tendency_delta=datetime.timedelta(hours=2))
     statistics_tendencies = {
         "lead_times": ["2h", "4h"],
         "2h": {"stdev": [1.0, 2.0]},

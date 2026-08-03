@@ -528,6 +528,25 @@ unintended bias in the training process.
    var_tendency:
      _target_: anemoi.training.losses.scalers.VarTendencyScaler
 
+The ``timestep`` used to look up tendency statistics is resolved
+automatically in the following priority order:
+
+1. ``task.tendency_delta`` — tasks such as
+   :class:`~anemoi.training.tasks.TemporalDownscaler` expose this to
+   indicate the per-step increment (e.g. ``1h``).
+2. ``lead_times[0]`` — the first output lead time, with a warning.
+   This preserves the previous behaviour for tasks such as
+   :class:`~anemoi.training.tasks.Forecaster` that do not define
+   ``tendency_delta``.
+
+To override the automatic resolution, set ``timestep`` explicitly:
+
+.. code:: yaml
+
+   stdev_tendency:
+      _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+      timestep: "6h"
+
 Variable Level Scalers
 ======================
 
