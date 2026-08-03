@@ -181,6 +181,19 @@ class Forecaster(BaseTask):
         shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
+    def fill_metadata(self, md_dict: dict) -> None:
+        """Fill the metadata dictionary with task-specific information."""
+        super().fill_metadata(md_dict)
+        fc_timesteps = {
+            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
+            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
+            "rollout_shift": frequency_to_string(self._rollout_shift),
+            "advance_map": self._advance_map,
+        }
+        dataset_names = md_dict["metadata_inference"]["dataset_names"]
+        for dataset_name in dataset_names:
+            md_dict["metadata_inference"][dataset_name]["timesteps"].update(fc_timesteps)
+
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
