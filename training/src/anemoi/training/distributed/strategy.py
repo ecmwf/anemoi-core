@@ -93,6 +93,7 @@ class BaseDDPStrategy(DDPStrategy):
         num_gpus_per_model: int,
         read_group_size: int,
         use_local_synchronization: bool = True,
+        broadcast_buffers: bool = False,
         **kwargs: dict,
     ) -> None:
         """Initialise the distributed strategy.
@@ -105,10 +106,12 @@ class BaseDDPStrategy(DDPStrategy):
             Number of GPUs per reader group.
         use_local_synchronization : bool, optional
             Use synchronization local to the group when creating process groups.
+        broadcast_buffers : bool, optional
+            Whether to broadcast module buffers at the start of each iteration. Defaults to False.
         **kwargs : dict
             Additional keyword arguments.
         """
-        super().__init__(**kwargs, broadcast_buffers=False)
+        super().__init__(**kwargs, broadcast_buffers=broadcast_buffers)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.use_local_synchronization = use_local_synchronization

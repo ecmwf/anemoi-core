@@ -111,6 +111,7 @@ trainable_parameters:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
+recompile_limit: 32 # need to increase to try get _forward_edge_sharding_attention to compile w dynamic false
 
 attributes:
   edges:
