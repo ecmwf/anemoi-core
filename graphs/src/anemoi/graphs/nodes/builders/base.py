@@ -10,17 +10,15 @@
 
 import logging
 import time
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import get_grid_reference_distance
-from anemoi.utils.config import DotDict
+from anemoi.graphs.utils import get_distributed_device, get_grid_reference_distance
 
 LOGGER = logging.getLogger(__name__)
 

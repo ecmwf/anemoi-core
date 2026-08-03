@@ -9,17 +9,14 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
-from scipy.spatial import ConvexHull
-from scipy.spatial import SphericalVoronoi
-from scipy.spatial import Voronoi
+from anemoi.datasets import open_dataset
+from scipy.spatial import ConvexHull, SphericalVoronoi, Voronoi
 from torch_geometric.data.storage import NodeStorage
 
-from anemoi.datasets import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute

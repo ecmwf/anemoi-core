@@ -12,8 +12,7 @@ from collections import defaultdict
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
 

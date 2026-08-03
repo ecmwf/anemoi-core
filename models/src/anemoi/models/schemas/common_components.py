@@ -8,15 +8,10 @@
 #
 
 from typing import Literal
-from typing import Union
-
-from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeInt
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field, NonNegativeInt, PositiveFloat, PositiveInt
 
 
 class TransformerModelComponent(PydanticBaseModel):
@@ -43,9 +38,9 @@ class TransformerModelComponent(PydanticBaseModel):
     "Implementation of feed-forward blocks (`mlp`, `glu`, `swiglu`, `geglu`, `reglu`). Default to `mlp`."
     num_heads: NonNegativeInt = Field(example=16)
     "Number of attention heads. Default to 16."
-    attn_channels: Union[PositiveInt, None] = Field(default=None)
+    attn_channels: PositiveInt | None = Field(default=None)
     "Internal attention width used for q/k/v projections. Default to None, which keeps the embedding dimension."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
@@ -68,7 +63,7 @@ class GNNModelComponent(BaseModel):
     "Ratio of MLP hidden dimension to channel width. Use 1.0 for no expansion, ~2.67 for gated variants to match transformer parameter counts."
     mlp_implementation: Literal["mlp", "glu", "swiglu", "geglu", "reglu"] = Field(default="mlp", example="mlp")
     "Implementation of feed-forward blocks (`mlp`, `glu`, `swiglu`, `geglu`, `reglu`). Default to `mlp`."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
@@ -81,7 +76,7 @@ class PointWiseModelComponent(BaseModel):
     "Offload to CPU. Default to False."
     gradient_checkpointing: bool = Field(default=True)
     "Enable gradient checkpointing to reduce memory usage. Default to True."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
@@ -92,5 +87,5 @@ class PointWiseMapperComponent(BaseModel):
     "Offload to CPU. Default to False."
     gradient_checkpointing: bool = Field(default=True)
     "Enable gradient checkpointing to reduce memory usage. Default to True."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder and decoder blocks"

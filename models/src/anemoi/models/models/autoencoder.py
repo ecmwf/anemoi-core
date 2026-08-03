@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
@@ -17,10 +16,7 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, DatasetShardSizes, ShardSizes, get_shard_sizes
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
@@ -119,7 +115,7 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
         self,
         x: dict[str, Tensor],
         *,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:

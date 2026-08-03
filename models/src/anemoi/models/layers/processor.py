@@ -10,27 +10,24 @@
 
 import logging
 from abc import ABC
-from typing import Optional
 
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import offload_wrapper
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted, shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.block import GraphConvProcessorBlock
-from anemoi.models.layers.block import GraphTransformerProcessorBlock
-from anemoi.models.layers.block import PointWiseMLPProcessorBlock
-from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.block import (
+    GraphConvProcessorBlock,
+    GraphTransformerProcessorBlock,
+    PointWiseMLPProcessorBlock,
+    TransformerProcessorBlock,
+)
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.layers.utils import maybe_checkpoint
-from anemoi.utils.config import DotDict
+from anemoi.models.layers.utils import compute_mlp_hidden_dim, load_layer_kernels, maybe_checkpoint
 
 LOGGER = logging.getLogger(__name__)
 
@@ -187,7 +184,7 @@ class PointWiseMLPProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_info: GraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -212,14 +209,14 @@ class TransformerProcessor(BaseProcessor):
         num_chunks: int,
         num_heads: int,
         mlp_hidden_ratio: float,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm=False,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         **kwargs,
@@ -300,9 +297,9 @@ class TransformerProcessor(BaseProcessor):
         x: Tensor,
         batch_size: int,
         shard_info: GraphShardInfo,
-        edge_attr: Optional[Tensor] = None,
-        edge_index: Optional[Adj] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        edge_attr: Tensor | None = None,
+        edge_index: Adj | None = None,
+        model_comm_group: ProcessGroup | None = None,
         *args,
         **kwargs,
     ) -> Tensor:
@@ -401,7 +398,7 @@ class GNNProcessor(BaseProcessor):
         shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
@@ -467,7 +464,7 @@ class GraphTransformerProcessor(BaseProcessor):
         num_heads: int,
         mlp_hidden_ratio: float,
         edge_dim: int,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qk_norm: bool = False,
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
@@ -556,7 +553,7 @@ class GraphTransformerProcessor(BaseProcessor):
         shard_info: GraphShardInfo,
         edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,

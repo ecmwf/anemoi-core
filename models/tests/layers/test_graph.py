@@ -15,8 +15,7 @@ import torch
 from torch import nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.layers.graph import TrainableTensor
+from anemoi.models.layers.graph import NamedNodesAttributes, TrainableTensor
 
 
 class TestTrainableTensor:

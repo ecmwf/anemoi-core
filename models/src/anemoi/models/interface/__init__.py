@@ -16,8 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing import Processors, StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 
@@ -211,7 +210,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         gather_out: bool = True,
         **kwargs,
     ) -> dict[str, torch.Tensor]:

@@ -7,20 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Optional
+from dataclasses import asdict, dataclass, field
 
 import pytest
 import torch
+from anemoi.utils.config import DotDict
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.layers.mapper import TransformerBackwardMapper
-from anemoi.models.layers.mapper import TransformerBaseMapper
-from anemoi.models.layers.mapper import TransformerForwardMapper
+from anemoi.models.layers.mapper import TransformerBackwardMapper, TransformerBaseMapper, TransformerForwardMapper
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 
 def _conditional_layer_kernel_config(condition_shape: int):
@@ -43,14 +38,14 @@ class MapperConfig:
     num_chunks: int = 2
     num_heads: int = 8
     mlp_hidden_ratio: int = 4
-    attn_channels: Optional[int] = None
+    attn_channels: int | None = None
     qk_norm: bool = True
     dropout_p: float = 0.0
     attention_implementation: str = "scaled_dot_product_attention"
-    softcap: Optional[float] = None
+    softcap: float | None = None
     use_alibi_slopes: bool = False
     cpu_offload: bool = False
-    window_size: Optional[int] = None
+    window_size: int | None = None
     use_rotary_embeddings: bool = False
     layer_kernels: field(default_factory=DotDict) = None
 

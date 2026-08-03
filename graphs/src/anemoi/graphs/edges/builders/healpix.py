@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from typing import Optional
 
 import torch
 from torch_geometric.data.storage import NodeStorage
@@ -25,7 +24,7 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
         self,
         source_name: str,
         target_name: str,
-        scale_resolutions: Optional[int | list[int]] = None,
+        scale_resolutions: int | list[int] | None = None,
         **kwargs,
     ):
         super().__init__(source_name, target_name)
@@ -47,7 +46,7 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
 
         scale_resolutions = self.scale_resolutions or list(range(1, source_nodes["_resolution"] + 1))
         edges_index, prev_res = None, None
-        for res in list(sorted(scale_resolutions)):
+        for res in sorted(scale_resolutions):
             new_edge_index = get_healpix_edgeindex(res)
             LOGGER.debug(f"Resolution: {res}, Edge index shape: {new_edge_index.shape}")
             if edges_index is None:

@@ -13,9 +13,8 @@ import warnings
 from typing import Literal
 
 import torch
-from torch import nn
-
 from anemoi.utils.config import DotDict
+from torch import nn
 
 LOGGER = logging.getLogger(__name__)
 

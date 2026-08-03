@@ -95,7 +95,7 @@ def legpoly(
 
     # Fill the remaining values on the upper triangle and multiply b
     for n in range(2, nmax + 1):
-        for m in range(0, n - 1):
+        for m in range(n - 1):
             vdm[m, n, :] = (
                 x * np.sqrt((2 * n - 1) / (n - m) * (2 * n + 1) / (n + m)) * vdm[m, n - 1, :]
                 - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]

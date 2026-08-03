@@ -12,12 +12,14 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
-from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
-from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
-from anemoi.graphs.nodes.attributes import PlanarAreaWeights
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
-from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes import (
+    CosineLatWeightedAttribute,
+    IsolatitudeAreaWeights,
+    MaskedPlanarAreaWeights,
+    PlanarAreaWeights,
+    SphericalAreaWeights,
+    UniformWeights,
+)
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 
@@ -112,8 +114,7 @@ def test_planar_area_weights_shoelace_matches_convexhull():
     rectangular patch resembling a regional cutout (the production stress case).
     """
     import numpy as np
-    from scipy.spatial import ConvexHull
-    from scipy.spatial import Voronoi
+    from scipy.spatial import ConvexHull, Voronoi
 
     rng = np.random.default_rng(0)
     latlons = np.column_stack([rng.uniform(0.6, 0.9, 5000), rng.uniform(0.0, 0.4, 5000)])
@@ -144,8 +145,7 @@ def test_planar_area_weights_degenerate_fallback():
     into a real Voronoi region to exercise that path deterministically.
     """
     import numpy as np
-    from scipy.spatial import ConvexHull
-    from scipy.spatial import Voronoi
+    from scipy.spatial import ConvexHull, Voronoi
 
     rng = np.random.default_rng(0)
     points = rng.uniform(0.0, 1.0, (200, 2))

@@ -10,9 +10,7 @@
 import numpy as np
 import torch
 
-from anemoi.graphs.utils import concat_edges
-from anemoi.graphs.utils import get_edge_attributes
-from anemoi.graphs.utils import intersect_edges
+from anemoi.graphs.utils import concat_edges, get_edge_attributes, intersect_edges
 
 
 def test_concat_edges():

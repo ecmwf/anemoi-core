@@ -4,8 +4,6 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -18,7 +16,7 @@ def randn_with_grid_sharding(
     *,
     device: torch.device,
     dtype: torch.dtype,
-    model_comm_group: Optional[ProcessGroup] = None,
+    model_comm_group: ProcessGroup | None = None,
     grid_shard_sizes: ShardSizes = None,
     shard_dim: int = -2,
 ) -> torch.Tensor:
@@ -47,7 +45,7 @@ def randn_with_grid_sharding(
 def randn_like_with_grid_sharding(
     tensor: torch.Tensor,
     *,
-    model_comm_group: Optional[ProcessGroup] = None,
+    model_comm_group: ProcessGroup | None = None,
     grid_shard_sizes: ShardSizes = None,
     shard_dim: int = -2,
 ) -> torch.Tensor:

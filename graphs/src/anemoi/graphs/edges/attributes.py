@@ -9,22 +9,17 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn.conv import MessagePassing
-from torch_geometric.typing import Adj
-from torch_geometric.typing import PairTensor
-from torch_geometric.typing import Size
+from torch_geometric.typing import Adj, PairTensor, Size
 from torch_geometric.utils import scatter
 
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
-from anemoi.graphs.utils import NodesAxis
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import haversine_distance
+from anemoi.graphs.utils import NodesAxis, get_distributed_device, haversine_distance
 
 LOGGER = logging.getLogger(__name__)
 

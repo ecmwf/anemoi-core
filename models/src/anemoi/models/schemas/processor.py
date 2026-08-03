@@ -7,19 +7,12 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Any
-from typing import Literal
-from typing import Union
+from typing import Any, Literal
 
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, model_validator
 
-from .common_components import GNNModelComponent
-from .common_components import PointWiseModelComponent
-from .common_components import TransformerModelComponent
+from .common_components import GNNModelComponent, PointWiseModelComponent, TransformerModelComponent
 
 
 class NoOpProcessorSchema(PydanticBaseModel):
@@ -78,7 +71,7 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Number of layers of Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
     "Number of chunks to divide the layer into. Default to 2."
-    window_size: Union[NonNegativeInt, None] = Field(example=512)
+    window_size: NonNegativeInt | None = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"

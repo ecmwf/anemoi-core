@@ -7,36 +7,32 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .area_weights import AnemoiDatasetVariableWeights
-from .area_weights import CosineLatWeightedAttribute
-from .area_weights import IsolatitudeAreaWeights
-from .area_weights import MaskedPlanarAreaWeights
-from .area_weights import PlanarAreaWeights
-from .area_weights import SphericalAreaWeights
-from .area_weights import UniformWeights
-from .boolean_op import BooleanAndMask
-from .boolean_op import BooleanNot
-from .boolean_op import BooleanOrMask
-from .masks import CutOutMask
-from .masks import GridsMask
-from .masks import LimitedAreaMask
-from .masks import NonmissingAnemoiDatasetVariable
-from .masks import NonzeroAnemoiDatasetVariable
+from .area_weights import (
+    AnemoiDatasetVariableWeights,
+    CosineLatWeightedAttribute,
+    IsolatitudeAreaWeights,
+    MaskedPlanarAreaWeights,
+    PlanarAreaWeights,
+    SphericalAreaWeights,
+    UniformWeights,
+)
+from .boolean_op import BooleanAndMask, BooleanNot, BooleanOrMask
+from .masks import CutOutMask, GridsMask, LimitedAreaMask, NonmissingAnemoiDatasetVariable, NonzeroAnemoiDatasetVariable
 
 __all__ = [
-    "GridsMask",
-    "SphericalAreaWeights",
-    "PlanarAreaWeights",
-    "UniformWeights",
-    "CutOutMask",
-    "LimitedAreaMask",
-    "MaskedPlanarAreaWeights",
-    "NonmissingAnemoiDatasetVariable",
-    "NonzeroAnemoiDatasetVariable",
+    "AnemoiDatasetVariableWeights",
     "BooleanAndMask",
     "BooleanNot",
     "BooleanOrMask",
     "CosineLatWeightedAttribute",
+    "CutOutMask",
+    "GridsMask",
     "IsolatitudeAreaWeights",
-    "AnemoiDatasetVariableWeights",
+    "LimitedAreaMask",
+    "MaskedPlanarAreaWeights",
+    "NonmissingAnemoiDatasetVariable",
+    "NonzeroAnemoiDatasetVariable",
+    "PlanarAreaWeights",
+    "SphericalAreaWeights",
+    "UniformWeights",
 ]

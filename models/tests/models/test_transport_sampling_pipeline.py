@@ -12,16 +12,20 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import (
+    AnemoiTransportModelEncProcDec,
+    AnemoiTransportTendModelEncProcDec,
+)
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport import EDMDiffusionModelObjective
-from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import StochasticInterpolantModelObjective
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport import TransportSourceSettings
-from anemoi.models.transport import schedules
+from anemoi.models.transport import (
+    EDMDiffusionModelObjective,
+    EdmSettings,
+    StochasticInterpolantModelObjective,
+    TransportSourceBuilder,
+    TransportSourceRequest,
+    TransportSourceSettings,
+    schedules,
+)
 
 
 class IdentityProcessor(torch.nn.Module):

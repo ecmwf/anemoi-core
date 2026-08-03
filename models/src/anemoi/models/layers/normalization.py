@@ -9,11 +9,7 @@
 
 from __future__ import annotations
 
-from typing import Union
-
-from torch import Size
-from torch import Tensor
-from torch import nn
+from torch import Size, Tensor, nn
 
 
 class AutocastLayerNorm(nn.LayerNorm):
@@ -40,7 +36,7 @@ class ConditionalLayerNorm(nn.Module):
 
     def __init__(
         self,
-        normalized_shape: Union[int, list, Size],
+        normalized_shape: int | list | Size,
         condition_shape: int = 16,
         zero_init: bool = True,
         autocast: bool = True,

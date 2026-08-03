@@ -10,11 +10,9 @@
 
 import logging
 from abc import ABC
-from typing import Optional
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import BasePreprocessor
@@ -30,8 +28,8 @@ class BaseImputer(BasePreprocessor, ABC):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         """Initialize the imputer.
 
@@ -299,8 +297,8 @@ class InputImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -330,8 +328,8 @@ class ConstantImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 
@@ -353,8 +351,8 @@ class CopyImputer(BaseImputer):
     def __init__(
         self,
         config=None,
-        data_indices: Optional[IndexCollection] = None,
-        statistics: Optional[dict] = None,
+        data_indices: IndexCollection | None = None,
+        statistics: dict | None = None,
     ) -> None:
         super().__init__(config, data_indices, statistics)
 

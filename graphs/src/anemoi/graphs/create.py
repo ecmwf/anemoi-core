@@ -13,11 +13,10 @@ from itertools import chain
 from pathlib import Path
 
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
-
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 

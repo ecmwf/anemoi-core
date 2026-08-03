@@ -14,10 +14,8 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
-from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
-from anemoi.graphs.nodes import ICONCellGridNodes
-from anemoi.graphs.nodes import ICONMultiMeshNodes
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
+from anemoi.graphs.nodes import ICONCellGridNodes, ICONMultiMeshNodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 

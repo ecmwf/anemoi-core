@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.commands.migration import in_incorrect_order
-from anemoi.models.commands.migration import new_migrations_from_main_branch
+from anemoi.models.commands.migration import in_incorrect_order, new_migrations_from_main_branch
 from anemoi.models.migrations import MIGRATION_PATH
 
 

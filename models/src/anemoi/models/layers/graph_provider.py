@@ -10,26 +10,20 @@
 
 import copy
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
-from typing import Union
 
 import numpy as np
 import torch
-from scipy.sparse import coo_matrix
-from scipy.sparse import load_npz
-from scipy.sparse import spmatrix
-from torch import Tensor
-from torch import nn
+from scipy.sparse import coo_matrix, load_npz, spmatrix
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
-from anemoi.models.distributed.khop_edges import shard_edges_1hop
-from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
+from anemoi.models.distributed.khop_edges import shard_edges_1hop, sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.layers.graph import TrainableTensor
 
@@ -37,10 +31,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_graph_provider(
-    graph: Optional[HeteroData] = None,
-    edge_attributes: Optional[list[str]] = None,
-    src_size: Optional[int] = None,
-    dst_size: Optional[int] = None,
+    graph: HeteroData | None = None,
+    edge_attributes: list[str] | None = None,
+    src_size: int | None = None,
+    dst_size: int | None = None,
     trainable_size: int = 0,
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
@@ -101,12 +95,12 @@ class BaseGraphProvider(nn.Module, ABC):
     @abstractmethod
     def get_edges(
         self,
-        batch_size: Optional[int] = None,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        batch_size: int | None = None,
+        src_coords: Tensor | None = None,
+        dst_coords: Tensor | None = None,
+        model_comm_group: ProcessGroup | None = None,
         shard_edges: bool = True,
-    ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
+    ) -> tuple[Tensor, Adj, ShardSizes | None] | Tensor:
         """Get edge information.
 
         Parameters
@@ -128,13 +122,11 @@ class BaseGraphProvider(nn.Module, ABC):
             For standard providers: (edge_attr, edge_index, edge_shard_sizes) tuple
             For sparse providers: sparse projection matrix
         """
-        pass
 
     @property
     @abstractmethod
     def edge_dim(self) -> int:
         """Return the edge dimension."""
-        pass
 
     @property
     def is_sparse(self) -> bool:
@@ -234,8 +226,8 @@ class StaticGraphProvider(BaseGraphProvider):
         self,
         batch_size: int,
         shard_edges: bool,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
+        model_comm_group: ProcessGroup | None,
+    ) -> tuple[Tensor, Adj, ShardSizes | None]:
         """Implementation of get_edges."""
         edge_attr = self.trainable(self.edge_attr, batch_size)
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
@@ -256,12 +248,12 @@ class StaticGraphProvider(BaseGraphProvider):
     def get_edges(
         self,
         batch_size: int,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        src_coords: Tensor | None = None,
+        dst_coords: Tensor | None = None,
+        model_comm_group: ProcessGroup | None = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
+    ) -> tuple[Tensor, Adj, ShardSizes | None]:
         """Get edge attributes and expanded edge index for static graph.
 
         Parameters
@@ -309,10 +301,10 @@ class NoOpGraphProvider(BaseGraphProvider):
 
     def get_edges(
         self,
-        batch_size: Optional[int] = None,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        batch_size: int | None = None,
+        src_coords: Tensor | None = None,
+        dst_coords: Tensor | None = None,
+        model_comm_group: ProcessGroup | None = None,
         shard_edges: bool = True,
     ) -> tuple[None, None, None]:
         """Return None for edge attributes, edge index, and edge_shard_sizes.
@@ -395,8 +387,8 @@ class DynamicGraphProvider(BaseGraphProvider):
         src_coords: Tensor,
         dst_coords: Tensor,
         shard_edges: bool,
-        model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
+        model_comm_group: ProcessGroup | None,
+    ) -> tuple[Tensor, Adj, ShardSizes | None]:
         """Implementation of get_edges, separated for checkpointing."""
         # Build graph from coordinates
         edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
@@ -413,13 +405,13 @@ class DynamicGraphProvider(BaseGraphProvider):
 
     def get_edges(
         self,
-        batch_size: Optional[int] = None,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        batch_size: int | None = None,
+        src_coords: Tensor | None = None,
+        dst_coords: Tensor | None = None,
+        model_comm_group: ProcessGroup | None = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
-    ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
+    ) -> tuple[Tensor, Adj, ShardSizes | None]:
         """Get dynamic edges constructed from node coordinates.
 
         Calls build_graph() to construct edges on-the-fly using k-NN, radius graphs, etc.
@@ -469,11 +461,11 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     def __init__(
         self,
-        graph: Optional[HeteroData] = None,
-        edges_name: Optional[tuple[str, str, str]] = None,
-        edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        file_path: Optional[str | Path] = None,
+        graph: HeteroData | None = None,
+        edges_name: tuple[str, str, str] | None = None,
+        edge_weight_attribute: str | None = None,
+        src_node_weight_attribute: str | None = None,
+        file_path: str | Path | None = None,
         row_normalize: bool = False,
     ) -> None:
         """Initialize ProjectionGraphProvider.
@@ -535,8 +527,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         self,
         graph: HeteroData,
         edges_name: tuple[str, str, str],
-        edge_weight_attribute: Optional[str],
-        src_node_weight_attribute: Optional[str],
+        edge_weight_attribute: str | None,
+        src_node_weight_attribute: str | None,
         row_normalize: bool,
     ) -> None:
         """Build projection matrix from graph.
@@ -623,12 +615,12 @@ class ProjectionGraphProvider(BaseGraphProvider):
 
     def get_edges(
         self,
-        batch_size: Optional[int] = None,
-        src_coords: Optional[Tensor] = None,
-        dst_coords: Optional[Tensor] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        batch_size: int | None = None,
+        src_coords: Tensor | None = None,
+        dst_coords: Tensor | None = None,
+        model_comm_group: ProcessGroup | None = None,
         shard_edges: bool = True,
-        device: Optional[torch.device] = None,
+        device: torch.device | None = None,
     ) -> Tensor:
         """Return the sparse projection matrix.
 
@@ -661,7 +653,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
     def from_config(
         cls,
         config: object,
-        graph_data: Optional[HeteroData] = None,
+        graph_data: HeteroData | None = None,
         data_node_name: str = "data",
     ) -> Optional["ProjectionGraphProvider"]:
         """Create a provider from a config mapping, choosing the mode from the keys present.

@@ -10,18 +10,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import dataclass, field
 from typing import Any
-from typing import Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
-from anemoi.models.transport.random_fields import randn_with_grid_sharding
+from anemoi.models.distributed.shapes import DatasetShardSizes, ShardSizes
+from anemoi.models.transport.random_fields import randn_like_with_grid_sharding, randn_with_grid_sharding
 from anemoi.models.transport.settings import TransportSourceSettings
 
 TRANSPORT_SOURCE_KINDS = frozenset({"zero", "gaussian", "reference_state"})
@@ -106,7 +102,7 @@ class TransportSourceRequest:
     specs: dict[str, TransportSourceSpec]
     default_kind: str
     custom_source_factories: dict[str, TransportSourceFactory] = field(default_factory=dict)
-    model_comm_group: Optional[ProcessGroup] = None
+    model_comm_group: ProcessGroup | None = None
     allowed_kinds: frozenset[str] | None = None
     error_context: str = "transport source"
 
@@ -124,7 +120,7 @@ class TransportSourceRequest:
         *,
         default_kind: str,
         custom_source_factories: dict[str, TransportSourceFactory] | None = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         allowed_kinds: frozenset[str] | None = None,
         error_context: str = "transport source",
@@ -152,7 +148,7 @@ class TransportSourceRequest:
     def _gaussian(
         specs: dict[str, TransportSourceSpec],
         *,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> dict[str, torch.Tensor]:
         return {
             name: randn_with_grid_sharding(

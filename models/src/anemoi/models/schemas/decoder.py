@@ -7,18 +7,11 @@
 # nor does it submit to any jurisdiction.
 #
 
-from typing import Any
-from typing import Literal
-from typing import Union
+from typing import Any, Literal
 
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, model_validator
 
-from .common_components import GNNModelComponent
-from .common_components import PointWiseMapperComponent
-from .common_components import TransformerModelComponent
+from .common_components import GNNModelComponent, PointWiseMapperComponent, TransformerModelComponent
 
 
 class GNNDecoderSchema(GNNModelComponent):
@@ -62,7 +55,7 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
 class TransformerDecoderSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.mapper.TransformerBackwardMapper"] = Field(..., alias="_target_")
     "Transformer Encoder object from anemoi.models.layers.mapper."
-    window_size: Union[NonNegativeInt, None] = Field(example=512)
+    window_size: NonNegativeInt | None = Field(example=512)
     "Attention window size along the longitude axis. Default to 512."
     dropout_p: NonNegativeFloat = Field(example=0.0)
     "Dropout probability used for multi-head self attention, default 0.0"

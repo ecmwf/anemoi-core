@@ -11,8 +11,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
-from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights, UniformWeights
 from anemoi.graphs.nodes.builders.from_vectors import LatLonNodes
 
 lats = [45.0, 45.0, 40.0, 40.0]

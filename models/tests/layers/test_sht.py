@@ -10,8 +10,7 @@
 import pytest
 import torch
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
 
 """
 Random array of complex spectral coefficients.

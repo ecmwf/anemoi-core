@@ -9,8 +9,7 @@
 
 import pytest
 import torch
-from scipy.sparse import csr_matrix
-from scipy.sparse import save_npz
+from scipy.sparse import csr_matrix, save_npz
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider

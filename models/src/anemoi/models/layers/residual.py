@@ -8,26 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
+from abc import ABC, abstractmethod
 
 import einops
 import numpy as np
 import torch
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
-from anemoi.models.layers.spectral_transforms import InverseRegularSHT
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
+from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT, InverseRegularSHT
 
 
 class BaseResidualConnection(nn.Module, ABC):
@@ -48,7 +44,6 @@ class BaseResidualConnection(nn.Module, ABC):
 
         Should be overridden by subclasses.
         """
-        pass
 
     @staticmethod
     def _expand_time(x: torch.Tensor, n_step_output: int | None) -> torch.Tensor:
@@ -146,19 +141,19 @@ class TruncatedConnection(BaseResidualConnection):
 
     def __init__(
         self,
-        graph: Optional[HeteroData] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        edge_weight_attribute: Optional[str] = None,
-        truncation_config: Optional[dict] = None,
-        truncation_up_edges_name: Optional[tuple[str, str, str]] = None,
-        truncation_down_edges_name: Optional[tuple[str, str, str]] = None,
+        graph: HeteroData | None = None,
+        src_node_weight_attribute: str | None = None,
+        edge_weight_attribute: str | None = None,
+        truncation_config: dict | None = None,
+        truncation_up_edges_name: tuple[str, str, str] | None = None,
+        truncation_down_edges_name: tuple[str, str, str] | None = None,
         data_node_name: str = "data",
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
         row_normalize: bool = False,
         # Deprecated: pass inside truncation_config instead.
-        truncation_up_file_path: Optional[str] = None,
-        truncation_down_file_path: Optional[str] = None,
+        truncation_up_file_path: str | None = None,
+        truncation_down_file_path: str | None = None,
         **_,
     ) -> None:
         super().__init__()
@@ -224,10 +219,10 @@ class TruncatedConnection(BaseResidualConnection):
 
     @staticmethod
     def _normalise_truncation_config(
-        truncation_config: Optional[dict],
-        truncation_up_file_path: Optional[str],
-        truncation_down_file_path: Optional[str],
-    ) -> Optional[dict]:
+        truncation_config: dict | None,
+        truncation_up_file_path: str | None,
+        truncation_down_file_path: str | None,
+    ) -> dict | None:
         """Forward deprecated top-level file-path kwargs into truncation_config."""
         has_files = truncation_up_file_path is not None or truncation_down_file_path is not None
         if not has_files:

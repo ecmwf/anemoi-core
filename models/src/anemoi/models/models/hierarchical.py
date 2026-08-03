@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -17,10 +16,7 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, DatasetShardSizes, GraphShardInfo, get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
 
@@ -65,7 +61,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
-            for i in range(0, self.num_hidden - 1):
+            for i in range(self.num_hidden - 1):
                 nodes_names = self._graph_name_hidden[i]
 
                 # Create graph providers for down level processor
@@ -123,7 +119,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-        for i in range(0, self.num_hidden - 1):
+        for i in range(self.num_hidden - 1):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
@@ -194,7 +190,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     def forward(
         self,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -290,7 +286,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         ## Downscale
         x_encoded_latents_dict = {}
-        for i in range(0, self.num_hidden - 1):
+        for i in range(self.num_hidden - 1):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i + 1]
 

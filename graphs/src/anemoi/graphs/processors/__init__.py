@@ -7,16 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .post_process import RemoveSelfEdges
-from .post_process import RemoveUnconnectedNodes
-from .post_process import RestrictEdgeLength
-from .post_process import SortEdgeIndexBySourceNodes
-from .post_process import SortEdgeIndexByTargetNodes
+from .post_process import (
+    RemoveSelfEdges,
+    RemoveUnconnectedNodes,
+    RestrictEdgeLength,
+    SortEdgeIndexBySourceNodes,
+    SortEdgeIndexByTargetNodes,
+)
 
 __all__ = [
     "RemoveSelfEdges",
     "RemoveUnconnectedNodes",
     "RestrictEdgeLength",
-    "SortEdgeIndexByTargetNodes",
     "SortEdgeIndexBySourceNodes",
+    "SortEdgeIndexByTargetNodes",
 ]

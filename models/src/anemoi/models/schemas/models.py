@@ -11,39 +11,38 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Annotated
-from typing import Any
-from typing import Literal
-from typing import Optional
-from typing import Union
+from typing import Annotated, Any, Literal, Union
 
-from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
-from pydantic import model_validator
-
-from anemoi.models.transport.settings import EdmSettings
-from anemoi.models.transport.settings import NoiseConditioningSettings
-from anemoi.models.transport.settings import StochasticInterpolantSettings
-from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
+from pydantic import BaseModel as PydanticBaseModel
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt, model_validator
 
-from .decoder import GNNDecoderSchema  # noqa: TC001
-from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
-from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
-from .decoder import TransformerDecoderSchema  # noqa: TC001
-from .encoder import GNNEncoderSchema  # noqa: TC001
-from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
-from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
-from .encoder import TransformerEncoderSchema  # noqa: TC001
-from .processor import GNNProcessorSchema  # noqa: TC001
-from .processor import GraphTransformerProcessorSchema  # noqa: TC001
-from .processor import NoOpProcessorSchema  # noqa: TC001
-from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
-from .processor import TransformerProcessorSchema  # noqa: TC001
+from anemoi.models.transport.settings import (
+    EdmSettings,
+    NoiseConditioningSettings,
+    StochasticInterpolantSettings,
+    TransportSourceSettings,
+)
+
+from .decoder import (
+    GNNDecoderSchema,
+    GraphTransformerDecoderSchema,
+    PointWiseBackwardMapperSchema,
+    TransformerDecoderSchema,
+)
+from .encoder import (
+    GNNEncoderSchema,
+    GraphTransformerEncoderSchema,
+    PointWiseForwardMapperSchema,
+    TransformerEncoderSchema,
+)
+from .processor import (
+    GNNProcessorSchema,
+    GraphTransformerProcessorSchema,
+    NoOpProcessorSchema,
+    PointWiseMLPProcessorSchema,
+    TransformerProcessorSchema,
+)
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -221,16 +220,7 @@ class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
 
 
 Bounding = Annotated[
-    Union[
-        ReluBoundingSchema,
-        LeakyReluBoundingSchema,
-        FractionBoundingSchema,
-        LeakyFractionBoundingSchema,
-        HardtanhBoundingSchema,
-        LeakyHardtanhBoundingSchema,
-        NormalizedReluBoundingSchema,
-        NormalizedLeakyReluBoundingSchema,
-    ],
+    ReluBoundingSchema | LeakyReluBoundingSchema | FractionBoundingSchema | LeakyFractionBoundingSchema | HardtanhBoundingSchema | LeakyHardtanhBoundingSchema | NormalizedReluBoundingSchema | NormalizedLeakyReluBoundingSchema,
     Field(discriminator="target_"),
 ]
 
@@ -264,33 +254,17 @@ class BaseModelSchema(PydanticBaseModel):
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
-    processor: Union[
-        NoOpProcessorSchema,
-        GNNProcessorSchema,
-        GraphTransformerProcessorSchema,
-        TransformerProcessorSchema,
-        PointWiseMLPProcessorSchema,
-    ] = Field(
+    processor: NoOpProcessorSchema | GNNProcessorSchema | GraphTransformerProcessorSchema | TransformerProcessorSchema | PointWiseMLPProcessorSchema = Field(
         ...,
         discriminator="target_",
     )
     "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
+    encoder: GNNEncoderSchema | GraphTransformerEncoderSchema | TransformerEncoderSchema | PointWiseForwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )
     "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
+    decoder: GNNDecoderSchema | GraphTransformerDecoderSchema | TransformerDecoderSchema | PointWiseBackwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )
@@ -300,7 +274,7 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "Residual connection schema."
-    compile: Optional[list[dict[str, Any]]] = Field(None)
+    compile: list[dict[str, Any]] | None = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
@@ -324,13 +298,13 @@ class NoiseConditioningSchema(BaseModel):
     "Number of channels in the noise tensor."
     noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
     "Hidden dimension of the MLP used to process the noise."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
-    noise_matrix: Optional[str] = Field(default=None)
+    noise_matrix: str | None = Field(default=None)
     "Path to the noise projection matrix file (.npz). If None, no projection is applied."
-    noise_edges_name: Optional[tuple[str, str, str]] = Field(default=None)
+    noise_edges_name: tuple[str, str, str] | None = Field(default=None)
     "Edge type identifier (src, relation, dst) for graph-based noise projection."
-    edge_weight_attribute: Optional[str] = Field(default=None)
+    edge_weight_attribute: str | None = Field(default=None)
     "Optional edge attribute name for graph-based noise projection weights."
     row_normalize_noise_matrix: bool = Field(default=False)
     "Whether to row-normalize the noise projection matrix weights."
@@ -349,12 +323,12 @@ class NoiseInjectorSchema(BaseModel):
     "Number of channels in the noise tensor."
     noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
     "Hidden dimension of the MLP used to process the noise."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
 NoiseInjectorUnion = Annotated[
-    Union[NoOpNoiseInjectorSchema, NoiseConditioningSchema, NoiseInjectorSchema],
+    NoOpNoiseInjectorSchema | NoiseConditioningSchema | NoiseInjectorSchema,
     Field(discriminator="target_"),
 ]
 
@@ -371,7 +345,7 @@ class TransportModelSchema(BaseModelSchema):
     "Transport model schema."
 
     @model_validator(mode="after")
-    def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
+    def validate_no_bounding_for_transport(self) -> TransportModelSchema:
         if self.bounding:
             msg = (
                 "Transport models do not support bounding layers. "

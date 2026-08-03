@@ -12,15 +12,16 @@ import torch
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _expand_sharded_tensor
-from anemoi.models.distributed.primitives import _gather
-from anemoi.models.distributed.primitives import _halo_exchange
-from anemoi.models.distributed.primitives import _halo_exchange_bwd
-from anemoi.models.distributed.primitives import _reduce
-from anemoi.models.distributed.primitives import _split
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.primitives import (
+    _alltoall_transpose,
+    _expand_sharded_tensor,
+    _gather,
+    _halo_exchange,
+    _halo_exchange_bwd,
+    _reduce,
+    _split,
+)
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
 
 

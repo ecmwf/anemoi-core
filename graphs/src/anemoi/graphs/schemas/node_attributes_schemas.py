@@ -11,10 +11,10 @@
 import logging
 from typing import Literal
 
+from anemoi.utils.schemas import BaseModel
 from pydantic import Field
 
 from anemoi.graphs.schemas.normalise import ImplementedNormalisationSchema
-from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 

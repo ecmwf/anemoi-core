@@ -17,8 +17,7 @@ from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian, latlon_rad_to_cartesian_np
 from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)

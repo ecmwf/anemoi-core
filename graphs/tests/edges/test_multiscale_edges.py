@@ -16,9 +16,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges import MultiScaleEdges
 from anemoi.graphs.generate import tri_icosahedron
 from anemoi.graphs.generate.masks import AreaMaskBuilder
-from anemoi.graphs.nodes import HexNodes
-from anemoi.graphs.nodes import StretchedTriNodes
-from anemoi.graphs.nodes import TriNodes
+from anemoi.graphs.nodes import HexNodes, StretchedTriNodes, TriNodes
 
 
 class TestMultiScaleEdgesInit:
