@@ -66,12 +66,14 @@ class FlatView:
     device: torch.device | None
     shard_sizes: ShardSizes
     batch_sizes: tuple[int, ...] | None = None
+    timedeltas: torch.Tensor | None = None
 
     def to(self, device: torch.device) -> "FlatView":
         """Return a copy of this view with all tensors moved to the given device."""
         return FlatView(
             data=self.data.to(device),
             coordinates=self.coordinates.to(device),
+            timedeltas=None if self.timedeltas is None else self.timedeltas.to(device),
             device=device,
             shard_sizes=self.shard_sizes,
             batch_sizes=self.batch_sizes,
@@ -242,6 +244,7 @@ class GriddedSourceView(SourceView):
         return FlatView(
             data=flattened_data,
             coordinates=coordinates.to(device),
+            timedeltas=None,
             device=device,
             shard_sizes=self.shard_sizes,
             batch_sizes=None,
@@ -417,9 +420,21 @@ class TabularSourceView(SourceView):
         if len(self.data) > 1:
             data = torch.cat(self.data, dim=0)
             coordinates = torch.cat(self.coordinates, dim=0)
+            timedeltas = None if self.timedeltas is None else torch.cat(self.timedeltas, dim=0)
         elif len(self.data) == 1:
             data = self.data[0]
             coordinates = self.coordinates[0]
+            timedeltas = None if self.timedeltas is None else self.timedeltas[0]
+        else:
+            msg = f"{self.__class__.__name__} cannot flatten an empty batch."
+            raise ValueError(msg)
+
+        if timedeltas is not None and timedeltas.shape[0] != coordinates.shape[0]:
+            msg = (
+                f"{self.__class__.__name__} timedeltas and coordinates must contain the same number of nodes, "
+                f"got {timedeltas.shape[0]} and {coordinates.shape[0]}."
+            )
+            raise ValueError(msg)
 
         # flatten shard sizes to a single list of shard sizes for the locally concatenated data
         # NOTE that this operation changes the order of observations when gathering data:
@@ -439,6 +454,7 @@ class TabularSourceView(SourceView):
         return FlatView(
             data=data,
             coordinates=coordinates.to(device),
+            timedeltas=None if timedeltas is None else timedeltas.to(device),
             device=device,
             shard_sizes=flat_shard_sizes,
             batch_sizes=tuple(sample.shape[self.layout.grid] for sample in self.data),

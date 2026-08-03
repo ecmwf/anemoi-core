@@ -12,7 +12,11 @@ import torch
 from scipy.sparse import csr_matrix
 from scipy.sparse import save_npz
 from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import NodeStorage
 
+from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.edges.attributes import Timedeltas
+from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 
 
@@ -176,3 +180,156 @@ def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
     edges = provider.get_edges()
     assert edges.layout == torch.sparse_csr
     assert torch.allclose(edges.to_dense(), expected)
+
+
+class _FixedEdgeBuilder:
+    @staticmethod
+    def compute_edge_index_from_coords(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        del source_coords, target_coords
+        return torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
+
+
+def _dynamic_provider(attribute) -> DynamicGraphProvider:
+    provider = DynamicGraphProvider.__new__(DynamicGraphProvider)
+    torch.nn.Module.__init__(provider)
+    provider.edge_builder = _FixedEdgeBuilder()
+    provider.attributes_config = {"feature": attribute}
+    provider._edge_dim = attribute.ndim
+    provider._capture_request = None
+    provider._captured_graph = None
+    return provider
+
+
+def test_dynamic_graph_provider_routes_source_timedeltas() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+    src_coords = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]])
+    dst_coords = torch.tensor([[0.0, 0.0], [0.3, 0.3]])
+
+    edge_attr, edge_index = provider.build_graph(
+        src_coords,
+        dst_coords,
+        src_timedeltas=torch.tensor([-3600.0, 0.0, 7200.0]),
+    )
+
+    assert torch.equal(edge_index, torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]], device=edge_index.device))
+    assert torch.equal(
+        edge_attr.squeeze(-1),
+        torch.tensor([-1.0, 0.0, 2.0, -1.0], device=edge_attr.device),
+    )
+
+
+def test_dynamic_graph_provider_routes_target_timedeltas() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="target", scale_seconds=3600.0))
+    src_coords = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]])
+    dst_coords = torch.tensor([[0.0, 0.0], [0.3, 0.3]])
+
+    edge_attr, _ = provider.build_graph(
+        src_coords,
+        dst_coords,
+        dst_timedeltas=torch.tensor([1800.0, 3600.0]),
+    )
+
+    assert torch.equal(edge_attr.squeeze(-1), torch.tensor([0.5, 0.5, 1.0, 1.0], device=edge_attr.device))
+
+
+def test_dynamic_graph_provider_batches_timedeltas_with_coordinates() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+    src_coords = torch.zeros(6, 2)
+    dst_coords = torch.zeros(4, 2)
+
+    edge_attr, edge_index = provider.build_graph(
+        src_coords,
+        dst_coords,
+        src_timedeltas=torch.tensor([-3600.0, 0.0, 3600.0, 7200.0, 10800.0, 14400.0]),
+        src_batch_sizes=(3, 3),
+        dst_batch_sizes=(2, 2),
+    )
+
+    assert torch.equal(
+        edge_index,
+        torch.tensor(
+            [[0, 1, 2, 0, 3, 4, 5, 3], [0, 0, 1, 1, 2, 2, 3, 3]],
+            device=edge_index.device,
+        ),
+    )
+    assert torch.equal(
+        edge_attr.squeeze(-1),
+        torch.tensor([-1.0, 0.0, 1.0, -1.0, 2.0, 3.0, 4.0, 2.0], device=edge_attr.device),
+    )
+
+
+def test_dynamic_graph_provider_batches_empty_and_nonempty_samples_on_one_device() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+
+    edge_attr, edge_index = provider.build_graph(
+        src_coords=torch.zeros(3, 2),
+        dst_coords=torch.zeros(4, 2),
+        src_timedeltas=torch.tensor([3600.0, 7200.0, 10800.0]),
+        src_batch_sizes=(0, 3),
+        dst_batch_sizes=(2, 2),
+    )
+
+    assert edge_attr.device == edge_index.device
+    assert edge_attr.shape == (4, 1)
+    assert torch.equal(
+        edge_attr.squeeze(-1),
+        torch.tensor([1.0, 2.0, 3.0, 1.0], device=edge_attr.device),
+    )
+
+
+def test_dynamic_graph_capture_keeps_timedeltas_and_encoded_edges() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+    provider.capture_next_graph("obs", "hidden")
+    src_coords = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]])
+    dst_coords = torch.tensor([[0.0, 0.0], [0.3, 0.3]])
+    src_timedeltas = torch.tensor([-3600.0, 0.0, 7200.0])
+
+    provider.get_edges(
+        src_coords=src_coords,
+        dst_coords=dst_coords,
+        src_timedeltas=src_timedeltas,
+        shard_edges=False,
+        act_checkpoint=False,
+    )
+    graph = provider.consume_captured_graph()
+
+    assert graph is not None
+    assert torch.equal(graph["obs"].timedeltas, src_timedeltas)
+    assert torch.equal(
+        graph[("obs", "to", "hidden")].feature.squeeze(-1),
+        torch.tensor([-1.0, 0.0, 2.0, -1.0]),
+    )
+
+
+def test_dynamic_graph_provider_checkpoints_timedelta_inputs() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+    device = provider.attributes_config["feature"].device
+
+    edge_attr, edge_index, shard_sizes = provider.get_edges(
+        src_coords=torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]], device=device),
+        dst_coords=torch.tensor([[0.0, 0.0], [0.3, 0.3]], device=device),
+        src_timedeltas=torch.tensor([-3600.0, 0.0, 7200.0], device=device),
+        shard_edges=False,
+    )
+
+    assert edge_attr.shape == (4, 1)
+    assert edge_index.shape == (2, 4)
+    assert shard_sizes is None
+
+
+def test_dynamic_graph_provider_keeps_coordinate_attributes_working() -> None:
+    provider = _dynamic_provider(EdgeLength(norm=None))
+    src_coords = torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]])
+    dst_coords = torch.tensor([[0.0, 0.0], [0.3, 0.3]])
+
+    edge_attr, edge_index = provider.build_graph(src_coords, dst_coords)
+    source_nodes = NodeStorage()
+    source_nodes.x = src_coords
+    target_nodes = NodeStorage()
+    target_nodes.x = dst_coords
+    expected = EdgeLength(norm=None)(
+        x=(source_nodes, target_nodes),
+        edge_index=edge_index,
+    )
+
+    assert torch.allclose(edge_attr, expected)

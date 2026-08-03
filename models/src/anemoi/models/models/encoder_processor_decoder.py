@@ -54,6 +54,41 @@ def sum_dataset_latents(
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    def _configure_dynamic_node_attributes(self, dynamic_node_config: DotDict) -> None:
+        """Instantiate runtime timedelta encoders for dynamic dataset nodes."""
+        timedelta_target = "anemoi.graphs.nodes.attributes.Timedeltas"
+        for dataset_name, node_config in dynamic_node_config.items():
+            runtime_attributes = {}
+            for attribute_name, attribute_config in (node_config.get("attributes") or {}).items():
+                if attribute_config.get("_target_") != timedelta_target:
+                    continue
+                runtime_attributes[attribute_name] = instantiate(attribute_config)
+
+            if runtime_attributes:
+                self.dynamic_node_attributes[dataset_name] = runtime_attributes
+                self.dynamic_node_attribute_dims[dataset_name] = sum(
+                    attribute.ndim for attribute in runtime_attributes.values()
+                )
+
+    def _encode_dynamic_node_attributes(self, dataset_name: str, x_flat: "FlatView") -> torch.Tensor | None:
+        """Encode configured per-node runtime attributes."""
+        attribute_builders = self.dynamic_node_attributes.get(dataset_name)
+        if not attribute_builders:
+            return None
+        if x_flat.timedeltas is None:
+            raise ValueError(
+                f"Dataset {dataset_name!r} configures timedelta node attributes, "
+                "but the batch does not provide timedeltas."
+            )
+        if x_flat.timedeltas.shape[0] != x_flat.coordinates.shape[0]:
+            raise ValueError(
+                f"Dataset {dataset_name!r} has {x_flat.timedeltas.shape[0]} timedeltas "
+                f"for {x_flat.coordinates.shape[0]} coordinates."
+            )
+
+        features = [attribute.compute(x_flat.timedeltas) for attribute in attribute_builders.values()]
+        return torch.cat(features, dim=-1)
+
     def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -128,7 +163,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes, tuple[int, ...] | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         x_flat: "FlatView" = x.flatten()  # flatten data to (nodes, features)
@@ -145,6 +180,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_skip = None
 
         inputs = [x_flat.data, latlons_to_sincos(x_flat.coordinates)]
+        dynamic_node_attributes = self._encode_dynamic_node_attributes(dataset_name, x_flat)
+        if dynamic_node_attributes is not None:
+            inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
 
         if dataset_name in self.node_attributes:
             trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
@@ -157,10 +195,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # gather full coordinates for correct graph building in the encoder
         coordinates = x_flat.coordinates
+        timedeltas = x_flat.timedeltas
         if grid_shard_sizes is not None:
             coordinates = gather_tensor(coordinates, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
+            if timedeltas is not None:
+                timedeltas = gather_tensor(timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
 
-        return coordinates, x_data_latent, x_skip, grid_shard_sizes, x_flat.batch_sizes
+        return coordinates, x_data_latent, x_skip, grid_shard_sizes, x_flat.batch_sizes, timedeltas
 
     def _assemble_target(
         self,
@@ -181,10 +222,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             assert encoder_data_output is not None
             target_decoder_data = encoder_data_output
         else:
-            target_decoder_data = torch.cat(
-                [x_flat.data, latlons_to_sincos(x_flat.coordinates)],
-                dim=-1,
-            )
+            target_inputs = [x_flat.data, latlons_to_sincos(x_flat.coordinates)]
+            dynamic_node_attributes = self._encode_dynamic_node_attributes(dataset_name, x_flat)
+            if dynamic_node_attributes is not None:
+                target_inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
+            target_decoder_data = torch.cat(target_inputs, dim=-1)
 
             if dataset_name in self.node_attributes:
                 trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
@@ -197,10 +239,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # gather full coordinates for correct graph building in the decoder
         coordinates = x_flat.coordinates
+        timedeltas = x_flat.timedeltas
         if grid_shard_sizes is not None:
             coordinates = gather_tensor(coordinates, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
+            if timedeltas is not None:
+                timedeltas = gather_tensor(timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
 
-        return coordinates, target_decoder_data, grid_shard_sizes, x_flat.batch_sizes
+        return coordinates, target_decoder_data, grid_shard_sizes, x_flat.batch_sizes, timedeltas
 
     def _assemble_output(
         self,
@@ -315,11 +360,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
         for dataset_name in dataset_names:
-            data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes = self._assemble_input(
-                batch[dataset_name],
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
+            data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = (
+                self._assemble_input(
+                    batch[dataset_name],
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                    dataset_name=dataset_name,
+                )
             )
             if data_coords.shape[0] == 0:
                 continue
@@ -337,10 +384,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 batch_size=batch_size,
                 src_coords=data_coords,
                 dst_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
+                src_timedeltas=data_timedeltas,
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
             )
-            encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)
+            encoder_edge_attr = encoder_edge_attr.to(device=x_data_latent.device, dtype=x_data_latent.dtype)
             encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
 
             enc_shard_info = BipartiteGraphShardInfo(
@@ -391,12 +439,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in dataset_names:
-            data_coords, target_data_latent, shard_sizes_data, data_batch_sizes = self._assemble_target(
-                target[dataset_name],
-                x_data_latent_dict.get(dataset_name, None),
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
+            data_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
+                self._assemble_target(
+                    target[dataset_name],
+                    x_data_latent_dict.get(dataset_name, None),
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                    dataset_name=dataset_name,
+                )
             )
 
             if data_coords.numel() == 0:
@@ -419,10 +469,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 batch_size=batch_size,
                 src_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
                 dst_coords=data_coords,
+                dst_timedeltas=data_timedeltas,
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
             )
-            decoder_edge_attr = decoder_edge_attr.to(x_latent.device)
+            decoder_edge_attr = decoder_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
             decoder_edge_index = decoder_edge_index.to(x_latent.device)
 
             dec_shard_info = BipartiteGraphShardInfo(

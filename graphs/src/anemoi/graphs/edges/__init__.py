@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from .attributes import Timedeltas
 from .builders.cutoff import CutOffEdges
 from .builders.cutoff import ReversedCutOffEdges
 from .builders.healpix import HEALPixMultiScaleEdges
@@ -29,4 +30,5 @@ __all__ = [
     "ICONTopologicalProcessorEdges",
     "ICONTopologicalEncoderEdges",
     "ICONTopologicalDecoderEdges",
+    "Timedeltas",
 ]

@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import Annotated
 from typing import Literal
 
 from pydantic import Field
@@ -73,6 +74,17 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
+class TimedeltasSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.Timedeltas"] = Field(..., alias="_target_")
+    "Runtime timedelta node encoder."
+    scale_seconds: float = Field(default=3600.0, gt=0, allow_inf_nan=False)
+    "Number of input seconds per scaled unit."
+    periods: list[Annotated[float, Field(gt=0, allow_inf_nan=False)]] = Field(default_factory=list)
+    "Fourier periods expressed in scaled units."
+    dtype: str = Field(default="float32")
+    "Torch floating-point output dtype."
+
+
 SingleAttributeSchema = (
     PlanarAreaWeightSchema
     | MaskedPlanarAreaWeightsSchema
@@ -80,6 +92,7 @@ SingleAttributeSchema = (
     | CutOutMaskSchema
     | GridsMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
+    | TimedeltasSchema
 )
 
 

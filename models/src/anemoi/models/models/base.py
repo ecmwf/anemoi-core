@@ -146,6 +146,9 @@ class BaseGraphModel(nn.Module):
         # TODO: this info should come through the config, not be hardcoded here.
         # The model should not know about the dataset names.
         self.use_encoder_data_output = defaultdict(bool, {"data": True, "grid": True})
+        self.dynamic_node_attributes: dict[str, dict[str, object]] = {}
+        self.dynamic_node_attribute_dims: dict[str, int] = {}
+        self._configure_dynamic_node_attributes(dynamic_graph_config.nodes)
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
@@ -160,6 +163,10 @@ class BaseGraphModel(nn.Module):
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         self.boundings = build_boundings(model_config.model.bounding, dataset_names=self.dataset_names)
+
+    def _configure_dynamic_node_attributes(self, dynamic_node_config: DotDict) -> None:
+        """Configure runtime node attributes for models that support them."""
+        del dynamic_node_config
 
     def _hidden_coordinates(self) -> torch.Tensor:
         return self._graph_data[self._graph_name_hidden].x
@@ -209,6 +216,7 @@ class BaseGraphModel(nn.Module):
             self.num_input_channels[dataset_name]
             + COORDS_DIM
             + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+            + self.dynamic_node_attribute_dims.get(dataset_name, 0)
         )
 
     def _calculate_input_dim_latent(self) -> int:
@@ -246,6 +254,7 @@ class BaseGraphModel(nn.Module):
                 self.num_input_channels_decoding_forcings[dataset_name]
                 + COORDS_DIM
                 + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
+                + self.dynamic_node_attribute_dims.get(dataset_name, 0)
             )
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
