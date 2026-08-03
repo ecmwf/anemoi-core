@@ -59,11 +59,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         super()._build_networks(model_config)
 
         self.noise_injector = instantiate(
-            model_config.model.noise_injector,
+            model_config.noise_injector,
             _recursive_=False,
-            num_channels=self.num_channels,
             graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.model.get("sparse_projector", {}).get("num_chunks", 1),
+            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:

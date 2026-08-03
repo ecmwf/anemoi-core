@@ -66,7 +66,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 )
                 continue
 
-            encoder_config = model_config.model.encoders[self.dataset2encoder[dataset_name]]
+            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
@@ -79,7 +79,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         self.encoder = torch.nn.ModuleDict()
-        for encoder_name, encoder_config in model_config.model.encoders.items():
+        for encoder_name, encoder_config in model_config.encoders.items():
             encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
             assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
                 f"All datasets for encoder {encoder_name} must have the same input dimension, "
@@ -96,21 +96,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Latent aggregator: combines encoder outputs before the processor
         self.latent_aggregator = instantiate(
-            model_config.model.latent_aggregator,
+            model_config.latent_aggregator,
             num_channels={encoder_name: encoder.hidden_dim for encoder_name, encoder in self.encoder.items()},
         )
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=static_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attribute_names=model_config.model.processor.get("sub_graph_edge_attributes"),
+            edge_attribute_names=model_config.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes.get(self._graph_name_hidden, None),
             dst_size=self.node_attributes.num_nodes.get(self._graph_name_hidden, None),
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            trainable_size=model_config.processor.get("trainable_size", 0),
+            # graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            # edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
+            # src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            # dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            # trainable_size=model_config.processor.get("trainable_size", 0),
         )
 
         self.processor = instantiate(
-            model_config.model.processor,
+            model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -129,7 +134,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 )
                 continue
 
-            decoder_config = model_config.model.decoders[self.dataset2decoder[dataset_name]]
+            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
@@ -140,7 +145,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         self.decoder = torch.nn.ModuleDict()
-        for decoder_name, decoder_config in model_config.model.decoders.items():
+        for decoder_name, decoder_config in model_config.decoders.items():
             decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
             assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
                 f"All datasets for decoder {decoder_name} must have the same target dimension, "
@@ -265,40 +270,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_targets = []
-        for target_feature in self.decoders_target_input[self.dataset2decoder[dataset_name]]:
-            if target_feature == "coordinates":
-                coords = getattr(self.node_attributes, f"latlons_{dataset_name}")  # (num_points, coords_dim)
-                new_target = einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
-            elif target_feature == "forcings":
-                # TODO: this should point to future forcings
-                new_target = x_input_data[self._internal_input_idx[dataset_name]]
-            elif target_feature == "prognostics":
-                new_target = x_input_data[self._internal_input_idx[dataset_name]]
-            elif target_feature == "trainable_parameters":
-                node_trainable_params = self.node_attributes.trainable_tensors[
-                    dataset_name
-                ].trainable  # (num_points, ?)
-                new_target = einops.repeat(node_trainable_params, "e f -> (repeat e) f", repeat=batch_size)
-            elif target_feature == "encoded_data":
-                if x_encoded_data is None:
-                    raise ValueError(
-                        f'"encoded_data" can be used only if dataset {dataset_name} is encoded. '
-                        f"Please update the decoder.{self.dataset2decoder[dataset_name]}.input_target_features configuration."
-                    )
-                new_target = x_encoded_data
-            else:
-                raise ValueError("")
+        x_target_latent = self.decoders_target_input[self.dataset2decoder[dataset_name]].tensor(
+            x_input_data,
+            x_encoded_data,
+            batch_size=batch_size,
+            grid_shard_sizes=grid_shard_sizes,
+            model_comm_group=model_comm_group,
+            dataset_name=dataset_name,
+        )
 
-            if grid_shard_sizes is not None:
-                new_target = shard_tensor(new_target, 0, grid_shard_sizes, model_comm_group)
-
-            x_targets.append(new_target)
-
-        if len(x_targets) == 1:
-            return x_targets[0], grid_shard_sizes
-
-        return torch.cat(x_targets, dim=-1), grid_shard_sizes
+        return x_target_latent, grid_shard_sizes
 
     def _assemble_output(
         self,
@@ -415,7 +396,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in dataset_names:
             if dataset_name not in self.input_datasets:
                 continue
-            
+
             data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes = self._assemble_input(
                 batch[dataset_name],
                 batch_size=batch_size,

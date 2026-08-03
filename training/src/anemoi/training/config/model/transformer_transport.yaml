@@ -61,6 +61,7 @@ processor:
 encoders:
   0:
     datasets: [ "data" ]
+    dataset_fusing_strategy:  "not-supported" # Options: "not-supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

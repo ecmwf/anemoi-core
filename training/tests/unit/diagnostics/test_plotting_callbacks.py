@@ -48,9 +48,13 @@ from anemoi.training.utils.masks import NoOutputMask
 # ``functools.partial``. ``sample_idx`` / ``parameters`` / ``dataset_names`` /
 # ``members`` are forwarded straight to the callback constructor.
 def _sample_plot(*, accumulation_levels_plot=None, **kwargs) -> BatchOutputPlot:
-    plot_fn = sample_plot_fn if accumulation_levels_plot is None else partial(
-        sample_plot_fn,
-        accumulation_levels_plot=accumulation_levels_plot,
+    plot_fn = (
+        sample_plot_fn
+        if accumulation_levels_plot is None
+        else partial(
+            sample_plot_fn,
+            accumulation_levels_plot=accumulation_levels_plot,
+        )
     )
     return BatchOutputPlot(plot_fn=plot_fn, tag_infix="sample", with_auxiliary=True, **kwargs)
 
@@ -489,7 +493,6 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 
 
 # ---- LossCurvePlot ----
-
 
 
 def test_plot_loss_sort_and_color_by_parameter_group_small_list():

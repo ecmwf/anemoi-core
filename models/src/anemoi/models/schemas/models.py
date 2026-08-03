@@ -27,6 +27,7 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
+from anemoi.models.models.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.models.transport.settings import EdmSettings
 from anemoi.models.transport.settings import NoiseConditioningSettings
@@ -68,10 +69,6 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
-    ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
 
 
 class Model(BaseModel):
@@ -256,6 +253,8 @@ class EncodersSchema(BaseModel):
 
     datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
+    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
+    "Dataset fusing strategy. Default to 'not_supported'."
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -272,9 +271,9 @@ class DecodersSchema(BaseModel):
 
     datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
-    input_target_features: list[
-        Literal["coordinates", "forcings", "prognostics", "trainable_parameters", "encoded_data"]
-    ] = Field(default_factory=lambda: ["encoded_data"])
+    input_target_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
+        default_factory=lambda: ["encoded_data"]
+    )
     "Whether to use the encoded latents from the encoder."
     mapper: Union[
         GNNDecoderSchema,
@@ -288,8 +287,6 @@ class DecodersSchema(BaseModel):
 
 
 class BaseModelSchema(PydanticBaseModel):
-    num_channels: NonNegativeInt = Field(example=512)
-    "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
     "Keep the input batch and the output of the model sharded"
     sparse_projector: SparseProjectorSchema = Field(default_factory=SparseProjectorSchema)
@@ -437,6 +434,26 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Toggle to do message passing at every downscaling and upscaling step"
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
+    upscale_mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+    "Mapper used to upscale from a lower level to a higher level in the hierarchy."
+    downscale_mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+    "Mapper used to downscale from a higher level to a lower level in the hierarchy."
 
 
 ModelSchema = Union[

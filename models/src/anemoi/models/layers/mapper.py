@@ -1024,7 +1024,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=num_channels,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,

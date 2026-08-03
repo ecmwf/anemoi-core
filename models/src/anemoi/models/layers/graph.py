@@ -87,7 +87,10 @@ class NamedNodesAttributes(nn.Module):
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
         self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
-        self.num_trainable_parameters = {nodes_name: trainable_parameters[nodes_name] for nodes_name in nodes_names}
+        self.attr_ndims = {
+            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
+            for nodes_name in nodes_names
+        }
 
     def register_tensor(self, name: str, num_trainable_params: int) -> None:
         """Register a trainable tensor."""

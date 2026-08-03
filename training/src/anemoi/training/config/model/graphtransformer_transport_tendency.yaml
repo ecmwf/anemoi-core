@@ -60,6 +60,7 @@ processor:
 encoders:
   0:
     datasets: [ "data" ]
+    dataset_fusing_strategy:  "not-supported" # Options: "not-supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       trainable_size: ${model.trainable_parameters.data2hidden}

@@ -12,6 +12,7 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
+
 # from typing import Optional
 
 import torch
@@ -19,6 +20,7 @@ from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
+
 # from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
 
