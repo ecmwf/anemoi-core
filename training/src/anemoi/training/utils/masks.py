@@ -8,16 +8,18 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import abstractmethod
-from collections import defaultdict
+# from collections import defaultdict
 
 import numpy as np
 import torch
 from hydra.utils import instantiate
-from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseMask:
@@ -170,25 +172,31 @@ class NoOutputMask(BaseMask):
         return x
 
 
-def build_output_masks(output_mask_configs: dict, data_readers: dict) -> dict[str, BaseMask]:
-    """Build output masks for each dataset.
+def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict, **kwargs) -> dict[str, BaseMask]:
+    """Create output masks for each dataset based on the provided configuration.
 
     Parameters
     ----------
-    output_mask_configs : dict[str, dict]
-        Dictionary of output mask configurations for each dataset.
+    output_mask_config : dict[str, dict]
+        A dictionary containing the output mask configuration for each dataset. If a dataset is
+        not found in this configuration, a `NoOutputMask` will be used as the default.
     data_readers : dict
-        Dictionary of data readers for each dataset.
+        A dictionary containing the data readers for each dataset.
 
     Returns
     -------
     dict[str, BaseMask]
-        Dictionary of output masks for each dataset.
+        A dictionary mapping dataset names to their corresponding output masks.
     """
-    output_masks = defaultdict(lambda: NoOutputMask())
-    for dataset_name, output_mask_config in output_mask_configs.items():
-        if output_mask_config is not None:
-            assert dataset_name in data_readers, f"Dataset '{dataset_name}' not found in the data_readers."
-            output_masks[dataset_name] = instantiate(output_mask_config, nodes=data_readers[dataset_name])
+    output_masks = {}
+    for dataset_name, data_reader in data_readers.items():
+        if dataset_name not in output_mask_config:
+            LOGGER.warning(
+                f"Dataset '{dataset_name}' not found in 'config.model.output_mask'. Using `NoOutputMask` as default.",
+            )
+            output_masks[dataset_name] = NoOutputMask()
+            continue
+
+        output_masks[dataset_name] = instantiate(output_mask_config[dataset_name], nodes=data_reader, **kwargs)
 
     return output_masks

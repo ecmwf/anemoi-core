@@ -22,7 +22,6 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
-
 from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
 from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper

@@ -50,11 +50,10 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
-    from anemoi.models.distributed.shapes import ShardSizes
-    from anemoi.training.losses.scaler_tensor import ScaleTensor
-
     from anemoi.models.data import TensorLayout
     from anemoi.models.data.views import SourceView
+    from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.training.losses.scaler_tensor import ScaleTensor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -305,14 +304,14 @@ class SpectralLoss(BaseLoss):
 
     def forward(
         self,
-        pred: "SourceView",
-        target: "SourceView",
+        pred: SourceView,
+        target: SourceView,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
-        group: "ProcessGroup | None" = None,
+        group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
@@ -383,7 +382,7 @@ class SpectralAMSELoss(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -481,7 +480,7 @@ class PowerSpectrumLoss(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -536,7 +535,7 @@ class LogSpectralDistance(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -592,7 +591,7 @@ class FourierCorrelationLoss(SpectralLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -711,7 +710,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        layout: "TensorLayout",
+        layout: TensorLayout,
         squash: bool = True,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
