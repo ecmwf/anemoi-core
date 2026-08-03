@@ -32,7 +32,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
-from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
@@ -143,7 +143,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
+        self.node_attributes = NodeTrainableParameters(trainable_parameters, self._graph_data)
 
         # HACK: returns True for "data" and "grid" labels, False for everything else (obs)
         # TODO: this info should come through the config, not be hardcoded here.
@@ -315,12 +315,12 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        return self.n_step_input * self.num_input_channels[dataset_name] + COORDS_DIM + self.node_attributes.num_trainable_parameters[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        return COORDS_DIM + self.node_attributes.num_trainable_parameters[nodes_name]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # # Default behaviour is to pass the same input as to the encoder.
