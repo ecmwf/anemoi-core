@@ -48,9 +48,13 @@ from anemoi.training.utils.masks import NoOutputMask
 # ``functools.partial``. ``sample_idx`` / ``parameters`` / ``dataset_names`` /
 # ``members`` are forwarded straight to the callback constructor.
 def _sample_plot(*, accumulation_levels_plot=None, **kwargs) -> BatchOutputPlot:
-    plot_fn = sample_plot_fn if accumulation_levels_plot is None else partial(
-        sample_plot_fn,
-        accumulation_levels_plot=accumulation_levels_plot,
+    plot_fn = (
+        sample_plot_fn
+        if accumulation_levels_plot is None
+        else partial(
+            sample_plot_fn,
+            accumulation_levels_plot=accumulation_levels_plot,
+        )
     )
     return BatchOutputPlot(plot_fn=plot_fn, tag_infix="sample", with_auxiliary=True, **kwargs)
 
@@ -489,7 +493,6 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 
 
 # ---- LossCurvePlot ----
-
 
 
 def test_plot_loss_sort_and_color_by_parameter_group_small_list():
@@ -1040,6 +1043,44 @@ def test_plots_plot_predicted_multilevel_flat_sample_accepts_auxiliary_panel():
     assert any(title == "tp corrupted targets" for title in plot_titles)
     assert "tp increment [pred - input]" not in plot_titles
     assert "tp persist err" not in plot_titles
+    fig.clear()
+    plt.close(fig)
+
+
+@pytest.mark.parametrize("nens", [1, 4])
+def test_plots_plot_predicted_ensemble_allocates_four_fixed_panels_plus_members(nens):
+    """plot_predicted_ensemble gives each variable 4 fixed panels plus one per member."""
+    import matplotlib.pyplot as plt
+
+    from anemoi.training.diagnostics.evaluation.plotting.ensemble import plot_predicted_ensemble
+
+    parameters = {0: ("t2m", False), 1: ("tp", True)}
+    nlatlon, nvar = 12, 2
+    latlons = np.stack(
+        [np.linspace(50, 55, nlatlon), np.linspace(0, 5, nlatlon)],
+        axis=1,
+    )
+    rng = np.random.default_rng(0)
+    y_true = rng.standard_normal((nlatlon, nvar)).astype(np.float64)
+    y_pred = rng.standard_normal((nens, nlatlon, nvar)).astype(np.float64)
+
+    fig = plot_predicted_ensemble(
+        parameters,
+        latlons,
+        [0.5],
+        y_true,
+        y_pred,
+        datashader=False,
+    )
+
+    # colorbar axes carry no title, so titled axes == plotted panels
+    titles = [ax.get_title() for ax in fig.axes if ax.get_title()]
+    assert len(titles) == nvar * (nens + 4)
+    for vname in ("t2m", "tp"):
+        for suffix in ("target", "pred mean", "ens mean err", "ens sd"):
+            assert f"{vname} {suffix}" in titles
+        for i_ens in range(nens):
+            assert f"{vname}_{i_ens + 1} - mean" in titles
     fig.clear()
     plt.close(fig)
 

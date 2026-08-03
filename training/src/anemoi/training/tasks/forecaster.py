@@ -173,6 +173,9 @@ class Forecaster(BaseTask):
         x = x.roll(-keep_steps, dims=1)
 
         for i in range(keep_steps):
+            if y_pred is None:
+                continue
+
             # Get prognostic variables
             x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
                 :,

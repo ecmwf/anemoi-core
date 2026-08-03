@@ -12,6 +12,7 @@ from .base_scaler import TensorDim
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
+from .spectral import SpectralDimensionScaler
 from .time_step import LeadTimeDecayScaler
 from .time_step import TimeStepScaler
 from .time_step import UniformTimeStepScaler
@@ -35,6 +36,7 @@ __all__ = [
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
+    "SpectralDimensionScaler",
     "StdevTendencyScaler",
     "TensorDim",
     "TimeStepScaler",

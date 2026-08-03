@@ -9,9 +9,12 @@
 
 
 from abc import abstractmethod
+from collections import defaultdict
 
 import numpy as np
 import torch
+from hydra.utils import instantiate
+from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -49,7 +52,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
 
     def __init__(self, nodes: NodeStorage, attribute_name: str) -> None:
         super().__init__()
-
+        assert attribute_name in nodes, f"{self.__class__.__name__} cannot find attribute '{attribute_name}' in nodes."
         mask = nodes[attribute_name].bool().squeeze()
         self.register_buffer("mask", mask)
 
@@ -165,3 +168,27 @@ class NoOutputMask(BaseMask):
 
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         return x
+
+
+def build_output_masks(output_mask_configs: dict, data_readers: dict) -> dict[str, BaseMask]:
+    """Build output masks for each dataset.
+
+    Parameters
+    ----------
+    output_mask_configs : dict[str, dict]
+        Dictionary of output mask configurations for each dataset.
+    data_readers : dict
+        Dictionary of data readers for each dataset.
+
+    Returns
+    -------
+    dict[str, BaseMask]
+        Dictionary of output masks for each dataset.
+    """
+    output_masks = defaultdict(lambda: NoOutputMask())
+    for dataset_name, output_mask_config in output_mask_configs.items():
+        if output_mask_config is not None:
+            assert dataset_name in data_readers, f"Dataset '{dataset_name}' not found in the data_readers."
+            output_masks[dataset_name] = instantiate(output_mask_config, nodes=data_readers[dataset_name])
+
+    return output_masks
