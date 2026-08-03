@@ -49,13 +49,13 @@ class BaseTendencyScaler(BaseScaler):
         statistics_tendencies : dict
             Data statistics dictionary for tendencies
         timestep : str, optional
-            Tendency statistics lead time. Defaults to ``task.tendency_delta``,
-            then ``task.output_timestep``, then the first available lead time.
+            Tendency statistics lead time. Defaults to ``task.tendency_delta``
+            if available, otherwise the first available lead time.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         task : object, optional
-            Training task. Used to derive a default timestep from ``tendency_delta``
-            or ``output_timestep`` when ``timestep`` is not provided.
+            Training task. If it exposes a ``tendency_delta`` attribute it is used
+            as the default timestep when ``timestep`` is not provided.
         """
         super().__init__(norm=norm)
         del kwargs
