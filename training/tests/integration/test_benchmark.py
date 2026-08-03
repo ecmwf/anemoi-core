@@ -106,6 +106,10 @@ def test_benchmark_training_dataloader(
     original_seed, random_seed = set_temp_base_seed()
     LOGGER.info("Benchmarking dataloader for configuration: %s (seed=%s)", test_case, random_seed)
 
+    task = None
+    datamodule = None
+    train_dataloader = None
+    data_iter = None
     try:
         # Initialize task
         task = instantiate(cfg.task)
@@ -126,7 +130,8 @@ def test_benchmark_training_dataloader(
         start_time = time.perf_counter()
         batch_count = 0
 
-        for batch_idx, batch in enumerate(train_dataloader):
+        data_iter = iter(train_dataloader)
+        for batch_idx, batch in enumerate(data_iter):
             if batch_idx >= num_batches_to_test:
                 break
             batch_count += 1
@@ -164,4 +169,12 @@ def test_benchmark_training_dataloader(
         LOGGER.info("  Process tree RSS delta:  %.2f MiB", rss_after - rss_before)
         track_dataloader_benchmark_results(test_case, batches_per_second)
     finally:
+        # Shut down the DataLoader worker processes and free their shared-memory
+        # segments.
+        del data_iter
+        del train_dataloader
+        del datamodule
+        del task
+        gc.collect()
+        empty_cache()
         restore_base_seed(original_seed)
