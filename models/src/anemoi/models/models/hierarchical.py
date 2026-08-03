@@ -12,7 +12,6 @@ import logging
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
@@ -23,6 +22,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.utils import instantiate
 
 LOGGER = logging.getLogger(__name__)
 

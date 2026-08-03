@@ -12,12 +12,20 @@ import logging
 import math
 from typing import Optional
 
-from hydra.errors import InstantiationException
-from hydra.utils import instantiate
 from torch import nn
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.utils import InstantiationError
+from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
+
+# Backwards-compatible alias: the native backend raises ``InstantiationError`` while the
+# Hydra backend raises ``hydra.errors.InstantiationException``. Catch both so the kernel
+# loader behaves identically regardless of the active backend.
+try:  # pragma: no cover - depends on whether Hydra is installed
+    from hydra.errors import InstantiationException
+except ImportError:  # pragma: no cover
+    InstantiationException = InstantiationError
 
 LOGGER = logging.getLogger(__name__)
 
@@ -130,11 +138,11 @@ def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool =
         if instance:
             try:
                 layer_kernels[name] = instantiate(kernel_entry, _partial_=True)
-            except InstantiationException:
+            except (InstantiationException, InstantiationError):
                 LOGGER.info(
                     f"{kernel_entry['_target_']} not found! Check your config.model.layer_kernel. {name} entry. Maybe your desired kernel is not installed or the import string is incorrect?"
                 )
-                raise InstantiationException
+                raise
             else:
                 LOGGER.info(f"{name} kernel: {kernel_entry['_target_']}.")
         else:

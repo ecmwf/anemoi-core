@@ -10,7 +10,6 @@
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
@@ -24,6 +23,7 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import AnemoiModelAutoEncoder
+from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
 
 

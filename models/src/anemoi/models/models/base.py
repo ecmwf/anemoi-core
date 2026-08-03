@@ -13,7 +13,6 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from torch import Tensor
@@ -29,6 +28,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.utils import instantiate
 from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.utils.config import DotDict
 

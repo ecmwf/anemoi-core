@@ -127,6 +127,25 @@ class IndexCollection:
             "model": self.model.todict(),
         }
 
+    def to_serialised(self) -> dict:
+        """Return the minimal JSON-serialisable inputs needed to rebuild this collection.
+
+        An ``IndexCollection`` is fully determined by its data config and ``name_to_index``
+        mapping (everything else is derived in ``__init__``). Returning just those two makes
+        a lossless, pickle-free description suitable for storing in checkpoint metadata.
+        """
+        return {
+            "config": self.config,
+            "name_to_index": dict(self.name_to_index),
+        }
+
+    @classmethod
+    def from_serialised(cls, data: dict) -> "IndexCollection":
+        """Rebuild an ``IndexCollection`` from :meth:`to_serialised` output."""
+        # __init__ expects an OmegaConf-like config (it uses .get / attribute access and
+        # OmegaConf.to_container); wrap the plain dict accordingly.
+        return cls(OmegaConf.create(data["config"]), dict(data["name_to_index"]))
+
     @staticmethod
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))

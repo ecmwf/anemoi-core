@@ -49,6 +49,22 @@ class BaseImputer(BasePreprocessor, ABC):
         self.register_buffer("nan_locations", torch.empty(0, dtype=torch.bool), persistent=False)
         # weight imputed values with zero in loss calculation
         self.register_buffer("loss_mask_training", torch.empty(0, dtype=torch.bool), persistent=False)
+        # The training-input index tensor is used at forward time (to select input variables
+        # from the NaN mask). Register it as a buffer so it is torch-managed: written to /
+        # loaded from the checkpoint state_dict and moved with the module across devices,
+        # instead of being read from the (separately-pickled) data_indices object. See
+        # no-pickle docs.
+        self.register_buffer("_data_input_full_idx", self.data_indices.data.input.full.clone(), persistent=True)
+
+    def _load_from_state_dict(self, state_dict, prefix, *args, **kwargs):
+        super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+        # `_data_input_full_idx` was newly persisted; checkpoints predating that change lack
+        # it. It is always rebuilt from data_indices at construction, so tolerate its absence
+        # under strict=True. Signature positions: (..., strict, missing_keys, ...).
+        missing_keys = args[2] if len(args) > 2 else kwargs.get("missing_keys", [])
+        key = prefix + "_data_input_full_idx"
+        if key not in state_dict and key in missing_keys:
+            missing_keys.remove(key)
 
     def _validate_indices(self):
         assert len(self.index_training_input) == len(self.index_inference_input) <= len(self.replacement), (
@@ -211,9 +227,9 @@ class BaseImputer(BasePreprocessor, ABC):
                 and self.nan_locations.shape[0] == nan_locations.shape[0]
                 and self.nan_locations.shape[1] == nan_locations.shape[2]
             ):
-                self.nan_locations[:] = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+                self.nan_locations[:] = nan_locations[:, 0, ..., self._data_input_full_idx]
             else:
-                self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+                self.nan_locations = nan_locations[:, 0, ..., self._data_input_full_idx]
 
             # data indices for training input
             index = self.index_training_input

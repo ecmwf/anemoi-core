@@ -14,7 +14,6 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -37,6 +36,7 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
+from anemoi.models.utils import instantiate
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
