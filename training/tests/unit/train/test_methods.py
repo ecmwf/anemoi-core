@@ -436,8 +436,29 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
         dataset_name="data",
     )
 
-    assert result.shape == (1,)
+    assert result.shape == ()
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+
+
+def test_validation_step_logs_loss_and_metrics() -> None:
+    module = MagicMock(spec=BaseTrainingModule)
+    module.logger_enabled = True
+    module._get_loss_name.return_value = "mse"
+    module._step.return_value = SimpleNamespace(
+        loss=torch.tensor(3.0),
+        metrics={"data_mse_loss": torch.tensor(2.0)},
+    )
+
+    BaseTrainingModule.validation_step(
+        module,
+        {"data": torch.zeros((2, 1, 1, 1, 1))},
+        batch_idx=0,
+    )
+
+    assert [call.args[0] for call in module.log.call_args_list] == [
+        "val_mse_loss",
+        "val_data_mse_loss",
+    ]
 
 
 # ── EDMDiffusionTransportObjective: compute_loss ─────────────────────────────────

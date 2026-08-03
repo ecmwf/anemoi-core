@@ -81,9 +81,6 @@ class RolloutEval(Callback):
             self._log(pl_module, step_output.loss, step_output.metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
-
-        loss_scales = loss
-        loss = loss_scales.sum()
         loss_name = getattr(pl_module.loss, "name", pl_module.loss.__class__.__name__.lower())
         pl_module.log(
             f"val_r{self.max_rollout}_{loss_name}",
@@ -95,34 +92,18 @@ class RolloutEval(Callback):
             batch_size=bs,
             sync_dist=True,
         )
-        if loss_scales.numel() > 1:
-            for scale in range(loss_scales.numel()):
-                pl_module.log(
-                    f"val_r{self.max_rollout}_{loss_name}_{scale}",
-                    loss_scales[scale],
-                    on_epoch=True,
-                    on_step=True,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
 
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
-
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
-                pl_module.log(
-                    f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
-                    log_val,
-                    on_epoch=True,
-                    on_step=False,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
+            pl_module.log(
+                f"val_r{self.max_rollout}_" + mname,
+                mvalue,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=False,
+                logger=pl_module.logger_enabled,
+                batch_size=bs,
+                sync_dist=True,
+            )
 
     def on_validation_batch_end(
         self,
