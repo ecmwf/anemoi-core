@@ -8,13 +8,17 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from abc import abstractmethod
 
 import numpy as np
 import torch
+from hydra.utils import instantiate
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
+
+LOGGER = logging.getLogger(__name__)
 
 
 class BaseMask:
@@ -165,3 +169,33 @@ class NoOutputMask(BaseMask):
 
     def rollout_boundary(self, x: torch.Tensor, *args, **kwargs) -> torch.Tensor:  # noqa: ARG002
         return x
+
+
+def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict, **kwargs) -> dict[str, BaseMask]:
+    """Create output masks for each dataset based on the provided configuration.
+
+    Parameters
+    ----------
+    output_mask_config : dict[str, dict]
+        A dictionary containing the output mask configuration for each dataset. If a dataset is
+        not found in this configuration, a `NoOutputMask` will be used as the default.
+    data_readers : dict
+        A dictionary containing the data readers for each dataset.
+
+    Returns
+    -------
+    dict[str, BaseMask]
+        A dictionary mapping dataset names to their corresponding output masks.
+    """
+    output_masks = {}
+    for dataset_name, data_reader in data_readers.items():
+        if dataset_name not in output_mask_config:
+            LOGGER.warning(
+                f"Dataset '{dataset_name}' not found in 'config.model.output_mask'. Using `NoOutputMask` as default.",
+            )
+            output_masks[dataset_name] = NoOutputMask()
+            continue
+
+        output_masks[dataset_name] = instantiate(output_mask_config[dataset_name], nodes=data_reader, **kwargs)
+
+    return output_masks

@@ -43,6 +43,8 @@ from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+from anemoi.training.utils.masks import BaseMask
+from anemoi.training.utils.masks import create_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
@@ -177,17 +179,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
 
-        # Handle dictionary of graph_data
         self.dataset_names = list(data_indices.keys())
 
-        # Create output_mask dictionary for each dataset
-        self.output_mask = {
-            name: instantiate(
-                config.model.output_mask,
-                nodes=data_readers[name],  # TODO(Mario): Fix.
-            )
-            for name in self.dataset_names
-        }
+        self.output_mask: dict[str, BaseMask] = create_output_masks(
+            get_multiple_datasets_config(config.model.output_mask),
+            data_readers=data_readers,
+        )
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
