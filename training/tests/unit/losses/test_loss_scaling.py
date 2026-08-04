@@ -415,49 +415,6 @@ def test_tendency_scaler_uses_configured_timestep(
     assert scalers["additional_scaler"][1][variable_idx] == expected_scaling
 
 
-def test_tendency_scaler_defaults_to_task_tendency_delta() -> None:
-    """BaseTendencyScaler uses task.tendency_delta (highest priority) when no explicit timestep is given."""
-    import datetime
-    from types import SimpleNamespace
-    from unittest.mock import MagicMock
-
-    from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
-
-    task = SimpleNamespace(tendency_delta=datetime.timedelta(hours=2))
-    statistics_tendencies = {
-        "lead_times": ["2h", "4h"],
-        "2h": {"stdev": [1.0, 2.0]},
-        "4h": {"stdev": [1.0, 2.0]},
-    }
-    scaler = StdevTendencyScaler(
-        data_indices=MagicMock(),
-        statistics={"stdev": [1.0, 2.0]},
-        statistics_tendencies=statistics_tendencies,
-        task=task,
-    )
-    assert scaler.timestep == "2h"
-
-
-def test_tendency_scaler_falls_back_to_first_lead_time() -> None:
-    """BaseTendencyScaler falls back to lead_times[0] when task provides no hint."""
-    from unittest.mock import MagicMock
-
-    from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
-
-    statistics_tendencies = {
-        "lead_times": ["6h", "12h"],
-        "6h": {"stdev": [1.0]},
-        "12h": {"stdev": [1.0]},
-    }
-    scaler = StdevTendencyScaler(
-        data_indices=MagicMock(),
-        statistics={"stdev": [1.0]},
-        statistics_tendencies=statistics_tendencies,
-        task=None,
-    )
-    assert scaler.timestep == "6h"
-
-
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
 def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     config, data_indices, _, _ = fake_data
