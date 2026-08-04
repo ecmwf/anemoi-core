@@ -80,44 +80,6 @@ def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str
         OmegaConf.set_struct(config, prior_struct)
 
 
-def _reject_unsupported_warm_start(pipeline_cfg: DictConfig) -> None:
-    """Reject warm start configured with a source that has no local checkpoint.
-
-    Warm start restores optimizer and epoch state through Lightning's
-    ``ckpt_path``, which needs a checkpoint reachable as a local file. Only
-    ``LocalSource`` (an explicit path) and ``RunSource`` (a resolved ``last.ckpt``
-    on a shared filesystem) provide one. With an ``S3Source`` / ``HTTPSource`` —
-    or no source at all — the pipeline would still load the weights, but
-    :attr:`AnemoiTrainer.last_checkpoint` resolves to ``None`` for those sources,
-    so Lightning would silently start from step 0 with the optimizer and epoch
-    state dropped. Fail loudly here instead of degrading silently.
-    """
-    loading = OmegaConf.select(pipeline_cfg, "training.checkpoint.loading", default=None)
-    if loading is None:
-        return
-    loading_target = OmegaConf.select(loading, "_target_", default="") or ""
-    if not loading_target.endswith("WarmStartLoader"):
-        return
-
-    source = OmegaConf.select(pipeline_cfg, "training.checkpoint.source", default=None)
-    source_target = (OmegaConf.select(source, "_target_", default="") or "") if source is not None else ""
-    if source_target.endswith(("LocalSource", "RunSource")):
-        return
-
-    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-
-    described = source_target.rsplit(".", 1)[-1] if source_target else "no source"
-    msg = (
-        "Warm start restores optimizer and epoch state via Lightning's ckpt_path, "
-        "which requires a checkpoint reachable as a local file. The configured "
-        f"training.checkpoint.source ({described}) does not provide one, so the optimizer "
-        "and epoch state would be silently dropped. Use a LocalSource or RunSource for "
-        "warm start, or switch training.checkpoint.loading to WeightsOnlyLoader / "
-        "TransferLearningLoader if you only need the weights."
-    )
-    raise CheckpointConfigError(msg)
-
-
 class AnemoiTrainer(ABC):
     """Utility class for training the model."""
 
@@ -501,7 +463,6 @@ class AnemoiTrainer(ABC):
         from anemoi.training.checkpoint.base import CheckpointContext
 
         has_loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None) is not None
-        _reject_unsupported_warm_start(self.config)
 
         context = CheckpointContext(model=model, config=self.config)
         # Runtime, logger-derived server-to-server lineage cannot reach a RunSource
@@ -569,8 +530,8 @@ class AnemoiTrainer(ABC):
         ``<checkpoints.root.parent>/<id>/last.ckpt`` via :meth:`RunSource.resolve_path`
         (shared with the source stage so the two cannot drift); a ``LocalSource`` yields
         its explicit file. Remote sources (S3/HTTP) record no local path (``None``),
-        which is why warm start is restricted to Local/Run sources
-        (see :func:`_reject_unsupported_warm_start`).
+        which is why warm start is restricted to Local/Run sources (enforced by
+        :func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`).
 
         Returns ``None`` when there is nothing to resume. A configured-but-missing run
         checkpoint still surfaces from the source stage during model build
@@ -824,13 +785,20 @@ class AnemoiTrainer(ABC):
     def _skip_lightning_restore(self) -> bool:
         """Whether to skip Lightning's ``ckpt_path`` full-state restore.
 
-        The checkpoint pipeline applies weights + parity to the model at build
-        (:meth:`model`), so Lightning must not redo that. ``ckpt_path`` is kept
-        only for a loading strategy that declares
-        :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
-        — i.e. warm start, where Lightning owns the optimizer/scheduler/loop
-        restore the pipeline cannot perform at build time. Every other strategy
-        (and a run with no loading configured) suppresses ``ckpt_path``.
+        The checkpoint pipeline applies the checkpoint *weights* to the model at build
+        (:meth:`model`), so Lightning must not redo that. ``ckpt_path`` additionally
+        makes Lightning restore the optimizer, scheduler and loop/epoch state — which is
+        wanted only for warm start. Concretely, keyed on the configured
+        ``training.checkpoint.loading``:
+
+        - **kept** (returns ``False``, Lightning restores full training state): a loader
+          that declares
+          :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
+          — i.e. ``WarmStartLoader``.
+        - **suppressed** (returns ``True``, ``ckpt_path=None``, weights-only): every other
+          loader — ``WeightsOnlyLoader`` / ``ColdStartLoader`` / ``TransferLearningLoader``
+          — because they intentionally start fresh training state. A run with no loading
+          configured returns ``False`` (nothing to suppress).
         """
         loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None)
         if loading is None:
@@ -865,6 +833,10 @@ class AnemoiTrainer(ABC):
 
         params["model"] = self.model
         params["datamodule"] = self.datamodule
+        # ckpt_path drives Lightning's optimizer/scheduler/epoch restore. Only warm start
+        # wants it (the pipeline already loaded the weights); weights-only / cold-start /
+        # transfer-learning suppress it so training state starts fresh. See
+        # :meth:`_skip_lightning_restore`.
         params["ckpt_path"] = None if self._skip_lightning_restore() else self.last_checkpoint
 
         if version.parse("2.6.0") <= PL_VERSION:

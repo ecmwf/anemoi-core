@@ -79,6 +79,50 @@ def _inject_run_lineage(
     return OmegaConf.merge(source, overrides)
 
 
+def reject_unsupported_warm_start(cfg: DictConfig) -> None:
+    """Reject warm start configured with a source that has no local checkpoint.
+
+    Warm start restores optimizer and epoch state through Lightning's ``ckpt_path``,
+    which needs a checkpoint reachable as a local file. Only ``LocalSource`` (an explicit
+    path) and ``RunSource`` (a resolved ``last.ckpt`` on a shared filesystem) provide one.
+    With an ``S3Source`` / ``HTTPSource`` — or no source at all — the pipeline would still
+    load the weights, but there is no local path for Lightning to resume the optimizer /
+    epoch state, so it would silently start from step 0. Fail loudly here instead of
+    degrading silently. Called at the start of :func:`build_checkpoint_pipeline` so the
+    checkpoint module owns this composition rule.
+
+    Raises
+    ------
+    CheckpointConfigError
+        If ``training.checkpoint.loading`` is a ``WarmStartLoader`` but the source is not
+        a Local/Run source.
+    """
+    loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
+    if loading is None:
+        return
+    loading_target = OmegaConf.select(loading, "_target_", default="") or ""
+    if not loading_target.endswith("WarmStartLoader"):
+        return
+
+    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
+    source_target = (OmegaConf.select(source, "_target_", default="") or "") if source is not None else ""
+    if source_target.endswith(("LocalSource", "RunSource")):
+        return
+
+    from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+    described = source_target.rsplit(".", 1)[-1] if source_target else "no source"
+    msg = (
+        "Warm start restores optimizer and epoch state via Lightning's ckpt_path, "
+        "which requires a checkpoint reachable as a local file. The configured "
+        f"training.checkpoint.source ({described}) does not provide one, so the optimizer "
+        "and epoch state would be silently dropped. Use a LocalSource or RunSource for "
+        "warm start, or switch training.checkpoint.loading to WeightsOnlyLoader / "
+        "TransferLearningLoader if you only need the weights."
+    )
+    raise CheckpointConfigError(msg)
+
+
 def build_checkpoint_pipeline(
     cfg: DictConfig,
     *,
@@ -119,6 +163,9 @@ def build_checkpoint_pipeline(
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
+
+    # Composition rule: warm start needs a source that yields a local ckpt_path.
+    reject_unsupported_warm_start(cfg)
 
     stage_configs: list[Any] = []
 

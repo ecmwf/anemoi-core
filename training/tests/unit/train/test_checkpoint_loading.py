@@ -19,11 +19,11 @@ from omegaconf import OmegaConf
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.train.train import _reject_unsupported_warm_start
 
 
 class DummyIndex:
@@ -895,19 +895,19 @@ def _warm_start_cfg(source: dict | None) -> DictConfig:
 def test_warm_start_rejects_remote_source(source_target: str) -> None:
     """Warm start from S3/HTTP would silently drop optimizer/epoch state, so it must raise."""
     with pytest.raises(CheckpointConfigError, match="Warm start"):
-        _reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))
+        reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))
 
 
 def test_warm_start_rejects_missing_source() -> None:
     """Warm start with no source has nothing to resume from and must raise."""
     with pytest.raises(CheckpointConfigError, match="Warm start"):
-        _reject_unsupported_warm_start(_warm_start_cfg(None))
+        reject_unsupported_warm_start(_warm_start_cfg(None))
 
 
 @pytest.mark.parametrize("source_target", [_LOCALSOURCE, _RUNSOURCE])
 def test_warm_start_allows_local_and_run_sources(source_target: str) -> None:
     """LocalSource and RunSource resolve to a local ckpt_path, so warm start is allowed."""
-    _reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))  # must not raise
+    reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))  # must not raise
 
 
 @pytest.mark.parametrize("source_target", _REMOTE_SOURCES)
@@ -923,4 +923,4 @@ def test_non_warm_start_allows_remote_source(source_target: str) -> None:
             },
         },
     )
-    _reject_unsupported_warm_start(cfg)  # must not raise
+    reject_unsupported_warm_start(cfg)  # must not raise
