@@ -122,7 +122,7 @@ def test_planar_area_weights_shoelace_matches_convexhull():
     resolution = attr._compute_mean_nearest_distance(latlons)
     boundary_points = attr._get_boundary_ring(latlons, resolution)
     extended_points = np.vstack([latlons, boundary_points])
-    v = Voronoi(extended_points, qhull_options="QJ Pp")
+    v = Voronoi(extended_points, qhull_options="Qbb Qc Qz Pp")
 
     # Reference: the original per-node implementation.
     reference = np.array([ConvexHull(v.vertices[v.regions[v.point_region[idx]]]).volume for idx in range(len(latlons))])
@@ -136,12 +136,11 @@ def test_planar_area_weights_shoelace_matches_convexhull():
 def test_planar_area_weights_degenerate_fallback():
     """A region with an interior vertex falls back to the exact ConvexHull area.
 
-    Heavy qhull joggling can emit interior Voronoi vertices, making a stored region
-    polygon non-convex so plain shoelace under-counts its area (observed on real
-    stretched-grid data: up to ~21% on a few cells). The detector must flag such a
-    region and the ConvexHull fallback must recover the exact hull area. Small random
-    fixtures rarely emit a genuine (non-collinear) interior vertex, so we inject one
-    into a real Voronoi region to exercise that path deterministically.
+    A stored region polygon that is not convex makes plain shoelace under-count its
+    area. The detector must flag such a region and the ConvexHull fallback must recover
+    the exact hull area. The merged-facet qhull options are not expected to emit such a
+    region in practice, so we inject one into a real Voronoi region to exercise that
+    path deterministically -- this pins the guard's behaviour, not its frequency.
     """
     import numpy as np
     from scipy.spatial import ConvexHull
@@ -155,7 +154,7 @@ def test_planar_area_weights_degenerate_fallback():
     resolution = PlanarAreaWeights()._compute_mean_nearest_distance(points)
     boundary_points = PlanarAreaWeights()._get_boundary_ring(points, resolution)
     extended_points = np.vstack([points, boundary_points])
-    v = Voronoi(extended_points, qhull_options="QJ Pp")
+    v = Voronoi(extended_points, qhull_options="Qbb Qc Qz Pp")
     n = len(points)
 
     # Pick a bounded region (no -1) with >= 4 vertices to deform.
@@ -188,3 +187,30 @@ def test_planar_area_weights_degenerate_fallback():
     # The production method must detect the non-convex region and fall back to ConvexHull.
     areas = PlanarAreaWeights._voronoi_region_areas(v, n)
     np.testing.assert_allclose(areas[target], hull_area, rtol=1e-9, atol=0.0)
+
+
+def test_planar_area_weights_exact_on_regular_grid():
+    """Interior cells of a regular grid have exactly dlat * dlon area.
+
+    Regression test for the qhull options (#690). A regular grid is massively cocircular,
+    which is precisely the degeneracy merged facets ("Qbb Qc Qz") handles exactly and the
+    joggle ("QJ") only approximates: joggle reproduces this to ~1e-6 and raising it, as
+    QH6229 suggests, to ~1e+3. Both blow through this tolerance, so reinstating a joggle
+    fails here loudly instead of silently returning meaningless weights.
+    """
+    import numpy as np
+
+    spacing = 0.01
+    lats = 0.5 + np.arange(60) * spacing
+    lons = 0.1 + np.arange(60) * spacing
+    grid_lat, grid_lon = np.meshgrid(lats, lons, indexing="ij")
+    latlons = np.column_stack([grid_lat.ravel(), grid_lon.ravel()])
+
+    areas = PlanarAreaWeights().compute_area_weights(latlons)
+
+    # Only interior cells are exact squares; the outer ring is bounded by the added
+    # boundary ring rather than by neighbouring nodes.
+    interior = ((grid_lat > lats[0]) & (grid_lat < lats[-1]) & (grid_lon > lons[0]) & (grid_lon < lons[-1])).ravel()
+    assert interior.sum() == 58 * 58
+
+    np.testing.assert_allclose(areas[interior], spacing**2, rtol=1e-9, atol=0.0)

@@ -164,9 +164,12 @@ class PlanarAreaWeights(BaseAreaWeights):
 
         Uses the shoelace formula instead of a per-node :class:`scipy.spatial.ConvexHull`.
         SciPy returns each 2-D region's vertices in boundary order, so for a convex cell
-        this matches ``ConvexHull(...).volume`` to float-rounding level. Heavy joggling
-        (qhull ``QJ``) can yield degenerate, non-convex regions where shoelace
-        under-counts; those are detected and recomputed exactly with ``ConvexHull``.
+        this matches ``ConvexHull(...).volume`` to float-rounding level. A region whose
+        stored vertex order is not convex would make shoelace under-count, so those are
+        detected and recomputed exactly with ``ConvexHull``. Under the merged-facet qhull
+        options used by :meth:`compute_area_weights` this guard is not expected to fire
+        (it does not on N320 or on 1.7M-node stretched grids); it is kept as a cheap
+        safety net against near-collinear cell vertices.
 
         Parameters
         ----------
@@ -238,9 +241,17 @@ class PlanarAreaWeights(BaseAreaWeights):
         resolution = self._compute_mean_nearest_distance(latlons)
         boundary_points = self._get_boundary_ring(latlons, resolution)
 
-        # Build the Voronoi tessellation over all points (boundary ring included)
+        # Build the Voronoi tessellation over all points (boundary ring included).
+        #
+        # "Qbb Qc Qz" is qhull's merged-facet precision handling (SciPy's own default for
+        # 2-D Voronoi) and "Pp" silences its precision warnings. Do NOT swap this for the
+        # joggle ("QJ"): joggle displaces every input coordinate by up to 1% of the
+        # *bounding box*, which is unrelated to the node spacing. On a stretched grid
+        # (global extent, 1 km nodes) that is ~40x the spacing, so qhull fails to build a
+        # hull at all and asks for a larger joggle -- and raising it, as QH6229 suggests,
+        # returns silently meaningless areas rather than fixing anything. See #690.
         extended_points = np.vstack([latlons, boundary_points])
-        v = Voronoi(extended_points, qhull_options="QJ Pp")
+        v = Voronoi(extended_points, qhull_options="Qbb Qc Qz Pp")
 
         # Area of each node's Voronoi cell (boundary-ring points excluded), vectorised.
         return self._voronoi_region_areas(v, len(latlons))
