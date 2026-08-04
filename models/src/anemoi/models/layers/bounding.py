@@ -275,11 +275,11 @@ def _build_dataset_boundings(
 
     Returns
     -------
-    nn.ModuleDict
-        Mapping of dataset name to nn.Sequential of bounding modules.
+    nn.Sequential
+        Sequence of bounding modules.
     """
-    return nn.ModuleList(
-        [
+    return nn.Sequential(
+        *[
             instantiate(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,

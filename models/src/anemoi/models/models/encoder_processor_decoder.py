@@ -249,52 +249,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_target(
         self,
-        x: "SourceView",
-        encoder_data_output: torch.Tensor | None,
-        batch_size: int = 1,
-        model_comm_group: ProcessGroup | None = None,
-        dataset_name: str | None = None,
-    ):
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-
-        x_flat = x.flatten()
-        # Sharding of the flattened (single-tensor) node dimension is described by
-        # the view itself; ``None`` means the dataset is replicated, not sharded.
-        grid_shard_sizes = x_flat.shard_sizes
-
-        if self.use_encoder_data_output[dataset_name]:
-            assert encoder_data_output is not None
-            target_decoder_data = encoder_data_output
-        else:
-            target_inputs = [x_flat.data, latlons_to_sincos(x_flat.coordinates)]
-            dynamic_node_attributes = self._encode_dynamic_node_attributes(dataset_name, x_flat)
-            if dynamic_node_attributes is not None:
-                target_inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
-            target_decoder_data = torch.cat(target_inputs, dim=-1)
-
-            if dataset_name in self.node_attributes:
-                trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
-                if grid_shard_sizes is not None:
-                    trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
-
-                target_decoder_data = torch.cat([target_decoder_data, trainable_parameters], dim=-1)
-
-        assert x_flat.coordinates.shape[0] == target_decoder_data.shape[0], "Coordinate and data sizes must match."
-
-        # gather full coordinates for correct graph building in the decoder
-        coordinates = x_flat.coordinates
-        timedeltas = x_flat.timedeltas
-        if grid_shard_sizes is not None:
-            coordinates = gather_tensor(coordinates, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
-            if timedeltas is not None:
-                timedeltas = gather_tensor(timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
-
-        return coordinates, target_decoder_data, grid_shard_sizes, x_flat.batch_sizes, timedeltas
-
-    def _assemble_targets(
-        self,
-        x_input_data: Tensor,
+        x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
+        x_target: "SourceView",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -307,24 +264,33 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Returns
         -------
-        tuple[Tensor, ShardSizes]
-            ``(x_target_latent, grid_shard_sizes)`` where ``x_target_latent`` has width
-            ``target_dim[dataset_name]``.
+        target_coords : Tensor
+            Coordinates of the target nodes, shape (N, 2) for lat/lon.
+        x_target_latent : Tensor
+            Latent features for the target nodes, shape (N, F) where F is the concatenated feature dimension.
+        grid_shard_sizes : ShardSizes
+            Shard sizes for the target nodes, or None if the dataset is not sharded.
+        data_batch_sizes : tuple[int, ...] | None
+            Batch sizes for the target nodes, or None if the dataset is not batched.
+        target_timedeltas : Tensor | None   
+            Timedeltas for the target nodes, or None if the dataset does not have timedeltas (gridded).
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_target_latent = self.decoders_target_input[self.dataset2decoder[dataset_name]].tensor(
+        target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
+        target_coords, target_timedeltas, x_target_latent = target_features.tensor(
             x_input_data,
             x_encoded_data,
+            x_target,
             batch_size=batch_size,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
         )
 
-        return x_target_latent, grid_shard_sizes
+        return target_coords, x_target_latent, grid_shard_sizes, None, target_timedeltas
 
     def _assemble_output(
         self,
@@ -472,6 +438,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
             encoder_edge_attr = encoder_edge_attr.to(device=x_data_latent.device, dtype=x_data_latent.dtype)
             encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
+            assert encoder_edge_index.shape[1] == encoder_edge_attr.shape[0], (
+                f"Encoder edge_index shape {list(encoder_edge_index.shape)} does not match "
+                f"edge_attr shape {list(encoder_edge_attr.shape)} for dataset {dataset_name}."
+            )
 
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
@@ -522,23 +492,29 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in dataset_names:
-            data_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
-                self._assemble_target(
-                    target[dataset_name],
-                    x_data_latent_dict.get(dataset_name, None),
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                    dataset_name=dataset_name,
-                )
+        for dataset_name in self.target_datasets:
+            (
+                target_coords, 
+                target_data_latent,
+                shard_sizes_data,
+                data_batch_sizes,
+                data_timedeltas
+            ) = self._assemble_target(
+                batch[dataset_name],
+                x_data_latent_dict.get(dataset_name, None),
+                target[dataset_name],
+                batch_size=batch_size,
+                model_comm_group=model_comm_group,
+                dataset_name=dataset_name,
             )
 
-            if data_coords.numel() == 0:
+
+            if target_coords.numel() == 0:
                 LOGGER.debug(
                     "No data points for dataset %s in the batch (data_coords.shape = %s), "
                     + "will decode to a size-zero tensor ...",
                     dataset_name,
-                    list(data_coords.shape),
+                    list(target_coords.shape),
                 )
 
             graph_batch_kwargs = (
@@ -552,7 +528,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ].get_edges(
                 batch_size=batch_size,
                 src_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
-                dst_coords=data_coords,
+                dst_coords=target_coords,
                 dst_timedeltas=data_timedeltas,
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
@@ -566,7 +542,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
                 (x_latent_proc, target_data_latent),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
@@ -587,7 +564,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Preserve the reconstructed output metadata rather than the decoder
         # conditioning metadata carried by target.
         output = target
-        for dataset_name in target.keys():
+        for dataset_name in x_out_dict.keys():
             do_coords_match = target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
             assert (
                 do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
