@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -52,10 +52,6 @@ class BaseGraphSchema(PydanticBaseModel):
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
-    data: str = Field(example="data")
-    "Key name for the data nodes. Default to 'data'."
-    hidden: str | list[str] = Field(example="hidden")
-    "Key name for the hidden nodes. Default to 'hidden'."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 
     @model_validator(mode="after")

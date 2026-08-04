@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,12 +9,15 @@
 
 
 import hypothesis.strategies as st
+import psutil
 import pytest
 import torch
 import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
@@ -36,9 +39,7 @@ def layer_kernels():
 def test_multi_head_self_attention_init(
     num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation, layer_kernels
 ):
-    embed_dim = (
-        num_heads * embed_dim_multiplier
-    )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
+    embed_dim = num_heads * embed_dim_multiplier
 
     mhsa = attention_module(
         num_heads,
@@ -52,11 +53,23 @@ def test_multi_head_self_attention_init(
 
     assert isinstance(mhsa, nn.Module)
     assert mhsa.num_heads == num_heads
-    assert mhsa.embed_dim == embed_dim
     assert mhsa.head_dim == embed_dim // num_heads
+    assert mhsa.lin_q.in_features == embed_dim
+    assert mhsa.projection.out_features == embed_dim
     assert dropout_p == mhsa.dropout_p
     assert mhsa.q_norm.bias is None
     assert mhsa.k_norm.bias is None
+
+
+@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
+def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_module, layer_kernels):
+    with pytest.raises(ValueError, match="must be divisible by number of heads"):
+        attention_module(
+            num_heads=3,
+            embed_dim=10,
+            layer_kernels=layer_kernels,
+            attention_implementation="scaled_dot_product_attention",
+        )
 
 
 @pytest.mark.gpu
@@ -79,8 +92,8 @@ def test_multi_head_self_attention_forward_sdpa(batch_size, num_heads, embed_dim
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
-    shapes = [list(x.shape)]
-    output = mhsa.forward(x, shapes, batch_size)
+    shard_info = GraphShardInfo(nodes=[2])
+    output = mhsa.forward(x, shard_info, batch_size)
 
     assert output.shape == x.shape
 
@@ -105,8 +118,8 @@ def test_multi_head_self_attention_backward_sdpa(batch_size, num_heads, embed_di
     )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
-    output = mhsa.forward(x, shapes, batch_size)
+    shard_info = GraphShardInfo(nodes=[2])
+    output = mhsa.forward(x, shard_info, batch_size)
 
     # Dummy loss
     loss = output.sum()
@@ -137,8 +150,8 @@ def test_multi_head_cross_attention_forward_sdpa(batch_size, num_heads, embed_di
     )
 
     x = torch.randn(batch_size * 2, embed_dim)
-    shapes = [list(x.shape)]
-    output = mhsa.forward((x, x), shapes, batch_size)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2], dst_nodes=[2])
+    output = mhsa.forward((x, x), shard_info, batch_size)
 
     assert output.shape == x.shape
 
@@ -164,8 +177,8 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     )
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
-    output = mhsa.forward((x, x), shapes, batch_size)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2], dst_nodes=[2])
+    output = mhsa.forward((x, x), shard_info, batch_size)
 
     # Dummy loss
     loss = output.sum()
@@ -173,3 +186,83 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
 
     assert x.grad is not None
     assert x.grad.shape == x.shape
+
+
+def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
+    """Test that SDPA with window_size produces valid output and attends only within the window."""
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 1
+    grid = 16
+    window_size = 4
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    torch.set_default_device(device)
+
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        window_size=window_size,
+    )
+
+    x = torch.randn(batch_size * grid, embed_dim, device=device)
+    shard_info = GraphShardInfo(nodes=[grid])
+    output = mhsa.forward(x, shard_info, batch_size)
+    if device == "cuda":
+        peak_alloc_memory_after_sliding_window_mb = torch.cuda.max_memory_allocated() / (1024**2)
+    else:
+        peak_alloc_memory_after_sliding_window_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
+    print(f"Peak memory allocated during sliding window attention: {peak_alloc_memory_after_sliding_window_mb:.2f} MB")
+
+    # Output shape must match input shape
+    assert output.shape == x.shape
+
+    # Compare against global attention (no window) to verify the window changes the result
+    mhsa_global = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        window_size=None,
+    )
+    # Copy weights so the only difference is the window mask
+    mhsa_global.load_state_dict(mhsa.state_dict())
+    output_global = mhsa_global.forward(x, shard_info, batch_size)
+
+    if device == "cuda":
+        peak_alloc_memory_after_global_mb = torch.cuda.max_memory_allocated() / (1024**2)
+    else:
+        peak_alloc_memory_after_global_mb = psutil.Process().memory_info().rss / (1024**2)  # RSS size in MB
+    print(f"Peak memory allocated during global attention: {peak_alloc_memory_after_global_mb:.2f} MB")
+
+    # With a small window on a 16-token sequence, outputs should differ
+    assert not torch.allclose(
+        output, output_global, atol=1e-5
+    ), "Sliding window output should differ from global attention output"
+
+    # Memory usage using sliding window should not be greater then using global attention
+    # Since flex_attentions block mask funciton is used to handle the sliding window,
+    # masking naively with a seq_len^2 array
+    assert (
+        peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
+    ), "Sliding window attention should not use more memory than global attention"
+
+
+def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
+    num_heads = 4
+    embed_dim = 32
+    batch_size = 2
+    mhsa = MultiHeadSelfAttention(
+        num_heads,
+        embed_dim,
+        layer_kernels,
+        attention_implementation="scaled_dot_product_attention",
+        softcap=0.5,
+    )
+
+    x = torch.randn(batch_size * 2, embed_dim)
+    shard_info = GraphShardInfo(nodes=[2])
+    with pytest.raises(NotImplementedError, match="Softcap not supported"):
+        mhsa.forward(x, shard_info, batch_size)

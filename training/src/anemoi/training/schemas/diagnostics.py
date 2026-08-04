@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,31 +13,116 @@ from typing import Annotated
 from typing import Any
 from typing import Literal
 
+from omegaconf import OmegaConf
+from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveInt
+from pydantic import model_validator
 from pydantic import root_validator
 
 from anemoi.training.diagnostics.mlflow import MAX_PARAMS_LENGTH
+from anemoi.training.schemas.training import GenericSchema
 from anemoi.utils.schemas import BaseModel
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphTrainableFeaturesPlotSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphTrainableFeaturesPlot"] = Field(alias="_target_")
-    "GraphTrainableFeaturesPlot object from anemoi training diagnostics callbacks."
+class GraphPlotFnSchema(GenericSchema):
+    """Hydra config for a :class:`GraphFeaturePlot` plot function.
+
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
+    ``edge_trainable_modules``. See :class:`GraphPlotFn` for the full contract.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
+    """
+
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
+
+
+class LossPlotFnSchema(GenericSchema):
+    """Hydra config for a :class:`LossCurvePlot` plot function.
+
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``loss`` and ``parameter_names``. See :class:`LossPlotFn` for the full contract.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
+    """
+
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
+
+
+class GraphFeaturePlotSchema(PydanticBaseModel):
+    """Config schema for :class:`GraphFeaturePlot`.
+
+    Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
+    shared with :class:`BatchOutputPlot` and :class:`LossCurvePlot`) without
+    extending this schema (``extra='allow'`` on the nested ``plot_fn``).
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot"] = Field(alias="_target_")
+    "GraphFeaturePlot object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
     every_n_epochs: int | None
     "Epoch frequency to plot at."
+    q_extreme_limit: float = Field(default=0.05)
+    "Quantile edges to represent (used by default plot_fn)."
+    plot_fn: GraphPlotFnSchema | None = Field(default=None)
+    "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
-class PlotLossSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotLoss"] = Field(alias="_target_")
-    "PlotLoss object from anemoi training diagnostics callbacks."
+class FocusAreaSchema(BaseModel):
+    name: str | None = Field(default=None)
+    "Name of the focus_area, will be used for plot naming."
+    mask_attr_name: str | None = Field(default=None)
+    "Name of the node attribute to use as masking. eg. cutout_mask"
+    latlon_bbox: list[float] | None = Field(default=None, min_items=4, max_items=4)
+    "Latitude and longitude bounds as [lat_min, lon_min, lat_max, lon_max]."
+
+    @model_validator(mode="after")
+    def exactly_one_present(self) -> "FocusAreaSchema":
+        if (self.mask_attr_name is None) == (self.latlon_bbox is None):
+            msg = "Provide exactly one of 'mask_attr_name' or 'latlon_bbox' (not both)."
+            raise ValueError(msg)
+        return self
+
+
+class LossCurvePlotSchema(PydanticBaseModel):
+    """Config schema for :class:`LossCurvePlot`.
+
+    Users may plug in a custom ``plot_fn`` (matching the pluggable pattern
+    shared with :class:`BatchOutputPlot`) without extending this schema
+    (``extra='allow'`` on the nested ``plot_fn``).
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LossCurvePlot"] = Field(alias="_target_")
+    "LossCurvePlot object from anemoi training diagnostics callbacks."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
     parameter_groups: dict[str, list[str]]
     "Dictionary with parameter groups with parameter names as key."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at."
+    plot_fn: LossPlotFnSchema | None = Field(default=None)
+    "Hydra-instantiable plot function (use ``_partial_: true``). ``None`` uses the default."
 
 
 class MatplotlibColormapSchema(BaseModel):
@@ -75,83 +160,62 @@ ColormapSchema = Annotated[
 ]
 
 
-class LongRolloutPlotsSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.LongRolloutPlots"] = Field(alias="_target_")
-    "LongRolloutPlots object from anemoi training diagnostics callbacks."
-    rollout: list[int]
-    "Rollout steps to plot at."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    video_rollout: int = Field(example=0)
-    "Number of rollout steps for video, by default 0 (no video)."
-    accumulation_levels_plot: list[float] | None = Field(default=None)
-    "Accumulation levels to plot, by default None."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    per_sample: int | None = Field(default=None)
-    "Number of plots per sample, by default 6."
-    every_n_epochs: int = Field(example=1)
-    "Epoch frequency to plot at, by default 1."
-    animation_interval: int | None = Field(default=None)
-    "Delay between frames in the animation in milliseconds, by default 400."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
+class BatchOutputPlotFnSchema(GenericSchema):
+    """Hydra config for a :class:`BatchOutputPlot` plot function.
+
+    The ``_target_`` must resolve to a callable that accepts at minimum:
+    ``parameters``, ``x``, ``y_true``, ``y_pred``, ``latlons``.
+    See :class:`BatchOutputPlotFn` for the full contract.
+
+    Built-in options
+    ----------------
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn``
+
+    Custom functions are accepted — pass any dotted import path and bind
+    extra kwargs via ``_partial_: true``.
+    """
+
+    partial_: bool = Field(default=True, alias="_partial_")
+    "Must be true — the callback binds the remaining arguments at call time."
 
 
-class PlotSampleSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSample"] = Field(alias="_target_")
-    "PlotSample object from anemoi training diagnostics callbacks."
+class BatchOutputPlotSchema(PydanticBaseModel):
+    """Config-driven batch-output plot callback.
+
+    Users may subclass or supply a custom ``plot_fn`` by pointing ``_target_``
+    to their own function. Signature validation happens at runtime in
+    :meth:`BatchOutputPlot.__init__`.
+    """
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot"] = Field(alias="_target_")
+    "BatchOutputPlot object from anemoi training diagnostics callbacks."
+    tag_infix: str
+    "Short tag inserted into logged artifact names."
     sample_idx: int
-    "Index of sample to plot, must be inside batch size."
+    "Index of sample within the batch to plot."
     parameters: list[str]
-    "List of parameters to plot."
-    accumulation_levels_plot: list[float]
-    "Accumulation levels to plot."
-    cmap_accumulation: list[str] | None = Field(default=None)
-    "Colors of the accumulation levels. Default to None. Kept for backward compatibility."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    per_sample: int = Field(example=6)
-    "Number of plots per sample, by default 6."
+    "Model output parameters to include in the plot."
+    plot_fn: BatchOutputPlotFnSchema
+    "Hydra-instantiable plot function (use ``_partial_: true``)."
+    with_auxiliary: bool = Field(default=False)
+    "Forward the auxiliary tensor (e.g. corrupted targets) to ``plot_fn``."
+    members: list[int] | int | None = Field(default=None)
+    "Ensemble members to select; None means adapter default (all for ensembles)."
+    dataset_names: list[str] = Field(default_factory=lambda: ["data"], examples=["data"])
+    "List of dataset names to plot. Defaults to ``['data']``."
     every_n_batches: int | None = Field(default=None)
     "Batch frequency to plot at, by default None."
-    colormaps: dict[str, ColormapSchema] | None = Field(default=None)
-    "List of colormaps to use, by default None."
-
-
-class PlotSpectrumSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotSpectrum"] = Field(alias="_target_")
-    "PlotSpectrum object from anemoi training diagnostics callbacks."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
-
-
-class PlotHistogramSchema(BaseModel):
-    target_: Literal["anemoi.training.diagnostics.callbacks.plot.PlotHistogram"] = Field(alias="_target_")
-    "PlotHistogram object from anemoi training diagnostics callbacks."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str] | None = Field(default=None)
-    "List of precipitation related fields, by default None."
-    every_n_batches: int | None = Field(default=None)
-    "Batch frequency to plot at, by default None."
+    focus_area: FocusAreaSchema | None = Field(default=None)
+    "Region of interest to restrict plots to."
 
 
 PlotCallbacks = Annotated[
-    LongRolloutPlotsSchema
-    | GraphTrainableFeaturesPlotSchema
-    | PlotLossSchema
-    | PlotSampleSchema
-    | PlotSpectrumSchema
-    | PlotHistogramSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema,
     Field(discriminator="target_"),
 ]
 
@@ -163,23 +227,81 @@ class PlottingFrequency(BaseModel):
     "Frequency of the plotting in number of epochs."
 
 
-class PlotSchema(BaseModel):
-    asynchronous: bool
+class PlotSettingsSchema(PydanticBaseModel):
+    """Rendering settings shared across all plot callbacks in a run.
+
+    These map 1:1 to :class:`PlottingSettings` in ``plot.py`` and are read
+    from the ``diagnostics.plot.settings`` config sub-node.
+    """
+
+    asynchronous: bool = True
     "Handle plotting tasks without blocking the model training."
-    datashader: bool
+    datashader: bool = True
     "Use Datashader to plot."
-    frequency: PlottingFrequency
-    "Frequency of the plotting."
-    sample_idx: int
-    "Index of sample to plot, must be inside batch size."
-    parameters: list[str]
-    "List of parameters to plot."
-    precip_and_related_fields: list[str]
-    "List of precipitation related fields from the parameters list."
-    colormaps: dict[str, ColormapSchema] = Field(default_factory=dict)
-    "List of colormaps to use."
+    projection_kind: str = Field(
+        default="equirectangular",
+        examples=["equirectangular", "lambert_conformal", "robinson", "mollweide"],
+    )
+    """Map projection for diagnostics plots.
+
+    Built-in options: ``'equirectangular'`` (no cartopy required) and
+    ``'lambert_conformal'`` (auto-fitted to the data domain; requires cartopy).
+    Any ``cartopy.crs`` class name in snake_case is also accepted
+    (e.g. ``'robinson'``, ``'mollweide'``, ``'orthographic'``); these require
+    cartopy and are instantiated with **default constructor arguments** (e.g.
+    ``'orthographic'`` centres on longitude/latitude 0). If you need non-default
+    parameters, use ``'lambert_conformal'`` (auto-fitted to the data domain) or
+    subclass ``MapProjection``.
+    Must be ``'equirectangular'`` when ``datashader`` is ``True``.
+    """
+    colormaps: dict | None = None
+    "Variable-specific colormaps keyed by 'default', 'error', or variable name group."
+    precip_and_related_fields: list[str] | None = None
+    "Names of precipitation and related fields that use a special colormap."
+
+
+class PlotSchema(PydanticBaseModel):
+    settings: PlotSettingsSchema = Field(default_factory=PlotSettingsSchema)
+    "Rendering settings (datashader, projection, colormaps, etc.)."
     callbacks: list[PlotCallbacks] = Field(example=[])
     "List of plotting functions to call."
+    focus_areas: dict | None = None
+    "Named spatial focus areas (lat/lon bounding boxes or node attribute masks)."
+    datasets_to_plot: list[str] | None = None
+    "Dataset names to include in plots."
+
+    @model_validator(mode="after")
+    def _unique_batch_output_tag_infix(self) -> "PlotSchema":
+        """Ensure every :class:`BatchOutputPlot` entry produces a unique artifact tag.
+
+        The runtime tag has the form
+        ``pred_val_{tag_infix}_{dataset_name}_..._{focus_mask.tag}``, so the
+        uniqueness key is ``(tag_infix, tuple(dataset_names), focus_area)``.
+        Two callbacks that share this triple would silently overwrite each
+        other's logged artifacts.
+        """
+        from collections import Counter
+
+        keys = [
+            (
+                cb.tag_infix,
+                tuple(cb.dataset_names or []),
+                cb.focus_area.model_dump() if cb.focus_area is not None else None,
+            )
+            for cb in (self.callbacks or [])
+            if isinstance(cb, BatchOutputPlotSchema)
+        ]
+        # dicts are unhashable -> compare as sorted repr for the last element
+        hashable = [(k[0], k[1], repr(sorted(k[2].items())) if k[2] else None) for k in keys]
+        duplicates = sorted({k for k, n in Counter(hashable).items() if n > 1})
+        if duplicates:
+            msg = (
+                "Every BatchOutputPlot callback must produce a unique artifact tag "
+                "(tag_infix, dataset_names, focus_area); duplicates: "
+                f"{duplicates}"
+            )
+            raise ValueError(msg)
+        return self
 
 
 class TimeLimitSchema(BaseModel):
@@ -229,6 +351,10 @@ class CheckpointSchema(BaseModel):
 
 
 class WandbSchema(BaseModel):
+    target_: Literal["pytorch_lightning.loggers.wandb.WandbLogger"] = Field(
+        default="pytorch_lightning.loggers.wandb.WandbLogger",
+        alias="_target_",
+    )
     enabled: bool
     "Use Weights & Biases logger."
     offline: bool
@@ -244,6 +370,8 @@ class WandbSchema(BaseModel):
     "Whether to log the hyper parameters."
     entity: str | None = None
     "Username or team name where to send runs. This entity must exist before you can send runs there."
+    interval: PositiveInt | None = Field(default=100)
+    "Logging frequency in batches."
 
     @root_validator(pre=True)
     def clean_entity(cls: type["WandbSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
@@ -253,7 +381,10 @@ class WandbSchema(BaseModel):
 
 
 class MlflowSchema(BaseModel):
-
+    target_: Literal["anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"] = Field(
+        default="anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger",
+        alias="_target_",
+    )
     enabled: bool
     "Use MLflow logger."
     offline: bool
@@ -275,6 +406,10 @@ class MlflowSchema(BaseModel):
     "Log terminal logs to MLflow."
     run_name: str | None
     "Name of run."
+    prefix: str = ""
+    "Prefix for metric keys logged to MLflow."
+    log_hyperparams: bool = True
+    "Whether to log hyperparameters."
     on_resume_create_child: bool
     "Whether to create a child run when resuming a run."
     expand_hyperparams: list[str] = Field(default_factory=lambda: ["config"])
@@ -283,6 +418,8 @@ class MlflowSchema(BaseModel):
     "Specifies the maximum number of retries for MLflow HTTP requests, default 35."
     max_params_length: int = MAX_PARAMS_LENGTH
     "Maximum number of hpParams to be logged with mlflow"
+    save_dir: str | None = None
+    "Directory to save logs to when offline=True, default={system.output.root}/{system.output.logs.mlflow}"
 
     @root_validator(pre=True)
     def clean_entity(cls: type["MlflowSchema"], values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
@@ -291,20 +428,62 @@ class MlflowSchema(BaseModel):
         return values
 
 
-class TensorboardSchema(BaseModel):
-    enabled: bool
-    "Use TensorBoard logger."
+class AzureMlflowSchema(MlflowSchema):
+    target_: Literal["anemoi.training.diagnostics.mlflow.azureml.AnemoiAzureMLflowLogger"] = Field(
+        ...,
+        alias="_target_",
+    )
+
+    # These options are inherited, but either don't't make sense or don't work for Azure
+    # so we enforce the required value
+    offline: Literal[False]
+    terminal: Literal[False]
+    # These are specific to Azure
+    identity: str | None = None
+    "Type of identity to use for logging in with Azure ML."
+    resource_group: str | None = None
+    "Name of the AzureML resource group"
+    workspace_name: str | None = None
+    "Name of the AzureML workspace"
+    subscription_id: str | None = None
+    "AzureML subscription ID"
+    azure_log_level: str = "WARNING"
+    "Log level for all azure packages (azure-identity, azure-core, etc)"
 
 
 class LoggingSchema(BaseModel):
-    wandb: WandbSchema
+    wandb: WandbSchema | None = None
     "W&B logging schema."
-    tensorboard: TensorboardSchema
-    "TensorBorad logging schema."
-    mlflow: MlflowSchema
+
+    mlflow: Annotated[
+        MlflowSchema | AzureMlflowSchema | None,
+        Field(discriminator="target_"),
+    ] = None
     "MLflow logging schema."
+
     interval: PositiveInt
     "Logging frequency in batches."
+
+    @model_validator(mode="before")
+    def inject_default_targets(cls, values: dict[str, Any]) -> dict[str, Any]:  # noqa: N805
+
+        # ---- MLflow ----
+        mlflow_val = values.get("mlflow")
+        if mlflow_val is not None:
+            mlflow_cfg = OmegaConf.to_container(mlflow_val, resolve=True)
+            if isinstance(mlflow_cfg, dict) and "_target_" not in mlflow_cfg:
+                mlflow_cfg["_target_"] = "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
+                values["mlflow"] = mlflow_cfg
+
+        # ---- W&B ----
+        wandb_val = values.get("wandb")
+        if wandb_val is not None:
+            wandb_cfg = OmegaConf.to_container(wandb_val, resolve=True)
+            if isinstance(wandb_cfg, dict) and "_target_" not in wandb_cfg:
+                wandb_cfg["_target_"] = "anemoi.training.diagnostics.wandb.logger.AnemoiWandbLogger"
+                values["wandb"] = wandb_cfg
+
+        return values
 
 
 class MemorySchema(BaseModel):
@@ -351,6 +530,17 @@ class BenchmarkProfilerSchema(BaseModel):
     "Memory snapshot if torch.cuda._record_memory_history is available."
 
 
+class ProgressBarSchema(BaseModel):
+    target_: Literal[
+        "pytorch_lightning.callbacks.TQDMProgressBar",
+        "pytorch_lightning.callbacks.RichProgressBar",
+        "anemoi.training.diagnostics.profilers.ProfilerProgressBar",
+    ] = Field(alias="_target_")
+    "TQDMProgressBar object from pytorch lightning."
+    refresh_rate: PositiveInt = Field(default=1)
+    "Refresh rate of the progress bar."
+
+
 class DiagnosticsSchema(BaseModel):
     plot: PlotSchema | None = None
     "Plot schema."
@@ -360,12 +550,12 @@ class DiagnosticsSchema(BaseModel):
     "Benchmark profiler schema for `profile` command."
     debug: Debug
     "Debug schema."
-    profiler: bool
-    "Activate the pytorch profiler and tensorboard logger."
     log: LoggingSchema
     "Log schema."
     enable_progress_bar: bool
     "Activate progress bar."
+    progress_bar: ProgressBarSchema | None = Field(default=None)
+    "Progress bar schema."
     print_memory_summary: bool
     "Print the memory summary."
     enable_checkpointing: bool

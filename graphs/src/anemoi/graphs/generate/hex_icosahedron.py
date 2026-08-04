@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,13 +12,13 @@ import h3
 import networkx as nx
 import numpy as np
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.generate.utils import get_coordinates_ordering
 
 
 def create_hex_nodes(
     resolution: int,
-    area_mask_builder: KNNAreaMaskBuilder | None = None,
+    area_mask_builder: AreaMaskBuilder | None = None,
 ) -> tuple[nx.Graph, np.ndarray, list[int]]:
     """Creates a global mesh from a refined icosahedron.
 
@@ -29,8 +29,8 @@ def create_hex_nodes(
     ----------
     resolution : int
         Level of mesh resolution to consider.
-    area_mask_builder : KNNAreaMaskBuilder, optional
-        KNNAreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
+    area_mask_builder : AreaMaskBuilder, optional
+        AreaMaskBuilder with the cloud of points to limit the mesh area, by default None.
 
     Returns
     -------
@@ -43,12 +43,13 @@ def create_hex_nodes(
     """
     nodes = get_nodes_at_resolution(resolution)
 
-    coords_rad = np.deg2rad(np.array([h3.h3_to_geo(node) for node in nodes]))
+    coords_rad = np.deg2rad(np.array([h3.cell_to_latlng(node) for node in nodes]))
 
     node_ordering = get_coordinates_ordering(coords_rad)
 
     if area_mask_builder is not None:
         area_mask = area_mask_builder.get_mask(coords_rad)
+        area_mask = area_mask.cpu().numpy()
         node_ordering = node_ordering[area_mask[node_ordering]]
 
     graph = create_nx_graph_from_hex_coords(nodes, node_ordering)
@@ -75,7 +76,7 @@ def create_nx_graph_from_hex_coords(nodes: list[str], node_ordering: np.ndarray)
 
     for node_pos in node_ordering:
         h3_idx = nodes[node_pos]
-        graph.add_node(h3_idx, hcoords_rad=np.deg2rad(h3.h3_to_geo(h3_idx)))
+        graph.add_node(h3_idx, hcoords_rad=np.deg2rad(h3.cell_to_latlng(h3_idx)))
 
     return graph
 
@@ -95,7 +96,7 @@ def get_nodes_at_resolution(
     nodes : list[str]
         The list of H3 indexes at the specified resolution level.
     """
-    return list(h3.uncompact(h3.get_res0_indexes(), resolution))
+    return list(h3.uncompact_cells(h3.get_res0_cells(), resolution))
 
 
 def add_edges_to_nx_graph(
@@ -143,11 +144,11 @@ def add_neighbour_edges(
 
         for idx in nodes:
             # neighbours
-            for idx_neighbour in h3.k_ring(idx, k=x_hops) & set(nodes):
+            for idx_neighbour in set(h3.grid_disk(idx, k=x_hops)) & set(nodes):
                 graph = add_edge(
                     graph,
-                    h3.h3_to_center_child(idx, max(refinement_levels)),
-                    h3.h3_to_center_child(idx_neighbour, max(refinement_levels)),
+                    h3.cell_to_center_child(idx, max(refinement_levels)),
+                    h3.cell_to_center_child(idx_neighbour, max(refinement_levels)),
                 )
 
     return graph
@@ -189,8 +190,8 @@ def add_edges_to_children(
                 for child_idx in h3.h3_to_children(parent_idx, res=resolution_child):
                     graph = add_edge(
                         graph,
-                        h3.h3_to_center_child(parent_idx, refinement_levels[-1]),
-                        h3.h3_to_center_child(child_idx, refinement_levels[-1]),
+                        h3.cell_to_center_child(parent_idx, refinement_levels[-1]),
+                        h3.cell_to_center_child(child_idx, refinement_levels[-1]),
                     )
 
     return graph
@@ -198,8 +199,8 @@ def add_edges_to_children(
 
 def select_nodes_from_graph_at_resolution(graph: nx.Graph, resolution: int) -> set[str]:
     """Select nodes from a graph at a specified resolution level."""
-    nodes_at_lower_resolution = [n for n in h3.compact(graph.nodes) if h3.h3_get_resolution(n) <= resolution]
-    nodes_at_resolution = h3.uncompact(nodes_at_lower_resolution, resolution)
+    nodes_at_lower_resolution = [n for n in h3.compact_cells(graph.nodes) if h3.get_resolution(n) <= resolution]
+    nodes_at_resolution = h3.uncompact_cells(nodes_at_lower_resolution, resolution)
     return nodes_at_resolution
 
 

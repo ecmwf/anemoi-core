@@ -1,0 +1,89 @@
+defaults:
+  - settings_base
+
+datasets_to_plot: ["era5", "cerra"]
+
+settings:
+  colormaps:
+    default:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+      name: viridis
+    # in order to use distinctipy, you need to install the package
+    # default:
+    #   _target_: anemoi.training.utils.custom_colormaps.DistinctipyColormap
+    #   n_colors: 8
+    error:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+      name: bwr
+    precip:
+      _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+      clevels: ["#ffffff", "#04e9e7", "#019ff4", "#0300f4", "#02fd02", "#01c501", "#008e00", "#fdf802", "#e5bc00", "#fd9500", "#fd0000", "#d40000", "#bc0000", "#f800fd"]
+      variables: ${diagnostics.plot.settings.precip_and_related_fields}
+
+callbacks:
+  - _target_: anemoi.training.diagnostics.callbacks.plot.GraphFeaturePlot
+    every_n_epochs: 5
+    dataset_names: ${diagnostics.plot.datasets_to_plot}
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn
+      _partial_: true
+  - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+    dataset_names: ${diagnostics.plot.datasets_to_plot}
+    parameter_groups:
+      moisture: [tp, cp, tcw]
+      sfc_wind: [10u, 10v]
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
+      _partial_: true
+  - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+    tag_infix: sample
+    dataset_names: ["era5"]
+    sample_idx: ${diagnostics.plot.sample_idx}
+    parameters: ${diagnostics.plot.parameters}
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    with_auxiliary: true
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+      _partial_: true
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm
+  - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+    tag_infix: histo
+    dataset_names: ["era5"]
+    sample_idx: ${diagnostics.plot.sample_idx}
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    parameters: [z_500, tp, 2t, 10u, 10v]
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+      _partial_: true
+      # Optional overrides (shown with defaults):
+      # log_scale: false
+  - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+    tag_infix: histo
+    dataset_names: ["cerra"]
+    sample_idx: ${diagnostics.plot.sample_idx}
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    parameters: [z_500, tp, 2t]
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn
+      _partial_: true
+      # Optional overrides (shown with defaults):
+      # log_scale: false
+  - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+    tag_infix: sample
+    dataset_names: ["cerra"]
+    sample_idx: ${diagnostics.plot.sample_idx}
+    parameters: [z_500, t_850, u_850, v_850, 2t, tp]
+    every_n_batches: ${diagnostics.plot.frequency.batch}
+    with_auxiliary: true
+    plot_fn:
+      _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+      _partial_: true
+      # Optional overrides (shown with defaults):
+      # per_sample: 6
+      # accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]  # mm

@@ -9,20 +9,23 @@ the network.
  Usage
 *******
 
-These activation layers can be used in two ways:
-
-#. Directly in model implementations
-#. Through the layer kernels configuration system
-
-Example configuration using layer kernels:
+These activation layers can be used through the layer kernels configuration
+system. For example, to use the ``Sine`` activation function:
 
 .. code:: yaml
 
    layer_kernels:
-     processor:
-       Activation:
-         _target_: anemoi.models.layers.activations.GLU
-         dim: 1024
+     Activation:
+       _target_: anemoi.models.layers.activations.Sine
+
+For gated variants (GLU, SwiGLU, GEGLU, ReGLU), use ``mlp_implementation``
+instead of ``layer_kernels.Activation``:
+
+.. code:: yaml
+
+   processor:
+     mlp_implementation: swiglu  # options: glu, swiglu, geglu, reglu
+     mlp_hidden_ratio: 2.67  # recommended ratio for gated variants
 
 ******************
  Available Layers

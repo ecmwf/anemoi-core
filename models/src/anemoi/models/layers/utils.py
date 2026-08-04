@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -9,6 +9,7 @@
 
 
 import logging
+import math
 from typing import Optional
 
 from hydra.errors import InstantiationException
@@ -21,6 +22,36 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
+def compute_mlp_hidden_dim(num_channels: int, mlp_hidden_ratio: float) -> int:
+    """Compute integer hidden dimension from a (possibly fractional) MLP ratio.
+
+    Parameters
+    ----------
+    num_channels : int
+        Base channel width.
+    mlp_hidden_ratio : float
+        Multiplier used to derive hidden width.
+
+    Returns
+    -------
+    int
+        Rounded hidden width.
+    """
+    if not math.isfinite(mlp_hidden_ratio):
+        msg = f"`mlp_hidden_ratio` must be finite, got {mlp_hidden_ratio}."
+        raise ValueError(msg)
+    if mlp_hidden_ratio <= 0:
+        msg = f"`mlp_hidden_ratio` must be > 0, got {mlp_hidden_ratio}."
+        raise ValueError(msg)
+
+    # Round to nearest integer with halves rounding up.
+    hidden_dim = int(num_channels * mlp_hidden_ratio + 0.5)
+    if hidden_dim <= 0:
+        msg = f"Computed hidden_dim must be > 0, got {hidden_dim}."
+        raise ValueError(msg)
+    return hidden_dim
+
+
 class CheckpointWrapper(nn.Module):
     """Wrapper for checkpointing a module."""
 
@@ -30,6 +61,27 @@ class CheckpointWrapper(nn.Module):
 
     def forward(self, *args, **kwargs):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
+
+
+def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
+    """Conditionally apply gradient checkpointing to a function.
+
+    Parameters
+    ----------
+    func : callable
+        The function to potentially wrap with checkpointing
+    enabled : bool
+        Whether to apply gradient checkpointing
+    *args, **kwargs
+        Arguments to pass to the function
+
+    Returns
+    -------
+    The result of calling func with the provided arguments
+    """
+    if enabled:
+        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+    return func(*args, **kwargs)
 
 
 def load_layer_kernels(kernel_config: Optional[DotDict] = None, instance: bool = True) -> DotDict["str" : nn.Module]:

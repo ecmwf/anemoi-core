@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,6 +12,10 @@ from .loss_weights_mask import NaNMaskScaler
 from .node_attributes import GraphNodeAttributeScaler
 from .node_attributes import ReweightedGraphNodeAttributeScaler
 from .scalers import create_scalers
+from .spectral import SpectralDimensionScaler
+from .time_step import LeadTimeDecayScaler
+from .time_step import TimeStepScaler
+from .time_step import UniformTimeStepScaler
 from .variable import GeneralVariableLossScaler
 from .variable_level import LinearVariableLevelScaler
 from .variable_level import NoVariableLevelScaler
@@ -25,6 +29,7 @@ from .variable_tendency import VarTendencyScaler
 __all__ = [
     "GeneralVariableLossScaler",
     "GraphNodeAttributeScaler",
+    "LeadTimeDecayScaler",
     "LinearVariableLevelScaler",
     "NaNMaskScaler",
     "NoTendencyScaler",
@@ -32,8 +37,11 @@ __all__ = [
     "PolynomialVariableLevelScaler",
     "ReluVariableLevelScaler",
     "ReweightedGraphNodeAttributeScaler",
+    "SpectralDimensionScaler",
     "StdevTendencyScaler",
     "TensorDim",
+    "TimeStepScaler",
+    "UniformTimeStepScaler",
     "VarTendencyScaler",
     "VariableMaskingLossScaler",
     "create_scalers",

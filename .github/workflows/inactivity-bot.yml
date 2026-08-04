@@ -1,0 +1,40 @@
+name: Mark inactive issues and PRs
+
+on:
+  schedule:
+    - cron: "0 23 * * *"  # every day at 23pm on default(main) branch
+  workflow_dispatch: # Allows manual trigger
+
+permissions:
+  actions: write
+  contents: write # only for delete-branch option
+  issues: write
+  pull-requests: write
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/stale@v9
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+
+          # Issue settings
+          days-before-issue-stale: 90 # (~3 months)
+          days-before-issue-close: 10
+          stale-issue-label: inactive
+          stale-issue-message: >
+            This issue has been marked as inactive due to inactivity.
+            It will be closed if no further activity occurs in the next 10 days.
+          exempt-issue-labels: 'good first issue,help wanted,roadmap,known-issue'
+
+          # PR settings
+          days-before-pr-stale: 90 # (~3 months)
+          days-before-pr-close: 10
+          stale-pr-label: inactive
+          stale-pr-message: >
+            This PR has been marked as inactive due to inactivity.
+            It will be closed if no further activity occurs in the next 10 days.
+          exempt-pr-labels: 'autorelease: pending'
+
+          remove-stale-when-updated: true

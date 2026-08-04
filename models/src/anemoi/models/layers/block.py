@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,23 +24,43 @@ from torch_geometric.typing import Adj
 from torch_geometric.typing import OptPairTensor
 from torch_geometric.typing import Size
 
+from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.halo import build_halo_info
+from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
+from anemoi.models.distributed.halo import verify_halo_info
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
-from anemoi.models.distributed.transformer import shard_heads
-from anemoi.models.distributed.transformer import shard_sequence
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.utils import compute_mlp_hidden_dim
+from anemoi.models.triton.utils import edge_index_to_csc
+from anemoi.models.triton.utils import is_triton_available
 from anemoi.utils.config import DotDict
+
+if is_triton_available():
+    from anemoi.models.triton.gt import graph_transformer_attention_conv
 
 LOGGER = logging.getLogger(__name__)
 
 # Number of chunks used in inference (https://github.com/ecmwf/anemoi-core/pull/66)
 NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
+# Change attention implementation during inference runtime
+ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
+ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 class BaseBlock(nn.Module, ABC):
@@ -55,12 +75,49 @@ class BaseBlock(nn.Module, ABC):
         x: OptPairTensor,
         edge_attr: torch.Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
         batch_size: int,
         size: Optional[Size] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         **layer_kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
+
+
+class PointWiseMLPProcessorBlock(BaseBlock):
+    """Point-wise block with MLPs."""
+
+    def __init__(self, *, num_channels: int, hidden_dim: int, layer_kernels: DotDict, dropout_p: float = 0.0):
+        super().__init__()
+        assert dropout_p is None or (0.0 <= dropout_p <= 1.0), "dropout_p must be in [0.0, 1.0]"
+        activation = layer_kernels.Activation()
+        if "GLU" in activation.__class__.__name__.upper():
+            raise ValueError(
+                "GLU-based activations are not supported in PointWiseMLPProcessorBlock. "
+                "Use a standard activation (GELU, ReLU, SiLU) via layer_kernels.Activation."
+            )
+        layers = [
+            layer_kernels.Linear(num_channels, hidden_dim),
+            # This pattern has been proven to produce good results in point-wise models
+            layer_kernels.LayerNorm(hidden_dim),
+            activation,
+        ]
+        if num_channels != hidden_dim:
+            layers.append(layer_kernels.Linear(hidden_dim, num_channels))
+
+        if dropout_p is not None and dropout_p > 0:
+            layers.append(nn.Dropout(p=dropout_p))
+
+        self.mlp = nn.Sequential(*layers)
+
+    def forward(
+        self,
+        x: Tensor,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        **layer_kwargs,
+    ) -> tuple[Tensor]:
+        return (self.mlp(x),)
 
 
 class TransformerProcessorBlock(BaseBlock):
@@ -72,11 +129,13 @@ class TransformerProcessorBlock(BaseBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: int,
+        window_size: Optional[int],
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -89,6 +148,7 @@ class TransformerProcessorBlock(BaseBlock):
         self.attention = MultiHeadSelfAttention(
             num_heads=num_heads,
             embed_dim=num_channels,
+            attn_channels=attn_channels,
             window_size=window_size,
             qkv_bias=False,
             is_causal=False,
@@ -101,27 +161,31 @@ class TransformerProcessorBlock(BaseBlock):
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
-        self.mlp = nn.Sequential(
-            layer_kernels.Linear(num_channels, hidden_dim),
-            layer_kernels.Activation(),
-            layer_kernels.Linear(hidden_dim, num_channels),
+        self.mlp = MLP(
+            in_features=num_channels,
+            hidden_dim=hidden_dim,
+            out_features=num_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
 
     def forward(
         self,
         x: Tensor,
-        shapes: list,
+        shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         **layer_kwargs,
-    ) -> Tensor:
+    ) -> tuple[Tensor]:
 
         # In case we have conditionings we pass these to the layer norm
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = x + self.attention(
-            self.layer_norm_attention(x, **cond_kwargs), shapes, batch_size, model_comm_group=model_comm_group
+            self.layer_norm_attention(x, **cond_kwargs), shard_info, batch_size, model_comm_group=model_comm_group
         )
         x = x + self.mlp(
             self.layer_norm_mlp(
@@ -129,7 +193,7 @@ class TransformerProcessorBlock(BaseBlock):
                 **cond_kwargs,
             )
         )
-        return x
+        return (x,)
 
 
 class TransformerMapperBlock(TransformerProcessorBlock):
@@ -141,11 +205,13 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: int,
+        window_size: Optional[int],
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
+        mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -153,12 +219,14 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         super().__init__(
             num_channels=num_channels,
             hidden_dim=hidden_dim,
+            attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
             layer_kernels=layer_kernels,
             dropout_p=dropout_p,
             qk_norm=qk_norm,
             attention_implementation=attention_implementation,
+            mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
@@ -167,6 +235,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         self.attention = MultiHeadCrossAttention(
             num_heads=num_heads,
             embed_dim=num_channels,
+            attn_channels=attn_channels,
             window_size=window_size,
             qkv_bias=False,
             qk_norm=qk_norm,
@@ -188,14 +257,18 @@ class TransformerMapperBlock(TransformerProcessorBlock):
     def forward(
         self,
         x: OptPairTensor,
-        shapes: list,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> Tensor:
-        x_src = self.layer_norm_attention_src(x[0])
-        x_dst = self.layer_norm_attention_dst(x[1])
-        x_dst = x_dst + self.attention((x_src, x_dst), shapes, batch_size, model_comm_group=model_comm_group)
-        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst))
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> tuple[Tensor, Tensor]:
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
+        x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
+        x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
+        x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
+        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
 
 
@@ -209,8 +282,11 @@ class GraphConvBaseBlock(BaseBlock):
         out_channels: int,
         num_chunks: int,
         mlp_extra_layers: int = 0,
+        mlp_hidden_ratio: float = 1.0,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
+        edge_dim: Optional[int] = None,
         **kwargs,
     ) -> None:
         """Initialize GNNBlock.
@@ -225,6 +301,8 @@ class GraphConvBaseBlock(BaseBlock):
             do message passing in X chunks
         mlp_extra_layers : int
             Extra layers in MLP, by default 0
+        mlp_hidden_ratio : float
+            Ratio of MLP hidden dimension to out_channels. Default 1.0 preserves existing behaviour.
         update_src_nodes: bool
             Update src if src and dst nodes are given, by default True
         layer_kernels : DotDict
@@ -233,15 +311,30 @@ class GraphConvBaseBlock(BaseBlock):
         """
         super().__init__(**kwargs)
 
+        hidden_dim = compute_mlp_hidden_dim(out_channels, mlp_hidden_ratio)
+
+        if edge_dim:
+            self.emb_edges = MLP(
+                in_features=edge_dim,
+                hidden_dim=hidden_dim,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=mlp_extra_layers + 1,
+                mlp_implementation=mlp_implementation,
+            )
+        else:
+            self.emb_edges = None
+
         self.update_src_nodes = update_src_nodes
         self.num_chunks = num_chunks
 
         self.node_mlp = MLP(
             in_features=2 * in_channels,
-            hidden_dim=out_channels,
+            hidden_dim=hidden_dim,
             out_features=out_channels,
             layer_kernels=layer_kernels,
-            n_extra_layers=mlp_extra_layers,
+            n_extra_layers=mlp_extra_layers + 1,
+            mlp_implementation=mlp_implementation,
         )
 
         self.conv = GraphConv(
@@ -249,6 +342,7 @@ class GraphConvBaseBlock(BaseBlock):
             out_channels=out_channels,
             layer_kernels=layer_kernels,
             mlp_extra_layers=mlp_extra_layers,
+            mlp_implementation=mlp_implementation,
         )
 
     @abstractmethod
@@ -257,7 +351,7 @@ class GraphConvBaseBlock(BaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
@@ -270,13 +364,15 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: GraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
+        if self.emb_edges is not None:
+            edge_attr = self.emb_edges(edge_attr)
 
-        x_in = sync_tensor(x, 0, shapes[1], model_comm_group)
+        x_in = sync_tensor(x, 0, shard_info.nodes, model_comm_group)
 
         if self.num_chunks > 1:
             edge_index_list = torch.tensor_split(edge_index, self.num_chunks, dim=1)
@@ -292,7 +388,7 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
 
-        out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
+        out = shard_tensor(out, 0, shard_info.nodes, model_comm_group, gather_in_backward=False)
 
         nodes_new = self.node_mlp(torch.cat([x, out], dim=1)) + x
 
@@ -347,14 +443,14 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         size: Optional[Size] = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
-        x_src = sync_tensor(x[0], 0, shapes[0], model_comm_group)
-        x_dst = sync_tensor(x[1], 0, shapes[1], model_comm_group)
+        x_src = sync_tensor(x[0], 0, shard_info.src_nodes, model_comm_group)
+        x_dst = sync_tensor(x[1], 0, shard_info.dst_nodes, model_comm_group)
         x_in = (x_src, x_dst)
 
         if self.num_chunks > 1:
@@ -371,7 +467,7 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         else:
             out, edges_new = self.conv(x_in, edge_attr, edge_index, size=size)
 
-        out = shard_tensor(out, 0, shapes[1], model_comm_group, gather_in_backward=False)
+        out = shard_tensor(out, 0, shard_info.dst_nodes, model_comm_group, gather_in_backward=False)
 
         nodes_new_dst = self.node_mlp(torch.cat([x[1], out], dim=1)) + x[1]
 
@@ -393,12 +489,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         hidden_dim: int,
         out_channels: int,
         num_heads: int,
-        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -409,10 +508,11 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             Number of input channels.
         out_channels : int
             Number of output channels.
+        attn_channels : int, optional
+            Internal attention width used for q/k/v and edge projections. If
+            None, defaults to out_channels.
         num_heads : int,
             Number of heads
-        num_chunks : int,
-            Number of chunks
         edge_dim : int,
             Edge dimension
         bias : bool, by default True,
@@ -424,15 +524,26 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
         super().__init__(**kwargs)
 
         self.update_src_nodes = update_src_nodes
 
-        self.out_channels_conv = out_channels // num_heads
+        self.attn_channels = out_channels if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be > 0, got {self.attn_channels}")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by num_heads ({num_heads}) in {self.__class__.__name__}."
+            )
+
+        self.out_channels_conv = self.attn_channels // num_heads
         self.num_heads = num_heads
         self.qk_norm = qk_norm
-        self.num_chunks = num_chunks
 
         Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
@@ -442,9 +553,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         self.lin_self = Linear(in_channels, num_heads * self.out_channels_conv, bias=bias)
         self.lin_edge = Linear(edge_dim, num_heads * self.out_channels_conv)  # , bias=False)
 
-        self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
-
-        self.projection = Linear(out_channels, out_channels)
+        self.projection = Linear(self.attn_channels, out_channels)
 
         if self.qk_norm:
             self.q_norm = layer_kernels.QueryNorm(self.out_channels_conv)
@@ -452,11 +561,61 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
         self.layer_norm_attention = LayerNorm(normalized_shape=in_channels)
         self.layer_norm_mlp_dst = LayerNorm(normalized_shape=out_channels)
-        self.node_dst_mlp = nn.Sequential(
-            Linear(out_channels, hidden_dim),
-            layer_kernels.Activation(),
-            Linear(hidden_dim, out_channels),
+        self.node_dst_mlp = MLP(
+            in_features=out_channels,
+            hidden_dim=hidden_dim,
+            out_features=out_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
         )
+
+        # Optional edge preprocessing MLP
+        if edge_pre_mlp:
+            self.edge_pre_mlp = build_feedforward_layer(
+                in_features=edge_dim,
+                out_features=edge_dim,
+                layer_kernels=layer_kernels,
+                mlp_implementation="mlp",
+            )
+        else:
+            self.edge_pre_mlp = nn.Identity()
+
+        self.graph_attention_backend = graph_attention_backend
+        self._attention_backend_applied = False
+        self.set_attention_function()
+
+    def set_attention_function(self):
+        # Check if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set
+        if ATTENTION_BACKEND != "":
+            if ATTENTION_BACKEND == self.graph_attention_backend:
+                # Attention backend has already been updated, return early
+                return
+
+            LOGGER.info(
+                "'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
+                self.graph_attention_backend,
+                ATTENTION_BACKEND,
+            )
+            self.graph_attention_backend = ATTENTION_BACKEND
+
+        assert self.graph_attention_backend in [
+            "triton",
+            "pyg",
+        ], f"Backend '{self.graph_attention_backend}' not supported for GraphTransformerBlock, valid options are 'triton' and 'pyg'"
+
+        if not is_triton_available():
+            LOGGER.warning(
+                f"{self.__class__.__name__} requested the triton graph attention backend but triton is not available. Falling back to 'pyg' backend."
+            )
+            self.graph_attention_backend = "pyg"
+
+        if self.graph_attention_backend == "triton":
+            LOGGER.info(f"{self.__class__.__name__} using triton graph attention backend.")
+            self.conv = graph_transformer_attention_conv
+        else:
+            self.conv = GraphTransformerConv(out_channels=self.out_channels_conv)
 
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
@@ -471,9 +630,61 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(edge_attr)
+        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
+
+    def prepare_qkve_edge_sharding(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        query, key, value, edges = (
+            einops.rearrange(
+                t,
+                "nodes (heads vars) -> nodes heads vars",
+                heads=self.num_heads,
+                vars=self.out_channels_conv,
+            )
+            for t in (query, key, value, edges)
+        )
+        return query, key, value, edges
+
+    def _apply_qk_norm(self, query: Tensor, key: Tensor) -> tuple[Tensor, Tensor]:
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        return query, key
+
+    def _forward_edges_sharded_attention(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
+        query, key = self._apply_qk_norm(query, key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
 
     def shard_qkve_heads(
         self,
@@ -481,17 +692,15 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         key: Tensor,
         value: Tensor,
         edges: Tensor,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        """Shards qkv and edges along head dimension."""
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, ShardSizes]:
+        """Shards qkv and edges along head dimension using all_to_all_transpose."""
         if model_comm_group is not None:
             assert (
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded across GPUs"
-
-        shape_src_nodes, shape_dst_nodes, shape_edges = shapes
 
         query, key, value, edges = (
             einops.rearrange(
@@ -503,16 +712,83 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             )
             for t in (query, key, value, edges)
         )
-        query = shard_heads(query, shapes=shape_dst_nodes, mgroup=model_comm_group)
-        key = shard_heads(key, shapes=shape_src_nodes, mgroup=model_comm_group)
-        value = shard_heads(value, shapes=shape_src_nodes, mgroup=model_comm_group)
-        edges = shard_heads(edges, shapes=shape_edges, mgroup=model_comm_group)
+
+        head_shard_sizes = get_shard_sizes(query, -3, model_comm_group)
+        # Shard heads: split along heads (dim -3), gather along grid (dim -2)
+        query = all_to_all_transpose(query, -3, head_shard_sizes, -2, shard_info.dst_nodes, model_comm_group)
+        key = all_to_all_transpose(key, -3, head_shard_sizes, -2, shard_info.src_nodes, model_comm_group)
+        value = all_to_all_transpose(value, -3, head_shard_sizes, -2, shard_info.src_nodes, model_comm_group)
+        edges = all_to_all_transpose(edges, -3, head_shard_sizes, -2, shard_info.edges, model_comm_group)
 
         query, key, value, edges = (
             einops.rearrange(t, "batch heads grid vars -> (batch grid) heads vars") for t in (query, key, value, edges)
         )
 
-        return query, key, value, edges
+        return query, key, value, edges, head_shard_sizes
+
+    def _forward_heads_sharded_attention(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        size: Union[int, tuple[int, int]],
+        model_comm_group: Optional[ProcessGroup],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges, head_shard_sizes = self.shard_qkve_heads(
+            query, key, value, edges, shard_info, batch_size, model_comm_group
+        )
+        query, key = self._apply_qk_norm(query, key)
+
+        out = self.attention_block(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            size,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        return self.shard_output_seq(out, shard_info, head_shard_sizes, batch_size, model_comm_group)
+
+    def apply_gt(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        edges: Tensor,
+        edge_index: Adj,
+        size: Union[int, tuple[int, int]],
+        edges_are_dst_sorted: bool = True,
+    ) -> Tensor:
+        # self.conv requires size to be a tuple
+        conv_size = (size, size) if isinstance(size, int) else size
+
+        # Check once at runtime if 'ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND' env var has been set and update backend if so
+        if ATTENTION_BACKEND != "" and not self._attention_backend_applied:
+            self.set_attention_function()
+            self._attention_backend_applied = True
+
+        if self.graph_attention_backend == "triton":
+            csc, perm, reverse = edge_index_to_csc(
+                edge_index, num_nodes=conv_size, reverse=True, edges_are_dst_sorted=edges_are_dst_sorted
+            )
+
+            if perm is not None:
+                edges = edges.index_select(0, perm)
+
+            args_conv = (edges, csc, reverse)
+        else:
+            args_conv = (edges, edge_index, conv_size)
+
+        return self.conv(query, key, value, *args_conv)
 
     def attention_block(
         self,
@@ -523,43 +799,56 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
         num_chunks: int,
+        edges_are_dst_sorted: bool = True,
     ) -> Tensor:
-        # self.conv requires size to be a tuple
-        conv_size = (size, size) if isinstance(size, int) else size
-
+        # split 1-hop edges into chunks, compute self.conv chunk-wise
         if num_chunks > 1:
-            # split 1-hop edges into chunks, compute self.conv chunk-wise
             edge_attr_list, edge_index_list = sort_edges_1hop_chunks(
-                num_nodes=size, edge_attr=edges, edge_index=edge_index, num_chunks=num_chunks
+                num_nodes=size,
+                edge_attr=edges,
+                edge_index=edge_index,
+                num_chunks=num_chunks,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
             # shape: (num_nodes, num_heads, out_channels_conv)
             out = torch.zeros((*query.shape[:-1], self.out_channels_conv), device=query.device)
             for i in range(num_chunks):
-                out += self.conv(
+                out += self.apply_gt(
                     query=query,
                     key=key,
                     value=value,
-                    edge_attr=edge_attr_list[i],
+                    edges=edge_attr_list[i],
                     edge_index=edge_index_list[i],
-                    size=conv_size,
+                    size=size,
+                    edges_are_dst_sorted=edges_are_dst_sorted,
                 )
         else:
-            out = self.conv(query=query, key=key, value=value, edge_attr=edges, edge_index=edge_index, size=conv_size)
+            out = self.apply_gt(
+                query=query,
+                key=key,
+                value=value,
+                edges=edges,
+                edge_index=edge_index,
+                size=size,
+                edges_are_dst_sorted=edges_are_dst_sorted,
+            )
 
         return out
 
     def shard_output_seq(
         self,
         out: Tensor,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
+        head_shard_sizes: ShardSizes,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> Tensor:
-        """Shards Tensor sequence dimension."""
-        shape_dst_nodes = shapes[1]
-
+        """Shards Tensor sequence dimension using all_to_all_transpose."""
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
-        out = shard_sequence(out, shapes=shape_dst_nodes, mgroup=model_comm_group)
+
+        # Shard sequence: split along grid (dim -2), gather along heads (dim -3)
+        out = all_to_all_transpose(out, -2, shard_info.dst_nodes, -3, head_shard_sizes, model_comm_group)
+
         out = einops.rearrange(out, "batch heads grid vars -> (batch grid) (heads vars)")
 
         return out
@@ -570,7 +859,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
@@ -591,9 +880,12 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
         shard_strategy: str = "edges",
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -621,6 +913,10 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             Defined in config/models/<model>.yaml
         shard_strategy: str, by default "edges"
             Strategy to shard tensors
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -631,13 +927,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
             layer_kernels=layer_kernels,
             num_heads=num_heads,
             bias=bias,
-            num_chunks=1,
             qk_norm=qk_norm,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
+            graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
         )
 
-        Linear = layer_kernels.Linear
         LayerNorm = layer_kernels.LayerNorm
 
         self.layer_norm_attention_src = LayerNorm(normalized_shape=in_channels)
@@ -645,10 +942,14 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
 
         if self.update_src_nodes:
             self.layer_norm_mlp_src = LayerNorm(normalized_shape=out_channels)
-            self.node_src_mlp = nn.Sequential(
-                Linear(out_channels, hidden_dim),
-                layer_kernels.Activation(),
-                Linear(hidden_dim, out_channels),
+            self.node_src_mlp = MLP(
+                in_features=out_channels,
+                hidden_dim=hidden_dim,
+                out_features=out_channels,
+                layer_kernels=layer_kernels,
+                n_extra_layers=0,
+                layer_norm=False,
+                mlp_implementation=mlp_implementation,
             )
         else:
             self.layer_norm_mlp_src = nn.Identity()
@@ -659,33 +960,17 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
     def run_node_src_mlp(self, x, **layer_kwargs):
         return self.node_src_mlp(self.layer_norm_mlp_src(x, **layer_kwargs))
 
-    def prepare_qkve_edge_sharding(
-        self,
-        query: Tensor,
-        key: Tensor,
-        value: Tensor,
-        edges: Tensor,
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        return (
-            einops.rearrange(
-                t,
-                "nodes (heads vars) -> nodes heads vars",
-                heads=self.num_heads,
-                vars=self.out_channels_conv,
-            )
-            for t in (query, key, value, edges)
-        )
-
     def forward(
         self,
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = True,
         **layer_kwargs,
     ):
         x_skip = x
@@ -704,22 +989,30 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         query, key, value, edges = self.get_qkve(x, edge_attr)
 
         if self.shard_strategy == "heads":
-            query, key, value, edges = self.shard_qkve_heads(
-                query, key, value, edges, shapes, batch_size, model_comm_group
+            out = self._forward_heads_sharded_attention(
+                query,
+                key,
+                value,
+                edges,
+                edge_index,
+                shard_info,
+                batch_size,
+                size,
+                model_comm_group,
+                num_chunks=1,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
         else:
-            query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
-
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
-
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks=1)
-
-        if self.shard_strategy == "heads":
-            out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
-        else:
-            out = einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
+            out = self._forward_edges_sharded_attention(
+                query,
+                key,
+                value,
+                edges,
+                edge_index,
+                size,
+                num_chunks=1,
+                edges_are_dst_sorted=edges_are_dst_sorted,
+            )
 
         out = self.projection(out + x_r)
         out = out + x_skip[1]
@@ -727,7 +1020,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         nodes_new_dst = self.run_node_dst_mlp(out, **cond_dst_kwargs) + out
 
         if self.update_src_nodes:
-            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_dst_kwargs) + x_skip[0]
+            nodes_new_src = self.run_node_src_mlp(x_skip[0], **cond_src_kwargs) + x_skip[0]
         else:
             nodes_new_src = x_skip[0]
 
@@ -746,12 +1039,15 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         hidden_dim: int,
         out_channels: int,
         num_heads: int,
-        num_chunks: int,
         edge_dim: int,
         bias: bool = True,
         qk_norm: bool = False,
+        mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
+        graph_attention_backend: str = "triton",
+        edge_pre_mlp: bool = False,
         **kwargs,
     ) -> None:
         """Initialize GraphTransformerBlock.
@@ -764,8 +1060,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             Number of output channels.
         num_heads : int,
             Number of heads
-        num_chunks : int,
-            Number of chunks
         edge_dim : int,
             Edge dimension
         bias : bool
@@ -777,6 +1071,12 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy: str, by default "edges"
+            Strategy to shard tensors, options are "edges" and "heads"
+        graph_attention_backend: str, by default "triton"
+            Backend to use for graph transformer conv, options are "triton" and "pyg"
+        edge_pre_mlp: bool, by default False
+            Allow for edge feature mixing
         """
 
         super().__init__(
@@ -788,9 +1088,132 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             num_heads=num_heads,
             bias=bias,
             qk_norm=qk_norm,
-            num_chunks=num_chunks,
+            mlp_implementation=mlp_implementation,
             update_src_nodes=update_src_nodes,
+            graph_attention_backend=graph_attention_backend,
+            edge_pre_mlp=edge_pre_mlp,
             **kwargs,
+        )
+
+        self.shard_strategy = shard_strategy
+        self._cached_halo_info = None
+        self._cached_halo_cache_specs = None
+        self._cached_partition = None
+
+    def _get_or_build_cached_halo_info(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ):
+        """Return cached halo info, building it once when model sharding is active."""
+        if not model_is_distributed(model_comm_group):
+            return None
+
+        if batch_size != 1:
+            raise ValueError(
+                "GraphTransformerProcessorBlock halo exchange requires batch_size=1 when model sharding is enabled."
+            )
+
+        cache_specs = halo_cache_specs(shard_info, model_comm_group)
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+            return self._cached_halo_info
+
+        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+        partition = build_graph_partition_from_shard_info(edge_index, (x, x), bipartite_shard_info, model_comm_group)
+        self._cached_partition = partition
+        self._cached_halo_info = build_halo_info(
+            partition,
+            edge_index,
+            model_comm_group,
+            shard_info.edges,
+            debug=ANEMOI_DEBUG_SHARDING,
+        )
+        self._cached_halo_cache_specs = cache_specs
+
+        if ANEMOI_DEBUG_SHARDING:
+            verify_halo_info(self._cached_halo_info, partition, model_comm_group)
+
+        return self._cached_halo_info
+
+    def _forward_edges_shard_strategy(
+        self,
+        x: Tensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
+
+        if halo_info is not None:
+            x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
+            edge_index_for_attention = halo_info.edge_index_local
+            # attention_size: local nodes (dst) attend to local + halo nodes (src)
+            attention_size = (halo_info.total_nodes, halo_info.num_local_nodes)
+        else:
+            x_plus_halo = x
+            edge_index_for_attention = edge_index
+            attention_size = (x.size(0), x.size(0))
+
+        # compute q on local nodes (dst), and k,v on local + halo nodes (src)
+        query, key, value, edges = self.get_qkve((x_plus_halo, x), edge_attr)
+
+        return self._forward_edges_sharded_attention(
+            query,
+            key,
+            value,
+            edges,
+            edge_index_for_attention,
+            attention_size,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+    def _forward_heads_shard_strategy(
+        self,
+        x: Tensor,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        size: Union[int, tuple[int, int]],
+        model_comm_group: Optional[ProcessGroup],
+        num_chunks: int,
+        edges_are_dst_sorted: bool,
+    ) -> Tensor:
+        query, key, value, edges = self.get_qkve(x, edge_attr)
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+
+        return self._forward_heads_sharded_attention(
+            query,
+            key,
+            value,
+            edges,
+            edge_index,
+            bipartite_shard_info,
+            batch_size,
+            size,
+            model_comm_group,
+            num_chunks,
+            edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
     def forward(
@@ -798,11 +1221,13 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shapes: tuple,
+        shard_info: GraphShardInfo,
         batch_size: int,
         size: Union[int, tuple[int, int]],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
+        edges_are_dst_sorted: bool = True,
+        **kwargs,
     ):
         x_skip = x
 
@@ -812,19 +1237,32 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         x = self.layer_norm_attention(x, **cond_kwargs)
         x_r = self.lin_self(x)
 
-        query, key, value, edges = self.get_qkve(x, edge_attr)
+        # "inner" chunking for memory reductions in inference, controlled via env variable:
+        num_chunks = 1 if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
 
-        query, key, value, edges = self.shard_qkve_heads(query, key, value, edges, shapes, batch_size, model_comm_group)
-
-        if self.qk_norm:
-            query = self.q_norm(query)
-            key = self.k_norm(key)
-
-        num_chunks = self.num_chunks if self.training else NUM_CHUNKS_INFERENCE_PROCESSOR
-
-        out = self.attention_block(query, key, value, edges, edge_index, size, num_chunks)
-
-        out = self.shard_output_seq(out, shapes, batch_size, model_comm_group)
+        if self.shard_strategy == "edges":
+            out = self._forward_edges_shard_strategy(
+                x,
+                edge_attr,
+                edge_index,
+                shard_info,
+                batch_size,
+                model_comm_group,
+                num_chunks,
+                edges_are_dst_sorted,
+            )
+        else:
+            out = self._forward_heads_shard_strategy(
+                x,
+                edge_attr,
+                edge_index,
+                shard_info,
+                batch_size,
+                size,
+                model_comm_group,
+                num_chunks,
+                edges_are_dst_sorted,
+            )
 
         # out = self.projection(out + x_r) in chunks:
         out = torch.cat([self.projection(chunk) for chunk in torch.tensor_split(out + x_r, num_chunks, dim=0)], dim=0)

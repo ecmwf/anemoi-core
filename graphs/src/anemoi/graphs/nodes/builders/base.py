@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,6 +18,7 @@ import torch
 from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.utils.config import DotDict
 
@@ -33,7 +34,7 @@ class BaseNodeBuilder(ABC):
     ----------
     name : str
         name of the nodes, key for the nodes in the HeteroData graph object.
-    area_mask_builder : KNNAreaMaskBuilder
+    area_mask_builder : AreaMaskBuilder
         The area of interest mask builder, if any. Defaults to None.
     """
 
@@ -42,6 +43,7 @@ class BaseNodeBuilder(ABC):
     def __init__(self, name: str) -> None:
         self.name = name
         self.area_mask_builder = None
+        self.device = get_distributed_device()
 
     def register_nodes(self, graph: HeteroData) -> HeteroData:
         """Register nodes in the graph.
@@ -56,7 +58,7 @@ class BaseNodeBuilder(ABC):
         HeteroData
             The graph with the registered nodes.
         """
-        graph[self.name].x = self.get_coordinates().to(torch.float32)
+        graph[self.name].x = self.get_coordinates().to(dtype=torch.float32, device=self.device)
         graph[self.name].node_type = type(self).__name__
 
         if graph[self.name].num_nodes >= 2:

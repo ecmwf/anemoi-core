@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,9 +11,12 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from typing import Any
+from typing import Iterable
 from typing import Optional
 
 import torch
+from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.tensor import InputTensorIndex
@@ -121,49 +124,52 @@ class NormalizedReluBounding(BaseBounding):
         name_to_index_stats : dict
             A dictionary mapping the variable names to their corresponding indices in the statistics dictionary.
         """
+        if len(normalizer) != len(variables):
+            raise ValueError(
+                "The length of the normalizer list must match the number of variables in NormalizedReluBounding."
+            )
+        if len(min_val) != len(variables):
+            raise ValueError(
+                "The length of the min_val list must match the number of variables in NormalizedReluBounding."
+            )
+        if not all(norm in {"mean-std", "min-max", "max", "std"} for norm in normalizer):
+            raise ValueError(
+                "Each normalizer must be one of: 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
+            )
+
         super().__init__(
             variables=variables,
             name_to_index=name_to_index,
             statistics=statistics,
             name_to_index_stats=name_to_index_stats,
         )
-        self.min_val = min_val
-        self.normalizer = normalizer
 
-        # Validate normalizer input
-        if not all(norm in {"mean-std", "min-max", "max", "std"} for norm in self.normalizer):
-            raise ValueError(
-                "Each normalizer must be one of: 'mean-std', 'min-max', 'max', 'std' in NormalizedReluBounding."
-            )
-        if len(self.normalizer) != len(variables):
-            raise ValueError(
-                "The length of the normalizer list must match the number of variables in NormalizedReluBounding."
-            )
-        if len(self.min_val) != len(variables):
-            raise ValueError(
-                "The length of the min_val list must match the number of variables in NormalizedReluBounding."
-            )
+        # Silently skip variables absent from this dataset (matches BaseBounding._create_index).
+        kept = [(ii, var) for ii, var in enumerate(variables) if var in name_to_index]
+        self.variables = [var for _, var in kept]
+        self.min_val = [min_val[ii] for ii, _ in kept]
+        self.normalizer = [normalizer[ii] for ii, _ in kept]
 
         # Create data index for the variables to be bounded in order from configuration
-        self.data_index = torch.tensor([name_to_index[var] for var in variables], dtype=self.data_index.dtype)
+        self.data_index = torch.tensor([name_to_index[var] for var in self.variables], dtype=self.data_index.dtype)
         # Compute normalized min values
-        norm_min_val = torch.zeros(len(variables))
-        for ii, variable in enumerate(variables):
+        norm_min_val = torch.zeros(len(self.variables), dtype=torch.float32)
+        for ii, variable in enumerate(self.variables):
             stat_index = self.name_to_index_stats[variable]
             if self.normalizer[ii] == "mean-std":
                 mean = self.statistics["mean"][stat_index]
                 std = self.statistics["stdev"][stat_index]
-                norm_min_val[ii] = (min_val[ii] - mean) / std
+                norm_min_val[ii] = (self.min_val[ii] - mean) / std
             elif self.normalizer[ii] == "min-max":
                 min_stat = self.statistics["min"][stat_index]
                 max_stat = self.statistics["max"][stat_index]
-                norm_min_val[ii] = (min_val[ii] - min_stat) / (max_stat - min_stat)
+                norm_min_val[ii] = (self.min_val[ii] - min_stat) / (max_stat - min_stat)
             elif self.normalizer[ii] == "max":
                 max_stat = self.statistics["max"][stat_index]
-                norm_min_val[ii] = min_val[ii] / max_stat
+                norm_min_val[ii] = self.min_val[ii] / max_stat
             elif self.normalizer[ii] == "std":
                 std = self.statistics["stdev"][stat_index]
-                norm_min_val[ii] = min_val[ii] / std
+                norm_min_val[ii] = self.min_val[ii] / std
         # register the normalized min values as a buffer to ensure they are moved to the correct device
         self.register_buffer("norm_min_val", norm_min_val)
 
@@ -301,3 +307,91 @@ class LeakyFractionBounding(FractionBounding):
         # Calculate the fraction of the total variable
         x[..., self.data_index] *= x[..., self.total_variable]
         return x
+
+
+def _build_dataset_boundings(
+    model_config: Any,
+    data_indices: Any,
+    statistics: dict | None,
+) -> nn.ModuleList:
+    """Build the list of model-output bounding modules from configuration.
+
+    This is a thin factory over Hydra's ``instantiate`` that reads the iterable
+    ``model_config.model.bounding`` and instantiates each entry while injecting
+    the common keyword arguments required by bounding modules:
+    ``name_to_index``, ``statistics``, and ``name_to_index_stats``. The result
+    is returned as an ``nn.ModuleList`` preserving the order of the config.
+
+    Parameters
+    ----------
+    model_config : Any
+        Object with a ``model`` attribute containing an iterable ``bounding``
+        (e.g. a list of Hydra configs). If absent or empty, an empty
+        ``nn.ModuleList`` is returned.
+    data_indices : Any
+        Object providing the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict | None
+        Optional dataset/model statistics passed to each bounding module. Use
+        ``None`` if not required by the configured classes.
+
+    Returns
+    -------
+    torch.nn.ModuleList
+        The instantiated bounding modules, in the same order as specified in
+        ``model_config.model.bounding``. May be empty.
+    """
+
+    bounding_cfgs: Iterable[Any] = getattr(getattr(model_config, "model", object()), "bounding", []) or []
+
+    return nn.ModuleList(
+        [
+            instantiate(
+                cfg,
+                name_to_index=data_indices.model.output.name_to_index,
+                statistics=statistics,
+                name_to_index_stats=data_indices.data.input.name_to_index,
+            )
+            for cfg in bounding_cfgs
+        ]
+    )
+
+
+def build_boundings(
+    model_config: Any,
+    data_indices: Any,
+    statistics: dict | None,
+) -> nn.ModuleDict:
+    """Build the model-output bounding modules from configuration.
+
+    This is a thin factory that creates a ``nn.ModuleDict`` of bounding
+    modules by invoking ``_build_dataset_boundings`` for each dataset
+    specified in ``data_indices``.
+
+    Parameters
+    ----------
+    model_config : Any
+        Object with a ``model`` attribute containing an iterable ``bounding``
+        (e.g. a list of Hydra configs). If absent or empty, an empty
+        ``nn.ModuleDict`` is returned.
+    data_indices : Any
+        Dictionary mapping dataset names to data indices objects. Each
+        data indices object must provide the mappings:
+        ``data_indices.model.output.name_to_index`` and
+        ``data_indices.data.input.name_to_index``. These are forwarded to each
+        instantiated bounding module as ``name_to_index`` and
+        ``name_to_index_stats`` respectively.
+    statistics : dict | None
+        Dictionary mapping dataset names to optional dataset/model statistics
+        passed to each bounding module. Use ``None`` if not required by the
+        configured classes.
+    """
+    bounding_modules = nn.ModuleDict()
+    for dataset_name, dataset_indices in data_indices.items():
+        bounding_modules[dataset_name] = _build_dataset_boundings(
+            model_config, dataset_indices, statistics[dataset_name]
+        )
+    return bounding_modules

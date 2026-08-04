@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -78,16 +78,26 @@ def test_output_tensor_index_todict(output_tensor_index) -> None:
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),
+        "name_to_index": dict(x=0, y=1, z=2, q=3, other=4),
     }
     for key, value in output_tensor_index.todict().items():
         assert key in expected_output
-        assert torch.allclose(value, expected_output[key])
+        if isinstance(value, dict):
+            assert value == expected_output[key]
+        else:
+            assert torch.allclose(value, expected_output[key])
 
 
 def test_output_tensor_index_getattr(output_tensor_index) -> None:
     assert output_tensor_index.full is not None
     with pytest.raises(AttributeError):
         output_tensor_index.z
+
+
+def test_output_tensor_index_name_position_mapping(output_tensor_index) -> None:
+    assert output_tensor_index.ordered_names == ["z", "q", "other"]
+    assert output_tensor_index.name_to_position == {"z": 0, "q": 1, "other": 2}
+    assert output_tensor_index.positions_for_names(["q", "other"]) == [1, 2]
 
 
 def test_input_tensor_index_full(input_tensor_index) -> None:
@@ -112,13 +122,23 @@ def test_input_tensor_index_todict(input_tensor_index) -> None:
         "diagnostic": torch.Tensor([2]).to(torch.int),
         "forcing": torch.Tensor([0, 1]).to(torch.int),
         "prognostic": torch.Tensor([3, 4]).to(torch.int),
+        "name_to_index": dict(x=0, y=1, z=2, q=3, other=4),
     }
     for key, value in input_tensor_index.todict().items():
         assert key in expected_output
-        assert torch.allclose(value, expected_output[key])
+        if isinstance(value, dict):
+            assert value == expected_output[key]
+        else:
+            assert torch.allclose(value, expected_output[key])
 
 
 def test_input_tensor_index_getattr(input_tensor_index) -> None:
     assert input_tensor_index.full is not None
     with pytest.raises(AttributeError):
         input_tensor_index.z
+
+
+def test_input_tensor_index_name_position_mapping(input_tensor_index) -> None:
+    assert input_tensor_index.ordered_names == ["x", "y", "q", "other"]
+    assert input_tensor_index.name_to_position == {"x": 0, "y": 1, "q": 2, "other": 3}
+    assert input_tensor_index.positions_for_names(["x", "other"]) == [0, 3]

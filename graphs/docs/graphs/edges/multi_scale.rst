@@ -16,7 +16,7 @@ refinement level of an icosahedron. The higher the refinement level, the
 shorther the length of the edges. By default, all possible refinements
 levels are considered.
 
-.. image:: ../../_static/multi_scale_edges.png
+.. image:: ../../_static/multi_scale_edges.svg
    :alt: Multi-scale edges
    :align: center
 
@@ -57,3 +57,14 @@ included in the edge computation:
 .. csv-table:: Triangular refinements specifications (x_hops=1)
    :file: ./tri_refined_edges.csv
    :header-rows: 1
+
+*********************************
+ HEALPix Multi-scale connections
+*********************************
+
+A similar edge builder is available for the HEALPix grid when using the
+``HEALPixNodes`` builder.
+
+This edge builder, ``HEALPixMultiScaleEdges``, uses the same parameters
+as the multi-scale edge builder, except for ``x_hops``, which is
+currently always set to 1, and cannot be changed.

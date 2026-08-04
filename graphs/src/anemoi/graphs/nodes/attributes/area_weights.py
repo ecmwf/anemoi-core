@@ -19,6 +19,7 @@ from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.datasets import open_dataset
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
@@ -79,35 +80,6 @@ class UniformWeights(BaseAreaWeights):
             Ones.
         """
         return np.ones(latlons.shape[0])
-
-
-class AreaWeights(BaseNodeAttribute):
-    """Implements the area of the nodes as the weights.
-
-    Attributes
-    ----------
-    flat: bool
-        If True, the area is computed in 2D, otherwise in 3D.
-    **other: Any
-        Additional keyword arguments, see PlanarAreaWeights and SphericalAreaWeights
-        for details.
-
-    Methods
-    -------
-    compute(self, graph, nodes_name)
-        Compute the area attributes for each node.
-    """
-
-    def __new__(cls, flat: bool = False, **kwargs):
-        logging.warning(
-            "Creating %s with flat=%s and kwargs=%s. In a future release, AreaWeights will be deprecated: please use directly PlanarAreaWeights or SphericalAreaWeights.",
-            cls.__name__,
-            flat,
-            kwargs,
-        )
-        if flat:
-            return PlanarAreaWeights(**kwargs)
-        return SphericalAreaWeights(**kwargs)
 
 
 class PlanarAreaWeights(BaseAreaWeights):
@@ -186,6 +158,69 @@ class PlanarAreaWeights(BaseAreaWeights):
 
         return np.concatenate([expanded_hull, np.vstack(boundary_points)])
 
+    @staticmethod
+    def _voronoi_region_areas(v: Voronoi, n_points: int) -> np.ndarray:
+        """Polygon area of the first ``n_points`` Voronoi regions, vectorised.
+
+        Uses the shoelace formula instead of a per-node :class:`scipy.spatial.ConvexHull`.
+        SciPy returns each 2-D region's vertices in boundary order, so for a convex cell
+        this matches ``ConvexHull(...).volume`` to float-rounding level. Heavy joggling
+        (qhull ``QJ``) can yield degenerate, non-convex regions where shoelace
+        under-counts; those are detected and recomputed exactly with ``ConvexHull``.
+
+        Parameters
+        ----------
+        v : scipy.spatial.Voronoi
+            Voronoi tessellation of the nodes plus the boundary ring.
+        n_points : int
+            Number of leading points (the real nodes) whose cell area is returned.
+
+        Returns
+        -------
+        np.ndarray
+            Area of each of the ``n_points`` Voronoi cells.
+        """
+        regions = [v.regions[region_idx] for region_idx in v.point_region[:n_points]]
+        lengths = np.array([len(region) for region in regions], dtype=np.intp)
+
+        # Regions must be bounded polygons (>= 3 vertices); the boundary ring guarantees it.
+        assert (
+            n_points == 0 or lengths.min() >= 3
+        ), "Voronoi regions must be bounded polygons with >= 3 vertices (is the boundary ring missing?)."
+
+        # Flatten the ragged regions; per-region offsets and a wrap-around "next vertex" index.
+        flat = np.fromiter(
+            (vertex_idx for region in regions for vertex_idx in region),
+            dtype=np.intp,
+            count=int(lengths.sum()),
+        )
+        starts = np.zeros(n_points, dtype=np.intp)
+        np.cumsum(lengths[:-1], out=starts[1:])
+        ends = starts + lengths
+        nxt = np.arange(1, flat.shape[0] + 1, dtype=np.intp)
+        nxt[ends - 1] = starts  # wrap each region's last vertex back to its first
+
+        # Shoelace formula: area = 1/2 |sum_i (x_i * y_{i+1} - x_{i+1} * y_i)|, per region.
+        pts = v.vertices[flat]
+        x, y = pts[:, 0], pts[:, 1]
+        cross = x * y[nxt] - x[nxt] * y
+        areas = 0.5 * np.abs(np.add.reduceat(cross, starts))
+
+        # Flag non-convex regions: a convex polygon's consecutive edge-turn cross products
+        # all share one sign, so a region with both signs has an interior/degenerate vertex.
+        edge_x, edge_y = x[nxt] - x, y[nxt] - y
+        turn = edge_x * edge_y[nxt] - edge_y * edge_x[nxt]
+        has_pos = np.add.reduceat((turn > 0).astype(np.intp), starts) > 0
+        has_neg = np.add.reduceat((turn < 0).astype(np.intp), starts) > 0
+        flagged = np.flatnonzero(has_pos & has_neg)
+
+        # Exact ConvexHull fallback for the rare degenerate regions (matches the old code).
+        for idx in flagged:
+            region = v.regions[v.point_region[idx]]
+            areas[idx] = ConvexHull(v.vertices[region]).volume
+
+        return areas
+
     def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute area weights.
 
@@ -203,20 +238,12 @@ class PlanarAreaWeights(BaseAreaWeights):
         resolution = self._compute_mean_nearest_distance(latlons)
         boundary_points = self._get_boundary_ring(latlons, resolution)
 
-        # Compute convex hull over all points (boundary ring included)
+        # Build the Voronoi tessellation over all points (boundary ring included)
         extended_points = np.vstack([latlons, boundary_points])
         v = Voronoi(extended_points, qhull_options="QJ Pp")
 
-        # Compute the area of each node's region, excluding those in the boundary ring
-        areas = []
-        for idx in range(len(latlons)):
-            p_idx = v.point_region[idx]
-            r = v.regions[p_idx]
-            poly_coords = v.vertices[r]
-            area = ConvexHull(poly_coords).volume
-            areas.append(area)
-
-        return np.array(areas)
+        # Area of each node's Voronoi cell (boundary-ring points excluded), vectorised.
+        return self._voronoi_region_areas(v, len(latlons))
 
 
 class MaskedPlanarAreaWeights(PlanarAreaWeights):
@@ -397,8 +424,10 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
     Notes
     ------
     The area of a latitude band is
+
     .. math::
         A = 2\pi R(\sin(lat_2) - \sin(lat_1))
+
     where R is the earth radius and lat_1, lat_2 are in radians.
     """
 
@@ -422,3 +451,50 @@ class IsolatitudeAreaWeights(BaseLatWeightedAttribute):
         # Compute the area of each node
         area_km = dict(zip(unique_lats, ring_area_km / lat_counts))
         return np.array([area_km[lat] for lat in latitudes])
+
+
+class AnemoiDatasetVariableWeights(BaseNodeAttribute):
+    """Load area weights from a variable in the dataset.
+
+    Attributes
+    ----------
+    variable : str
+        Name of the variable to use as weights.
+    norm : str, optional
+        Method to use to normalise the weights.
+
+    Methods
+    -------
+    get_raw_values(self, nodes)
+        Extract the data and convert it to a Torch tensor object.
+    """
+
+    def __init__(self, variable: str, norm: str | None = None, dtype: str = "float32") -> None:
+        super().__init__(norm, dtype)
+        self.variable = variable
+
+    def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        """Read the weighting variable from the dataset."""
+        return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        """Extract the data and convert it to a Torch tensor object.
+
+        Parameters
+        ----------
+        nodes : NodeStorage
+            Nodes of the graph.
+        kwargs : dict
+            Additional keyword arguments.
+
+        Returns
+        -------
+        torch.Tensor
+            Area weights for the nodes.
+        """
+        assert nodes["node_type"] in [
+            "ZarrDatasetNodes",
+            "AnemoiDatasetNodes",
+        ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
+        data = torch.from_numpy(self._read_data(nodes))
+        return self.post_process(data)

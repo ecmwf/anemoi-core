@@ -1,16 +1,21 @@
 # configuration for the "graphtransformer" benchmark
-
-hardware:
-  num_gpus_per_model: 2
-  files:
-    dataset:  aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
-    graph: graphtransformer-bm-graph.pt
+system:
+  hardware:
+    num_gpus_per_model: 2
+  input:
+    dataset:  /home/mlx/ai-ml/datasets/aifs-ea-an-oper-0001-mars-n320-1979-2023-6h-v8.zarr
+    graph: ./graphtransformer-bm-graph.pt
+    #store locally so graph will be reused by non-zero processes
 
 dataloader:
   training:
-    end: 2020-11-30
+    datasets:
+      data:
+        end: 2020-11-30
   validation:
-    start: 2020-12-31
+    datasets:
+      data:
+        start: 2020-12-31
 
 model:
   num_channels: 512

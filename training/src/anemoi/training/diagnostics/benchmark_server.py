@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,10 +18,12 @@ import tarfile
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Callable
+from datetime import UTC
 from datetime import datetime
-from datetime import timezone
+from functools import partial
 from pathlib import Path
 from typing import Any
+from typing import Final
 
 import pandas as pd
 import yaml
@@ -32,12 +34,10 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch.cuda import memory_stats
 
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
-
 LOGGER = logging.getLogger(__name__)
 
-BENCHMARK_SERVER_ARTIFACT_LIMIT = 10
+BENCHMARK_SERVER_ARTIFACT_LIMIT: Final = 10
+MLFLOW_LOG_RETENTION_LIMIT: Final = 60
 
 
 def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
@@ -47,6 +47,33 @@ def parse_benchmark_config(path: Path) -> tuple[str, str, str]:
     hostname = benchmark_config["hostname"]
     path = benchmark_config["path"]
     return user, hostname, path
+
+
+DEFAULT_BENCHMARK_CONFIG_PATH: Final[Path] = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
+
+
+def get_benchmark_store(kind: str, config_path: Path = DEFAULT_BENCHMARK_CONFIG_PATH) -> str:
+    """Build an ssh:// store URL for a given kind of integration test.
+
+    Reads user/hostname from the anemoi-benchmark yaml and resolves the remote
+    directory for ``kind`` (e.g. ``"benchmarks"``, ``"accuracy"``) as follows:
+
+    - If the yaml has a ``paths`` mapping and ``paths[kind]`` is set, use it
+      verbatim.
+    - Otherwise treat the yaml's ``path`` entry as a base directory and append
+      ``kind`` as a subdirectory (so benchmarks and accuracy results live in
+      sibling directories on the remote host).
+    """
+    with config_path.open("r") as f:
+        cfg = yaml.safe_load(f)
+    user = cfg["user"]
+    hostname = cfg["hostname"]
+    paths = cfg.get("paths") or {}
+    base_path = str(cfg["path"]).rstrip("/")
+    remote_path = (
+        paths[kind] if kind in paths else (base_path if base_path.endswith(f"/{kind}") else f"{base_path}/{kind}")
+    )
+    return f"ssh://{user}@{hostname}:{remote_path}"
 
 
 class BenchmarkValue:
@@ -625,7 +652,7 @@ def get_local_benchmark_results(profiler_path: str) -> list[BenchmarkValue]:
 
     # get metadata
     commit = get_git_revision_hash()
-    yyyy_mm_dd = datetime.now(tz=timezone.utc).date()
+    yyyy_mm_dd = datetime.now(tz=UTC).date()
 
     # create Benchmark value objects
     local_benchmark_results = []
@@ -686,6 +713,120 @@ def get_local_benchmark_artifacts(profiler_path: str) -> list[Path]:
     return artifacts
 
 
+@rank_zero_only
+def track_dataloader_benchmark_results(
+    test_case: str,
+    batches_per_second: float,
+) -> None:
+    """Track dataloader metrics by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping dataloader benchmark tracking: not on main branch")
+        return
+
+    store = get_benchmark_store("benchmarks")
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    dataloader_benchmark_results = [
+        BenchmarkValue(
+            name="dataloaderThroughputIterPerS",
+            value=batches_per_second,
+            unit="iter/s",
+            date=today,
+            commit=commit,
+            op=operator.ge,
+            tolerance=10,
+        ),
+    ]
+
+    LOGGER.info("Updating dataloader benchmark metrics on server")
+    for dataloader_benchmark_value in dataloader_benchmark_results:
+        benchmark_server.set_value(dataloader_benchmark_value)
+
+
+@rank_zero_only
+def track_accuracy_result(
+    test_case: str,
+    value: float,
+    *,
+    name: str,
+) -> None:
+    """Track a single accuracy metric by updating the remote benchmark server on main."""
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping accuracy benchmark tracking: not on main branch")
+        return
+
+    # Accuracy and performance benchmarks live under sibling directories on
+    # the remote host (see get_benchmark_store): the yaml's 'path' entry is
+    # treated as a base and the kind ('benchmarks' / 'accuracy') is appended,
+    # unless overridden via a 'paths' mapping in the yaml.
+    store = get_benchmark_store("accuracy")
+    benchmark_server = parse_benchmark_location(store, test_case=test_case)
+
+    commit = get_git_revision_hash()
+    today = datetime.now(tz=UTC).date()
+    benchmark_value = BenchmarkValue(
+        name=name,
+        value=value,
+        unit="",
+        date=today,
+        commit=commit,
+        op=operator.le,
+        tolerance=0,
+    )
+
+    LOGGER.info("Updating accuracy benchmark metrics on server")
+    benchmark_server.set_value(benchmark_value)
+
+
+track_accuracy_final_loss = partial(track_accuracy_result, name="accuracyFinalLoss")
+
+
+@rank_zero_only
+def prune_mlflow_runs(
+    client: Any,
+    experiment_name: str,
+    run_name: str,
+    keep_latest: int = MLFLOW_LOG_RETENTION_LIMIT,
+    protected_run_ids: list[str] | None = None,
+) -> None:
+    """Deletes old mlflow runs for a benchmark/accuracy test, keeping only the most recent ones.
+
+    Once such a test has passed, only its most recent mlflow runs are useful for future
+    comparisons; older ones just accumulate on the tracking server. This keeps the
+    ``keep_latest`` most recent runs (by start time) matching ``run_name`` within
+    ``experiment_name`` and deletes the rest, always preserving any run listed in
+    ``protected_run_ids`` (e.g. a pinned reference run used for comparisons) regardless of age.
+
+    client: an mlflow tracking client (e.g. AnemoiMlflowClient) exposing the standard
+            MlflowClient interface (get_experiment_by_name, search_runs, delete_run).
+    """
+    if not _is_repo_on_branch("main"):
+        LOGGER.info("Skipping mlflow run pruning: not on main branch")
+        return
+
+    protected_run_ids = set(protected_run_ids or [])
+    experiment = client.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        LOGGER.info("No mlflow experiment named '%s' found, nothing to prune", experiment_name)
+        return
+
+    runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.mlflow.runName = '{run_name}'",
+        order_by=["attribute.start_time DESC"],
+    )
+
+    runs_to_maybe_delete = runs[keep_latest:]
+    for run in runs_to_maybe_delete:
+        if run.info.run_id in protected_run_ids:
+            LOGGER.debug("Keeping protected mlflow run %s", run.info.run_id)
+            continue
+        LOGGER.info("Deleting mlflow run %s (exceeds retention limit of %s)", run.info.run_id, keep_latest)
+        client.delete_run(run.info.run_id)
+
+
 def _print_local_benchmark_results(local_benchmark_results: list[BenchmarkValue]) -> str:
     local_results_str = "Local benchmark results:\n"
     local_results_str += "-" * 20 + "\n"
@@ -702,7 +843,8 @@ def benchmark(
     store: str,
     update_data: bool = False,  # when this is true, data is always updated
 ) -> None:
-    local_benchmark_results = get_local_benchmark_results(cfg.hardware.paths.profiler)
+    profiler_path = cfg.system.output.profiler
+    local_benchmark_results = get_local_benchmark_results(profiler_path)
 
     # Get reference benchmark results
     benchmark_server = parse_benchmark_location(store, test_case=test_case)
@@ -725,7 +867,7 @@ def benchmark(
 
     if len(failed_tests) > 0:
         msg = f"The following tests failed: {failed_tests}"
-        artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+        artifacts = get_local_benchmark_artifacts(profiler_path)
         artifacts_tar = Path(f"./{test_case}_artifacts.tar.gz")
         _tar_files(artifacts, artifacts_tar)
         LOGGER.info("Profiling artifacts from failed run stored under: %s", artifacts_tar)
@@ -736,5 +878,5 @@ def benchmark(
         LOGGER.info("Updating metrics on server")
         for local_benchmark_value in local_benchmark_results:
             benchmark_server.set_value(local_benchmark_value)
-            artifacts = get_local_benchmark_artifacts(cfg.hardware.paths.profiler)
+            artifacts = get_local_benchmark_artifacts(profiler_path)
             benchmark_server.store_artifacts(artifacts, local_benchmark_results[0].commit)

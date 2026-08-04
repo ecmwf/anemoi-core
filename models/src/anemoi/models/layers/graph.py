@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
+from collections import defaultdict
 
 import einops
 import torch
@@ -68,23 +70,26 @@ class NamedNodesAttributes(nn.Module):
     attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
-    def __init__(self, num_trainable_params: int, graph_data: HeteroData) -> None:
+    def __init__(self, trainable_parameters: dict[str, int], graph_data: HeteroData) -> None:
         """Initialize NamedNodesAttributes."""
         super().__init__()
 
-        self.define_fixed_attributes(graph_data, num_trainable_params)
+        trainable_parameters = defaultdict(int, trainable_parameters)
+
+        self.define_fixed_attributes(graph_data, trainable_parameters)
 
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
             self.register_coordinates(nodes_name, nodes.x)
-            self.register_tensor(nodes_name, num_trainable_params)
+            self.register_tensor(nodes_name, trainable_parameters[nodes_name])
 
-    def define_fixed_attributes(self, graph_data: HeteroData, num_trainable_params: int) -> None:
+    def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
         """Define fixed attributes."""
         nodes_names = list(graph_data.node_types)
         self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
         self.attr_ndims = {
-            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + num_trainable_params for nodes_name in nodes_names
+            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
+            for nodes_name in nodes_names
         }
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:

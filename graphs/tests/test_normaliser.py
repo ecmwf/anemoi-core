@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,7 +13,7 @@ import torch
 from anemoi.graphs.normalise import NormaliserMixin
 
 
-@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std", "log1p"])
 def test_normaliser(norm: str):
     """Test NormaliserMixin normalise method."""
 
@@ -32,7 +32,7 @@ def test_normaliser(norm: str):
     assert normalised_data.shape == data.shape
 
 
-@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std"])
+@pytest.mark.parametrize("norm", ["l1", "l2", "unit-max", "unit-range", "unit-std", "log1p"])
 def test_grouped_normaliser(norm: str):
     """Test NormaliserMixin normalise method."""
 
