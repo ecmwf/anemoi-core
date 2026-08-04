@@ -574,7 +574,6 @@ def benchmark_config(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
     OmegaConf.set_struct(template.data, False)
-    OmegaConf.set_struct(template.training.scalers, False)
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
