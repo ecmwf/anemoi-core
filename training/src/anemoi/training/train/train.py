@@ -431,7 +431,15 @@ class AnemoiTrainer(ABC):
         compat_options = (
             OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
         )
-        check_variables_metadata_compatibility(ckpt_variables_metadata, self.datamodule.metadata, **compat_options)
+        # Opt-in fine-tuning into FEWER variables (issue #838): tolerate checkpoint-only
+        # variables in the unit check, mirroring the dataset variable-order check.
+        allow_subset = bool(self.config.training.get("allow_variable_subset", False))
+        check_variables_metadata_compatibility(
+            ckpt_variables_metadata,
+            self.datamodule.metadata,
+            allow_subset=allow_subset,
+            **compat_options,
+        )
 
     @cached_property
     def model(self) -> pl.LightningModule:
