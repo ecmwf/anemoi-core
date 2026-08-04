@@ -480,3 +480,162 @@ def test_reduce_tensor_backward_is_identity(
         world_size=distributed_world_size,
         shape=(1025, 1024),
     )
+
+
+@pytest.mark.parametrize(
+    "gather_in_fwd",
+    [
+        pytest.param(True, id="gather_in_fwd"),
+        pytest.param(False, id="no_gather_in_fwd"),
+    ],
+)
+def test_sync_tensor_identity_without_group(gather_in_fwd: bool) -> None:
+    """With ``mgroup=None``, values and gradients pass through unchanged.
+
+    Covers the local fallback of ``_SyncParallelSection`` in both forward
+    modes: neither a gather nor a backward reduction occurs.
+    """
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    synced = sync_tensor(x, dim=0, sizes=None, mgroup=None, gather_in_fwd=gather_in_fwd)
+
+    assert synced.size() == expected.size()
+    assert synced.dtype == expected.dtype
+    assert synced.device == expected.device
+    torch.testing.assert_close(synced, expected)
+
+    loss = (synced * grad_output).sum()  # d(loss)/d(synced) == grad_output
+    loss.backward()
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_sync_tensor_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    dim: int,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    full = _make_range_tensor(shape, device)
+    sizes = get_balanced_partition_sizes(full.size(dim), world_size)
+    local = torch.split(full, sizes, dim=dim)[rank].contiguous().clone()
+    local.requires_grad_(True)
+
+    synced = sync_tensor(local, dim=dim, sizes=sizes, mgroup=group)
+
+    assert synced.size() == full.size()
+    assert synced.dtype == full.dtype
+    assert synced.device == full.device
+    torch.testing.assert_close(synced, full, atol=atol, rtol=rtol)
+
+    grad_output = _make_grad_output(shape, device, scale=rank + 1)
+    loss = (synced * grad_output).sum()  # d(loss)/d(synced) == grad_output
+    loss.backward()
+
+    # the backward all-reduce sums the rank scales: sum_q (q+1) = ws(ws+1)/2
+    grad_output_sum = _make_grad_output(shape, device, scale=world_size * (world_size + 1) / 2)
+    expected_grad = torch.split(grad_output_sum, sizes, dim=dim)[rank].clone()
+    torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shape", "dim"),
+    [
+        pytest.param((1025, 1024), 0, id="dim0_uneven_1m"),
+        pytest.param((64, 128, 129), -1, id="negative_last_dim_3d_1m"),
+    ],
+)
+def test_sync_tensor_gathers_and_reduces_gradients(
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Gather shards forward; all-reduce the grad_outputs, then split backward.
+
+    The forward matches gather_tensor. The backward is the exact adjoint of
+    gather-and-replicate: the rank-scaled grad_outputs are summed across
+    ranks, then each rank keeps its slice. This is the observable difference
+    from gather_tensor, whose backward keeps the rank's own grad_output
+    slice without communication.
+    """
+    run_distributed_test(
+        _test_sync_tensor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=shape,
+        dim=dim,
+    )
+
+
+def _test_sync_tensor_no_gather_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    gather_in_fwd: bool,
+    with_sizes: bool,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    base = _make_range_tensor(shape, device)
+    local = base + rank
+    expected = local.clone()
+    local.requires_grad_(True)
+
+    sizes = get_balanced_partition_sizes(shape[0], world_size) if with_sizes else None
+    synced = sync_tensor(local, dim=0, sizes=sizes, mgroup=group, gather_in_fwd=gather_in_fwd)
+
+    assert synced.size() == expected.size()
+    assert synced.dtype == expected.dtype
+    assert synced.device == expected.device
+    torch.testing.assert_close(synced, expected, atol=atol, rtol=rtol)
+
+    grad_output = _make_grad_output(shape, device, scale=rank + 1)
+    loss = (synced * grad_output).sum()  # d(loss)/d(synced) == grad_output
+    loss.backward()
+
+    # the backward all-reduce sums the rank scales: sum_q (q+1) = ws(ws+1)/2
+    expected_grad = _make_grad_output(shape, device, scale=world_size * (world_size + 1) / 2)
+    torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("gather_in_fwd", "with_sizes"),
+    [
+        pytest.param(False, True, id="gather_in_fwd_false"),
+        pytest.param(True, False, id="sizes_none"),
+    ],
+)
+def test_sync_tensor_no_forward_gather(
+    gather_in_fwd: bool,
+    with_sizes: bool,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Without a forward gather, the forward is the identity; the backward still all-reduces.
+
+    The forward gathers only when ``gather_in_fwd`` is true and sizes are
+    given; both disabling branches are covered. Having not gathered, the
+    backward returns the reduced grad_output whole, without splitting.
+    Inputs must be same-shaped across ranks.
+    """
+    run_distributed_test(
+        _test_sync_tensor_no_gather_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(1025, 1024),
+        gather_in_fwd=gather_in_fwd,
+        with_sizes=with_sizes,
+    )
