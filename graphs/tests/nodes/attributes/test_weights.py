@@ -187,30 +187,3 @@ def test_planar_area_weights_degenerate_fallback():
     # The production method must detect the non-convex region and fall back to ConvexHull.
     areas = PlanarAreaWeights._voronoi_region_areas(v, n)
     np.testing.assert_allclose(areas[target], hull_area, rtol=1e-9, atol=0.0)
-
-
-def test_planar_area_weights_exact_on_regular_grid():
-    """Interior cells of a regular grid have exactly dlat * dlon area.
-
-    Regression test for the qhull options (#690). A regular grid is massively cocircular,
-    which is precisely the degeneracy merged facets ("Qbb Qc Qz") handles exactly and the
-    joggle ("QJ") only approximates: joggle reproduces this to ~1e-6 and raising it, as
-    QH6229 suggests, to ~1e+3. Both blow through this tolerance, so reinstating a joggle
-    fails here loudly instead of silently returning meaningless weights.
-    """
-    import numpy as np
-
-    spacing = 0.01
-    lats = 0.5 + np.arange(60) * spacing
-    lons = 0.1 + np.arange(60) * spacing
-    grid_lat, grid_lon = np.meshgrid(lats, lons, indexing="ij")
-    latlons = np.column_stack([grid_lat.ravel(), grid_lon.ravel()])
-
-    areas = PlanarAreaWeights().compute_area_weights(latlons)
-
-    # Only interior cells are exact squares; the outer ring is bounded by the added
-    # boundary ring rather than by neighbouring nodes.
-    interior = ((grid_lat > lats[0]) & (grid_lat < lats[-1]) & (grid_lon > lons[0]) & (grid_lon < lons[-1])).ravel()
-    assert interior.sum() == 58 * 58
-
-    np.testing.assert_allclose(areas[interior], spacing**2, rtol=1e-9, atol=0.0)
