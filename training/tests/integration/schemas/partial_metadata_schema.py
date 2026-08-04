@@ -18,6 +18,7 @@ PARTIAL_METADATA_SCHEMA = {
     "version": None,
     "config": None,
     "seed": None,
+    "base_seed": None,
     "run_id": None,
     "dataset": None,
     "data_indices": None,
@@ -25,6 +26,7 @@ PARTIAL_METADATA_SCHEMA = {
     "timestamp": None,
     "metadata_inference": {
         "seed": None,
+        "base_seed": None,
         "run_id": None,
         "dataset_names": list,  # list of datasets
         "task": None,
