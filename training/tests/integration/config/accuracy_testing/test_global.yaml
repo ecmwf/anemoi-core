@@ -39,6 +39,7 @@ dataloader:
       data:
         start: 2020
 training:
+  precision: bf16-fp32-opt
   max_steps: 1000
   optimization:
     lr_scheduler:
