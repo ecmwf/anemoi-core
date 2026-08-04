@@ -321,3 +321,93 @@ def test_shard_tensor_no_backward_gather(
         dim=dim,
     )
 
+
+@pytest.mark.parametrize(
+    "sizes",
+    [
+        pytest.param(None, id="sizes_none"),
+        pytest.param([4], id="explicit_single_rank_sizes"),
+    ],
+)
+def test_gather_tensor_identity_without_group(sizes: list[int] | None) -> None:
+    """With ``mgroup=None``, values and gradients pass through unchanged.
+
+    Covers the local fallback of ``_GatherParallelSection``; the shard-size
+    metadata is ignored on this path.
+    """
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    gathered = gather_tensor(x, dim=0, sizes=sizes, mgroup=None)
+
+    assert gathered.size() == expected.size()
+    assert gathered.dtype == expected.dtype
+    assert gathered.device == expected.device
+    torch.testing.assert_close(gathered, expected)
+
+    loss = (gathered * grad_output).sum()  # d(loss)/d(gathered) == grad_output
+    loss.backward()
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_gather_tensor_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    dim: int,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    full = _make_range_tensor(shape, device)
+    sizes = get_balanced_partition_sizes(full.size(dim), world_size)
+    local = torch.split(full, sizes, dim=dim)[rank].contiguous().clone().requires_grad_(True)
+
+    gathered = gather_tensor(local, dim=dim, sizes=sizes, mgroup=group)
+
+    assert gathered.size() == full.size()
+    assert gathered.dtype == full.dtype
+    assert gathered.device == full.device
+    torch.testing.assert_close(gathered, full, atol=atol, rtol=rtol)
+
+    grad_output = _make_grad_output(shape, device, scale=rank + 1)
+    loss = (gathered * grad_output).sum()  # d(loss)/d(gathered) == grad_output
+    loss.backward()
+
+    expected_grad = torch.split(grad_output, sizes, dim=dim)[rank].clone()
+    torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shape", "dim"),
+    [
+        pytest.param((1025, 1024), 0, id="dim0_uneven_1m"),
+        pytest.param((1024, 1025), 1, id="dim1_uneven_1m"),
+        pytest.param((64, 128, 129), -1, id="negative_last_dim_3d_1m"),
+    ],
+)
+def test_gather_tensor_splits_gradients(
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Gather shards forward; split each rank's own grad_output backward.
+
+    Every rank reconstructs the full tensor forward. Backward involves no
+    communication: with rank-scaled grad_outputs the expected gradient is the
+    rank's slice of its own grad_output, so a spurious cross-rank all-reduce
+    would produce the slice of the rank-summed grad_outputs and fail.
+    """
+    run_distributed_test(
+        _test_gather_tensor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=shape,
+        dim=dim,
+    )
