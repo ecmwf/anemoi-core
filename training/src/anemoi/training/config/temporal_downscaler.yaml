@@ -59,7 +59,7 @@ diagnostics:
       every_n_batches: 20
 
 training:
-  # Overwrites each tendency timestep to the output timestep so all lead times are normalised
+  # Overwrites the tendency timestep used in the scaling to the output timestep so all lead times are normalised
   # by the same per-step statistics rather than their cumulative tendency statistics.
   # This does NOT activate the tendency scaler - to do this you must include the scaler in the loss configuration.
   scalers:
