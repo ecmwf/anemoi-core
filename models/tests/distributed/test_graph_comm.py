@@ -639,3 +639,91 @@ def test_sync_tensor_no_forward_gather(
         gather_in_fwd=gather_in_fwd,
         with_sizes=with_sizes,
     )
+
+
+def test_reduce_shard_tensor_identity_without_group() -> None:
+    """With ``mgroup=None``, values and gradients pass through unchanged.
+
+    Covers the local fallback of ``_ReduceShardParallelSection``.
+    """
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    shard_sum = reduce_shard_tensor(x, dim=0, sizes=None, mgroup=None)
+
+    assert shard_sum.size() == expected.size()
+    assert shard_sum.dtype == expected.dtype
+    assert shard_sum.device == expected.device
+    torch.testing.assert_close(shard_sum, expected)
+
+    loss = (shard_sum * grad_output).sum()  # d(loss)/d(shard_sum) == grad_output
+    loss.backward()
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_reduce_shard_tensor_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    dim: int,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    base = _make_range_tensor(shape, device)
+    sizes = get_balanced_partition_sizes(base.size(dim), world_size)
+    expected_full = torch.stack([base + q for q in range(world_size)]).sum(dim=0)
+    expected = torch.split(expected_full, sizes, dim=dim)[rank].clone()
+
+    local = base + rank
+    local.requires_grad_(True)
+
+    shard_sum = reduce_shard_tensor(local, dim=dim, sizes=sizes, mgroup=group)
+
+    assert shard_sum.size() == expected.size()
+    assert shard_sum.dtype == expected.dtype
+    assert shard_sum.device == expected.device
+    torch.testing.assert_close(shard_sum, expected, atol=atol, rtol=rtol)
+
+    # each rank's grad_output is its slice of one full grad_output
+    grad_output_full = _make_grad_output(shape, device)
+    grad_output_local = torch.split(grad_output_full, sizes, dim=dim)[rank].contiguous()
+    loss = (shard_sum * grad_output_local).sum()  # d(loss)/d(shard_sum) == grad_output_local
+    loss.backward()
+
+    torch.testing.assert_close(local.grad, grad_output_full, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shape", "dim"),
+    [
+        pytest.param((1025, 1024), 0, id="dim0_uneven_1m"),
+        pytest.param((64, 128, 129), -1, id="negative_last_dim_3d_1m"),
+    ],
+)
+def test_reduce_shard_tensor_gathers_gradients(
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """All-reduce full-shape contributions and keep the rank slice forward; gather backward.
+
+    The forward is semantically a reduce-scatter. The backward is the exact
+    adjoint: the per-rank shard grad_outputs are all-gathered into a full
+    gradient on every rank. Each rank's grad_output is its slice of one
+    conceptual full grad_output, so the gathered gradient must reassemble
+    that tensor exactly.
+    """
+    run_distributed_test(
+        _test_reduce_shard_tensor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=shape,
+        dim=dim,
+    )
