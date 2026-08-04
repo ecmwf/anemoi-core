@@ -243,7 +243,7 @@ class EnsembleTraining(BaseTrainingModule):
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_step_kwargs in task_steps:
+        for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
@@ -259,16 +259,17 @@ class EnsembleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_pred,
-                batch,
-                **task_step_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance input state for each dataset if another step follows
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_pred,
+                    batch,
+                    **task_step_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)
