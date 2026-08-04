@@ -411,3 +411,72 @@ def test_gather_tensor_splits_gradients(
         shape=shape,
         dim=dim,
     )
+
+
+def test_reduce_tensor_identity_without_group() -> None:
+    """With ``mgroup=None``, values and gradients pass through unchanged.
+
+    Covers the local fallback of ``_ReduceParallelSection``.
+    """
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    reduced = reduce_tensor(x, mgroup=None)
+
+    assert reduced.size() == expected.size()
+    assert reduced.dtype == expected.dtype
+    assert reduced.device == expected.device
+    torch.testing.assert_close(reduced, expected)
+
+    loss = (reduced * grad_output).sum()  # d(loss)/d(reduced) == grad_output
+    loss.backward()
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_reduce_tensor_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    base = _make_range_tensor(shape, device)
+    local = (base + rank).clone().requires_grad_(True)
+
+    reduced = reduce_tensor(local, mgroup=group)
+
+    expected = torch.stack([base + q for q in range(world_size)]).sum(dim=0)
+    assert reduced.size() == expected.size()
+    assert reduced.dtype == expected.dtype
+    assert reduced.device == expected.device
+    torch.testing.assert_close(reduced, expected, atol=atol, rtol=rtol)
+
+    grad_output = _make_grad_output(shape, device, scale=rank + 1)
+    loss = (reduced * grad_output).sum()  # d(loss)/d(reduced) == grad_output
+    loss.backward()
+
+    torch.testing.assert_close(local.grad, grad_output, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+def test_reduce_tensor_backward_is_identity(
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Sum same-shaped rank contributions forward; keep grad_output unchanged backward.
+
+    The identity backward is deliberately not the adjoint of the forward sum.
+    With rank-scaled grad_outputs, a spurious backward all-reduce would
+    return the rank-summed grad_outputs instead of the rank's own and fail.
+    """
+    run_distributed_test(
+        _test_reduce_tensor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(1025, 1024),
+    )
