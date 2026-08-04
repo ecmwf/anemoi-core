@@ -46,7 +46,7 @@ data:
 # when using tendency scalers with the temporal downscaler, set the tendency timestep to be the output timestep
 # and configure the scaler in the loss
 
-# training: 
+# training:
 #   scalers:
 #     datasets:
 #       data:
