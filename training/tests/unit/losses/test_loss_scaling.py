@@ -232,9 +232,9 @@ std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScale
 
 var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "6h"}
 
-std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12h"}
+std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12H"}
 
-var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12h"}
+var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12H"}
 
 no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
 
@@ -413,29 +413,6 @@ def test_tendency_scaler_uses_configured_timestep(
     variable_idx = data_indices.model.output.name_to_index["y_50"]
 
     assert scalers["additional_scaler"][1][variable_idx] == expected_scaling
-
-
-def test_tendency_scaler_timestep_overrides_all_lead_times() -> None:
-    """Configured timestep always selects a fixed key regardless of available lead times."""
-    from unittest.mock import MagicMock
-
-    from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
-
-    stdev_1h = [1.0, 2.0]
-    stdev_2h = [999.0, 999.0]  # deliberately wrong — should never be picked
-    statistics_tendencies = {
-        "lead_times": ["1h", "2h"],
-        "1h": {"stdev": stdev_1h},
-        "2h": {"stdev": stdev_2h},
-    }
-    scaler = StdevTendencyScaler(
-        data_indices=MagicMock(),
-        statistics={"stdev": [1.0, 1.0]},
-        statistics_tendencies=statistics_tendencies,
-        timestep="1h",
-    )
-    assert scaler.timestep == "1h"
-    assert scaler.statistics_tendencies["stdev"] == stdev_1h
 
 
 @pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])

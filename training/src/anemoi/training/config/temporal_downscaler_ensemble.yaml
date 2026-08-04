@@ -67,3 +67,10 @@ model:
 
 training:
   ensemble_size_per_device: 2
+  scalers:
+    datasets:
+      data:
+        stdev_tendency:
+          timestep: ${task.output_timestep}
+        var_tendency:
+          timestep: ${task.output_timestep}

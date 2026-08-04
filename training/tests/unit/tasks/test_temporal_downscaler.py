@@ -80,9 +80,3 @@ def test_temporal_downscaler_input_offsets_are_boundary_pair() -> None:
     """Input offsets are always [0h, input_timestep] regardless of output settings."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
     assert task._input_offsets == [datetime.timedelta(0), datetime.timedelta(hours=6)]
-
-
-def test_temporal_downscaler_stores_output_timestep_string() -> None:
-    """output_timestep is stored as the original config string for Hydra interpolation."""
-    task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
-    assert task.output_timestep == "2h"

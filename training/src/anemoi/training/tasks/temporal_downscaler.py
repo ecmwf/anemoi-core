@@ -31,7 +31,6 @@ class TemporalDownscaler(BaseSingleStepTask):
         **_kwargs,
     ) -> None:
         self.input_timestep = input_timestep
-        self.output_timestep = output_timestep
         input_timedelta = as_timedelta(input_timestep)
         output_timedelta = as_timedelta(output_timestep)
 
@@ -49,7 +48,6 @@ class TemporalDownscaler(BaseSingleStepTask):
         if output_right_boundary:
             output_offsets = [*output_offsets, input_timedelta]
 
-        self.output_timedelta = output_timedelta
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
         self._plot_adapter = TemporalDownscalerPlotAdapter(self)
 
