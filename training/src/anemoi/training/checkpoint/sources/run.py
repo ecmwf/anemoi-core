@@ -168,6 +168,43 @@ class RunSource(CheckpointSource):
         return await LocalSource().process(context)
 
 
+def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:
+    """Resolve ``(run_id, fork_run_id)`` from a configured ``training.checkpoint.source``.
+
+    ``RunSource`` is the single source of truth for run lineage: ``fork=False``
+    resumes ``run_id`` (so ``run_id`` is set, ``fork_run_id`` None); ``fork=True``
+    forks from it (so ``fork_run_id`` is set and ``run_id`` stays None, letting a
+    fresh MLflow id be minted). Any other source — or no source — carries no run
+    identity and returns ``(None, None)``. This replaces the trainer re-deriving the
+    identity: the trainer reads it here and never mutates the config to communicate it
+    to the logger / paths.
+
+    Parameters
+    ----------
+    config : DictConfig
+        The training config; ``training.checkpoint.source`` is inspected.
+
+    Returns
+    -------
+    tuple[str | None, str | None]
+        ``(run_id, fork_run_id)`` — at most one is set.
+    """
+    from omegaconf import OmegaConf
+
+    source = OmegaConf.select(config, "training.checkpoint.source", default=None)
+    if source is None:
+        return None, None
+    target = OmegaConf.select(source, "_target_", default="") or ""
+    if not target.endswith("RunSource"):
+        return None, None
+    run_id = OmegaConf.select(source, "run_id", default=None)
+    if run_id is None:
+        return None, None
+    if bool(OmegaConf.select(source, "fork", default=False)):
+        return None, run_id
+    return run_id, None
+
+
 def _is_rank_zero() -> bool:
     """Best-effort rank-0 detection without coupling to Lightning.
 

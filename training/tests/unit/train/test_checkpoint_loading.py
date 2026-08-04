@@ -612,9 +612,6 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
     for key, value in new_state.items():
         assert torch.equal(result.state_dict()[key], value)
     assert result.data_indices is data_indices
-    # The source stage records the resolved path; the trainer caches it for
-    # Lightning's ckpt_path resume (consumed by last_checkpoint).
-    assert trainer._resolved_ckpt_path == ckpt_dir / "last.ckpt"
 
 
 def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint(tmp_path: Path) -> None:
@@ -802,38 +799,53 @@ _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
         ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
     ],
 )
-def test_derive_run_identity_maps_source_to_internal_keys(
+def test_run_identity_from_config_maps_source(
     source: dict,
     expected_run_id: str | None,
     expected_fork_run_id: str | None,
 ) -> None:
-    """The RunSource surface lowers to the same internal triplet the legacy keys produced."""
-    trainer = SimpleNamespace(
-        config=OmegaConf.create(
-            {"training": {"run_id": None, "fork_run_id": None, "checkpoint": {"source": source}}},
-        ),
-    )
-    AnemoiTrainer._derive_run_identity(trainer)
-    assert trainer.config.training.run_id == expected_run_id
-    assert trainer.config.training.fork_run_id == expected_fork_run_id
+    """The RunSource surface resolves to the (run_id, fork_run_id) run identity."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    config = OmegaConf.create({"training": {"checkpoint": {"source": source}}})
+    assert run_identity_from_config(config) == (expected_run_id, expected_fork_run_id)
 
 
-def test_derive_run_identity_noop_without_checkpoint_source() -> None:
-    """With no training.checkpoint.source, the legacy keys are left untouched."""
-    trainer = SimpleNamespace(config=OmegaConf.create({"training": {"run_id": "keep", "fork_run_id": None}}))
-    AnemoiTrainer._derive_run_identity(trainer)
-    assert trainer.config.training.run_id == "keep"
+def test_run_identity_from_config_noop_without_checkpoint_source() -> None:
+    """With no training.checkpoint.source, there is no run identity."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
 
-def test_last_checkpoint_returns_resolved_context_path(tmp_path: Path) -> None:
-    """last_checkpoint returns the path the source stage resolved during model build."""
-    ckpt = tmp_path / "last.ckpt"
+def test_last_checkpoint_resolves_runsource_path(tmp_path: Path) -> None:
+    """last_checkpoint resolves a RunSource path directly from config, without building the model."""
+    # The root already carries the lineage append (as after _update_paths); resolve_path
+    # undoes it via .parent, so the path is <root.parent>/<run_id>/last.ckpt.
+    root = tmp_path / "ckpts" / "abc"
     trainer = SimpleNamespace(
         start_from_checkpoint=True,
-        model=object(),  # model already built; the pipeline cached the resolved path
-        _resolved_ckpt_path=ckpt,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        config=OmegaConf.create(
+            {
+                "training": {"checkpoint": {"source": {"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}}},
+                "system": {"output": {"checkpoints": {"root": str(root)}}},
+            },
+        ),
     )
-    assert AnemoiTrainer.last_checkpoint.func(trainer) == ckpt
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == tmp_path / "ckpts" / "abc" / "last.ckpt"
+
+
+def test_last_checkpoint_returns_localsource_path() -> None:
+    """A LocalSource hands its explicit path to Lightning's ckpt_path."""
+    trainer = SimpleNamespace(
+        start_from_checkpoint=True,
+        config=OmegaConf.create(
+            {"training": {"checkpoint": {"source": {"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}}}},
+        ),
+    )
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == Path("/scratch/run/last.ckpt")
 
 
 def test_last_checkpoint_none_when_not_starting() -> None:
@@ -842,9 +854,24 @@ def test_last_checkpoint_none_when_not_starting() -> None:
     assert AnemoiTrainer.last_checkpoint.func(trainer) is None
 
 
-def test_last_checkpoint_none_when_source_resolved_nothing() -> None:
-    """A configured source that did not record a local path (e.g. remote) yields None."""
-    trainer = SimpleNamespace(start_from_checkpoint=True, model=object(), _resolved_ckpt_path=None)
+def test_last_checkpoint_none_for_remote_source() -> None:
+    """A remote source records no local path, so warm-start ckpt_path resolves to None."""
+    trainer = SimpleNamespace(
+        start_from_checkpoint=True,
+        config=OmegaConf.create(
+            {
+                "training": {
+                    "checkpoint": {
+                        "source": {
+                            "_target_": "anemoi.training.checkpoint.sources.s3.S3Source",
+                            "bucket": "b",
+                            "key": "k",
+                        },
+                    },
+                },
+            },
+        ),
+    )
     assert AnemoiTrainer.last_checkpoint.func(trainer) is None
 
 
