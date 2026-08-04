@@ -43,14 +43,17 @@ data:
               - "sin_local_time"
               - "insolation"
 
-training:
-  scalers:
-    datasets:
-      data:
-        stdev_tendency:
-          timestep: ${task.output_timestep}
-        var_tendency:
-          timestep: ${task.output_timestep}
+# when using tendency scalers with the temporal downscaler, set the tendency timestep to be the output timestep
+# and configure the scaler in the loss
+
+# training: 
+#   scalers:
+#     datasets:
+#       data:
+#         stdev_tendency:
+#           timestep: ${task.output_timestep}
+#         var_tendency:
+#           timestep: ${task.output_timestep}
 
 ### This file is for local experimentation.
 ##  When you commit your changes, assign the new features and keywords

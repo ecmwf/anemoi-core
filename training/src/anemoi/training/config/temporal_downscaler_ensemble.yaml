@@ -67,10 +67,14 @@ model:
 
 training:
   ensemble_size_per_device: 2
-  scalers:
-    datasets:
-      data:
-        stdev_tendency:
-          timestep: ${task.output_timestep}
-        var_tendency:
-          timestep: ${task.output_timestep}
+
+  # when using tendency scalers with the temporal downscaler, set the tendency timestep to be the output timestep
+  # and configure the scaler in the loss
+
+  # scalers:
+  #   datasets:
+  #     data:
+  #       stdev_tendency:
+  #         timestep: ${task.output_timestep}
+  #       var_tendency:
+  #         timestep: ${task.output_timestep}
