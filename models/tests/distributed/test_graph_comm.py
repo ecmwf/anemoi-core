@@ -727,3 +727,113 @@ def test_reduce_shard_tensor_gathers_gradients(
         shape=shape,
         dim=dim,
     )
+
+
+def test_all_to_all_transpose_identity_without_group() -> None:
+    """With ``mgroup=None``, values and gradients pass through unchanged.
+
+    Covers the local fallback of ``_AllToAllParallelSection``; the layout
+    metadata is ignored on this path.
+    """
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    transposed = all_to_all_transpose(
+        x,
+        dim_split=0,
+        split_sizes=None,
+        dim_concat=1,
+        concat_sizes=None,
+        mgroup=None,
+    )
+
+    assert transposed.size() == expected.size()
+    assert transposed.dtype == expected.dtype
+    assert transposed.device == expected.device
+    torch.testing.assert_close(transposed, expected)
+
+    loss = (transposed * grad_output).sum()  # d(loss)/d(transposed) == grad_output
+    loss.backward()
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_all_to_all_transpose_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    dim_split: int,
+    dim_concat: int,
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    full = _make_range_tensor(shape, device)
+    split_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
+    concat_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
+    expected = torch.split(full, split_sizes, dim=dim_split)[rank].clone()
+
+    local = torch.split(full, concat_sizes, dim=dim_concat)[rank].contiguous().clone()
+    local.requires_grad_(True)
+
+    transposed = all_to_all_transpose(
+        local,
+        dim_split=dim_split,
+        split_sizes=split_sizes,
+        dim_concat=dim_concat,
+        concat_sizes=concat_sizes,
+        mgroup=group,
+    )
+
+    assert transposed.size() == expected.size()
+    assert transposed.dtype == expected.dtype
+    assert transposed.device == expected.device
+    torch.testing.assert_close(transposed, expected, atol=atol, rtol=rtol)
+
+    # each rank's grad_output is its split-layout slice of one full grad_output
+    grad_output_full = _make_grad_output(shape, device)
+    grad_output = torch.split(grad_output_full, split_sizes, dim=dim_split)[rank].contiguous()
+    loss = (transposed * grad_output).sum()  # d(loss)/d(transposed) == grad_output
+    loss.backward()
+
+    # the reverse transpose delivers the rank's concat-layout slice
+    expected_grad = torch.split(grad_output_full, concat_sizes, dim=dim_concat)[rank].clone()
+    torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shape", "dim_split", "dim_concat"),
+    [
+        pytest.param((1025, 1025), 0, 1, id="uneven_both_dims_1m"),
+        pytest.param((64, 128, 129), 1, -1, id="negative_concat_dim_3d_1m"),
+    ],
+)
+def test_all_to_all_transpose_inverts_gradients(
+    shape: tuple[int, ...],
+    dim_split: int,
+    dim_concat: int,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Redistribute between sharded layouts forward; apply the inverse backward.
+
+    Each rank starts with its concat-layout slice of a conceptual tensor and
+    receives its split-layout slice, never materializing the full tensor.
+    The backward runs the reverse redistribution: with each rank's
+    grad_output being its split-layout slice of one full grad_output, the
+    input gradient must be the rank's concat-layout slice of that tensor.
+    """
+    if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
+        pytest.skip("Gloo all_to_all_transpose requires torch >= 2.6.")
+    run_distributed_test(
+        _test_all_to_all_transpose_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=shape,
+        dim_split=dim_split,
+        dim_concat=dim_concat,
+    )
