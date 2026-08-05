@@ -70,8 +70,12 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
         else:
             layout_version = int(layout_version)
 
-        if layout_version < graph_provider._TRAINABLE_LAYOUT_VERSION and trainable_key in state_dict:
-            trainable = state_dict[trainable_key]
+        if layout_version < graph_provider._TRAINABLE_LAYOUT_VERSION:
+            trainable = state_dict.get(trainable_key, None)
+            if trainable is None:
+                state_dict[layout_version_key] = graph_provider.trainable_layout_version.clone()
+                continue
+
             if trainable.shape[0] != graph_provider.perm.shape[0]:
                 LOGGER.info(
                     "Skipping trainable edge permutation for %s: trainable tensor has shape %s "
