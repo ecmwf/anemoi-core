@@ -33,7 +33,7 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoders:
-  0:
+  "0":
     source_datasets: [ "era5" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
@@ -47,7 +47,7 @@ latent_aggregator:
   _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
-  0:
+  "0":
     target_datasets: [ "cerra" ]
     input_target_features: [ "encoded_data" ]
     mapper:

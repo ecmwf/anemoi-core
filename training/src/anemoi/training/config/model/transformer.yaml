@@ -43,7 +43,7 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoders:
-  0:
+  "0":
     source_datasets: [ "data" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
@@ -63,7 +63,7 @@ encoders:
       graph_attention_backend: "triton" # Options: "triton", "pyg"
 
 decoders:
-  0:
+  "0":
     target_datasets: [ "data" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, encoded_data
     mapper:
