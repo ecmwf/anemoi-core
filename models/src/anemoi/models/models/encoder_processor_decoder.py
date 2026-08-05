@@ -68,7 +68,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.datasets[0]].edge_dim,
+                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
             )
 
         # Latent aggregator: combines encoder outputs before the processor
@@ -134,7 +134,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.processor.num_channels,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.datasets[0]].edge_dim,
+                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
     def _assemble_input(
