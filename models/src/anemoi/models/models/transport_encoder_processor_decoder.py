@@ -323,6 +323,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             # Encoder for this dataset
             encoder_name = self.dataset2encoder[dataset_name]
+            if encoder_name in dataset_latents:
+                raise ValueError(
+                    f"Dataset {dataset_name} has already been processed by an encoder. Only "
+                    f"dataset_fusing_strategy='not_supported' is supported for now."
+                )
+
             x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=bse,

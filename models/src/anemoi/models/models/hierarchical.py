@@ -275,7 +275,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
             # Encoder for this dataset
-            x_data_latent, x_latent = self.encoder[dataset_name](
+            encoder_name = self.dataset2encoder[dataset_name]
+            if encoder_name in dataset_latents:
+                raise ValueError(
+                    f"Dataset {dataset_name} has already been processed by an encoder. Only "
+                    f"dataset_fusing_strategy='not_supported' is supported for now."
+                )
+
+            x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latents[self._graph_name_hidden[0]]),
                 batch_size=batch_size,
                 shard_info=enc_shard_info,
@@ -453,7 +460,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
                 (x_latent, x_data_latent_dict[dataset_name]),
                 batch_size=batch_size,
                 shard_info=dec_shard_info,
