@@ -294,91 +294,69 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
                 reqs.append(dist.isend(input_list[j], group_dst=j, group=group))
                 reqs.append(dist.irecv(output_list[j], group_src=j, group=group))
             else:
-                output_list[rank] = input_list[rank]
+                # copy into the pre-allocated buffer rather than rebinding the
+                # reference, so no output tensor aliases an input (which would
+                # violate the custom-op aliasing constraint in _alltoall_op).
+                output_list[rank].copy_(input_list[rank])
         for req in reqs:
             req.wait()
     else:
         dist.all_to_all(output_list, input_list, group=group)
 
 
-# TODO(Cathal): add 'torch.library.opcheck' test once distibuted testing infrastructure is in place.
-@torch.library.custom_op("anemoi_distributed::alltoall_transpose", mutates_args=())
-def _alltoall_transpose_op(
-    input_: Tensor,
-    dim_split: int,
-    split_sizes: list[int],
-    dim_concat: int,
-    concat_sizes: list[int],
+@torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
+def _alltoall_op(
+    input_list: list[Tensor],
+    output_shapes_flat: list[int],
+    ndim: int,
     group_name: str,
-) -> Tensor:
+) -> list[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     Dynamo cannot trace the list variant of ``dist.all_to_all`` (it fails while
-    constructing the pybind ``AllToAllOptions``). Registering it as a custom op makes
-    Dynamo emit an opaque node and run the collective eagerly at runtime. A
-    ``ProcessGroup`` is not a valid custom-op argument, so the group's registered name
-    is passed and resolved here.
+    constructing the pybind ``AllToAllOptions``). Registering only the collective
+    exchange as a custom op makes Dynamo emit an opaque node and run it eagerly at
+    runtime, while any surrounding split/concat stays traceable. A ``ProcessGroup``
+    is not a valid custom-op argument, so the group's registered name is passed and
+    resolved here.
+
+    ``output_shapes_flat`` is the per-rank received shapes flattened into a single
+    ``list[int]`` (custom-op schemas don't support ``list[list[int]]``); it is
+    regrouped into ``ndim``-sized chunks. The output buffers are allocated here and
+    filled by the exchange.
     """
     group = _resolve_process_group(group_name)
+    ref = input_list[0]
+    input_format = get_memory_format(ref)
 
-    # normalise negative dims
-    ndim = input_.dim()
-    dim_split = dim_split % ndim
-    dim_concat = dim_concat % ndim
-    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
-
-    comm_size = dist.get_world_size(group=group)
-    if comm_size == 1:
-        return input_
-
-    myrank = dist.get_rank(group=group)
-    input_format = get_memory_format(input_)
-
-    # split input along dim_split
-    input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
-
-    # build output tensors: each has the shape of input_ but with
-    # dim_split size = split_sizes[myrank] and dim_concat size = concat_sizes[rank]
-    output_list = []
-    for rank in range(comm_size):
-        out_shape = list(input_.shape)
-        out_shape[dim_split] = split_sizes[myrank]
-        out_shape[dim_concat] = concat_sizes[rank]
-        output_list.append(
-            torch.empty(
-                out_shape,
-                dtype=input_.dtype,
-                layout=input_.layout,
-                device=input_.device,
-                memory_format=input_format,
-            )
+    output_shapes = [output_shapes_flat[i * ndim : (i + 1) * ndim] for i in range(len(output_shapes_flat) // ndim)]
+    output_list = [
+        torch.empty(
+            shape,
+            dtype=ref.dtype,
+            layout=ref.layout,
+            device=ref.device,
+            memory_format=input_format,
         )
+        for shape in output_shapes
+    ]
 
     _alltoallwrapper(output_list, input_list, group=group)
 
-    return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
+    return output_list
 
 
-@_alltoall_transpose_op.register_fake
+@_alltoall_op.register_fake
 def _(
-    input_: Tensor,
-    dim_split: int,
-    split_sizes: list[int],
-    dim_concat: int,
-    concat_sizes: list[int],
+    input_list: list[Tensor],
+    output_shapes_flat: list[int],
+    ndim: int,
     group_name: str,
-) -> Tensor:
-    # Output shape is fully determined by the (static) shard sizes: dim_split becomes
-    # this rank's split size, dim_concat becomes the sum of received concat sizes.
-    group = _resolve_process_group(group_name)
-    myrank = group.rank()
-    ndim = input_.dim()
-    dim_split = dim_split % ndim
-    dim_concat = dim_concat % ndim
-    out_shape = list(input_.shape)
-    out_shape[dim_split] = split_sizes[myrank]
-    out_shape[dim_concat] = sum(concat_sizes)
-    return input_.new_empty(out_shape)
+) -> list[Tensor]:
+    # Output shapes are provided explicitly, so the fake result is fully determined.
+    ref = input_list[0]
+    output_shapes = [output_shapes_flat[i * ndim : (i + 1) * ndim] for i in range(len(output_shapes_flat) // ndim)]
+    return [ref.new_empty(shape) for shape in output_shapes]
 
 
 def _resolve_group_name(group: Optional[ProcessGroup]) -> str:
@@ -426,7 +404,32 @@ def _alltoall_transpose(
     if comm_size == 1:
         return input_
 
-    return _alltoall_transpose_op(input_, dim_split, split_sizes, dim_concat, concat_sizes, _resolve_group_name(group))
+    # normalise negative dims
+    ndim = input_.dim()
+    dim_split = dim_split % ndim
+    dim_concat = dim_concat % ndim
+    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
+
+    myrank = dist.get_rank(group=group)
+    input_format = get_memory_format(input_)
+
+    # Only the collective exchange is opaque to Dynamo; the split and concat remain
+    # traceable by torch.compile.
+    input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
+
+    # shape received from each rank: dim_split = this rank's split size,
+    # dim_concat = that rank's concat size. Flattened into a single list[int]
+    # because custom-op schemas don't support list[list[int]].
+    output_shapes_flat: list[int] = []
+    for rank in range(comm_size):
+        out_shape = list(input_.shape)
+        out_shape[dim_split] = split_sizes[myrank]
+        out_shape[dim_concat] = concat_sizes[rank]
+        output_shapes_flat.extend(out_shape)
+
+    output_list = _alltoall_op(input_list, output_shapes_flat, ndim, _resolve_group_name(group))
+
+    return torch.cat(output_list, dim=dim_concat).contiguous(memory_format=input_format)
 
 
 def _halo_exchange(
