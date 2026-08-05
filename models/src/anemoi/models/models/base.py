@@ -32,7 +32,7 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
-from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
@@ -147,7 +147,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._graph_data)
+        self.node_attributes = NodeTrainableParameters(trainable_parameters, self._graph_data)
 
         # HACK: returns True for "data" and "grid" labels, False for everything else (obs)
         # TODO: this info should come through the config, not be hardcoded here.

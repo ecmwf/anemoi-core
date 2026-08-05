@@ -16,6 +16,9 @@ from torch import Tensor
 from torch import nn
 from torch_geometric.data import HeteroData
 
+from rich.console import Console
+from rich.tree import Tree
+
 
 class TrainableTensor(nn.Module):
     """Trainable Tensor Module."""
@@ -34,6 +37,7 @@ class TrainableTensor(nn.Module):
             nn.init.constant_(trainable, 0)
         else:
             trainable = None
+
         self.register_parameter("trainable", trainable)
 
     def forward(self, batch_size: int) -> Tensor | None:
@@ -42,15 +46,18 @@ class TrainableTensor(nn.Module):
 
         return einops.repeat(self.trainable, "e f -> (repeat e) f", repeat=batch_size)
 
+    def tree(self, prefix: str = "") -> str:
+        if self.trainable is None:
+            return prefix + "❌ No node trainable parameters"
 
-class NamedNodesAttributes(nn.Module):
-    """Named Nodes Attributes information.
+        return prefix + self.__class__.__name__ + f" ({self.trainable.shape[0]} x {self.trainable.shape[1]})"
+
+
+class NodeTrainableParameters(nn.Module):
+    """Node Trainable Attributes information.
 
     Attributes
     ----------
-    num_nodes : dict[str, int]
-        Number of nodes for each group of nodes. None if the number of nodes is not fixed over time
-        (e.g. for tabular datasets).
     num_trainable_parameters : dict[str, int]
         Total dimension of node attributes (non-trainable + trainable) for each group of nodes. If the dataset is
         tabular, trainable_parameter is set to 0.
@@ -59,42 +66,28 @@ class NamedNodesAttributes(nn.Module):
 
     Methods
     -------
-    forward(self, name: str, batch_size: int, coords: Tensor | None = None) -> Tensor
+    forward(self, name: str, batch_size: int) -> Tensor
         Get the node attributes to be passed trough the graph neural network.
-        When ``coords`` is provided, sin/cos features are computed on the
-        fly from the per-batch coordinates rather than read from the static
-        ``latlons_{name}`` buffer.
     """
 
-    num_nodes: dict[str, int]
     num_trainable_parameters: dict[str, int]
-    attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
     def __init__(self, trainable_parameters: dict[str, int], graph_data: HeteroData) -> None:
-        """Initialize NamedNodesAttributes."""
+        """Initialize NodeTrainableParameters."""
         super().__init__()
 
-        self.num_trainable_parameters = defaultdict(int, trainable_parameters)
-        self.define_fixed_attributes(graph_data, self.num_trainable_parameters)
+        # Only nodes present in the (static) graph get trainable tensors. Tabular/dynamic
+        # datasets (e.g. observations) have a variable number of nodes per batch and are not
+        # part of the static graph, so they carry no trainable node parameters. Keeping
+        # ``num_trainable_parameters`` aligned with ``trainable_tensors`` ensures the input
+        # dimension computed in the model matches what is actually concatenated at runtime.
+        self.num_trainable_parameters = defaultdict(int)  # default to 0 for missing nodes
 
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
-            # self.register_coordinates(nodes_name, nodes.x)
-            self.register_tensor(nodes_name, self.num_trainable_parameters[nodes_name])
-
-    def define_fixed_attributes(self, graph_data: HeteroData, trainable_parameters: dict[str, int]) -> None:
-        """Define fixed attributes."""
-        nodes_names = list(graph_data.node_types)
-        self.num_nodes = {nodes_name: graph_data[nodes_name].num_nodes for nodes_name in nodes_names}
-        self.attr_ndims = {
-            nodes_name: 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
-            for nodes_name in nodes_names
-        }
-
-    def register_tensor(self, name: str, num_trainable_params: int) -> None:
-        """Register a trainable tensor."""
-        self.trainable_tensors[name] = TrainableTensor(self.num_nodes[name], num_trainable_params)
+            self.num_trainable_parameters[nodes_name] = trainable_parameters.get(nodes_name, 0)
+            self.trainable_tensors[nodes_name] = TrainableTensor(nodes.num_nodes, self.num_trainable_parameters[nodes_name])
 
     def forward(self, name: str, batch_size: int) -> Tensor | None:
         """Returns the node attributes to be passed trough the graph neural network.
@@ -119,20 +112,15 @@ class NamedNodesAttributes(nn.Module):
         """Check if a node group exists in the named nodes attributes."""
         return name in self.trainable_tensors and self.num_trainable_parameters[name] > 0
 
+    def tree(self, prefix: str = "") -> Tree:
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        for dataset_name, trainable_tensor in self.trainable_tensors.items():
+            tree.add(trainable_tensor.tree(f"{dataset_name}: "))
+        return tree
+
     def __repr__(self) -> str:
-        names = sorted(
-            set(self.num_nodes) | set(self.num_trainable_parameters) | set(self.trainable_tensors),
-        )
-        lines = [f"{self.__class__.__name__}("]
-        for name in names:
-            n_nodes = self.num_nodes.get(name)
-            n_train = self.num_trainable_parameters.get(name, 0)
-            tt = self.trainable_tensors.get(name) if name in self.trainable_tensors else None
-            shape = tuple(tt.trainable.shape) if (tt is not None and tt.trainable is not None) else None
-            lines.append(
-                f"  {name}: num_nodes={n_nodes}, "
-                f"num_trainable_parameters={n_train}, "
-                f"trainable_tensor_shape={shape}",
-            )
-        lines.append(")")
-        return "\n".join(lines)
+        """Return a string representation of the NodeTrainableParameters."""
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
