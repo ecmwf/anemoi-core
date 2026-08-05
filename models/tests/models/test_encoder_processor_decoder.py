@@ -45,13 +45,13 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
     def __init__(self) -> None:
         nn.Module.__init__(self)
         self.input_datasets = ["dataset_a", "dataset_b"]
-        self.dataset2encoder = {"dataset_a": "shared", "dataset_b": "shared"}
+        self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
         self._graph_name_hidden = "hidden"
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(
             {dataset_name: _GraphProvider() for dataset_name in self.input_datasets},
         )
-        self.encoder = nn.ModuleDict({"shared": _SharedEncoder()})
+        self.encoder = nn.ModuleDict({"dataset_a": _SharedEncoder()})
         self.latent_aggregator = _CaptureAggregator()
 
     def _build_networks(self, model_config) -> None:
