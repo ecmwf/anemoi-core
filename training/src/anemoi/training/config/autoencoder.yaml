@@ -27,7 +27,7 @@ model:
     _target_: anemoi.models.models.AnemoiModelEncProcDec
     latent_skip: False
   decoders:
-    0:
+    "0":
       input_target_features: [ "coordinates" ]
   processor:
     _target_: anemoi.models.layers.processor.NoOpProcessor
