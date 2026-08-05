@@ -247,7 +247,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
             x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[encoder_name] = x_latent
+            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         x_latent = self.latent_aggregator(dataset_latents)
