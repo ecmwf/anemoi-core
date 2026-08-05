@@ -193,9 +193,7 @@ class CrossAttentionAggregator(BaseLatentAggregator):
         self.source_norm = self.layer_factory.LayerNorm(normalized_shape=num_channels)
         self.source_projections = nn.ModuleDict(
             {
-                source_name: (
-                    nn.Identity() if channels == num_channels else self.layer_factory.Linear(channels, num_channels)
-                )
+                source_name: self.layer_factory.Linear(channels, num_channels)
                 for source_name, channels in self.source_channels.items()
             },
         )
