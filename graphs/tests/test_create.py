@@ -9,6 +9,7 @@
 
 
 from pathlib import Path
+from anemoi.graphs.utils import load_graph_from_file
 
 import pytest
 import torch
@@ -51,6 +52,6 @@ class TestGraphCreator:
 
         if graph_path is not None:
             assert graph_path.exists()
-            graph_saved = torch.load(graph_path, weights_only=False)
+            graph_saved = load_graph_from_file(graph_path)
             assert graph.node_types == graph_saved.node_types
             assert graph.edge_types == graph_saved.edge_types

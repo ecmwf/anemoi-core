@@ -9,6 +9,7 @@
 
 import os
 from collections.abc import Iterable
+from anemoi.graphs.utils import load_graph_from_file
 from pathlib import Path
 
 import scipy.sparse as sp
@@ -36,7 +37,7 @@ class GraphExporter:
         elif isinstance(graph, (Path, str)):
             graph_path = Path(graph)
             if graph_path.suffix == ".pt":
-                self.graph = torch.load(graph_path, weights_only=False, map_location="cpu")
+                self.graph = load_graph_from_file(graph_path)
             elif graph_path.suffix in (".yaml", ".yml"):
                 self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
             else:

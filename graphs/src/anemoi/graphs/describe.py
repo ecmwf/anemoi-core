@@ -11,6 +11,7 @@ import math
 from itertools import chain
 from pathlib import Path
 
+from anemoi.graphs.utils import load_graph_from_file
 import torch
 
 from anemoi.utils.humanize import bytes
@@ -22,7 +23,7 @@ class GraphDescriptor:
 
     def __init__(self, path: str | Path, **kwargs):
         self.path = path
-        self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
+        self.graph = load_graph_from_file(self.path)
 
     @property
     def total_size(self):
