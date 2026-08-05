@@ -11,6 +11,7 @@
 import gc
 import logging
 import os
+import shutil
 from pathlib import Path
 from typing import Union
 
@@ -29,6 +30,33 @@ from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
 LOGGER = logging.getLogger(__name__)
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# is run by pytest during initalisation
+def pytest_configure(config: pytest.Config) -> None:  # noqa: ARG001
+    # suppress logging spam when using torch compile
+    logging.getLogger("torch.__trace").setLevel(logging.WARNING)
+    logging.getLogger("torch.__trace").propagate = False
+
+
+# NOTE: Do not delete
+# It is not called explictly, but
+# it runs before every integration test
+@pytest.fixture(autouse=True)
+def _reset_torch_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reset torch compile state before each test."""
+    import torch._dynamo
+
+    inductor_cache = tmp_path / "torchinductor_cache"
+    shutil.rmtree(inductor_cache, ignore_errors=True)
+    inductor_cache.mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(inductor_cache))
+
+    torch._dynamo.reset()
+    return
 
 
 @pytest.fixture(autouse=True)
@@ -493,6 +521,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "stretched",
         "ensemble_crps",
         "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
     ids=[
         "lam",
@@ -500,6 +529,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
         "stretched",
         "ensemble_crps",
         "edm_diffusion_tendency",
+        "temporal_downscaler_ensemble",
     ],
 )
 def benchmark_config(
@@ -527,6 +557,9 @@ def benchmark_config(
     elif test_case == "edm_diffusion_tendency":
         overrides = []
         base_config = "transport_edm_diffusion_tendency"
+    elif test_case == "temporal_downscaler_ensemble":
+        overrides = []
+        base_config = "temporal_downscaler_ensemble"
     else:
         msg = f"Error. Unknown benchmark configuration: {test_case}"
         raise ValueError(msg)
@@ -540,6 +573,7 @@ def benchmark_config(
     use_case_modifications = OmegaConf.load(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
+    OmegaConf.set_struct(template.data, False)
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
@@ -608,7 +642,7 @@ def temporal_downscaler_config(
         config_path="../../src/anemoi/training/config",
         job_name="test_temporal_downscaler",
     ):
-        template = compose(config_name="temporal_downscaler.yaml")
+        template = compose(config_name="temporal_downscaler_ensemble.yaml")
 
     use_case_modifications = OmegaConf.load(
         Path.cwd() / "training/tests/integration/config/test_temporal_downscaler.yaml",

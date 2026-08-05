@@ -13,6 +13,7 @@ jobs:
     name: Check latest commit
     outputs:
       should_run: ${{ steps.should_run.outputs.should_run }}
+      date: ${{ steps.date.outputs.date }}
     steps:
       - uses: actions/checkout@v4
       - name: print latest_commit
@@ -22,8 +23,10 @@ jobs:
         name: check latest commit is less than a day
         if: ${{ github.event_name == 'schedule' }}
         run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
-  integration-tests:
+  build-env:
+    name: build-env
     runs-on: hpc
+    timeout-minutes: 120
     needs: check_date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
     steps:
@@ -33,32 +36,72 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
+            # Shared working dir on $PERM. The clone + virtualenv are built once
+            # here and reused by each test, then removed by the cleanup-env job.
+            WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
-            cd $TMPDIR
+            rm -rf "$WORKDIR"
+            mkdir -p "$WORKDIR"
+            cd "$WORKDIR"
             git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
-            cd $REPO_NAME
-            python3 -m venv .venv
-            source .venv/bin/activate
+            python3 -m venv venv
+            source venv/bin/activate
             pip install --upgrade pip
-            pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
-            python3 -m pytest -v training/tests/integration --slow --mlflow --mlflow-server=${{ secrets.MLFLOW_TEST_URL }}
-            python3 -m pytest -v models/tests/integration --slow
+            cd "$REPO_NAME"
+            pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
             deactivate
-            rm -rf $REPO_NAME
           sbatch_options: |
-            #SBATCH --job-name=anemoi_core_pytest
+            #SBATCH --job-name=anemoi_core_build_env
+            #SBATCH --nodes=1
+            #SBATCH --cpus-per-task=32
             #SBATCH --time=01:00:00
-            #SBATCH --qos=ng
-            #SBATCH --gpus=1
-            #SBATCH --gres=gpu:1
+            #SBATCH --qos=nf
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
-  benchmark-tests:
+
+  integration-tests:
+    name: ${{ matrix.test_name }}
     runs-on: hpc
-    timeout-minutes: 360 #increase timeout, if slurm queues for ~1 hour then github actions can timeout
-    needs: check_date
+    timeout-minutes: ${{ matrix.timeout_minutes }}
+    needs: [check_date, build-env]
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - test_name: test_benchmark
+            pytest_cmd: srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
+            timeout_minutes: 360
+            sbatch_options: |
+              #SBATCH --job-name=anemoi_core_benchmark_pytest
+              #SBATCH --nodes=1
+              #SBATCH --ntasks-per-node=2
+              #SBATCH --cpus-per-task=32
+              #SBATCH --gpus-per-node=2
+              #SBATCH --time=1:00:00
+              #SBATCH --qos=ng
+              #SBATCH --mem=120GB
+          - test_name: test_training_cycle
+            pytest_cmd: python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+            timeout_minutes: 120
+            sbatch_options: |
+              #SBATCH --job-name=anemoi_core_pytest_training_cycle
+              #SBATCH --time=01:00:00
+              #SBATCH --qos=ng
+              #SBATCH --gpus=1
+              #SBATCH --gres=gpu:1
+              #SBATCH --mem=64G
+          - test_name: test_accuracy
+            pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+            timeout_minutes: 120
+            sbatch_options: |
+              #SBATCH --job-name=anemoi_core_pytest_accuracy
+              #SBATCH --time=01:00:00
+              #SBATCH --qos=ng
+              #SBATCH --gpus=1
+              #SBATCH --gres=gpu:1
+              #SBATCH --mem=64G
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -66,31 +109,41 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
-            REPO_NAME=anemoi-core
-            REPO_BRANCH=${{ github.head_ref || github.ref_name }}
-            cd $TMPDIR
-            git clone -b $REPO_BRANCH https://${{ secrets.GH_REPO_READ_TOKEN }}@github.com/ecmwf/${REPO_NAME}.git
-            cd $REPO_NAME
-            python3 -m venv .venv
-            source .venv/bin/activate
-            pip install --upgrade pip
-            pip install -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
-            srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
+            # Reuse the shared clone + virtualenv built by the build-env job.
+            WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
+            cd "$WORKDIR/anemoi-core"
+            git show -s --format=oneline #print latest commit info
+            source "$WORKDIR/venv/bin/activate"
+            pip freeze #print dependent library versions
+            # Inject the MLflow URL here (not via job-level env:, which does not
+            # propagate to the sbatch job); secrets are valid inside this template.
+            export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
+            export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
+            ${{ matrix.pytest_cmd }}
             deactivate
-            rm -rf $REPO_NAME
-          sbatch_options: |
-            #SBATCH --job-name=anemoi_core_benchmark_pytest
-            #SBATCH --nodes=1
-            #SBATCH --ntasks-per-node=2
-            #SBATCH --cpus-per-task=32
-            #SBATCH --gpus-per-node=2
-            #SBATCH --time=1:00:00
-            #SBATCH --qos=ng
-            #SBATCH --mem=0
+          sbatch_options: ${{ matrix.sbatch_options }}
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
-
+  cleanup-env:
+      name: cleanup-env
+      runs-on: hpc
+      timeout-minutes: 30
+      needs: [check_date, integration-tests]
+      if: ${{ always() }}
+      steps:
+        - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+          with:
+            template: |
+              set -eux
+              WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
+              rm -rf "$WORKDIR"
+            sbatch_options: |
+              #SBATCH --job-name=anemoi_core_cleanup_env
+              #SBATCH --time=00:15:00
+              #SBATCH --qos=nf
+              #SBATCH --mem=8G
+            troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
   notify-team:
-    needs: integration-tests
+    needs: [build-env, integration-tests]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
@@ -100,25 +153,6 @@ jobs:
           issue-number: 294
           body: |
             ## 🚨 Nightly Job Failed
-
-            **Repository:** ${{ github.repository }}
-            **Workflow:** ${{ github.workflow }}
-            **Run URL:** [View logs](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})
-            **Time:** ${{ github.event.schedule }}
-
-            cc: @ecmwf/anemoisecurity
-
-  notify-team-bm:
-    needs: benchmark-tests
-    if: failure() && github.event_name == 'schedule'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Add failure comment
-        uses: peter-evans/create-or-update-comment@v3
-        with:
-          issue-number: 294
-          body: |
-            ## 🚨 Nightly Benchmark Job Failed
 
             **Repository:** ${{ github.repository }}
             **Workflow:** ${{ github.workflow }}
