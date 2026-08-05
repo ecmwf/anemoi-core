@@ -294,9 +294,7 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
                 reqs.append(dist.isend(input_list[j], group_dst=j, group=group))
                 reqs.append(dist.irecv(output_list[j], group_src=j, group=group))
             else:
-                # copy into the pre-allocated buffer rather than rebinding the
-                # reference, so no output tensor aliases an input (which would
-                # violate the custom-op aliasing constraint in _alltoall_op).
+                # when using custom operators, return tensors must not alias any input
                 output_list[rank].copy_(input_list[rank])
         for req in reqs:
             req.wait()
@@ -313,17 +311,8 @@ def _alltoall_op(
 ) -> list[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
-    Dynamo cannot trace the list variant of ``dist.all_to_all`` (it fails while
-    constructing the pybind ``AllToAllOptions``). Registering only the collective
-    exchange as a custom op makes Dynamo emit an opaque node and run it eagerly at
-    runtime, while any surrounding split/concat stays traceable. A ``ProcessGroup``
-    is not a valid custom-op argument, so the group's registered name is passed and
-    resolved here.
-
-    ``output_shapes_flat`` is the per-rank received shapes flattened into a single
-    ``list[int]`` (custom-op schemas don't support ``list[list[int]]``); it is
-    regrouped into ``ndim``-sized chunks. The output buffers are allocated here and
-    filled by the exchange.
+    torch.compile() cannot trace ``dist.all_to_all`` with list inputs.
+    so we register a custom operator that wraps the list-based all_to_all and can be traced by torch.compile().
     """
     group = _resolve_process_group(group_name)
     ref = input_list[0]
@@ -413,8 +402,6 @@ def _alltoall_transpose(
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
 
-    # Only the collective exchange is opaque to Dynamo; the split and concat remain
-    # traceable by torch.compile.
     input_list = [x.contiguous() for x in torch.split(input_, split_sizes, dim=dim_split)]
 
     # shape received from each rank: dim_split = this rank's split size,
