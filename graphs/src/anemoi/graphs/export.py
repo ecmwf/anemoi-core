@@ -9,7 +9,6 @@
 
 import os
 from collections.abc import Iterable
-from anemoi.graphs.utils import load_graph_from_file
 from pathlib import Path
 
 import scipy.sparse as sp
@@ -18,6 +17,7 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.config import DotDict
 
 

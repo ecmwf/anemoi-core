@@ -8,24 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from enum import Enum
 from pathlib import Path
-import logging
 
 import torch
-from torch_geometric.data.hetero_data import HeteroData
-from torch_geometric.data.storage import EdgeStorage
-from torch_geometric.data.storage import BaseStorage
-from torch_geometric.data.storage import NodeStorage
-
 from sklearn.neighbors import NearestNeighbors
+from torch_geometric.data.hetero_data import HeteroData
+from torch_geometric.data.storage import BaseStorage
+from torch_geometric.data.storage import EdgeStorage
+from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
-
 LOGGER = logging.getLogger(__name__)
 
-# Add HeteroData and its storage classes to the safe globals for torch serialization
+# Add HeteroData and its storage classes to the safe globals for torch serialization
 # This prevents code execution when loading a graph from a file, which is a security risk.
 torch.serialization.add_safe_globals([HeteroData, BaseStorage, NodeStorage, EdgeStorage])
 
@@ -39,7 +37,6 @@ def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
 
     LOGGER.info("Loading graph data from %s", graph_filename)
     return torch.load(graph_filename, map_location=map_location, weights_only=True)
-
 
 
 def get_distributed_device() -> torch.device:

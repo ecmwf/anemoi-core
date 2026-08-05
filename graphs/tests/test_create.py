@@ -9,13 +9,13 @@
 
 
 from pathlib import Path
-from anemoi.graphs.utils import load_graph_from_file
 
 import pytest
 import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.utils import load_graph_from_file
 
 
 class TestGraphCreator:
