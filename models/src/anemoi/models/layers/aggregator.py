@@ -55,8 +55,9 @@ class SumAggregator(BaseLatentAggregator):
     is provided the tensor is returned as-is without any copy or computation.
     """
 
-    def __init__(self, num_channels: dict[str, int]) -> None:
+    def __init__(self, num_channels: dict[str, int], skipna: bool = True) -> None:
         super().__init__(num_channels)
+        self.skipna = skipna
         self._hidden_dim = list(num_channels.values())[0]
         assert all(
             ch == self._hidden_dim for ch in num_channels.values()
@@ -70,7 +71,16 @@ class SumAggregator(BaseLatentAggregator):
         values = list(latents.values())
         if len(values) == 1:
             return values[0]
-        return torch.stack(values).sum(dim=0)
+
+        all_values = torch.stack(values)
+        if self.skipna:
+            # Skip NaN values in the sum
+            return torch.nansum(all_values, dim=0)
+
+        assert not torch.isnan(all_values).any(), (
+            f"NaN values found in latent tensors, but {self.__class__.__name__}.skipna is False."
+        )
+        return all_values.sum(dim=0)
 
 
 class MeanAggregator(BaseLatentAggregator):

@@ -321,16 +321,6 @@ class BaseGraphModel(nn.Module):
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # # Default behaviour is to pass the same input as to the encoder.
-        # # TODO: abstract different options into the base class
-        # if self.use_encoder_data_output[dataset_name]:
-        #     return self._calculate_input_dim(dataset_name)
-        # else:
-        #     return (
-        #         self.num_input_channels_decoding_forcings[dataset_name]
-        #         + COORDS_DIM
-        #         + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
-        #         + self.dynamic_node_attribute_dims.get(dataset_name, 0)
         """Calculate the decoder target input dimension for a given dataset.
 
         Decoder target features are per-node vectors attached to the destination nodes of the
