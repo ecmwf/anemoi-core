@@ -27,10 +27,12 @@ from distributed_runner import run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.primitives import _alltoall_transpose
+from anemoi.models.distributed.primitives import _alltoall_transpose_op
 from anemoi.models.distributed.primitives import _alltoallwrapper
 from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
+from anemoi.models.distributed.primitives import _resolve_group_name
 from anemoi.models.distributed.primitives import _split
 
 GLOBAL_DEFAULT_ATOL = 1e-12
@@ -753,4 +755,74 @@ def test_alltoallwrapper_exchanges_rank_ordered_tensor_lists(
         _test_alltoallwrapper_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
+    )
+
+
+def _test_alltoall_transpose_opcheck_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shape: tuple[int, ...],
+    dim_split: int,
+    dim_concat: int,
+) -> None:
+    from torch._subclasses.fake_tensor import FakeTensorMode
+
+    full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
+    split_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
+    concat_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
+    local = torch.split(full, concat_sizes, dim=dim_concat)[rank].contiguous()
+
+    group_name = _resolve_group_name(group)
+    args = (local, dim_split, split_sizes, dim_concat, concat_sizes, group_name)
+
+    # Validate the custom op registration: schema, fake/meta implementation and
+    # (where applicable) autograd registration are all exercised by opcheck.
+    torch.library.opcheck(_alltoall_transpose_op, args)
+
+    # Explicitly verify the registered fake implementation returns the same shape,
+    # dtype and device metadata as the real (eager) implementation.
+    real = _alltoall_transpose_op(*args)
+    with FakeTensorMode(allow_non_fake_inputs=True) as fake_mode:
+        fake_local = fake_mode.from_tensor(local)
+        fake = _alltoall_transpose_op(fake_local, dim_split, split_sizes, dim_concat, concat_sizes, group_name)
+
+    assert fake.shape == real.shape, f"fake shape {fake.shape} != real shape {real.shape}"
+    assert fake.dtype == real.dtype, f"fake dtype {fake.dtype} != real dtype {real.dtype}"
+    assert fake.device == real.device, f"fake device {fake.device} != real device {real.device}"
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shape", "dim_split", "dim_concat"),
+    [
+        pytest.param((1024, 1024), 0, 1, id="even_split_even_concat_1m"),
+        pytest.param((1025, 1024), 0, 1, id="uneven_split_even_concat_1m"),
+        pytest.param((1024, 1025), 0, 1, id="even_split_uneven_concat_1m"),
+        pytest.param((1025, 1025), 0, 1, id="uneven_split_uneven_concat_1m"),
+        pytest.param((64, 129, 128), 1, 2, id="3d_middle_to_last_1m"),
+        pytest.param((64, 128, 129), 1, -1, id="negative_concat_dim_1m"),
+    ],
+)
+def test_alltoall_transpose_interface(
+    shape: tuple[int, ...],
+    dim_split: int,
+    dim_concat: int,
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Uses torch.library.opcheck to validate the registered custom op interface for alltoall_transpose.
+    and checks the fake shapes match the real shapes produced.
+    """
+    if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
+        pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
+    run_distributed_test(
+        _test_alltoall_transpose_opcheck_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=shape,
+        dim_split=dim_split,
+        dim_concat=dim_concat,
     )
