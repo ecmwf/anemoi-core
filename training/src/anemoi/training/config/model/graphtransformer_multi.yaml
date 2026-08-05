@@ -42,7 +42,7 @@ processor:
 
 encoders:
   global: # user-defined key. It will appear in the state-dict
-    source_datasets: [ "data1", "data2", "data3" ]
+    source_datasets: [ "era" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
