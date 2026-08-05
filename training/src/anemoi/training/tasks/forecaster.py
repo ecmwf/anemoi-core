@@ -59,28 +59,22 @@ class RolloutConfig:
         self._last_increased_epoch = state["last_increased_epoch"]
 
 
-class Forecaster(BaseTask):
-    """Forecasting task implementation.
+class BaseForecaster(BaseTask):
+    """Abstract forecasting task implementation.
 
-    Builds input and output offsets from ``multistep_input``,
-    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
-
+    Actual implementations should inherit from this class.
     For rollout training, training offsets extend up to the current
     ``rollout.step`` so the dataloader only loads the required time
     steps. ``rollout.step`` grows via ``on_train_epoch_end``.
     """
 
-    name: str = "forecaster"
+    name: str
 
     def __init__(
         self,
-        input_offsets: list[str] | None = None,
-        output_offsets: list[str] | None = None,
-        rollout_shift: str = "0H",
-        consistency_check: bool = True,
-        multistep_input: int | None = None,
-        multistep_output: int | None = None,
-        timestep: str | None = None,
+        input_offsets: list[datetime.timedelta],
+        output_offsets: list[datetime.timedelta],
+        rollout_shift: datetime.timedelta,
         rollout: dict | None = None,
         validation_rollout: int | None = None,
         **kwargs,
@@ -93,34 +87,11 @@ class Forecaster(BaseTask):
                 kwargs,
             )
 
-        if multistep_input is not None or multistep_output is not None or timestep is not None:
-            assert not input_offsets and not output_offsets and rollout_shift == "0H", (
-                "When using multistep_input, multistep_output, and timestep, input_offsets, "
-                " output_offsets and rollout_shift must not be provided."
-            )
-            timestep = frequency_to_timedelta(timestep)
-            input_offsets = sorted(-i * timestep for i in range(multistep_input))
-            output_offsets = sorted((i + 1) * timestep for i in range(multistep_output))
-            rollout_shift = timestep * multistep_output
-        else:
-            assert multistep_input is None and multistep_output is None and timestep is None, (
-                "When using input_offsets, output_offsets, and rollout_shift, multistep_input, "
-                "multistep_output, and timestep must not be provided."
-            )
-            input_offsets = sorted(frequency_to_timedelta(v) for v in input_offsets)
-            output_offsets = sorted(frequency_to_timedelta(v) for v in output_offsets)
-            rollout_shift = frequency_to_timedelta(rollout_shift)
-
         super().__init__(input_offsets=input_offsets, output_offsets=output_offsets)
+
         self._rollout_shift = rollout_shift
-
-        if consistency_check:
-            self._validate_offsets()
-            self._validate_rollout_shift()
-
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
-        self._advance_map = self._compute_advance_map()
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -133,19 +104,6 @@ class Forecaster(BaseTask):
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
         """Get the metric name for the current step."""
         return f"_rstep{rollout_step}"
-
-    def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
-        """Pre-compute index mappings for input advancement during a rollout step."""
-        out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
-        in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
-        advance_map = {"inin": [], "outin": []}
-        for new_idx, in_offset in enumerate(self._input_offsets):
-            shifted_in = in_offset + self._rollout_shift
-            if shifted_in in out_to_idx:
-                advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
-            else:
-                advance_map["inin"].append((in_to_idx[shifted_in], new_idx))
-        return advance_map
 
     def _compute_rollout_offsets(self, rollout_step: int) -> list[datetime.timedelta]:
         """Compute the full list of offsets needed for the current rollout configuration."""
@@ -181,19 +139,6 @@ class Forecaster(BaseTask):
         shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
-    def fill_metadata(self, md_dict: dict) -> None:
-        """Fill the metadata dictionary with task-specific information."""
-        super().fill_metadata(md_dict)
-        fc_timesteps = {
-            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
-            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
-            "rollout_shift": frequency_to_string(self._rollout_shift),
-            "advance_map": self._advance_map,
-        }
-        dataset_names = md_dict["metadata_inference"]["dataset_names"]
-        for dataset_name in dataset_names:
-            md_dict["metadata_inference"][dataset_name]["timesteps"].update(fc_timesteps)
-
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
@@ -208,46 +153,8 @@ class Forecaster(BaseTask):
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
-        # Return a fresh tensor: gradient computations need the version of x at each rollout step
-        x = x.clone()
-
-        # Shift part of input to be reused.
-        for old_idx, new_idx in self._advance_map["inin"]:
-            x[:, new_idx] = x[:, old_idx]
-
-        # Compute batch indices for the output offsets of this rollout step
-        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
-
-        for out_idx, new_idx in self._advance_map["outin"]:
-            # Get prognostic variables
-            x[:, new_idx, ..., data_indices.model.input.prognostic] = y_pred[
-                :,
-                out_idx,
-                ...,
-                data_indices.model.output.prognostic,
-            ]
-
-            batch_time_index = output_batch_indices[out_idx]
-            true_state = batch[:, batch_time_index]
-
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
-
-            x[:, new_idx] = output_mask.rollout_boundary(
-                x[:, new_idx],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, new_idx, ..., data_indices.model.input.forcing] = batch[
-                :,
-                batch_time_index,
-                ...,
-                data_indices.data.input.forcing,
-            ]
-        return x
+        msg = "Subclasses must implement _advance_dataset_input."
+        raise NotImplementedError(msg)
 
     def advance_input(
         self,
@@ -307,6 +214,220 @@ class Forecaster(BaseTask):
         offsets = self._offsets
         timestep = min(offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1))
         return frequency_to_string(timestep)
+
+
+class Forecaster(BaseForecaster):
+    """Basic Forecasting task implementation.
+
+    Builds input and output offsets from ``multistep_input``,
+    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
+    """
+
+    name: str = "forecaster"
+
+    def __init__(
+        self,
+        multistep_input: int,
+        multistep_output: int,
+        timestep: str,
+        rollout: dict | None = None,
+        validation_rollout: int | None = None,
+        **kwargs,
+    ) -> None:
+
+        self.timestep = frequency_to_timedelta(timestep)
+        self.num_input_steps = multistep_input
+        self.num_output_steps = multistep_output
+
+        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
+        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
+        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
+        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
+        rollout_shift = self.timestep * self.num_output_steps
+
+        super().__init__(
+            input_offsets=input_offsets,
+            output_offsets=output_offsets,
+            rollout_shift=rollout_shift,
+            rollout=rollout,
+            validation_rollout=validation_rollout,
+            **kwargs,
+        )
+
+    def _advance_dataset_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int = 0,
+        data_indices: IndexCollection | None = None,
+        output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
+    ) -> torch.Tensor:
+        """Advance a single dataset's input state for the next rollout step.
+
+        Supports model outputs shaped like ``(B, T, E, G, V)``.
+        """
+        keep_steps = min(self.num_input_steps, self.num_output_steps)
+
+        x = x.roll(-keep_steps, dims=1)
+
+        # Compute batch indices for the output offsets of this rollout step
+        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+
+        for i in range(keep_steps):
+            # Get prognostic variables
+            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
+                :,
+                -(i + 1),
+                ...,
+                data_indices.model.output.prognostic,
+            ]
+
+            batch_time_index = output_batch_indices[-(i + 1)]
+            true_state = batch[:, batch_time_index]
+
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
+
+            x[:, -(i + 1)] = output_mask.rollout_boundary(
+                x[:, -(i + 1)],
+                true_state,
+                data_indices,
+                grid_shard_slice=grid_shard_slice,
+            )
+
+            # get new "constants" needed for time-varying fields
+            x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
+                :,
+                batch_time_index,
+                ...,
+                data_indices.data.input.forcing,
+            ]
+        return x
+
+
+class OffsetForecaster(BaseForecaster):
+    """Alternative Forecasting task implementation.
+
+    Forecaster directly configured from offsets as lists of strings.
+    Offsets are validated for consistency with rollout.
+    The default rollout shift is the maximum valid shift.
+    """
+
+    name: str = "offset-forecaster"
+
+    def __init__(
+        self,
+        input_offsets: list[str] | None = None,
+        output_offsets: list[str] | None = None,
+        rollout_shift: str = "0H",
+        consistency_check: bool = True,
+        rollout: dict | None = None,
+        validation_rollout: int | None = None,
+        **kwargs,
+    ) -> None:
+
+        input_offsets = sorted(frequency_to_timedelta(v) for v in input_offsets)
+        output_offsets = sorted(frequency_to_timedelta(v) for v in output_offsets)
+        rollout_shift = frequency_to_timedelta(rollout_shift)
+
+        super().__init__(
+            input_offsets=input_offsets,
+            output_offsets=output_offsets,
+            rollout_shift=rollout_shift,
+            rollout=rollout,
+            validation_rollout=validation_rollout,
+            **kwargs,
+        )
+
+        if consistency_check:
+            self._validate_offsets()
+            self._validate_rollout_shift()
+
+        self._advance_map = self._compute_advance_map()
+
+    def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
+        """Pre-compute index mappings for input advancement during a rollout step."""
+        out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
+        in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
+        advance_map = {"inin": [], "outin": []}
+        for new_idx, in_offset in enumerate(self._input_offsets):
+            shifted_in = in_offset + self._rollout_shift
+            if shifted_in in out_to_idx:
+                advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
+            else:
+                advance_map["inin"].append((in_to_idx[shifted_in], new_idx))
+        return advance_map
+
+    def fill_metadata(self, md_dict: dict) -> None:
+        """Fill the metadata dictionary with task-specific information."""
+        super().fill_metadata(md_dict)
+        fc_timesteps = {
+            "input_offsets": [frequency_to_string(o) for o in self._input_offsets],
+            "output_offsets": [frequency_to_string(o) for o in self._output_offsets],
+            "rollout_shift": frequency_to_string(self._rollout_shift),
+            "advance_map": self._advance_map,
+        }
+        dataset_names = md_dict["metadata_inference"]["dataset_names"]
+        for dataset_name in dataset_names:
+            md_dict["metadata_inference"][dataset_name]["timesteps"].update(fc_timesteps)
+
+    def _advance_dataset_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        batch: torch.Tensor,
+        rollout_step: int = 0,
+        data_indices: IndexCollection | None = None,
+        output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
+    ) -> torch.Tensor:
+        """Advance a single dataset's input state for the next rollout step.
+
+        Based on advance_map, mapping indices from input and output to new input.
+        Supports model outputs shaped like ``(B, T, E, G, V)``.
+        """
+        # Return a fresh tensor: gradient computations need the version of x at each rollout step
+        x = x.clone()
+
+        # Shift part of input to be reused.
+        for old_idx, new_idx in self._advance_map["inin"]:
+            x[:, new_idx] = x[:, old_idx]
+
+        # Compute batch indices for the output offsets of this rollout step
+        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+
+        for out_idx, new_idx in self._advance_map["outin"]:
+            # Get prognostic variables
+            x[:, new_idx, ..., data_indices.model.input.prognostic] = y_pred[
+                :,
+                out_idx,
+                ...,
+                data_indices.model.output.prognostic,
+            ]
+
+            batch_time_index = output_batch_indices[out_idx]
+            true_state = batch[:, batch_time_index]
+
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
+
+            x[:, new_idx] = output_mask.rollout_boundary(
+                x[:, new_idx],
+                true_state,
+                data_indices,
+                grid_shard_slice=grid_shard_slice,
+            )
+
+            # get new "constants" needed for time-varying fields
+            x[:, new_idx, ..., data_indices.model.input.forcing] = batch[
+                :,
+                batch_time_index,
+                ...,
+                data_indices.data.input.forcing,
+            ]
+        return x
 
     def _validate_offsets(self) -> None:
         """Check that input and output offsets are well-formed for a forecasting task."""
