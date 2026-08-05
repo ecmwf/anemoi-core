@@ -105,7 +105,7 @@ decoders:
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
-    datasets: [ "cerra" ]
+    target_datasets: [ "cerra" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
