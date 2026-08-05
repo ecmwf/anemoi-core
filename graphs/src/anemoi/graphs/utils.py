@@ -8,12 +8,46 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from enum import Enum
+from pathlib import Path
 
 import torch
 from sklearn.neighbors import NearestNeighbors
+from torch_geometric.data.hetero_data import HeteroData
+from torch_geometric.data.storage import BaseStorage
+from torch_geometric.data.storage import EdgeStorage
+from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+
+LOGGER = logging.getLogger(__name__)
+
+# Add HeteroData and its storage classes to the safe globals for torch serialization
+# This prevents code execution when loading a graph from a file, which is a security risk.
+torch.serialization.add_safe_globals([HeteroData, BaseStorage, NodeStorage, EdgeStorage])
+
+
+def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
+    """Load a serialized graph on the currently active distributed device."""
+    try:
+        map_location = get_distributed_device()
+    except Exception:
+        map_location = "cpu"
+
+    LOGGER.info("Loading graph data from %s", graph_filename)
+    return torch.load(graph_filename, map_location=map_location, weights_only=True)
+
+
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
+    """Ensure the loaded graph contains the required dataset node types."""
+    missing = [n for n in required_dataset_names if n not in graph_data.node_types]
+    if missing:
+        msg = (
+            "Loaded graph is missing dataset node types required by the dataloader. "
+            f"Missing {missing}; available nodes are {graph_data.node_types}."
+        )
+        raise ValueError(msg)
 
 
 def get_distributed_device() -> torch.device:
