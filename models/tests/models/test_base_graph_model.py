@@ -86,6 +86,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                 "encoders": {
                     0: {
                         "source_datasets": ["data"],
+                        "dataset_fusing_strategy": "not_supported",
                         "mapper": {},
                     },
                 },
@@ -133,6 +134,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
                 "encoders": {
                     0: {
                         "source_datasets": ["data"],
+                        "dataset_fusing_strategy": "not_supported",
                         "mapper": {},
                     },
                 },
