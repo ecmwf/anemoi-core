@@ -36,7 +36,7 @@ class _SharedEncoder(nn.Module):
 
 
 class _CaptureAggregator(nn.Module):
-    def forward(self, latents: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, hidden_latent: torch.Tensor, latents: dict[str, torch.Tensor]) -> torch.Tensor:
         self.latents = dict(latents)
         raise _AggregationReached
 

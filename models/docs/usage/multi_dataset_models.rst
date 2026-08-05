@@ -119,7 +119,32 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
 ``ConcatAggregator``
    Concatenation along the channel dimension. The aggregated channel
    dimension is the **sum** of the per-dataset channel dimensions, so
-   the processor ``num_channels`` must be sized accordingly.
+   the processor ``num_channels`` must be sized accordingly. Channels are
+   concatenated in the configured dataset order, independently of
+   the order of the mapping passed to the model. Every configured dataset
+   must be active because omitting one would change the output width.
+
+``CrossAttentionAggregator``
+   Pointwise cross-attention over the active dataset latents. The
+   initial hidden-node attributes provide the query and residual, while
+   each dataset latent is projected to ``num_channels`` and used as a
+   named key/value source. Encoder widths may differ and active dataset
+   subsets are supported. The output width is ``num_channels`` and must
+   match the processor width.
+
+   .. code:: yaml
+
+      latent_aggregator:
+        _target_: anemoi.models.layers.aggregator.CrossAttentionAggregator
+        num_channels: ${model.num_channels}
+        num_heads: 16
+        attn_channels: null
+        dropout_p: 0.0
+        qkv_bias: false
+        qk_norm: false
+        attention_implementation: scaled_dot_product_attention
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
 
 *************************
  Decoder target features

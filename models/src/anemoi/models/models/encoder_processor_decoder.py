@@ -74,7 +74,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Latent aggregator: combines encoder outputs before the processor
         self.latent_aggregator = instantiate(
             model_config.latent_aggregator,
-            num_channels=self._get_latent_aggregator_channels(),
+            input_channels=self.input_dim_latent,
+            source_channels=self._get_latent_aggregator_channels(),
         )
 
         # Processor hidden -> hidden
@@ -369,7 +370,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = self.latent_aggregator(dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         (
