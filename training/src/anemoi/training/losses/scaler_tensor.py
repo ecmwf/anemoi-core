@@ -365,7 +365,11 @@ class ScaleTensor(nn.Module):
         dimension = self._tensors[name][0]
 
         if not override:
+            # Multiple updating scalers sharing a dynamic dimension are not supported;
+            # other updating scalers would still expose their previous shape here.
+            excluded_scaler = self._tensors.pop(name)
             self.validate_scaler(dimension, scaler)
+            self._tensors[name] = excluded_scaler
 
         if name in self._buffers:
             delattr(self, name)
