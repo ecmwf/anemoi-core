@@ -20,80 +20,13 @@ on:
   merge_group:
 
 jobs:
-  check_date:
-    runs-on: ubuntu-latest
-    name: Determine what to run
-    outputs:
-      should_run: ${{ steps.should_run.outputs.should_run }}
-      matrix: ${{ steps.set_matrix.outputs.matrix }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: print latest_commit
-        run: echo ${{ github.sha }}
-      - id: should_run
-        name: Decide whether to run the expensive tests
-        run: |
-          # schedule       -> only if there was a commit in the last 24h
-          # pull_request   -> only if the 'run-expensive-tests' label is set
-          # dispatch/merge -> always
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ -z "$(git rev-list --after='24 hours' ${{ github.sha }} 2>/dev/null)" ]; then
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-            else
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-            fi
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            if [ "${{ contains(github.event.pull_request.labels.*.name, 'run-expensive-tests') }}" = "true" ]; then
-              echo "should_run=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "should_run=false" >> "$GITHUB_OUTPUT"
-            fi
-          else
-            echo "should_run=true" >> "$GITHUB_OUTPUT"
-          fi
-      - id: set_matrix
-        name: Build the (optionally filtered) test matrix
-        run: |
-          SELECTED='${{ github.event.inputs.tests }}'
-          [ -z "$SELECTED" ] && SELECTED="all"
-          # Single source of truth for the three expensive tests. Newlines in
-          # sbatch_options are written as \n so each #SBATCH directive stays
-          # flush-left when the ci-hpc-generic action expands it. The venv is
-          # built once by build-env, so no per-test pip_extras are needed here.
-          FULL=$(jq -n '{include: [
-            {
-              test_name: "test_benchmark",
-              pytest_cmd: "srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu",
-              timeout_minutes: 360,
-              sbatch_options: "#SBATCH --job-name=anemoi_core_benchmark_pytest\n#SBATCH --nodes=1\n#SBATCH --ntasks-per-node=2\n#SBATCH --cpus-per-task=32\n#SBATCH --gpus-per-node=2\n#SBATCH --time=1:00:00\n#SBATCH --qos=ng\n#SBATCH --mem=120GB\n"
-            },
-            {
-              test_name: "test_training_cycle",
-              pytest_cmd: "python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL",
-              timeout_minutes: 120,
-              sbatch_options: "#SBATCH --job-name=anemoi_core_pytest_training_cycle\n#SBATCH --time=01:00:00\n#SBATCH --qos=ng\n#SBATCH --gpus=1\n#SBATCH --gres=gpu:1\n#SBATCH --mem=64G\n"
-            },
-            {
-              test_name: "test_accuracy",
-              pytest_cmd: "python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL",
-              timeout_minutes: 120,
-              sbatch_options: "#SBATCH --job-name=anemoi_core_pytest_accuracy\n#SBATCH --time=01:00:00\n#SBATCH --qos=ng\n#SBATCH --gpus=1\n#SBATCH --gres=gpu:1\n#SBATCH --mem=64G\n"
-            }
-          ]}')
-          if [ "$SELECTED" = "all" ]; then
-            MATRIX="$FULL"
-          else
-            MATRIX=$(jq --arg sel "$SELECTED" '{include: [.include[] | select(.test_name == $sel)]}' <<< "$FULL")
-          fi
-          # printf (not echo) so \n inside sbatch_options is preserved verbatim.
-          printf 'matrix=%s\n' "$(jq -c . <<< "$MATRIX")" >> "$GITHUB_OUTPUT"
-
   build-env:
     name: build-env
     runs-on: hpc
     timeout-minutes: 120
-    needs: check_date
-    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    # On a pull_request the expensive tests only run when the author opted in
+    # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
+    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-expensive-tests') }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -128,61 +61,84 @@ jobs:
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
-  integration-tests:
-    name: ${{ matrix.test_name }}
+  # One job per expensive test. On workflow_dispatch a single test can be picked
+  # via the 'tests' input; on every other event all three run. When build-env is
+  # skipped (unlabeled PR) these skip automatically as dependents.
+  test_benchmark:
+    needs: build-env
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
+    uses: ./.github/workflows/run-integration-test-hpc.yml
+    with:
+      pytest_cmd: srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
+      timeout_minutes: 360
+      sbatch_options: |
+        #SBATCH --job-name=anemoi_core_benchmark_pytest
+        #SBATCH --nodes=1
+        #SBATCH --ntasks-per-node=2
+        #SBATCH --cpus-per-task=32
+        #SBATCH --gpus-per-node=2
+        #SBATCH --time=1:00:00
+        #SBATCH --qos=ng
+        #SBATCH --mem=120GB
+    secrets: inherit
+
+  test_training_cycle:
+    needs: build-env
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
+    uses: ./.github/workflows/run-integration-test-hpc.yml
+    with:
+      pytest_cmd: python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      timeout_minutes: 120
+      sbatch_options: |
+        #SBATCH --job-name=anemoi_core_pytest_training_cycle
+        #SBATCH --time=01:00:00
+        #SBATCH --qos=ng
+        #SBATCH --gpus=1
+        #SBATCH --gres=gpu:1
+        #SBATCH --mem=64G
+    secrets: inherit
+
+  test_accuracy:
+    needs: build-env
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
+    uses: ./.github/workflows/run-integration-test-hpc.yml
+    with:
+      pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      timeout_minutes: 120
+      sbatch_options: |
+        #SBATCH --job-name=anemoi_core_pytest_accuracy
+        #SBATCH --time=01:00:00
+        #SBATCH --qos=ng
+        #SBATCH --gpus=1
+        #SBATCH --gres=gpu:1
+        #SBATCH --mem=64G
+    secrets: inherit
+
+  cleanup-env:
+    name: cleanup-env
     runs-on: hpc
-    timeout-minutes: ${{ matrix.timeout_minutes }}
-    needs: [check_date, build-env]
-    if: ${{ needs.check_date.outputs.should_run != 'false' && needs.check_date.outputs.matrix != '{"include":[]}' }}
-    strategy:
-      fail-fast: false
-      matrix: ${{ fromJson(needs.check_date.outputs.matrix) }}
+    timeout-minutes: 30
+    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
+    # Only clean up when the env was built and no test failed/was cancelled
+    # (skipped tests from a selective run are fine). On failure the venv is left
+    # on the filesystem so the tests can be rerun against it.
+    if: ${{ needs.build-env.result == 'success' && !failure() && !cancelled() }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
-            env | grep SLURM # helps with debugging
             set -eux
-            module load python3/3.12.9-01
-            # Reuse the shared clone + virtualenv built by the build-env job.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
-            cd "$WORKDIR/anemoi-core"
-            git pull # update to the latest commit on the branch
-            git show -s --format=oneline #print latest commit info
-            source "$WORKDIR/venv/bin/activate"
-            pip freeze #print dependent library versions
-            # Inject the MLflow URL here (not via job-level env:, which does not
-            # propagate to the sbatch job); secrets are valid inside this template.
-            export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
-            export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
-            ${{ matrix.pytest_cmd }}
-            deactivate
-          sbatch_options: ${{ matrix.sbatch_options }}
+            rm -rf "$WORKDIR"
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_cleanup_env
+            #SBATCH --time=00:15:00
+            #SBATCH --qos=nf
+            #SBATCH --mem=8G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
-  cleanup-env:
-      name: cleanup-env
-      runs-on: hpc
-      timeout-minutes: 30
-      needs: [check_date, integration-tests]
-      # Only clean up when every integration test succeeded.
-      # if any test fails or is cancelled then failed/cancelled
-      # then leave the venv on filesystem to allow tests to be rerun.
-      if: ${{ success() && needs.check_date.outputs.should_run != 'false' }}
-      steps:
-        - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
-          with:
-            template: |
-              set -eux
-              WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
-              rm -rf "$WORKDIR"
-            sbatch_options: |
-              #SBATCH --job-name=anemoi_core_cleanup_env
-              #SBATCH --time=00:15:00
-              #SBATCH --qos=nf
-              #SBATCH --mem=8G
-            troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
+
   notify-team:
-    needs: [build-env, integration-tests]
+    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
