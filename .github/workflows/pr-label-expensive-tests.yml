@@ -14,7 +14,13 @@
 name: "[PR] Expensive-tests label gate"
 
 on:
-  pull_request:
+  # pull_request_target (not pull_request) so the job gets a read/write token on
+  # fork PRs and can post the commit status; a plain pull_request from a fork
+  # gets a read-only token and createCommitStatus would fail. This is safe
+  # despite pull_request_target's usual risk because the job only reads the
+  # event payload (labels/author) and posts a status — it never checks out or
+  # executes PR code, so untrusted fork code never runs with these permissions.
+  pull_request_target:
     types:
       - opened
       - reopened
