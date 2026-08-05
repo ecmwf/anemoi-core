@@ -175,7 +175,13 @@ def _gather(
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
         return _gather_into_tensor(input_, dim_, sizes, group)
 
-    requires_pad = dist.get_backend(group) == "gloo" and not all_shards_equal_shape
+    # For unequal shard sizes we must pad to equal shapes when either:
+    #  - the backend is gloo (no all_gather_into_tensor), or
+    #  - we are compiling: torch.compile does not support variable sized all_gather
+    #    whereas the padded path uses equal-size all_gather which works.
+    # NOTE: calling 'dist.get_backend(group)' gives an error in torch.compile()
+    # 'is_compiling()' must be called first to avoid that error
+    requires_pad = not all_shards_equal_shape and (torch.compiler.is_compiling() or dist.get_backend(group) == "gloo")
     if requires_pad:
         return _gather_with_padding(input_, dim_, sizes, group)
 

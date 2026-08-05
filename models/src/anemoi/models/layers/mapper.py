@@ -467,6 +467,16 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         }
 
+        if torch.compiler.is_compiling():
+            LOGGER.warning(
+                "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
+                "Disabling explicit gradient checkpointing for this function."
+                "Note: torch.compile will apply its own implicit checkpointing, determined by "
+                "'torch._dynamo.config.activation_memory_budget'"
+            )
+            self.gradient_checkpointing = False
+            self.num_chunks = 1
+
         if self.shard_strategy == "edges":
             return self.mapper_forward_with_edge_sharding(**kwargs_forward)
         else:  # self.shard_strategy == "heads"
