@@ -6,3 +6,4 @@ loss_matrices_path: null
 truncation: null
 truncation_inv: null
 warm_start: null
+compile_cache: ${oc.env:SCRATCH}/torch-compile-cache.bin

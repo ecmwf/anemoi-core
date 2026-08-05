@@ -47,7 +47,9 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import load_compile_cache
 from anemoi.training.utils.compile import prepare_compilation
+from anemoi.training.utils.compile import save_compile_cache
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
@@ -741,7 +743,7 @@ class AnemoiTrainer(ABC):
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-
+        load_compile_cache(self.config.system.input.compile_cache)
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
@@ -750,6 +752,9 @@ class AnemoiTrainer(ABC):
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
+
+        # TODO(cathal): move to after first training epoch
+        save_compile_cache(self.config.system.input.compile_cache)
 
         LOGGER.debug("---- DONE. ----")
 
