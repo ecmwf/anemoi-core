@@ -151,13 +151,12 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_output * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        return self.model.n_step_input * self.model.num_input_channels_forcings[self.datasets_names[0]]
 
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        indices = self.model._forcing_input_idx[dataset_name]
-        x_forcing = x_input_data[:, : self.model.n_step_output, ..., indices]
+        x_forcing = torch.index_select(x_input_data, dim=-1, index=self.model._forcing_input_idx[dataset_name])
         return einops.rearrange(x_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
@@ -184,8 +183,7 @@ class PrognosticsFeature(DecodingTargetFeature):
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        indices = self.model._internal_input_idx[dataset_name]
-        x_prog = x_input_data[:, : self.model.n_step_input, ..., indices]
+        x_prog = torch.index_select(x_input_data, dim=-1, index=self.model._internal_input_idx[dataset_name])
         return einops.rearrange(x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
