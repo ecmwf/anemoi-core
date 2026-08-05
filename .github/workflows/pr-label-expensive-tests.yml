@@ -1,63 +1,55 @@
-# This workflow checks that a PR declares whether the expensive integration
-# tests are needed, via exactly one of these labels:
+# Gate that a PR declares whether the expensive integration tests are needed,
+# via exactly one of these labels:
 # - "run-expensive-tests": the expensive HPC tests run on every push (see
-#   integration-tests-hpc.yml). Check passes.
-# - "expensive-tests-not-needed": the author has opted out. Check passes.
-# - Neither label: fail (forces an explicit decision before merging).
+#   integration-tests-hpc.yml).
+# - "expensive-tests-not-needed": the author has opted out.
+#
+# Rather than *failing* when a label is missing (a red X that desensitises
+# reviewers to real test failures), this reports a neutral *pending* commit
+# status 'expensive-tests-label' that only turns green once a label is present.
+# Mark 'expensive-tests-label' as a required status check in the branch
+# protection / ruleset for the target branch: a pending required check blocks
+# the merge (grey button) without ever showing a failure.
 
-name: "[PR] Expensive-tests labels"
+name: "[PR] Expensive-tests label gate"
 
 on:
   pull_request:
     types:
       - opened
-      - edited
       - reopened
+      - synchronize
       - labeled
       - unlabeled
-      - synchronize
 
 permissions:
+  statuses: write
   pull-requests: read
 
 jobs:
-  check:
+  gate:
     runs-on: ubuntu-latest
     steps:
-      - name: Get PR details
+      - name: Report expensive-tests label status
         uses: actions/github-script@v7
-        id: check-pr
         with:
           script: |
-            const pr = await github.rest.pulls.get({
+            const pr = context.payload.pull_request;
+            const author = pr.user.login;
+            const isBot = author === 'DeployDuck' || author === 'pre-commit-ci[bot]';
+            const labels = pr.labels.map(label => label.name);
+            const decided =
+              labels.includes('run-expensive-tests') ||
+              labels.includes('expensive-tests-not-needed');
+            const ok = isBot || decided;
+            await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
+              sha: pr.head.sha,
+              context: 'expensive-tests-label',
+              state: ok ? 'success' : 'pending',
+              description: ok
+                ? "Expensive-tests decision recorded"
+                : "Add 'run-expensive-tests' or 'expensive-tests-not-needed' to merge",
+              target_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
             });
-            const labels = pr.data.labels.map(label => label.name);
-            core.setOutput('labels', JSON.stringify(labels));
-            core.setOutput('author', context.payload.pull_request.user.login);
-
-      - name: Evaluate expensive-tests labels
-        run: |
-          AUTHOR='${{ steps.check-pr.outputs.author }}'
-          if [ "$AUTHOR" == "DeployDuck" ] || [ "$AUTHOR" == "pre-commit-ci[bot]" ]; then
-            echo "Bot PR, skipping."
-            exit 0
-          fi
-          LABELS=$(echo '${{ steps.check-pr.outputs.labels }}' | jq -r '.[]')
-          echo "Labels found:"
-          echo -e "$LABELS\n"
-          echo "Result:"
-          if echo "$LABELS" | grep -qi "run-expensive-tests"; then
-            echo "'run-expensive-tests' present: expensive tests run on every push. Passing."
-            EXIT_CODE=0
-          elif echo "$LABELS" | grep -qi "expensive-tests-not-needed"; then
-            echo "'expensive-tests-not-needed' present: expensive tests are skipped. Passing."
-            EXIT_CODE=0
-          else
-            echo "No expensive-tests label found. Please add either 'run-expensive-tests'"
-            echo "or 'expensive-tests-not-needed' to this PR. Failing."
-            EXIT_CODE=1
-          fi
-          exit $EXIT_CODE
