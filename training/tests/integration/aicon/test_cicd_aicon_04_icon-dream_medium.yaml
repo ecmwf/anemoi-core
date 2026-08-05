@@ -142,6 +142,7 @@ data:
             - "sin_local_time"
             std: []
 
+  num_features: null
   format: zarr
 
 model:
