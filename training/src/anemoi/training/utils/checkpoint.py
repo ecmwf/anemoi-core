@@ -20,9 +20,18 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
+from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
+
+
+def clear_imputer_runtime_state(model: torch.nn.Module) -> None:
+    """Clear imputer state before serialising a model."""
+    for module in model.modules():
+        if isinstance(module, BaseImputer):
+            module.nan_locations = None
+            module.loss_mask_training = None
 
 
 def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Module, dict]:
@@ -74,6 +83,7 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     save_path = Path(save_path)
     inference_filepath = save_path.parent / f"inference-{save_path.name}"
 
+    clear_imputer_runtime_state(model)
     torch.save(model, inference_filepath)
     save_metadata(inference_filepath, metadata)
     return inference_filepath
