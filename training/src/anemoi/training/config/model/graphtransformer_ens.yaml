@@ -75,7 +75,7 @@ processor:
 
 encoders:
   0:
-    datasets: [ "data" ]
+    source_datasets: [ "data" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -99,7 +99,7 @@ latent_aggregator:
 
 decoders:
   0:
-    datasets: [ "data" ]
+    target_datasets: [ "data" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper

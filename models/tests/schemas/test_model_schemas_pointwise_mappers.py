@@ -30,7 +30,7 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
         },
         encoders={
             "0": {
-                "datasets": ["data"],
+                "source_datasets": ["data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseForwardMapper",
                     "num_channels": 64,
@@ -43,7 +43,7 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
         latent_aggregator={"_target_": "anemoi.models.layers.aggregator.SumAggregator"},
         decoders={
             "0": {
-                "datasets": ["data"],
+                "target_datasets": ["data"],
                 "input_target_features": ["encoded_data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseBackwardMapper",
@@ -100,7 +100,7 @@ def test_base_model_schema_accepts_sparse_projector_configuration():
         latent_aggregator={"_target_": "anemoi.models.layers.aggregator.SumAggregator"},
         encoders={
             "0": {
-                "datasets": ["data"],
+                "source_datasets": ["data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseForwardMapper",
                     "num_channels": 64,
@@ -112,7 +112,7 @@ def test_base_model_schema_accepts_sparse_projector_configuration():
         },
         decoders={
             "0": {
-                "datasets": ["data"],
+                "target_datasets": ["data"],
                 "input_target_features": ["encoded_data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseBackwardMapper",

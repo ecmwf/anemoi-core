@@ -114,7 +114,7 @@ class BaseGraphModel(nn.Module):
         self.encoder2datasets: dict[str, list[str]] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
         for encoder_name, encoder_config in encoders_config.items():
-            datasets_to_encode = encoder_config["datasets"]
+            datasets_to_encode = encoder_config["source_datasets"]
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = encoder_name
@@ -128,7 +128,7 @@ class BaseGraphModel(nn.Module):
         self.decoder2datasets: dict[str, list[str]] = {}
         self.decoders_target_input: dict[str, DecodingTargetFeature] = {}
         for decoder_name, decoder_config in decoders_config.items():
-            datasets_to_decode = decoder_config["datasets"]
+            datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
             assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:

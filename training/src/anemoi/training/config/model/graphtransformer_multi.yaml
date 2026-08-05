@@ -42,7 +42,7 @@ processor:
 
 encoders:
   global: # user-defined key. It will appear in the state-dict
-    datasets: [ "data1", "data2", "data3" ]
+    source_datasets: [ "data1", "data2", "data3" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -61,7 +61,7 @@ encoders:
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
-    datasets: [ "cerra" ]
+    source_datasets: [ "cerra" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -85,7 +85,7 @@ latent_aggregator:
 
 decoders:
   global: # user-defined key. It will appear in the state-dict
-    datasets: [ "era5" ]
+    target_datasets: [ "era5" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
