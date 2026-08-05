@@ -30,10 +30,7 @@ jobs:
             # Reuse the shared clone + virtualenv built by the build-env job.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             cd "$WORKDIR/anemoi-core"
-            git pull # update to the latest commit on the branch
-            git show -s --format=oneline #print latest commit info
             source "$WORKDIR/venv/bin/activate"
-            pip freeze #print dependent library versions
             # Inject the MLflow URL here (not via job-level env:, which does not
             # propagate to the sbatch job); secrets are valid inside this template.
             export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}

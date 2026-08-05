@@ -50,7 +50,9 @@ jobs:
             source venv/bin/activate
             pip install --upgrade pip
             cd "$REPO_NAME"
+            git show -s --format=oneline
             pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests]
+            pip freeze
             deactivate
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_build_env
