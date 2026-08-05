@@ -449,7 +449,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             self.post_processors = copy.deepcopy(pl_module.model.post_processors)
             for dataset_name in self.post_processors:
                 for post_processor in self.post_processors[dataset_name].processors.values():
-                    if hasattr(post_processor, "nan_locations"):
+                    if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
                             dataset_name,
@@ -737,15 +737,16 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
         for dataset in self.loss:
             for leaf_loss in self.loss[dataset].iter_leaf_losses():
-                if (
-                    hasattr(leaf_loss, "scaler")
-                    and hasattr(leaf_loss.scaler, "nan_mask_weights")
-                    and leaf_loss.scaler.nan_mask_weights.shape[pl_module.grid_dim] != 1
-                ):
-                    leaf_loss.scaler.nan_mask_weights = pl_module.allgather_batch(
-                        leaf_loss.scaler.nan_mask_weights,
-                        dataset,
-                    )
+                scaler = getattr(leaf_loss, "scaler", None)
+                if scaler is not None and "nan_mask_weights" in scaler:
+                    nan_mask_weights = scaler.get_scaler_tensor("nan_mask_weights")
+                    if nan_mask_weights.shape[pl_module.grid_dim] != 1:
+                        # The copied loss is evaluated later, so replace its local mask
+                        # with the gathered mask through the ScaleTensor API.
+                        scaler.update_scaler(
+                            "nan_mask_weights",
+                            pl_module.allgather_batch(nan_mask_weights, dataset),
+                        )
 
         return pl_module.plot_adapter.prepare_loss_batch(batch)
 

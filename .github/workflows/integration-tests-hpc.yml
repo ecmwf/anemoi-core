@@ -35,10 +35,7 @@ jobs:
             set -eux
             module load python3/3.12.9-01
             # Shared working dir on $PERM. The clone + virtualenv are built once
-            # here and reused by every benchmark job, then removed by the
-            # cleanup-env job. Keyed on github.run_id (unique per workflow run and
-            # constant across all jobs in the run) so all jobs agree on the same
-            # path, and different runs/branches never collide on it.
+            # here and reused by each test, then removed by the cleanup-env job.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
@@ -121,10 +118,10 @@ jobs:
     runs-on: hpc
     timeout-minutes: 30
     needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
-    # Only clean up when the env was built and no test failed/was cancelled
-    # (skipped tests from a selective run are fine). On failure the venv is left
-    # on the filesystem so the tests can be rerun against it.
-    if: ${{ needs.build-env.result == 'success' && !failure() && !cancelled() }}
+    # Always free the shared venv from $PERM once the tests finish, whether they
+    # passed or failed. Guarded on build-env so it does not fire when no env was
+    # built (e.g. an unlabeled PR that skipped build-env).
+    if: ${{ always() && needs.build-env.result != 'skipped' }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:

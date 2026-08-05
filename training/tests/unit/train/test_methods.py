@@ -31,6 +31,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scalers import NaNMaskScaler
 from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
@@ -272,6 +273,34 @@ def _wire_training_module(
     obj.output_mask = {name: NoOutputMask() for name in data_indices}
     if task is not None:
         obj.task = task
+
+
+def test_initialise_updating_scalers_uses_runtime_storage() -> None:
+    updating_scaler = NaNMaskScaler()
+    updating_spec = updating_scaler.get_scaling()
+    fixed_spec = (0, torch.ones(1))
+    loss = MSELoss()
+    metric = MSELoss()
+
+    for loss_or_metric in (loss, metric):
+        loss_or_metric.add_scaler(*updating_spec, name="nan_mask_weights")
+        loss_or_metric.add_scaler(*fixed_spec, name="fixed")
+        assert "nan_mask_weights" in dict(loss_or_metric.scaler.named_buffers())
+
+    BaseTrainingModule._initialise_updating_scalers(
+        scalers={"nan_mask_weights": updating_spec, "fixed": fixed_spec},
+        updating_scalers={"nan_mask_weights": updating_scaler},
+        loss_obj=loss,
+        metrics_dict={"metric": metric},
+    )
+
+    for loss_or_metric in (loss, metric):
+        assert "nan_mask_weights" not in dict(loss_or_metric.scaler.named_buffers())
+        assert "fixed" in dict(loss_or_metric.scaler.named_buffers())
+        torch.testing.assert_close(
+            loss_or_metric.scaler.get_scaler_tensor("nan_mask_weights"),
+            updating_spec[1],
+        )
 
 
 # Shared minimal configs
