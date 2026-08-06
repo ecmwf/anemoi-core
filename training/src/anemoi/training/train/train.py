@@ -38,6 +38,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks.compile import CompileCache
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -47,9 +48,7 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
-from anemoi.training.utils.compile import load_compile_cache
 from anemoi.training.utils.compile import prepare_compilation
-from anemoi.training.utils.compile import save_compile_cache
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
@@ -718,9 +717,15 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        # TODO(cathal): better place to put this logic?
+        callbacks = self.callbacks
+        compile_cache_file = self.config.system.input.compile_cache
+        if compile_cache_file is not None:
+            callbacks = [*callbacks, CompileCache(str(compile_cache_file))]
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
-            callbacks=self.callbacks,
+            callbacks=callbacks,
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
@@ -744,7 +749,6 @@ class AnemoiTrainer(ABC):
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-        load_compile_cache(self.config.system.input.compile_cache)
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
@@ -753,9 +757,6 @@ class AnemoiTrainer(ABC):
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
-
-        # TODO(cathal): move to after first training epoch
-        save_compile_cache(self.config.system.input.compile_cache)
 
         LOGGER.debug("---- DONE. ----")
 
