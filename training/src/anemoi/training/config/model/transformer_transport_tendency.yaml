@@ -42,6 +42,7 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.TransformerProcessor
+  num_channels: ${model.num_channels}
   num_layers: 16
   num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -58,43 +59,58 @@ processor:
   use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
-encoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-  trainable_size: ${model.trainable_parameters.data2hidden}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
-  mlp_implementation: mlp
-  num_heads: 16 # GraphTransformer or Transformer only
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+encoders:
+  "0":
+    source_datasets: [ "data" ]
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      trainable_size: ${model.trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
-decoder:
-  _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-  trainable_size: ${model.trainable_parameters.hidden2data}
-  sub_graph_edge_attributes: ${model.attributes.edges}
-  num_chunks: 4
-  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
-  mlp_implementation: mlp
-  num_heads: 16 # GraphTransformer or Transformer only
-  initialise_data_extractor_zero: True
-  qk_norm: True
-  cpu_offload: ${model.cpu_offload}
-  gradient_checkpointing: True
-  layer_kernels: ${model.layer_kernels}
-  shard_strategy: "edges"
-  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
+decoders:
+  "0":
+    target_datasets: [ "data" ]
+    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      trainable_size: ${model.trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: True
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 residual:
-  _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
-  step: -1 # use the latest step as skip connection
+  datasets:
+    data:
+      _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+      step: -1 # use the latest step as skip connection
 
 output_mask:
-  _target_: anemoi.training.utils.masks.NoOutputMask
+  datasets:
+    data:
+      _target_: anemoi.training.utils.masks.NoOutputMask
 
 trainable_parameters:
   data: 8
@@ -137,4 +153,6 @@ compile:
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
 
 # Bounding configuration
-bounding: []
+bounding:
+  datasets:
+    data: []
