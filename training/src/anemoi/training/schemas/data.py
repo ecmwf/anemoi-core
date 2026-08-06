@@ -50,8 +50,6 @@ class DataSchema(PydanticBaseModel):
         The timestep of the data.
     datasets : dict[str, DatasetDataSchema] | None
         "Dictionary mapping dataset names to their configurations."
-    num_features : int, optional
-        The number of features in the forecast state. To be set in the code.
     """
 
     format: str = Field(example=None)
@@ -60,5 +58,3 @@ class DataSchema(PydanticBaseModel):
     "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
-    num_features: int | None
-    "Number of features in the forecast state. To be set in the code."

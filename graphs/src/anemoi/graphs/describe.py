@@ -13,7 +13,6 @@ from pathlib import Path
 
 import torch
 
-from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.humanize import bytes
 from anemoi.utils.text import table
 
@@ -23,7 +22,7 @@ class GraphDescriptor:
 
     def __init__(self, path: str | Path, **kwargs):
         self.path = path
-        self.graph = load_graph_from_file(self.path)
+        self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
 
     @property
     def total_size(self):
