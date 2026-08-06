@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 import torch
 
+from anemoi.training.utils.compile import init_compile_cache
 from anemoi.training.utils.compile import load_compile_cache
 from anemoi.training.utils.compile import save_compile_cache
 from anemoi.training.utils.compile import subset_tensor
@@ -106,11 +107,10 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
 
     torch._dynamo.reset()
     try:
-        # save_compile_cache serializes in-memory cache artifacts but does not configure
-        # TORCHINDUCTOR_CACHE_DIR. Configure it before compilation so Inductor writes
-        # generated artifacts under directory A.
+        # Initialize Inductor's cache environment from TMPDIR before compiling so
+        # generated artifacts are written under directory A.
         monkeypatch.setenv("TMPDIR", str(cache_root_a))
-        monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(expected_cache_dir_a))
+        init_compile_cache()
         assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str(expected_cache_dir_a)
 
         compiled_from_a = torch.compile(_compile_cache_test_function, fullgraph=True, dynamic=False)
