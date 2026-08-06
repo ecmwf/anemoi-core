@@ -28,9 +28,7 @@ class SpatialPreprocessor(nn.Module):
 
     Spatial preprocessors are registered on ``AnemoiModelInterface`` as
     ``self.spatial_pre_processors`` (a ``nn.ModuleDict`` keyed by dataset name)
-    and are saved in the model checkpoint.  They are intentionally graph-topology-
-    aware and therefore live in ``anemoi-models``, keeping ``anemoi-training`` free
-    of any ``anemoi-graphs`` dependency.
+    and are saved in the model checkpoint.
     """
 
     def forward(self, x: Tensor, model_comm_group=None, grid_shard_sizes=None) -> Tensor:

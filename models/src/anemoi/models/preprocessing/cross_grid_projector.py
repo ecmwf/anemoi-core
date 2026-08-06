@@ -32,12 +32,10 @@ class CrossGridProjector(SpatialPreprocessor):
     and passing to the encoder.
 
     The projection matrix is loaded from the graph at model construction time and
-    stored as a non-trainable buffer so it is saved in the model checkpoint. This
-    keeps ``anemoi-training`` free of any ``anemoi-graphs`` dependency.
+    stored as a non-trainable buffer so it is saved in the model checkpoint.
 
     Handles the full 5-D batch tensor ``(batch, time, ensemble, grid_src, vars)``
-    and preserves all time and ensemble slices — unlike ``InterpolationConnection``
-    which selects a single timestep.
+    and preserves all time and ensemble slices.
 
     Parameters
     ----------
@@ -110,6 +108,3 @@ class CrossGridProjector(SpatialPreprocessor):
                 x_proj, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
             )
         return einops.rearrange(x_proj, "(b t e) g v -> b t e g v", b=batch, t=time, e=ensemble)
-
-    def inverse(self, x: Tensor) -> Tensor:
-        raise NotImplementedError("CrossGridProjector does not support inverse projection.")
