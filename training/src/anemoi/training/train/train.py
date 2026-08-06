@@ -30,10 +30,10 @@ from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.graphs.utils import load_graph_from_file
-from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
