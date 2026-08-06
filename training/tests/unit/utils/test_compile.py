@@ -113,7 +113,12 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
         init_compile_cache()
         assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str(expected_cache_dir_a)
 
-        compiled_from_a = torch.compile(_compile_cache_test_function, fullgraph=True, dynamic=False)
+        compiled_from_a = torch.compile(
+            _compile_cache_test_function,
+            fullgraph=True,
+            dynamic=False,
+            mode="max-autotune",
+        )
         torch.testing.assert_close(compiled_from_a(x), expected)
         save_compile_cache(str(cache_file))
         assert cache_file.is_file()
@@ -126,7 +131,12 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
         load_compile_cache(str(cache_file))
         assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str(expected_cache_dir_b)
 
-        compiled_from_b = torch.compile(_compile_cache_test_function, fullgraph=True, dynamic=False)
+        compiled_from_b = torch.compile(
+            _compile_cache_test_function,
+            fullgraph=True,
+            dynamic=False,
+            mode="max-autotune",
+        )
         torch.testing.assert_close(compiled_from_b(x), expected)
     finally:
         torch._dynamo.reset()

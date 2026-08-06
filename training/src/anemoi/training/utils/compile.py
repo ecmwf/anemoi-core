@@ -132,10 +132,6 @@ def _configure_compile_cache_environment() -> None:
     # TMPDIR must be the same name across all ranks and jobs; it cannot include a
     # process id because restored artifacts retain their cache paths.
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
-    os.environ["TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE"] = (
-        "0"  # disable local cache for autotuning, since it contains hardcoded paths which
-        # break when loading the cache on a different node
-    )
 
 
 def init_compile_cache() -> None:
