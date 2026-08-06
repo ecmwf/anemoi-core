@@ -128,6 +128,11 @@ def prepare_compilation(
     return model
 
 
+def _configure_compile_cache_environment() -> None:
+    """Configure cache locations used when saving or loading compile artifacts."""
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
+
+
 def load_compile_cache(compile_cache_file: str) -> None:
     """Load the torch.compile cache from disk if it exists.
 
@@ -145,6 +150,7 @@ def load_compile_cache(compile_cache_file: str) -> None:
     if compile_cache_file is None:
         LOGGER.info("No torch.compile cache file specified, skipping load.")
         return
+    _configure_compile_cache_environment()
 
     path = Path(compile_cache_file)
     if not path.exists():
@@ -172,6 +178,7 @@ def save_compile_cache(compile_cache_file: str) -> None:
     if compile_cache_file is None:
         LOGGER.info("No torch.compile cache file specified, skipping save.")
         return
+    _configure_compile_cache_environment()
 
     if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
         return
