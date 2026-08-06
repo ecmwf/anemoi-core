@@ -319,8 +319,8 @@ class OffsetForecaster(BaseForecaster):
 
     def __init__(
         self,
-        input_offsets: list[str] | None = None,
-        output_offsets: list[str] | None = None,
+        input_offsets: list[str],
+        output_offsets: list[str],
         rollout_shift: str = "0H",
         consistency_check: bool = True,
         rollout: dict | None = None,
