@@ -122,7 +122,7 @@ class CoordinatesFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return 4 # getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
+        return 4  # getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
 
     def _compute(
         self,
@@ -195,7 +195,7 @@ class TargetForcingsFeature(DecodingTargetFeature):
         x_encoded_data: Tensor | None,
         x_target: "SourceView",
         batch_size: int,
-        dataset_name: str
+        dataset_name: str,
     ) -> Tensor:
         assert len(x_target.variables) == self.model.num_input_channels_forcings[dataset_name], (
             f"Expected {self.model.num_input_channels_forcings[dataset_name]} forcing variables, "
@@ -307,7 +307,7 @@ class EncodedDataFeature(DecodingTargetFeature):
         x_encoded_data: Tensor | None,
         x_target: Tensor | None,
         batch_size: int,
-        dataset_name: str
+        dataset_name: str,
     ) -> Tensor:
         if x_encoded_data is None:
             raise ValueError(f"'{self.name}' requires the encoder output for dataset '{dataset_name}'.")
@@ -381,7 +381,7 @@ class CompositeTargetFeature(DecodingTargetFeature):
         else:
             target_features = torch.cat(parts, dim=-1)
 
-        # Prepare additional target information for the decoder (coordinates and timedeltas)
+        # Prepare additional target information for the decoder (coordinates and timedeltas)
         target_flat = x_target.flatten()
         target_coords = target_flat.coordinates
         target_timedeltas = target_flat.timedeltas

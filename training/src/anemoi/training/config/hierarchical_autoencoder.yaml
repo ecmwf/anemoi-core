@@ -16,7 +16,7 @@ model:
   processor:
     _target_: anemoi.models.layers.processor.NoOpProcessor
   decoders:
-    0:
+    "0":
       input_target_features: [ "coordinates" ]
 
 

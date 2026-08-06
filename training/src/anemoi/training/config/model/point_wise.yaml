@@ -33,8 +33,8 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoders:
-  0:
-    datasets: [ "era5" ]
+  "0":
+    source_datasets: [ "era5" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
@@ -47,8 +47,8 @@ latent_aggregator:
   _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
-  0:
-    datasets: [ "cerra" ]
+  "0":
+    target_datasets: [ "cerra" ]
     input_target_features: [ "encoded_data" ]
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper

@@ -76,9 +76,8 @@ class WeightAveragingSchema(GenericSchema):
           decay: 0.999
           update_starting_at_step: 1000
 
-    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
-    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
-    updating loss scalers (a warning will be logged).
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
+    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
     """
 
 

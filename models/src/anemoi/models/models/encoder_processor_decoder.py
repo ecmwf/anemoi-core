@@ -128,13 +128,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.datasets[0]].edge_dim,
+                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
             )
 
         # Latent aggregator: combines encoder outputs before the processor
         self.latent_aggregator = instantiate(
             model_config.latent_aggregator,
-            num_channels={encoder_name: encoder.hidden_dim for encoder_name, encoder in self.encoder.items()},
+            num_channels=self._get_latent_aggregator_channels(),
         )
 
         # Processor hidden -> hidden
@@ -202,7 +202,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.processor.num_channels,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.datasets[0]].edge_dim,
+                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
     def _assemble_input(
@@ -276,7 +276,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Shard sizes for the target nodes, or None if the dataset is not sharded.
         data_batch_sizes : tuple[int, ...] | None
             Batch sizes for the target nodes, or None if the dataset is not batched.
-        target_timedeltas : Tensor | None   
+        target_timedeltas : Tensor | None
             Timedeltas for the target nodes, or None if the dataset does not have timedeltas (gridded).
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
@@ -294,7 +294,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_name=dataset_name,
         )
 
-        return target_coords, x_target_latent, grid_shard_sizes, None, target_timedeltas
+        # Fail fast with a clear message if the decoder destination features do not line up with the
+        # target nodes. Only valid when unsharded (under sharding the composite gathers
+        # target_coords to full size while x_target_latent stays local).
+        if grid_shard_sizes is None:
+            assert x_target_latent.shape[0] == target_coords.shape[0], (
+                f"Decoder x_dst rows ({x_target_latent.shape[0]}) != target node count "
+                f"({target_coords.shape[0]}) for dataset '{dataset_name}'. This usually means an "
+                f"'encoded_data' target feature is used for a dataset whose input and target node "
+                f"sets differ (e.g. tabular observations); use ['coordinates', 'target_forcings'] "
+                f"instead."
+            )
+
+        return target_coords, x_target_latent, grid_shard_sizes, x_target.flatten().batch_sizes, target_timedeltas
 
     def _assemble_output(
         self,
@@ -465,7 +477,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
             x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[encoder_name] = x_latent
+            dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
         # x_latent = sum_dataset_latents(dataset_latents, x_hidden_latent, self.num_channels)
@@ -497,21 +509,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
-            (
-                target_coords, 
-                target_data_latent,
-                shard_sizes_data,
-                data_batch_sizes,
-                data_timedeltas
-            ) = self._assemble_target(
-                batch[dataset_name],
-                x_data_latent_dict.get(dataset_name, None),
-                target[dataset_name],
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
+            target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
+                self._assemble_target(
+                    batch[dataset_name],
+                    x_data_latent_dict.get(dataset_name, None),
+                    target[dataset_name],
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                    dataset_name=dataset_name,
+                )
             )
-
 
             if target_coords.numel() == 0:
                 LOGGER.debug(
@@ -576,6 +583,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             output = output.update_source(dataset_name, x_out_dict[dataset_name])
 
         return output
+
+    def _get_latent_aggregator_channels(self) -> dict[str, int]:
+        """Return encoder output widths by dataset."""
+        return {
+            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            for dataset_name in self.input_datasets
+        }
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():

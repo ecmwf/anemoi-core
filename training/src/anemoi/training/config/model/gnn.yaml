@@ -33,8 +33,8 @@ processor:
   layer_kernels: ${model.layer_kernels}
 
 encoders:
-  0:
-    datasets: [ "data" ]
+  "0":
+    source_datasets: [ "data" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GNNForwardMapper
@@ -53,8 +53,8 @@ latent_aggregator:
   _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
-  0:
-    datasets: [ "data" ]
+  "0":
+    target_datasets: [ "data" ]
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GNNBackwardMapper

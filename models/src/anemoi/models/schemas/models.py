@@ -251,7 +251,7 @@ OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 class EncodersSchema(BaseModel):
     """Encoder schema"""
 
-    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
     dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
     "Dataset fusing strategy. Default to 'not_supported'."
@@ -269,7 +269,7 @@ class EncodersSchema(BaseModel):
 class DecodersSchema(BaseModel):
     """Decoder schema"""
 
-    datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    target_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
     input_target_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
         default_factory=lambda: ["encoded_data"]

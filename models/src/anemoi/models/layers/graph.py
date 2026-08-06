@@ -87,7 +87,9 @@ class NodeTrainableParameters(nn.Module):
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
             self.num_trainable_parameters[nodes_name] = trainable_parameters.get(nodes_name, 0)
-            self.trainable_tensors[nodes_name] = TrainableTensor(nodes.num_nodes, self.num_trainable_parameters[nodes_name])
+            self.trainable_tensors[nodes_name] = TrainableTensor(
+                nodes.num_nodes, self.num_trainable_parameters[nodes_name]
+            )
 
     def forward(self, name: str, batch_size: int) -> Tensor | None:
         """Returns the node attributes to be passed trough the graph neural network.

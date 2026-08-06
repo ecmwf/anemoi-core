@@ -142,7 +142,6 @@ data:
             - "sin_local_time"
             std: []
 
-  num_features: null
   format: zarr
 
 model:
@@ -173,7 +172,8 @@ model:
         _target_: torch.nn.GELU
   encoders:
     0:
-      datasets: [ "data" ]
+      source_datasets: [ "data" ]
+      dataset_fusing_strategy: "not_supported"
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}
@@ -187,7 +187,7 @@ model:
             _target_: torch.nn.GELU
   decoders:
     0:
-      datasets: [ "data" ]
+      target_datasets: [ "data" ]
       input_target_features: [ "encoded_data" ]
       mapper:
         _target_: anemoi.models.layers.mapper.GNNBackwardMapper

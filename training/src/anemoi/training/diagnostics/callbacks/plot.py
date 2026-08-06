@@ -539,6 +539,237 @@ class BasePerEpochPlotCallback(BasePlotCallback):
             )
 
 
+class GraphFeaturePlot(BasePerEpochPlotCallback):
+    """Visualize the node & edge trainable features defined.
+
+    The visualization function is supplied via ``plot_fn`` and follows the
+    same pluggable pattern as :class:`BatchOutputPlot` and :class:`LossCurvePlot`.
+    ``plot_fn`` must yield ``(figure, tag)`` pairs.
+
+    The callback resolves the underlying model and forwards **only**
+    already-extracted graph artifacts to ``plot_fn`` (never the raw model
+    object)::
+
+        fn(*, dataset_name, node_attributes, node_trainable_tensors,
+           edge_trainable_modules, q_extreme_limit, settings, **kwargs)
+            -> Iterable[tuple[Figure, str]]
+
+    Hierarchical models are handled here (``edge_trainable_modules={}``);
+    the plot function does not need to check the model type.
+
+    The default is
+    :func:`anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn`.
+    """
+
+    def __init__(
+        self,
+        dataset_names: list[str] | None = None,
+        every_n_epochs: int | None = None,
+        q_extreme_limit: float = 0.05,
+        plot_fn: Any = None,
+        plotting_settings: PlottingSettings | None = None,
+    ) -> None:
+        """Initialise the GraphFeaturePlot callback.
+
+        Parameters
+        ----------
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        every_n_epochs : int | None, optional
+            Override for frequency to plot at, by default None
+        q_extreme_limit : float, optional
+            Quantile edges to represent, by default 0.05
+        plot_fn : Callable, optional
+            Plug-in plot function yielding ``(figure, tag)`` pairs. Typically
+            a Hydra ``functools.partial`` (``_partial_: true``). Defaults to
+            :func:`graph_plot_fn`.
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings, by default None (uses defaults)
+        """
+        super().__init__(
+            dataset_names=dataset_names,
+            every_n_epochs=every_n_epochs,
+            plotting_settings=plotting_settings,
+        )
+        self.q_extreme_limit = q_extreme_limit
+        self.plot_fn = plot_fn if plot_fn is not None else _default_graph_plot_fn
+        validate_plot_fn(self.plot_fn, GraphPlotFn, "GraphFeaturePlot")
+
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        epoch: int,
+    ) -> None:
+        _ = epoch
+
+        for dataset_name in dataset_names:
+            graph_inputs = extract_graph_inputs(pl_module, dataset_name)
+            for fig, tag in self.plot_fn(
+                **graph_inputs,
+                q_extreme_limit=self.q_extreme_limit,
+                settings=self.plotting_settings,
+            ):
+                self._output_figure(
+                    trainer.logger,
+                    fig,
+                    epoch=trainer.current_epoch,
+                    tag=tag,
+                    exp_log_tag=tag,
+                )
+
+
+class LossCurvePlot(BasePerBatchPlotCallback):
+    """Plots the unsqueezed loss over rollouts.
+
+    The visualization function is supplied via ``plot_fn`` following the same
+    pluggable pattern as :class:`BatchOutputPlot`. It receives the raw
+    per-variable loss array plus the parameter naming/grouping context, and
+    is free to decide how (or whether) to sort, group, colour and render::
+
+        fn(loss, *, parameter_names, parameter_groups, metadata_variables,
+           step_index, metric_name, task_kwargs, settings, **kwargs)
+            -> matplotlib.figure.Figure
+
+    All keyword arguments except ``loss`` and ``parameter_names`` are
+    optional context: plug-in functions are expected to accept ``**kwargs``
+    and only bind what they need (e.g. a per-variable bar chart uses
+    ``parameter_groups``; a per-step title uses ``step_index`` /
+    ``metric_name``).
+
+    The default is
+    :func:`anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn`,
+    which reproduces the historic grouped bar-chart via
+    :func:`argsort_variablename_variablelevel` +
+    :func:`sort_and_color_by_parameter_group` + :func:`plot_loss`.
+    """
+
+    def __init__(
+        self,
+        parameter_groups: dict[dict[str, list[str]]],
+        every_n_batches: int | None = None,
+        dataset_names: list[str] | None = None,
+        plot_fn: Any = None,
+        plotting_settings: PlottingSettings | None = None,
+    ) -> None:
+        """Initialise the LossCurvePlot callback.
+
+        Parameters
+        ----------
+        parameter_groups : dict
+            Dictionary with parameter groups with parameter names as keys
+        every_n_batches : int, optional
+            Override for batch frequency, by default None
+        dataset_names : list[str] | None, optional
+            Dataset names, by default None
+        plot_fn : Callable, optional
+            Plug-in plot function. Typically a Hydra ``functools.partial``
+            (``_partial_: true``). Defaults to :func:`loss_plot_fn`.
+        plotting_settings : PlottingSettings, optional
+            Plotting configuration settings, by default None (uses defaults)
+        """
+        super().__init__(
+            every_n_batches=every_n_batches,
+            dataset_names=dataset_names,
+            plotting_settings=plotting_settings,
+        )
+        self.parameter_groups = parameter_groups
+        self.dataset_names = dataset_names if dataset_names is not None else ["data"]
+        if self.parameter_groups is None:
+            self.parameter_groups = {}
+        self.plot_fn = plot_fn if plot_fn is not None else _default_loss_plot_fn
+        validate_plot_fn(self.plot_fn, LossPlotFn, "LossCurvePlot")
+
+    def _plot(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        dataset_names: list[str],
+        outputs: TrainingStepOutput,
+        batch: dict[str, torch.Tensor],
+        batch_idx: int,
+        epoch: int,
+        processed_cache: dict | None = None,
+    ) -> None:
+        logger = trainer.logger
+        _ = batch_idx, processed_cache
+
+        if self.latlons is None:
+            self.latlons = {}
+
+        for dataset_name in dataset_names:
+            loss_inputs = extract_loss_inputs(pl_module, dataset_name, self.parameter_groups)
+
+            if not isinstance(self.loss[dataset_name], BaseLoss):
+                LOGGER.warning(
+                    "Loss function must be a subclass of BaseLoss, or provide `squash`.",
+                    RuntimeWarning,
+                )
+
+            for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                y_hat = outputs.predictions[i][dataset_name]
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
+                loss = reduce_to_last_dim(
+                    self.loss[dataset_name](
+                        y_hat,
+                        y_true,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_FULL,
+                        squash=False,
+                    )
+                    .detach()
+                    .cpu()
+                    .numpy(),
+                )
+
+                metric_name = pl_module.task.get_metric_name(**task_kwargs)
+                fig = self.plot_fn(
+                    loss,
+                    **loss_inputs,
+                    step_index=i,
+                    metric_name=metric_name,
+                    task_kwargs=task_kwargs,
+                    settings=self.plotting_settings,
+                )
+
+                self._output_figure(
+                    logger,
+                    fig,
+                    epoch=epoch,
+                    tag=f"loss_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                    exp_log_tag=f"loss_sample_{dataset_name}{metric_name}_rank{pl_module.local_rank:01d}",
+                )
+
+    def _prepare_batch(
+        self,
+        pl_module: pl.LightningModule,
+        batch: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Snapshot loss + gather nan-mask weights, then delegate batch prep to the plot adapter."""
+        self.loss = copy.deepcopy(pl_module.loss)
+
+        # gather nan-mask weight shards, don't gather if constant in grid dimension (broadcastable)
+        for dataset in self.loss:
+            for leaf_loss in self.loss[dataset].iter_leaf_losses():
+                scaler = getattr(leaf_loss, "scaler", None)
+                if scaler is not None and "nan_mask_weights" in scaler:
+                    nan_mask_weights = scaler.get_scaler_tensor("nan_mask_weights")
+                    if nan_mask_weights.shape[pl_module.grid_dim] != 1:
+                        # The copied loss is evaluated later, so replace its local mask
+                        # with the gathered mask through the ScaleTensor API.
+                        scaler.update_scaler(
+                            "nan_mask_weights",
+                            pl_module.allgather_batch(nan_mask_weights, dataset),
+                        )
+
+        return pl_module.plot_adapter.prepare_loss_batch(batch)
+
+
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     """Base processing class for additional metrics."""
 

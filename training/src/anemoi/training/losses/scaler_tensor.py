@@ -140,6 +140,7 @@ class ScaleTensor(nn.Module):
         super().__init__()
 
         self._tensors = {}
+        self._runtime_scalers: dict[str, torch.Tensor] = {}
 
         named_tensors.update(scalers or {})
         self.add(named_tensors)
@@ -159,12 +160,29 @@ class ScaleTensor(nn.Module):
             return tensors[name][1]
         return super().__getattr__(name)
 
-    def _apply(self, fn: Callable, *args: Any, **kwargs: Any) -> Self:
-        """Applies fn to the scaler tensors as well as module buffers/params."""
-        module = super()._apply(fn, *args, **kwargs)
-        for name, (dimension, scaler) in module._tensors.items():
-            module._tensors[name] = (dimension, fn(scaler))
-        return module
+    def get_scaler_tensor(self, name: str) -> torch.Tensor:
+        """Return a scaler from either explicit runtime state or registered buffers."""
+        if name in self._runtime_scalers:
+            return self._runtime_scalers[name]
+        if name in self._buffers:
+            return self.get_buffer(name)
+
+        msg = f"Scaler {name!r} has no associated tensor."
+        raise KeyError(msg)
+
+    def _apply(self, fn: Callable, recurse: bool = True) -> Self:
+        """Apply device and dtype conversions to registered and runtime scalers.
+
+        ``nn.Module._apply`` handles parameters and registered buffers. The scaler
+        tensors (``_tensors``) and runtime scalers (``_runtime_scalers``) are
+        deliberately neither, so we apply the same conversion to both explicit dicts.
+        """
+        super()._apply(fn, recurse=recurse)
+        for name, (dimension, scaler) in self._tensors.items():
+            self._tensors[name] = (dimension, fn(scaler))
+        for name, scaler in self._runtime_scalers.items():
+            self._runtime_scalers[name] = fn(scaler)
+        return self
 
     @property
     def specified_dimensions(self) -> dict[str, tuple[int]]:
@@ -352,6 +370,9 @@ class ScaleTensor(nn.Module):
         """
         if not isinstance(scaler, torch.Tensor):
             scaler = torch.tensor([scaler]) if isinstance(scaler, int | float) else torch.tensor(scaler)
+        assert (
+            not scaler.requires_grad
+        ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
         if name not in self._tensors:
             msg = f"scaler {name!r} not found in scalers."
@@ -360,7 +381,13 @@ class ScaleTensor(nn.Module):
         dimension = self._tensors[name][0]
 
         if not override:
-            self.validate_scaler(dimension, scaler)
+            # Multiple updating scalers sharing a dynamic dimension are not supported;
+            # other updating scalers would still expose their previous shape here.
+            excluded_scaler = self._tensors.pop(name)
+            try:
+                self.validate_scaler(dimension, scaler)
+            finally:
+                self._tensors[name] = excluded_scaler
 
         self._tensors[name] = (dimension, scaler)
 
@@ -536,7 +563,7 @@ class ScaleTensor(nn.Module):
         layout: TensorLayout | None = None,
         *,
         grid_shard_slice: slice | None = None,
-    ) -> None:
+    ) -> torch.Tensor:
         """Apply the scalers iteratively to the input tensor.
 
         Parameters
@@ -550,6 +577,11 @@ class ScaleTensor(nn.Module):
             for broadcasting, by default None
         grid_shard_slice : slice | None, optional
             Slice to apply to the grid dimension, by default None
+
+        Returns
+        -------
+        torch.Tensor
+            Scaled tensor.
         """
         if subset_indices is not None and not isinstance(subset_indices, tuple):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
@@ -588,13 +620,17 @@ class ScaleTensor(nn.Module):
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
-    ) -> None:
+    ) -> torch.Tensor:
         """Scale a given tensor by the scalers.
 
         Parameters
         ----------
-        tensor : torch.Tensor
+        x : torch.Tensor
             Input tensor to scale
+        subset_indices : tuple[int, ...] | None, optional
+            Indices to select along one tensor dimension.
+        grid_shard_slice : slice | None, optional
+            Grid slice to select from a full-grid scaler.
 
         Returns
         -------

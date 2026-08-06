@@ -75,8 +75,8 @@ def create_graph_provider(
     if (graph == {} or graph is None) and edge_builders is not None:
         if trainable_size > 0:
             LOGGER.warning(
-                "DynamicGraphProvider does not support trainable edge parameters but trainable_size=%d was provided.", 
-                trainable_size
+                "DynamicGraphProvider does not support trainable edge parameters but trainable_size=%d was provided.",
+                trainable_size,
             )
         return DynamicGraphProvider(
             edge_builder_config=edge_builders,

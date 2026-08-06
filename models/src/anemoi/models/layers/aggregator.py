@@ -77,9 +77,9 @@ class SumAggregator(BaseLatentAggregator):
             # Skip NaN values in the sum
             return torch.nansum(all_values, dim=0)
 
-        assert not torch.isnan(all_values).any(), (
-            f"NaN values found in latent tensors, but {self.__class__.__name__}.skipna is False."
-        )
+        assert not torch.isnan(
+            all_values
+        ).any(), f"NaN values found in latent tensors, but {self.__class__.__name__}.skipna is False."
         return all_values.sum(dim=0)
 
 
