@@ -127,6 +127,26 @@ def prepare_compilation(
     return model
 
 
+def _configure_compile_cache_environment() -> None:
+    """Configure cache locations used when saving or loading compile artifacts."""
+    # TMPDIR must be the same name across all ranks and jobs; it cannot include a
+    # process id because restored artifacts retain their cache paths.
+    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
+    os.environ["TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE"] = (
+        "0"  # disable local cache for autotuning, since it contains hardcoded paths which
+        # break when loading the cache on a different node
+    )
+
+
+def init_compile_cache() -> None:
+    """Configure the Inductor cache environment before compiling a model.
+
+    The cache directory is derived from ``TMPDIR`` and must be initialized before
+    ``torch.compile`` is first invoked for generated artifacts to use this location.
+    """
+    _configure_compile_cache_environment()
+
+
 def load_compile_cache(compile_cache_file: str) -> None:
     """Load the torch.compile cache from disk if it exists.
 
@@ -141,12 +161,7 @@ def load_compile_cache(compile_cache_file: str) -> None:
 
     By default, these caches are stored under 'TORCHINDUCTOR_CACHE_DIR'.
     """
-    # TMPDIR must be the same name across all ranks and jobs..can't use TMPDIR if it has a process pid in it
-    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
-    os.environ["TORCHINDUCTOR_AUTOTUNE_LOCAL_CACHE"] = (
-        "0"  # disable local cache for autotuning, since it contains hardcoded paths which
-        # breaks when loading the cache on a different node
-    )
+    _configure_compile_cache_environment()
     # only local rank should load the cache, since it is shared across all ranks on a node
     gpus_per_node = 4  # TODO(cathal): get this from config
     # TODO(cathal): torch distributed is not initialized at this point (called from training/train.py)
@@ -179,10 +194,12 @@ def save_compile_cache(compile_cache_file: str) -> None:
     # TODO(cathal): seems like the code will be restored to the original location
     # if this has a process pid e.g. the default, this will lead to perm denied
 
-    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
-        return
+    _configure_compile_cache_environment()
 
     if compile_cache_file is None:
+        return
+
+    if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
         return
 
     path = Path(compile_cache_file)
