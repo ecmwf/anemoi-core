@@ -777,6 +777,10 @@ class PlotLoss(BasePerBatchPlotCallback):
             )
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                # Skip DA-assimilation cycles; plot only forecast steps.
+                # No-op for non-DA tasks, where ``is_da`` is absent/False.
+                if task_kwargs.get("is_da", False):
+                    continue
                 y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
                     batch={dataset_name: batch[dataset_name]},
@@ -892,6 +896,10 @@ class PlotLossCorrected(PlotLoss):
             )
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+                # Skip DA-assimilation cycles; plot only forecast steps.
+                # No-op for non-DA tasks, where ``is_da`` is absent/False.
+                if task_kwargs.get("is_da", False):
+                    continue
                 y_hat = outputs.predictions[i][dataset_name]
                 y_true = pl_module.task.get_targets(
                     batch={dataset_name: batch[dataset_name]},

@@ -79,6 +79,10 @@ class ForecasterPlotAdapter(BasePlotAdapter):
         x = input_data[self.get_init_step(), ...].squeeze()
 
         for validation_step_kwargs in self._task.steps("validation"):
+            # Skip DA-assimilation cycles; plot only forecast steps.
+            # No-op for non-DA tasks, where ``is_da`` is absent/False.
+            if validation_step_kwargs.get("is_da", False):
+                continue
             rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 

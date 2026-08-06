@@ -42,6 +42,9 @@ class DASingleTraining(SingleTraining):
         super().__init__(graph_data=graph_data, **kwargs)
         self.corrector_mlp = torch.nn.ModuleDict()
         self._init_corrector_mlps(graph_data)
+        # Cache of DATA_FULL -> model-output column indices, keyed by dataset name,
+        # used to slice targets down to output variables before the loss checkpoint.
+        self._model_output_idx_cache: dict[str, torch.Tensor] = {}
 
     def _init_corrector_mlps(self, graph_data: HeteroData) -> None:
         """Build per-instrument corrector networks for each dataset with corrector variables.
@@ -170,6 +173,20 @@ class DASingleTraining(SingleTraining):
             )
         return y_for_loss
 
+    def _model_output_idx(self, dataset_name: str, device: torch.device) -> torch.Tensor:
+        """Return (and cache) the DATA_FULL column indices of the model-output variables.
+
+        Selecting these columns from a DATA_FULL target yields the model-output
+        variables in model-output order, so the sliced tensor pairs with
+        ``target_layout=IndexSpace.MODEL_OUTPUT`` (identity mapping) in the loss.
+        """
+        idx = self._model_output_idx_cache.get(dataset_name)
+        if idx is None or idx.device != device:
+            positions = self.data_indices[dataset_name].model_output_positions_in_data_full
+            idx = torch.as_tensor(positions, dtype=torch.long, device=device)
+            self._model_output_idx_cache[dataset_name] = idx
+        return idx
+
     def _step(
         self,
         batch: dict[str, torch.Tensor],
@@ -196,15 +213,20 @@ class DASingleTraining(SingleTraining):
             y = self.task.get_targets(batch, **task_kwargs)
 
             if weight > 0:
+                # Corrector needs the full DATA_FULL target (reads input.corrector columns).
                 y_for_loss = self._apply_corrector(y_pred, y)
+                # Slice the target to model-output variables BEFORE the checkpoint so the
+                # activation checkpoint saves only the reduced target rather than every
+                # DATA_FULL channel (forcings/obs/corrector) for each DA + rollout step.
+                y_target = {name: t.index_select(-1, self._model_output_idx(name, t.device)) for name, t in y.items()}
                 loss_next, metrics_next, _ = checkpoint(
                     self.compute_loss_metrics,
                     y_for_loss,
-                    y,
+                    y_target,
                     rollout_step=rollout_step,
                     validation_mode=validation_mode,
                     pred_layout=IndexSpace.MODEL_OUTPUT,
-                    target_layout=IndexSpace.DATA_FULL,
+                    target_layout=IndexSpace.MODEL_OUTPUT,
                     use_reentrant=False,
                 )
                 if loss_next is not None:
