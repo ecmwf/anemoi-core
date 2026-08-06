@@ -107,6 +107,7 @@ def prepare_compilation(
     # allow torch compile to pass logging calls through to the logger, otherwise it will try to compile them and error
     torch._dynamo.config.ignore_logger_methods.add(logging.Logger.info)
     torch._dynamo.config.ignore_logger_methods.add(logging.Logger.warning)
+
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
         check_env_and_warn()  # warn if env settings interfere with compilation
@@ -127,22 +128,6 @@ def prepare_compilation(
     return model
 
 
-def _configure_compile_cache_environment() -> None:
-    """Configure cache locations used when saving or loading compile artifacts."""
-    # TMPDIR must be the same name across all ranks and jobs; it cannot include a
-    # process id because restored artifacts retain their cache paths.
-    os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
-
-
-def init_compile_cache() -> None:
-    """Configure the Inductor cache environment before compiling a model.
-
-    The cache directory is derived from ``TMPDIR`` and must be initialized before
-    ``torch.compile`` is first invoked for generated artifacts to use this location.
-    """
-    _configure_compile_cache_environment()
-
-
 def load_compile_cache(compile_cache_file: str) -> None:
     """Load the torch.compile cache from disk if it exists.
 
@@ -155,16 +140,10 @@ def load_compile_cache(compile_cache_file: str) -> None:
         PGO-cache: A cache of dynamic shape decisions to reduce number of recompilations.
         AutotuningCache: results of benchmarking different inductor-generated triton kernels.
 
-    By default, these caches are stored under 'TORCHINDUCTOR_CACHE_DIR'.
+    these caches are stored under '$TORCHINDUCTOR_CACHE_DIR', which is under '$TMPDIR' by default
     """
-    _configure_compile_cache_environment()
-    # only local rank should load the cache, since it is shared across all ranks on a node
-    gpus_per_node = 4  # TODO(cathal): get this from config
-    # TODO(cathal): torch distributed is not initialized at this point (called from training/train.py)
-    if torch.distributed.is_initialized() and torch.distributed.get_rank() % gpus_per_node != 0:
-        return
-
     if compile_cache_file is None:
+        LOGGER.info("No torch.compile cache file specified, skipping load.")
         return
 
     path = Path(compile_cache_file)
@@ -183,16 +162,15 @@ def load_compile_cache(compile_cache_file: str) -> None:
 
 
 def save_compile_cache(compile_cache_file: str) -> None:
-    """Save the torch.compile cache to disk in bytes."""
-    # only rank 0 saves the cache
-    # TODO(cathal): you might want one rank per node to do this if you had many shapes
+    """Save the torch.compile cache to disk in bytes.
 
-    # TODO(cathal): seems like the code will be restored to the original location
-    # if this has a process pid e.g. the default, this will lead to perm denied
-
-    _configure_compile_cache_environment()
-
+    The cache is saved as a single file, which can be loaded later to prepopulate the relevant caches.
+    It should be stored in a persistent location, e.g. $SCRATCH on a shared filesystem, to be reused across runs.
+    It can then be loaded into a fast ephemeral filesystem,
+    e.g. $TMPDIR, to avoid recompilation and improve startup times.
+    """
     if compile_cache_file is None:
+        LOGGER.info("No torch.compile cache file specified, skipping save.")
         return
 
     if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:

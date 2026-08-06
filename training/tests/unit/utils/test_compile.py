@@ -7,13 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
 from pathlib import Path
 
 import pytest
 import torch
 
-from anemoi.training.utils.compile import init_compile_cache
 from anemoi.training.utils.compile import load_compile_cache
 from anemoi.training.utils.compile import save_compile_cache
 from anemoi.training.utils.compile import subset_tensor
@@ -92,7 +90,7 @@ def test_subset_tensor_tensor_indices_are_moved_to_input_device_and_long_dtype()
     assert subset_dim == -1
 
 
-def test_compile_cache_round_trip_between_inductor_cache_directories(
+def test_compile_cache_save_and_load(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -100,8 +98,6 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
     cache_root_a = tmp_path / "cache_a"
     cache_root_b = tmp_path / "cache_b"
     cache_file = tmp_path / "compile_cache.pt"
-    expected_cache_dir_a = cache_root_a / "anemoi_compile_cache"
-    expected_cache_dir_b = cache_root_b / "anemoi_compile_cache"
     x = torch.linspace(-1, 1, 128)
     expected = _compile_cache_test_function(x)
 
@@ -109,9 +105,7 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
     try:
         # Initialize Inductor's cache environment from TMPDIR before compiling so
         # generated artifacts are written under directory A.
-        monkeypatch.setenv("TMPDIR", str(cache_root_a))
-        init_compile_cache()
-        assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str(expected_cache_dir_a)
+        monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(cache_root_a))
 
         compiled_from_a = torch.compile(
             _compile_cache_test_function,
@@ -127,9 +121,8 @@ def test_compile_cache_round_trip_between_inductor_cache_directories(
         # compilation. Loading configures a distinct Inductor cache directory B and
         # repopulates the relevant compiler caches from the saved artifact bundle.
         torch._dynamo.reset()
-        monkeypatch.setenv("TMPDIR", str(cache_root_b))
+        monkeypatch.setenv("TORCHINDUCTOR_CACHE_DIR", str(cache_root_b))
         load_compile_cache(str(cache_file))
-        assert os.environ["TORCHINDUCTOR_CACHE_DIR"] == str(expected_cache_dir_b)
 
         compiled_from_b = torch.compile(
             _compile_cache_test_function,
