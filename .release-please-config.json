@@ -23,6 +23,10 @@
     "models": {
         "package-name": "anemoi-models",
         "component": "models"
+    },
+    "metadata": {
+        "package-name": "anemoi-metadata",
+        "component": "metadata"
     }
   },
   "plugins": [
