@@ -51,8 +51,6 @@ class DataSchema(PydanticBaseModel):
         The timestep of the data.
     datasets : dict[str, DatasetDataSchema] | None
         "Dictionary mapping dataset names to their configurations."
-    num_features : int, optional
-        The number of features in the forecast state. To be set in the code.
     """
 
     format: str = Field(example=None)
@@ -63,5 +61,3 @@ class DataSchema(PydanticBaseModel):
     "Dictionary mapping dataset names to their configurations."
     spatial_processors: dict[str, SpatialProcessorSchema] | None = Field(default=None)
     "Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector for downscaling)."
-    num_features: int | None
-    "Number of features in the forecast state. To be set in the code."
