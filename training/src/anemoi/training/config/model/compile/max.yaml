@@ -1,0 +1,54 @@
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+# You can optionally pass options to torch.compile with the 'options' key
+#
+# Below is an explanation of some common parameters to torch.compile
+# For a full list of possible parameters, consult the documenation for torch compile
+#       https://docs.pytorch.org/docs/stable/generated/torch.compile.html
+#
+# dynamic (bool): When True, it will try to avoid recompilation by generating
+#       as general a kernel as possible. But the performance of the general
+#       kernel might be worse. When False, it will generate a specific
+#       kernel for each input shape (until the configurable recompile
+#       limit has been hit), leading to possibly better performance but
+#       more recompilations
+# mode (str): Different compilation modes, allowing you to trade off
+#       compilation time versus potential performance. See the
+#       torch.compile documentation for list of possible modes
+# fullgraph (bool): When True, torch.compile will error when it hits a
+#       section of code it can't compile. When False, it will fallback to
+#       non-compiled ("eager") execution for those lines.
+# options (dict): a dict of further options which can be passed to torch.compile
+#
+# Example
+#  - module: anemoi.models.layers.conv.GraphTransformerConv
+#    options:
+#      dynamic: False
+#      mode: 'reduce-overhead'
+#      fullgraph: True
+#
+# NOTE: modules which are listed here but not present in the module at runtime
+# will be safely ignored.
+# NOTE: When compiled modules are composed, the inner instructions are ignored.
+
+- module: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+  options:
+    dynamic: false
+    fullgraph: false
+    mode: max-autotune
+- module: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+  options:
+    dynamic: false
+    fullgraph: false
+    mode: max-autotune
+- module: anemoi.models.layers.processor.GraphTransformerProcessor
+  options:
+    dynamic: false
+    fullgraph: false
+- module: anemoi.models.layers.conv.GraphTransformerConv
+- module: anemoi.models.layers.normalization.ConditionalLayerNorm
+- module: anemoi.training.losses.CRPS
+  options:
+    dynamic: false
+    fullgraph: true
+    mode: max-autotune
