@@ -9,8 +9,8 @@
 
 """Regression tests for LoadingStrategy._apply_format_migrations.
 
-Mirrors the legacy ``chunking_fix_migration(checkpoint)`` call in
-``anemoi.training.utils.checkpoint.transfer_learning_loading`` so old
+Applies the ``chunking_fix`` migration (via
+``checkpoint.loading.base.apply_checkpoint_format_migrations``) so old
 checkpoints with the pre-chunking attention head layout get rewritten
 before any ``load_state_dict`` attempt.
 """
@@ -41,6 +41,24 @@ def fake_chunking_migration(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
     parent_path = "anemoi.models.migrations.scripts"
     parent_module = sys.modules.get(parent_path) or types.ModuleType(parent_path)
     parent_module.chunking_fix = module
+
+    monkeypatch.setitem(sys.modules, parent_path, parent_module)
+    monkeypatch.setitem(sys.modules, pkg_path, module)
+    return fake_migrate
+
+
+@pytest.fixture
+def fake_edge_perm_migration(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Install a fake anemoi.models.migrations.scripts.trainable_edge_perm_fix.migrate."""
+    fake_migrate = MagicMock(side_effect=lambda ckpt, model: {**ckpt, "_edge_perm_applied": True, "_model": model})
+
+    pkg_path = "anemoi.models.migrations.scripts.trainable_edge_perm_fix"
+    module = types.ModuleType(pkg_path)
+    module.migrate = fake_migrate
+
+    parent_path = "anemoi.models.migrations.scripts"
+    parent_module = sys.modules.get(parent_path) or types.ModuleType(parent_path)
+    parent_module.trainable_edge_perm_fix = module
 
     monkeypatch.setitem(sys.modules, parent_path, parent_module)
     monkeypatch.setitem(sys.modules, pkg_path, module)
@@ -94,6 +112,45 @@ def test_no_checkpoint_data_is_noop() -> None:
     WeightsOnlyLoader()._apply_format_migrations(context)
 
     assert context.checkpoint_data is None
+
+
+def test_apply_trainable_edge_perm_migration_runs_model_dependent_migration(
+    fake_edge_perm_migration: MagicMock,
+) -> None:
+    """The helper runs the model-dependent edge-perm migration and reassigns the result."""
+    model = _Model()
+    context = CheckpointContext(model=model, checkpoint_data=_ckpt())
+
+    WeightsOnlyLoader()._apply_trainable_edge_perm_migration(context)
+
+    fake_edge_perm_migration.assert_called_once()
+    _, called_model = fake_edge_perm_migration.call_args.args
+    assert called_model is model  # migration is model-dependent
+    assert context.checkpoint_data["_edge_perm_applied"] is True
+    assert context.checkpoint_data["_model"] is model
+
+
+@pytest.mark.asyncio
+async def test_edge_perm_migration_invoked_during_process(
+    fake_edge_perm_migration: MagicMock,
+) -> None:
+    """WeightsOnlyLoader.process() applies the runtime edge-perm migration exactly once."""
+    context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt())
+
+    await WeightsOnlyLoader().process(context)
+
+    assert fake_edge_perm_migration.call_count == 1
+    assert context.checkpoint_data["_edge_perm_applied"] is True
+
+
+def test_edge_perm_migration_noop_without_model() -> None:
+    """No model → the model-dependent migration is skipped (no crash)."""
+    ckpt = _ckpt()
+    context = CheckpointContext(model=None, checkpoint_data=ckpt)
+
+    WeightsOnlyLoader()._apply_trainable_edge_perm_migration(context)
+
+    assert context.checkpoint_data is ckpt
 
 
 def test_missing_migration_module_is_noop(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,0 +1,4 @@
+# Loading strategy — fresh training from pretrained weights: loads weights and
+# resets training progress (epoch/global_step) to zero, recording provenance.
+_target_: anemoi.training.checkpoint.loading.strategies.ColdStartLoader
+strict: false

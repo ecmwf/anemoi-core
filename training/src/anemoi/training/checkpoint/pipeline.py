@@ -33,17 +33,11 @@ Example
 ...     WeightsOnlyLoader(strict=False),
 ... ])
 >>>
->>> # Or build from Hydra config
->>> from omegaconf import OmegaConf
->>> config = OmegaConf.create({
-...     'stages': [
-...         {'_target_': 'anemoi.training.checkpoint.sources.LocalSource',
-...          'path': '/tmp/checkpoint.pt'},
-...         {'_target_': 'anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader',
-...          'strict': False}
-...     ]
-... })
->>> pipeline = CheckpointPipeline.from_config(config)
+>>> # Or, in a training run, build it from the declarative config. The trainer
+>>> # reads ``training.checkpoint.{source,loading,modifiers}`` and assembles the
+>>> # stages in that fixed order:
+>>> from anemoi.training.checkpoint import build_checkpoint_pipeline
+>>> pipeline = build_checkpoint_pipeline(cfg)  # cfg.training.checkpoint.*
 >>>
 >>> # Execute pipeline
 >>> context = CheckpointContext(model=my_model)
@@ -59,7 +53,7 @@ Execute during model initialization, before ``trainer.fit()``. This is the
 recommended approach as checkpoint loading happens once at startup::
 
     # In your training script or AnemoiTrainer.model property
-    pipeline = CheckpointPipeline.from_config(config.checkpoint_pipeline)
+    pipeline = build_checkpoint_pipeline(config)  # reads training.checkpoint.*
     context = CheckpointContext(model=model)
 
     # Async execution (recommended for remote sources)
@@ -132,8 +126,6 @@ class CheckpointPipeline:
     continue_on_error : bool, optional
         Whether to continue pipeline on stage errors (default: False).
         If True, failed stages will be logged but won't stop the pipeline.
-    config : DictConfig, optional
-        If provided, overrides other parameters with config values
 
     Attributes
     ----------
@@ -165,7 +157,6 @@ class CheckpointPipeline:
         stages: list[Union[PipelineStage, DictConfig, dict]] | None = None,
         async_execution: bool = True,
         continue_on_error: bool = False,
-        config: DictConfig | None = None,
     ):
         """Initialize the checkpoint pipeline.
 
@@ -179,17 +170,9 @@ class CheckpointPipeline:
             Whether to use async execution (default: True)
         continue_on_error : bool, optional
             Whether to continue pipeline on stage errors (default: False)
-        config : DictConfig, optional
-            If provided, overrides other parameters with config values
         """
-        # Extract settings from config if provided
-        if config is not None:
-            self.async_execution = config.get("async_execution", async_execution)
-            self.continue_on_error = config.get("continue_on_error", continue_on_error)
-            stages = config.get("stages", stages)
-        else:
-            self.async_execution = async_execution
-            self.continue_on_error = continue_on_error
+        self.async_execution = async_execution
+        self.continue_on_error = continue_on_error
 
         # Instantiate stages
         self.stages = self._instantiate_stages(stages or [])
@@ -242,8 +225,39 @@ class CheckpointPipeline:
                 instantiated.append(stage)
         return instantiated
 
+    @staticmethod
+    def _stage_role(stage: Any) -> str | None:
+        """Classify a stage by its checkpoint-pipeline layer.
+
+        Returns ``"source"``, ``"loader"``, ``"modifier"``, or ``None`` for a
+        stage that belongs to no known layer. Classification is by ``isinstance``
+        against the layer base classes — the robust contract — rather than by
+        class-name substring, so a correctly-subclassed stage is recognised
+        regardless of what it is named (e.g. a ``Restorer(LoadingStrategy)``).
+        The base-class imports are local so importing this module does not pull
+        in the layer subpackages.
+        """
+        from anemoi.training.checkpoint.loading.base import LoadingStrategy
+        from anemoi.training.checkpoint.modifiers.base import ModelModifier
+        from anemoi.training.checkpoint.sources.base import CheckpointSource
+
+        if isinstance(stage, CheckpointSource):
+            return "source"
+        if isinstance(stage, LoadingStrategy):
+            return "loader"
+        if isinstance(stage, ModelModifier):
+            return "modifier"
+        return None
+
     def _validate_pipeline_composition(self) -> None:
-        """Validate pipeline composition and provide smart warnings."""
+        """Validate pipeline composition: raise on ordering/conflict violations, warn/suggest otherwise.
+
+        Stage ordering (source before loader, modifier after loader) and a single
+        loading strategy are structural invariants: a violation is a hard
+        ``CheckpointConfigError`` at construction. Multiple sources and missing
+        stages are advisory (warn / info) — the builder always emits stages in the
+        canonical order, so only hand-built or misconfigured pipelines are bitten.
+        """
         if not self.stages:
             LOGGER.warning(
                 "Pipeline has no stages configured. "
@@ -251,79 +265,72 @@ class CheckpointPipeline:
             )
             return
 
-        stage_types = [stage.__class__.__name__ for stage in self.stages]
+        roles = [self._stage_role(stage) for stage in self.stages]
+        stage_names = [stage.__class__.__name__ for stage in self.stages]
 
-        # Check for common composition issues
-        self._check_source_loading_order(stage_types)
-        self._check_modifier_placement(stage_types)
-        self._check_duplicate_stages(stage_types)
-        self._suggest_missing_stages(stage_types)
+        violations: list[str] = []
+        self._check_source_loading_order(roles, violations)
+        self._check_modifier_placement(roles, violations)
+        self._check_duplicate_stages(roles, stage_names, violations)
 
-    def _check_source_loading_order(self, stage_types: list[str]) -> None:
-        """Check that source stages come before loading stages."""
-        source_indices = [i for i, name in enumerate(stage_types) if "Source" in name]
-        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
+        if violations:
+            from .exceptions import CheckpointConfigError
 
-        if source_indices and loader_indices:
-            last_source = max(source_indices)
-            first_loader = min(loader_indices)
+            message = "Invalid checkpoint pipeline composition:\n  - " + "\n  - ".join(violations)
+            raise CheckpointConfigError(message, config_path="training.checkpoint")
 
-            if last_source > first_loader:
-                LOGGER.warning(
-                    "Source stage at position %d comes after loader stage at position %d. "
-                    "This may cause issues as loaders typically expect checkpoints to be already acquired. "
-                    "Consider reordering: sources first, then loaders, then modifiers.",
-                    last_source,
-                    first_loader,
-                )
+        # Non-fatal guidance.
+        self._warn_multiple_sources(roles, stage_names)
+        self._suggest_missing_stages(roles)
 
-    def _check_modifier_placement(self, stage_types: list[str]) -> None:
-        """Check that modifier stages come after loading stages."""
-        loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
-        modifier_indices = [i for i, name in enumerate(stage_types) if "Modifier" in name]
+    def _check_source_loading_order(self, roles: list[str | None], violations: list[str]) -> None:
+        """A source stage must come before every loading stage."""
+        source_indices = [i for i, role in enumerate(roles) if role == "source"]
+        loader_indices = [i for i, role in enumerate(roles) if role == "loader"]
 
-        if loader_indices and modifier_indices:
-            last_loader = max(loader_indices)
-            first_modifier = min(modifier_indices)
+        if source_indices and loader_indices and max(source_indices) > min(loader_indices):
+            violations.append(
+                f"a source stage at position {max(source_indices)} comes after a loader stage at position "
+                f"{min(loader_indices)}; loaders expect the checkpoint already acquired "
+                "(order stages source -> loader -> modifiers).",
+            )
 
-            if first_modifier < last_loader:
-                LOGGER.warning(
-                    "Modifier stage at position %d comes before loader stage at position %d. "
-                    "Model modifications typically work best after checkpoint loading. "
-                    "Consider reordering: sources, loaders, then modifiers.",
-                    first_modifier,
-                    last_loader,
-                )
+    def _check_modifier_placement(self, roles: list[str | None], violations: list[str]) -> None:
+        """Modifier stages must come after every loading stage."""
+        loader_indices = [i for i, role in enumerate(roles) if role == "loader"]
+        modifier_indices = [i for i, role in enumerate(roles) if role == "modifier"]
 
-    def _check_duplicate_stages(self, stage_types: list[str]) -> None:
-        """Check for potentially conflicting duplicate stages."""
-        from collections import Counter
+        if loader_indices and modifier_indices and min(modifier_indices) < max(loader_indices):
+            violations.append(
+                f"a modifier stage at position {min(modifier_indices)} comes before a loader stage at position "
+                f"{max(loader_indices)}; model modifications must run after checkpoint loading.",
+            )
 
-        type_counts = Counter(stage_types)
-        duplicates = {stage_type: count for stage_type, count in type_counts.items() if count > 1}
+    def _check_duplicate_stages(self, roles: list[str | None], stage_names: list[str], violations: list[str]) -> None:
+        """Multiple loading strategies conflict; flag as a violation."""
+        loaders = [stage_names[i] for i, role in enumerate(roles) if role == "loader"]
+        if len(loaders) > 1:
+            violations.append(
+                f"found {len(loaders)} loading strategies ({', '.join(loaders)}); "
+                "use a single loading strategy appropriate for your use case.",
+            )
 
-        if duplicates:
-            for stage_type, count in duplicates.items():
-                if "Loader" in stage_type or "Loading" in stage_type:
-                    LOGGER.warning(
-                        "Found %d instances of %s. Multiple loading strategies may conflict. "
-                        "Consider using a single loading strategy appropriate for your use case.",
-                        count,
-                        stage_type,
-                    )
-                elif "Source" in stage_type and stage_type.endswith("Source"):
-                    LOGGER.warning(
-                        "Found %d instances of %s. Multiple checkpoint sources may be redundant. "
-                        "The pipeline will process them in sequence.",
-                        count,
-                        stage_type,
-                    )
+    def _warn_multiple_sources(self, roles: list[str | None], stage_names: list[str]) -> None:
+        """Multiple sources are redundant but not fatal (the pipeline runs them in sequence)."""
+        sources = [stage_names[i] for i, role in enumerate(roles) if role == "source"]
+        if len(sources) > 1:
+            LOGGER.warning(
+                "Found %d checkpoint sources (%s). Multiple checkpoint sources may be redundant. "
+                "The pipeline will process them in sequence.",
+                len(sources),
+                ", ".join(sources),
+            )
 
-    def _suggest_missing_stages(self, stage_types: list[str]) -> None:
+    def _suggest_missing_stages(self, roles: list[str | None]) -> None:
         """Suggest potentially missing stages based on common patterns."""
-        has_source = any("Source" in name for name in stage_types)
-        has_loader = any("Loader" in name or "Loading" in name for name in stage_types)
-        has_modifier = any("Modifier" in name for name in stage_types)
+        has_source = "source" in roles
+        has_loader = "loader" in roles
+        has_modifier = "modifier" in roles
 
         suggestions = []
 
@@ -349,41 +356,6 @@ class CheckpointPipeline:
 
         if suggestions:
             LOGGER.info("Pipeline composition suggestions:\n  • %s", "\n  • ".join(suggestions))
-
-    @classmethod
-    def from_config(cls, config: DictConfig) -> CheckpointPipeline:
-        """Create a pipeline from Hydra configuration.
-
-        This is a convenience method that creates a pipeline entirely
-        from a Hydra configuration, using instantiate for all stages.
-
-        Parameters
-        ----------
-        config : DictConfig
-            Hydra configuration with pipeline settings. Should contain:
-            - stages: List of stage configs with '_target_'
-            - async_execution: Optional bool for async mode
-            - continue_on_error: Optional bool for error handling
-
-        Returns
-        -------
-        CheckpointPipeline
-            Configured pipeline instance
-
-        Examples
-        --------
-        >>> from omegaconf import OmegaConf
-        >>> config = OmegaConf.create({
-        ...     'stages': [
-        ...         {'_target_': 'path.to.SourceStage', 'param': 'value'},
-        ...         {'_target_': 'path.to.LoaderStage', 'strict': False}
-        ...     ],
-        ...     'async_execution': True,
-        ...     'continue_on_error': False
-        ... })
-        >>> pipeline = CheckpointPipeline.from_config(config)
-        """
-        return cls(config=config)
 
     async def execute_async(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute pipeline stages asynchronously.
@@ -489,8 +461,11 @@ class CheckpointPipeline:
 
         This prevents silently proceeding with a randomly-initialised model
         when ``continue_on_error=True`` swallowed the loading failure.
+        ``weights_initialized`` is advisory for other readers, but the pipeline
+        treats it as a gate here: a configured source with no applied weights is
+        a hard error, not a warning.
         """
-        has_source = any("Source" in s.__class__.__name__ for s in self.stages)
+        has_source = any(self._stage_role(stage) == "source" for stage in self.stages)
         if not has_source:
             return
 
@@ -508,7 +483,7 @@ class CheckpointPipeline:
                 "missing. Refusing to proceed with random weights."
             )
             LOGGER.error(msg)
-            raise CheckpointLoadError(None, RuntimeError(msg))
+            raise CheckpointLoadError(context.checkpoint_path or "<unresolved checkpoint>", RuntimeError(msg))
 
     def execute_sync(self, initial_context: CheckpointContext) -> CheckpointContext:
         """Execute pipeline stages synchronously.
