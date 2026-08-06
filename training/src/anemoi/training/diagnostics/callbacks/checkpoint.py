@@ -50,7 +50,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
         # the nearest N steps
         # This reduces broadcasts by a factor
         # of self._time_check_every_n_steps
-        self._time_check_every_n_steps = 10
+        self._time_check_every_n_steps = 50
 
     @staticmethod
     def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
