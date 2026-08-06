@@ -202,7 +202,7 @@ class DASingleTraining(SingleTraining):
         task_steps = self.task.steps("validation" if validation_mode else "training")
         n_forecast = max(1, sum(1 for step in task_steps if not step.get("is_da", False)))
 
-        for task_kwargs in task_steps:
+        for i, task_kwargs in enumerate(task_steps):
             is_da = task_kwargs.get("is_da", False)
             rollout_step = task_kwargs["rollout_step"]
             weight = self.task.da_loss_weight if is_da else 1.0
@@ -233,16 +233,19 @@ class DASingleTraining(SingleTraining):
                     loss = loss + weight * loss_next
                 metrics.update(metrics_next)
 
-            # Advance with the RAW prediction, never the corrected tensor.
-            x = self.task.advance_input(
-                x,
-                y_pred,
-                batch,
-                **task_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance the input state only if another step follows; the final
+            # step's advanced state is never read. Advance with the RAW
+            # prediction, never the corrected tensor.
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_pred,
+                    batch,
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
             y_preds.append(y_pred)
 

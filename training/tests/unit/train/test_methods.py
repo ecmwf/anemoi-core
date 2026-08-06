@@ -33,9 +33,11 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.scalers import NaNMaskScaler
 from anemoi.training.tasks import Autoencoder
+from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.da_single import DASingleTraining
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
 from anemoi.training.train.methods.single import SingleTraining
@@ -2340,3 +2342,80 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
     assert "rmse_metric/data/z500/2" in metrics_step1
     # Keys must be distinct across steps
     assert set(metrics_step0.keys()).isdisjoint(set(metrics_step1.keys()))
+
+
+def _make_da_single_training(task: Any, data_indices: dict[str, IndexCollection]) -> DASingleTraining:
+    """Build a DASingleTraining module wired for unit tests (no correctors)."""
+    module = DASingleTraining.__new__(DASingleTraining)
+    pl.LightningModule.__init__(module)
+    _wire_training_module(
+        module,
+        data_indices=data_indices,
+        config=_CFG_EMPTY,
+        n_step_input=task.num_input_timesteps,
+        n_step_output=task.num_output_timesteps,
+        task=task,
+    )
+    module.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=task.num_output_timesteps,
+    )
+    module.is_first_step = False
+    module.updating_scalars = {}
+    module.target_dataset_names = module.dataset_names
+    module.loss = {"data": DummyLoss()}
+    module.loss_supports_sharding = False
+    module.metrics_support_sharding = True
+    module.corrector = torch.nn.ModuleDict()
+    module._model_output_idx_cache = {}
+    return module
+
+
+def test_da_single_training_advance_input_called_between_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """advance_input is invoked once per DA + rollout step except the last."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=2,
+        da_loss_weight=0.5,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": slice(1, 3)}
+    module.output_mask = {"data": NoOutputMask()}
+
+    task_steps = task.steps("training")
+    # 2 DA cycles + 2 rollout steps; the final step's advanced state is never read.
+    assert len(task_steps) == 4
+
+    advance_calls: list[dict[str, Any]] = []
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(
+        module,
+        "compute_loss_metrics",
+        lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y),
+    )
+
+    def _advance_input(x: dict[str, torch.Tensor], *_args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+        advance_calls.append(kwargs.copy())
+        return x
+
+    monkeypatch.setattr(task, "advance_input", _advance_input)
+
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 2, e, g, v)}
+    output = module._step(batch, validation_mode=False)
+
+    assert len(advance_calls) == len(task_steps) - 1
+    for kwargs in advance_calls:
+        assert kwargs["output_mask"] is module.output_mask
+        assert kwargs["grid_shard_slice"] is module.grid_shard_slice
+    # Every step still contributes a prediction, so callback indexing stays aligned.
+    assert len(output.predictions) == len(task_steps)
