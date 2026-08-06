@@ -63,9 +63,19 @@ def test_add_existing_scaler() -> None:
 
 
 def test_update_scaler() -> None:
-    scale = ScaleTensor(test=(0, torch.ones(2)))
-    scale.update_scaler("test", torch.tensor([3.0]))
-    torch.testing.assert_close(scale.tensors["test"][1], torch.tensor([3.0]))
+    scale = ScaleTensor(test=(0, torch.ones(3)))
+    assert "test" in dict(scale.named_buffers())
+
+    updated_scaler = torch.full((2,), 3.0)
+    scale.update_scaler("test", updated_scaler)
+
+    torch.testing.assert_close(scale.tensors["test"][1], updated_scaler)
+    torch.testing.assert_close(scale.get_scaler_tensor("test"), updated_scaler)
+    assert "test" not in dict(scale.named_buffers())
+    assert not hasattr(scale, "test")
+
+    scale.to(dtype=torch.float64)
+    assert scale.get_scaler_tensor("test").dtype == torch.float64
 
 
 def test_update_missing_scaler() -> None:

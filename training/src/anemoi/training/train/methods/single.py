@@ -38,7 +38,7 @@ class SingleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_kwargs in task_steps:
+        for i, task_kwargs in enumerate(task_steps):
             y_pred = self(x)
 
             y = self.task.get_targets(batch, **task_kwargs)
@@ -54,16 +54,17 @@ class SingleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_preds_next,
-                batch,
-                **task_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance input state for each dataset if another step follows
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_preds_next,
+                    batch,
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)

@@ -76,9 +76,8 @@ class WeightAveragingSchema(GenericSchema):
           decay: 0.999
           update_starting_at_step: 1000
 
-    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
-    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
-    updating loss scalers (a warning will be logged).
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
+    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
     """
 
 
@@ -234,6 +233,17 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     "Normalisation method applied to the node attribute."
 
 
+class SpectralDimensionScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
+    n_spectral_modes: PositiveInt = Field(example=193)
+    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
+    spectral_dims: PositiveInt | None = Field(default=None, example=193)
+    "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
+    "Set explicitly for losses that keep the full (L, M) dimension flattened."
+    norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
+    "Normalisation method applied to the scaler values."
+
+
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
@@ -245,6 +255,7 @@ ScalerSchema = (
     | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
+    | SpectralDimensionScalerSchema
 )
 
 
@@ -260,7 +271,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     lsd = "anemoi.training.losses.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
     nan_aware_mse = "anemoi.training.losses.NaNAwareMSELoss"
 
@@ -556,7 +567,7 @@ def _loss_discriminator(v: Any) -> str:
         "anemoi.training.losses.LogSpectralDistance",
         "anemoi.training.losses.LogFFT2Distance",
         "anemoi.training.losses.SpectralCRPSLoss",
-        "anemoi.training.losses.SpectralL2Loss",
+        "anemoi.training.losses.PowerSpectrumLoss",
         "anemoi.training.losses.SpectralAMSELoss",
     }:
         return "spectral"
@@ -664,6 +675,8 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per reader group. Defaults to number of GPUs."
     use_local_synchronization: bool = Field(default=True, example=True)
     "Use synchronization local to the group when creating process groups."
+    broadcast_buffers: bool = Field(default=False, example=False)
+    "Broadcast model buffers at the start of each iteration. Defaults to False."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):

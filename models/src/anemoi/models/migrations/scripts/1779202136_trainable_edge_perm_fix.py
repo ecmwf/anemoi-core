@@ -70,18 +70,23 @@ def migrate(ckpt: CkptType, model: torch.nn.Module | None = None) -> CkptType:
         else:
             layout_version = int(layout_version)
 
-        if layout_version < graph_provider._TRAINABLE_LAYOUT_VERSION and trainable_key in state_dict:
-            LOGGER.info("Permuting legacy trainable edge parameters for %s", provider_path)
-            trainable = state_dict[trainable_key]
-            if trainable.shape[0] != graph_provider.perm.shape[0]:
-                msg = (
-                    "Cannot permute legacy graph-provider trainable tensor for "
-                    f"{provider_path}: expected first dimension {graph_provider.perm.shape[0]}, "
-                    f"got {trainable.shape[0]}."
-                )
-                raise RuntimeError(msg)
+        if layout_version < graph_provider._TRAINABLE_LAYOUT_VERSION:
+            trainable = state_dict.get(trainable_key, None)
+            if trainable is None:
+                state_dict[layout_version_key] = graph_provider.trainable_layout_version.clone()
+                continue
 
-            state_dict[trainable_key] = trainable.index_select(0, graph_provider.perm.to(device=trainable.device))
+            if trainable.shape[0] != graph_provider.perm.shape[0]:
+                LOGGER.info(
+                    "Skipping trainable edge permutation for %s: trainable tensor has shape %s "
+                    "which does not match expected first dimension %d (trainable_size=0 or shape mismatch).",
+                    provider_path,
+                    list(trainable.shape),
+                    graph_provider.perm.shape[0],
+                )
+            else:
+                LOGGER.info("Permuting legacy trainable edge parameters for %s", provider_path)
+                state_dict[trainable_key] = trainable.index_select(0, graph_provider.perm.to(device=trainable.device))
 
         state_dict[layout_version_key] = graph_provider.trainable_layout_version.clone()
 
