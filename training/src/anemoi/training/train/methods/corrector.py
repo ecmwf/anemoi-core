@@ -287,7 +287,7 @@ class CorrectorGNN(nn.Module):
         return cached
 
 
-class InstrumentCorrectorMLPs(nn.Module):
+class InstrumentCorrectors(nn.Module):
     """Per-instrument corrector networks.
 
     Holds a separate corrector network per instrument group. Each group's
@@ -339,7 +339,7 @@ class InstrumentCorrectorMLPs(nn.Module):
         num_gnn_layers: int = 1,
     ) -> None:
         super().__init__()
-        self.mlps = nn.ModuleDict()
+        self.correctors = nn.ModuleDict()
         self.corrector_type = corrector_type
 
         if corrector_type == "gnn" and (edge_index is None or edge_attr is None or num_nodes is None):
@@ -395,7 +395,7 @@ class InstrumentCorrectorMLPs(nn.Module):
             )
 
             if corrector_type == "gnn":
-                self.mlps[group_name] = CorrectorGNN(
+                self.correctors[group_name] = CorrectorGNN(
                     n_target=len(target_indices),
                     n_corrector=len(corrector_positions),
                     hidden_dim=hidden_dim,
@@ -405,7 +405,7 @@ class InstrumentCorrectorMLPs(nn.Module):
                     num_layers=num_gnn_layers,
                 )
             else:
-                self.mlps[group_name] = CorrectorMLP(
+                self.correctors[group_name] = CorrectorMLP(
                     n_target=len(target_indices),
                     n_corrector=len(corrector_positions),
                     hidden_dim=hidden_dim,
@@ -449,20 +449,20 @@ class InstrumentCorrectorMLPs(nn.Module):
             Corrected output, shape (..., n_output).
         """
         y_out = y_pred.clone()
-        for group_name, mlp in self.mlps.items():
+        for group_name, corrector in self.correctors.items():
             corrector_idx = getattr(self, f"_corrector_idx_{group_name}")
             target_idx = getattr(self, f"_target_idx_{group_name}")
 
             group_corrector = corrector_vars[..., corrector_idx]
             y_subset = y_out[..., target_idx]
-            if isinstance(mlp, CorrectorGNN):
-                correction = mlp(
+            if isinstance(corrector, CorrectorGNN):
+                correction = corrector(
                     y_subset,
                     group_corrector,
                     model_comm_group=model_comm_group,
                     grid_shard_sizes=grid_shard_sizes,
                 )
             else:
-                correction = mlp(y_subset, group_corrector)
+                correction = corrector(y_subset, group_corrector)
             y_out[..., target_idx] = y_subset + correction
         return y_out

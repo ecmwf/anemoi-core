@@ -27,7 +27,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
-from anemoi.training.train.methods.corrector import InstrumentCorrectorMLPs
+from anemoi.training.train.methods.corrector import InstrumentCorrectors
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
@@ -40,13 +40,13 @@ class DASingleTraining(SingleTraining):
 
     def __init__(self, *, graph_data: HeteroData, **kwargs) -> None:
         super().__init__(graph_data=graph_data, **kwargs)
-        self.corrector_mlp = torch.nn.ModuleDict()
-        self._init_corrector_mlps(graph_data)
+        self.corrector = torch.nn.ModuleDict()
+        self._init_correctors(graph_data)
         # Cache of DATA_FULL -> model-output column indices, keyed by dataset name,
         # used to slice targets down to output variables before the loss checkpoint.
         self._model_output_idx_cache: dict[str, torch.Tensor] = {}
 
-    def _init_corrector_mlps(self, graph_data: HeteroData) -> None:
+    def _init_correctors(self, graph_data: HeteroData) -> None:
         """Build per-instrument corrector networks for each dataset with corrector variables.
 
         Reads the ``training.corrector`` config section which defines instrument
@@ -119,7 +119,7 @@ class DASingleTraining(SingleTraining):
                     num_gnn_layers,
                 )
 
-            self.corrector_mlp[dataset_name] = InstrumentCorrectorMLPs(
+            self.corrector[dataset_name] = InstrumentCorrectors(
                 instrument_groups=instrument_groups,
                 all_corrector_names=all_corrector_names,
                 output_name_to_index=output_name_to_index,
@@ -153,13 +153,13 @@ class DASingleTraining(SingleTraining):
         dict[str, torch.Tensor]
             Corrector-adjusted predictions per dataset.
         """
-        if len(self.corrector_mlp) == 0:
+        if len(self.corrector) == 0:
             return y_pred
 
         y_for_loss = {}
         for dataset_name, pred in y_pred.items():
             # nn.ModuleDict has no .get(), so SIM401's suggestion does not apply here.
-            corrector = self.corrector_mlp[dataset_name] if dataset_name in self.corrector_mlp else None  # noqa: SIM401
+            corrector = self.corrector[dataset_name] if dataset_name in self.corrector else None  # noqa: SIM401
             if corrector is None:
                 y_for_loss[dataset_name] = pred
                 continue

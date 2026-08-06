@@ -851,7 +851,7 @@ class PlotLossCorrected(PlotLoss):
     """Per-variable loss plot with the training-time corrector applied to predictions.
 
     Identical to :class:`PlotLoss` but, for datasets that have a corrector
-    network on the training method (``pl_module.corrector_mlp``), the raw
+    network on the training method (``pl_module.corrector``), the raw
     prediction is corrected before the per-variable loss is computed — matching
     the corrected loss the model is actually trained against. Falls back to the
     raw prediction (i.e. behaves like :class:`PlotLoss`) when no corrector is
@@ -875,7 +875,7 @@ class PlotLossCorrected(PlotLoss):
         if self.latlons is None:
             self.latlons = {}
 
-        corrector_mlp = getattr(pl_module, "corrector_mlp", {})
+        correctors = getattr(pl_module, "corrector", {})
 
         for dataset_name in dataset_names:
             data_indices = pl_module.data_indices[dataset_name]
@@ -908,8 +908,8 @@ class PlotLossCorrected(PlotLoss):
                 )[dataset_name]
 
                 # Apply the corrector for this dataset (if any) before scoring.
-                # corrector_mlp may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
-                corrector = corrector_mlp[dataset_name] if dataset_name in corrector_mlp else None  # noqa: SIM401
+                # correctors may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
+                corrector = correctors[dataset_name] if dataset_name in correctors else None  # noqa: SIM401
                 if corrector is not None:
                     corrector_idx = data_indices.data.input.corrector.to(device=y_true.device)
                     corrector_vars = y_true.index_select(-1, corrector_idx)

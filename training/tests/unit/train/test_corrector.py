@@ -11,7 +11,7 @@ import torch
 
 from anemoi.training.train.methods.corrector import CorrectorGNN
 from anemoi.training.train.methods.corrector import CorrectorMLP
-from anemoi.training.train.methods.corrector import InstrumentCorrectorMLPs
+from anemoi.training.train.methods.corrector import InstrumentCorrectors
 
 
 def test_corrector_mlp_zero_initialised() -> None:
@@ -42,10 +42,10 @@ def test_corrector_gnn_zero_initialised_and_shape() -> None:
     assert torch.allclose(out, torch.zeros_like(out))  # zero-init head
 
 
-def test_instrument_corrector_mlp_additive_and_targeted() -> None:
+def test_instrument_corrector_additive_and_targeted() -> None:
     # two output channels named hirs_1, hirs_2 plus an unrelated z; corrector var geom
     output_name_to_index = {"z": 0, "hirs_1": 1, "hirs_2": 2}
-    corrector = InstrumentCorrectorMLPs(
+    corrector = InstrumentCorrectors(
         instrument_groups={"hirs": {"corrector_variables": ["geom"], "channels": None}},
         all_corrector_names=["geom"],
         output_name_to_index=output_name_to_index,
@@ -60,8 +60,8 @@ def test_instrument_corrector_mlp_additive_and_targeted() -> None:
     assert torch.allclose(out, y_pred)  # zero-init correction
 
     # after perturbing the output head, only hirs channels change
-    corrector.mlps["hirs"].out.weight.data.fill_(0.1)
-    corrector.mlps["hirs"].out.bias.data.fill_(0.5)
+    corrector.correctors["hirs"].out.weight.data.fill_(0.1)
+    corrector.correctors["hirs"].out.bias.data.fill_(0.5)
     out2 = corrector(y_pred, corrector_vars)
     assert torch.allclose(out2[..., 0], y_pred[..., 0])  # z untouched
     assert not torch.allclose(out2[..., 1], y_pred[..., 1])  # hirs_1 corrected
@@ -69,7 +69,7 @@ def test_instrument_corrector_mlp_additive_and_targeted() -> None:
 
 def test_instrument_corrector_prefix_matching() -> None:
     output_name_to_index = {"mwt_1": 0, "mwt_2": 1, "other": 2}
-    corrector = InstrumentCorrectorMLPs(
+    corrector = InstrumentCorrectors(
         instrument_groups={"mwt": {"corrector_variables": ["v"], "channels": None}},
         all_corrector_names=["v", "unused"],
         output_name_to_index=output_name_to_index,
