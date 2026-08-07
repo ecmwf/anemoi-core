@@ -177,8 +177,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
 
-        c_data = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[dataset_name])
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
+        c_data = self._make_noise_emb(noise_cond, repeat=self._graph_data[dataset_name].num_nodes)
+        c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[self._graph_name_hidden].num_nodes)
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
             c_data_to_hidden = self._make_noise_emb(

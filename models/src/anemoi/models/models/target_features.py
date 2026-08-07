@@ -165,8 +165,9 @@ class InputForcingsFeature(DecodingTargetFeature):
         dataset_name: str,
     ) -> Tensor:
         indices = self.model._forcing_input_idx[dataset_name]
-        x_forcing = x_input_data[:, : self.model.n_step_input, ..., indices]
-        return einops.rearrange(x_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+        # Layout-agnostic: for gridded views flatten folds time into the feature axis
+        # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
+        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
 
 
 @register_target_feature("target_forcings")
@@ -232,8 +233,10 @@ class PrognosticsFeature(DecodingTargetFeature):
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
-        x_prog = x_input_data[:, : self.model.n_step_input, ..., indices]
-        return einops.rearrange(x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+        indices = self.model._internal_input_idx[dataset_name]
+        # Layout-agnostic: for gridded views flatten folds time into the feature axis
+        # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
+        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
 
 
 @register_target_feature("trainable_parameters")

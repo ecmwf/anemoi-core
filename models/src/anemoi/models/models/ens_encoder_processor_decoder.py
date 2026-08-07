@@ -266,7 +266,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x=x_latent,
             batch_size=batch_size,
             ensemble_size=ensemble_size,
-            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
+            grid_size=self._graph_data[self._graph_name_hidden].num_nodes,
             grid_shard_sizes=shard_sizes_hidden,
             model_comm_group=model_comm_group,
         )

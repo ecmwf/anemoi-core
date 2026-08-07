@@ -108,8 +108,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
                 edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(dataset_name, "to", self._graph_name_hidden)],
-                # src_size=self.node_attributes.num_nodes.get(dataset_name, None),
-                # dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
                 src_size=self._graph_data[dataset_name].num_nodes,
                 dst_size=self._graph_data[self._graph_name_hidden].num_nodes,
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
@@ -144,11 +142,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             src_size=self._graph_data[self._graph_name_hidden].num_nodes,
             dst_size=self._graph_data[self._graph_name_hidden].num_nodes,
             trainable_size=model_config.processor.get("trainable_size", 0),
-            # graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            # edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-            # src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            # dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            # trainable_size=model_config.processor.get("trainable_size", 0),
         )
 
         self.processor = instantiate(
@@ -176,8 +169,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(self._graph_name_hidden, "to", dataset_name)],
-                # src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                # dst_size=self.node_attributes.num_nodes.get(dataset_name, None),
                 src_size=self._graph_data[self._graph_name_hidden].num_nodes,
                 dst_size=self._graph_data[dataset_name].num_nodes,
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),

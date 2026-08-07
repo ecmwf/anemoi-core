@@ -23,6 +23,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models import AnemoiModelEncProcDec
 
 LOGGER = logging.getLogger(__name__)
@@ -42,8 +43,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
                 edge_attributes=model_config.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name],
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+                src_size=self._graph_data[dataset_name].num_nodes,
+                dst_size=self._graph_data[self._graph_name_hidden[0]].num_nodes,
                 trainable_size=model_config.encoder.get("trainable_size", 0),
             )
 
@@ -75,8 +76,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_size=self.node_attributes.num_nodes[nodes_names],
+                    src_size=self._graph_data[nodes_names].num_nodes,
+                    dst_size=self._graph_data[nodes_names].num_nodes,
                     trainable_size=model_config.processor.get("trainable_size", 0),
                 )
 
@@ -92,8 +93,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_size=self.node_attributes.num_nodes[nodes_names],
+                    src_size=self._graph_data[nodes_names].num_nodes,
+                    dst_size=self._graph_data[nodes_names].num_nodes,
                     trainable_size=model_config.processor.get("trainable_size", 0),
                 )
 
@@ -111,8 +112,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
             ],
             edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
+            src_size=self._graph_data[self._graph_name_hidden[self.num_hidden - 1]].num_nodes,
+            dst_size=self._graph_data[self._graph_name_hidden[self.num_hidden - 1]].num_nodes,
             trainable_size=model_config.processor.get("trainable_size", 0),
         )
 
@@ -133,8 +134,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.upscale_mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
+                src_size=self._graph_data[src_nodes_name].num_nodes,
+                dst_size=self._graph_data[dst_nodes_name].num_nodes,
                 trainable_size=model_config.upscale_mapper.get("trainable_size", 0),
             )
 
@@ -142,7 +143,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_config.upscale_mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
-                in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
+                in_channels_dst=COORDS_DIM + self.node_attributes.num_trainable_parameters.get(dst_nodes_name, 0),
                 hidden_dim=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
@@ -157,8 +158,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.downscale_mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
+                src_size=self._graph_data[src_nodes_name].num_nodes,
+                dst_size=self._graph_data[dst_nodes_name].num_nodes,
                 trainable_size=model_config.downscale_mapper.get("trainable_size", 0),
             )
 
@@ -179,8 +180,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
                 edge_attributes=model_config.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
+                src_size=self._graph_data[self._graph_name_hidden[0]].num_nodes,
+                dst_size=self._graph_data[dataset_name].num_nodes,
                 trainable_size=model_config.decoder.get("trainable_size", 0),
             )
 
