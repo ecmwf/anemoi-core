@@ -48,6 +48,7 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import configure_compile_cache_environment
 from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -720,6 +721,9 @@ class AnemoiTrainer(ABC):
         callbacks = self.callbacks
         compile_cache_file = self.config.system.input.compile_cache
         if compile_cache_file is not None:
+            # This must happen before any sanity-validation or training graph is
+            # compiled: Inductor embeds this setting in generated Python.
+            configure_compile_cache_environment()
             callbacks = [*callbacks, CompileCache(str(compile_cache_file))]
 
         trainer = pl.Trainer(

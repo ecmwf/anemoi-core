@@ -128,9 +128,15 @@ def prepare_compilation(
     return model
 
 
-def _configure_compile_cache_environment() -> None:
-    """Configure cache locations used when saving or loading compile artifacts."""
+def configure_compile_cache_environment() -> None:
+    """Configure portable torch.compile cache settings before compiling a model.
+
+    Inductor embeds the local-autotune setting in generated Python. Local
+    autotune cache paths are derived from that generated file's absolute path,
+    which is not portable between ranks with distinct ``TMPDIR`` locations.
+    """
     os.environ["TORCHINDUCTOR_CACHE_DIR"] = os.environ.get("TMPDIR") + "/anemoi_compile_cache"
+    torch._inductor.config.autotune_local_cache = False
 
 
 def load_compile_cache(compile_cache_file: str) -> None:
@@ -150,7 +156,7 @@ def load_compile_cache(compile_cache_file: str) -> None:
     if compile_cache_file is None:
         LOGGER.info("No torch.compile cache file specified, skipping load.")
         return
-    _configure_compile_cache_environment()
+    configure_compile_cache_environment()
 
     path = Path(compile_cache_file)
     if not path.exists():
@@ -178,7 +184,7 @@ def save_compile_cache(compile_cache_file: str) -> None:
     if compile_cache_file is None:
         LOGGER.info("No torch.compile cache file specified, skipping save.")
         return
-    _configure_compile_cache_environment()
+    configure_compile_cache_environment()
 
     if torch.distributed.is_initialized() and torch.distributed.get_rank() != 0:
         return
