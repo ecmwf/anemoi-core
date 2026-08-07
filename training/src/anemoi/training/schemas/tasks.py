@@ -55,9 +55,8 @@ class OffsetForecasterSchema(BaseModel):
     "Input time offsets as duration strings."
     output_offsets: list[str] = Field(example=["6H"])
     "Output time offsets as duration strings."
-    rollout_shift: str = Field(default="0H", example="6H")
-    "Time shift applied to the offsets between rollout steps."
-    "Rollout configuration for autoregressive training."
+    rollout_shift: str = Field(default="default", example="6H")
+    "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])

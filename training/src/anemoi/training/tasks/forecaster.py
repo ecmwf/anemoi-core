@@ -473,9 +473,7 @@ class OffsetForecaster(BaseForecaster):
                 msg = (
                     "No valid autoregressive rollout shift exists. "
                     "This forecaster cannot be trained with rollout, "
-                    "nor can it predict autoregressively in inference. "
-                    "If you insist on training a forecaster with these offsets you can set "
-                    "`consistency_check=False` in the task configuration.\n"
+                    "nor can it predict autoregressively in inference.\n"
                     f"input_offsets={[frequency_to_string(v) for v in input_offsets]}, "
                     f"output_offsets={[frequency_to_string(v) for v in output_offsets]}"
                 )
