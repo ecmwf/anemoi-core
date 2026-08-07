@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from unittest.mock import patch
+
 import hypothesis.strategies as st
 import psutil
 import pytest
@@ -20,6 +22,8 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
+from anemoi.models.layers.attention import SDPAAttentionWrapper
 from anemoi.models.layers.utils import load_layer_kernels
 
 
@@ -61,7 +65,10 @@ def test_multi_head_self_attention_init(
     assert mhsa.k_norm.bias is None
 
 
-@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
+@pytest.mark.parametrize(
+    "attention_module",
+    [MultiHeadSelfAttention, MultiHeadCrossAttention, PointwiseMultiHeadCrossAttention],
+)
 def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_module, layer_kernels):
     with pytest.raises(ValueError, match="must be divisible by number of heads"):
         attention_module(
@@ -70,6 +77,66 @@ def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_mo
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
         )
+
+
+def test_self_attention_initializes_when_inference_override_matches_configuration(layer_kernels) -> None:
+    with patch(
+        "anemoi.models.layers.attention.ATTENTION_BACKEND",
+        "scaled_dot_product_attention",
+    ):
+        attention = MultiHeadSelfAttention(
+            num_heads=2,
+            embed_dim=8,
+            layer_kernels=layer_kernels,
+            attention_implementation="scaled_dot_product_attention",
+        )
+
+    assert isinstance(attention.attention, SDPAAttentionWrapper)
+
+
+def test_pointwise_attention_checks_inference_backend_on_first_forward(layer_kernels) -> None:
+    attention = PointwiseMultiHeadCrossAttention(
+        num_heads=2,
+        embed_dim=8,
+        layer_kernels=layer_kernels,
+    )
+    attention.attention_implementation = "flash_attention"
+
+    with patch(
+        "anemoi.models.layers.attention.ATTENTION_BACKEND",
+        "scaled_dot_product_attention",
+    ):
+        attention(
+            torch.randn(3, 8),
+            torch.randn(3, 2, 8),
+            torch.randn(3, 2, 8),
+        )
+
+    assert attention.attention_implementation == "scaled_dot_product_attention"
+    assert isinstance(attention.attention, SDPAAttentionWrapper)
+
+
+def test_pointwise_multi_head_cross_attention_preserves_shape_and_gradients(layer_kernels) -> None:
+    attention = PointwiseMultiHeadCrossAttention(
+        num_heads=2,
+        embed_dim=8,
+        attn_channels=4,
+        layer_kernels=layer_kernels,
+        qk_norm=True,
+    )
+    query = torch.randn(6, 8, requires_grad=True)
+    key = torch.randn(6, 4, 8, requires_grad=True)
+    value = torch.randn(6, 4, 8, requires_grad=True)
+
+    output = attention(query, key, value)
+    output.square().mean().backward()
+
+    assert attention.attention_implementation == "scaled_dot_product_attention"
+    assert isinstance(attention.attention, SDPAAttentionWrapper)
+    assert output.shape == query.shape
+    assert query.grad is not None
+    assert key.grad is not None
+    assert value.grad is not None
 
 
 @pytest.mark.gpu
