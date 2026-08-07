@@ -36,7 +36,7 @@ def test_update_graph():
     """Test update_graph method."""
     node_builder = TriNodes(1, "test_nodes")
     graph = HeteroData()
-    graph = node_builder.update_graph(graph, {})
+    graph = node_builder.update_graph(graph)
     assert "_resolutions" in graph["test_nodes"]
     assert "_nx_graph" in graph["test_nodes"]
     assert "_node_ordering" in graph["test_nodes"]

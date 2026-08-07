@@ -43,7 +43,7 @@ class TestHEALPixMultiScaleEdgesTransform:
     def healpix_graph(self) -> HeteroData:
         """Return a HeteroData object with HEALPixMultiScaleEdges."""
         graph = HeteroData()
-        graph = HEALPixNodes(1, "test_tri_nodes").update_graph(graph, {})
+        graph = HEALPixNodes(1, "test_tri_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph

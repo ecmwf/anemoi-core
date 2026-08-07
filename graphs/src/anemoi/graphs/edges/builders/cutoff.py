@@ -71,8 +71,9 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
         max_num_neighbours: int = 64,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, attributes=attributes)
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
         if cutoff_factor is None and cutoff_distance_km is None:

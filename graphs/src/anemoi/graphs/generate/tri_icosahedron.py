@@ -162,12 +162,22 @@ def add_1_hop_edges(
     """Adds edges for x_hops = 1 relying on trimesh only."""
 
     hop_1_edges = []
+    nodes_coords_rad_np = nodes_coords_rad.cpu().numpy()
+    tree = BallTree(nodes_coords_rad_np, metric="haversine")
 
     # Loop over the edge_resolutions to get edges at all refinement levels
     for subdivisions in edge_resolutions:
         sphere = trimesh.creation.icosphere(subdivisions=subdivisions, radius=1.0)
         LOGGER.debug("Adding %d unmasked 1-hop edges for resolution %d", sphere.edges.shape[0], subdivisions)
-        hop_1_edges.append(sphere.edges)
+        resolution_edges = sphere.edges
+
+        if area_mask_builder is not None:
+            area_mask = area_mask_builder.get_mask(cartesian_to_latlon_rad(sphere.vertices))
+            valid_nodes = np.where(area_mask.cpu().numpy())[0]
+            resolution_edges = resolution_edges[np.isin(resolution_edges, valid_nodes).all(axis=1)]
+
+        _, vertex_mapping_index = tree.query(cartesian_to_latlon_rad(sphere.vertices), k=1)
+        hop_1_edges.append(vertex_mapping_index[resolution_edges].squeeze(-1))
 
     # Concatenate all edges from different resolutions and transpose to get shape (2, num_edges)
     multiscale_edges = np.transpose(np.concatenate(hop_1_edges, axis=0), (1, 0))
@@ -178,22 +188,9 @@ def add_1_hop_edges(
         trimesh.creation.icosphere(subdivisions=max(node_resolutions), radius=1.0).vertices
     )
     assert np.all(
-        (nodes_coords_rad.cpu().numpy() - unmasked_nodes[node_ordering]) == 0
+        (nodes_coords_rad_np - unmasked_nodes[node_ordering]) == 0
     ), "Node coordates do not match coordinates used for multi-scale edge building"
     LOGGER.debug("unmasked_nodes shape[0]: %d", unmasked_nodes.shape[0])
-    if area_mask_builder is not None:
-        # Take care of the edges with start- or end-point outside the mask
-        inverse_ordering = np.full(unmasked_nodes.shape[0], -1, dtype=int)
-    else:
-        inverse_ordering = np.full(unmasked_nodes.shape[0], 0, dtype=int)
-
-    # Update the start- and end indexes according to the node ordering
-    inverse_ordering[node_ordering] = np.arange(len(node_ordering))
-    updated_edges = inverse_ordering[multiscale_edges]
-    valid_edges_mask = np.all(updated_edges >= 0, axis=0)
-
-    # Select only those edges requested by the mask
-    multiscale_edges = updated_edges[:, valid_edges_mask]
     LOGGER.debug("multiscale_edges_shape: %s", multiscale_edges.shape)
 
     return multiscale_edges
