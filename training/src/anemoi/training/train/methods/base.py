@@ -20,7 +20,6 @@ from typing import Any
 
 import pytorch_lightning as pl
 import torch
-from hydra.utils import instantiate
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
@@ -47,6 +46,7 @@ from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
+from anemoi.utils.builder import build
 
 _chunking_fix_migration = importlib.import_module("anemoi.models.migrations.scripts.1762857428_chunking_fix").migrate
 _trainable_edge_perm_fix_migration = importlib.import_module(
@@ -194,7 +194,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Create output_mask dictionary for each dataset
         self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
+            name: build(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
         }
 
         # Handle supporting_arrays merge with all output masks
@@ -1202,16 +1202,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def configure_optimizers(
         self,
     ) -> OptimizerLRScheduler:
-        """Create optimizer and LR scheduler based on Hydra config."""
+        """Create optimizer and LR scheduler from the optimization config."""
         optimization_config = self.config.training.optimization
         params = filter(lambda p: p.requires_grad, self.parameters())
-        optimizer = instantiate(optimization_config.optimizer, params=params, lr=self.effective_lr)
+        optimizer = build(optimization_config.optimizer, params=params, lr=self.effective_lr)
         self.log_optimizer(optimizer)
 
         if not getattr(optimization_config, "lr_scheduler", None):
             return optimizer
 
-        scheduler = instantiate(optimization_config.lr_scheduler, optimizer=optimizer)
+        scheduler = build(optimization_config.lr_scheduler, optimizer=optimizer)
         return [optimizer], [{"scheduler": scheduler, **optimization_config.pl_lr_scheduler}]  # type: ignore[return-value]
 
     @staticmethod

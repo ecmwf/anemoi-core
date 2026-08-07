@@ -16,11 +16,11 @@ from typing import Iterable
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
+from anemoi.utils.builder import build
 
 
 class BaseBounding(nn.Module, ABC):
@@ -349,7 +349,7 @@ def _build_dataset_boundings(
 
     return nn.ModuleList(
         [
-            instantiate(
+            build(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,
                 statistics=statistics,

@@ -8,12 +8,36 @@
 # nor does it submit to any jurisdiction.
 
 
+import re
+from collections.abc import Mapping
+from collections.abc import Sequence
 from enum import Enum
 
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+
+
+def camel_to_snake(name: str) -> str:
+    """Convert a CamelCase class name to snake_case (e.g. ``EdgeLength`` -> ``edge_length``)."""
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def normalise_attributes(attributes: Mapping | Sequence | None) -> dict:
+    """Normalise node/edge attributes into a ``{name: attribute}`` mapping of built objects.
+
+    Accepts either a mapping (used as-is) or a sequence of already-built attribute
+    objects (keyed by the snake_case of their class name). ``None`` yields an empty
+    mapping. Values are expected to be fully-built attribute objects, not config specs.
+    """
+    if attributes is None:
+        return {}
+    if isinstance(attributes, Mapping):
+        return dict(attributes)
+    if isinstance(attributes, Sequence) and not isinstance(attributes, (str, bytes)):
+        return {camel_to_snake(type(attr).__name__): attr for attr in attributes}
+    raise TypeError(f"attributes must be a mapping, sequence or None, got {type(attributes).__name__}")
 
 
 def get_distributed_device() -> torch.device:

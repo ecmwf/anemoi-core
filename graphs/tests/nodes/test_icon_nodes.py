@@ -18,6 +18,7 @@ from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
 from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
 from anemoi.graphs.nodes import ICONMultiMeshNodes
+from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 
@@ -151,7 +152,7 @@ def test_register_attributes(
     """Test ICONNodes register correctly the weights."""
     monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
     nodes = ICONCellGridNodes(name="test_nodes", max_level=0, grid_filename="test.nc")
-    config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
+    config = {"test_attr": UniformWeights()}
 
     graph = nodes.register_attributes(graph_with_nodes, config)
 

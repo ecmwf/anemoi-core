@@ -16,6 +16,7 @@ from timm.scheduler import CosineLRScheduler
 
 from anemoi.training.optimizers.AdEMAMix import AdEMAMix
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.utils.builder import BuilderError
 
 _ADAM_CFG = OmegaConf.create({"_target_": "torch.optim.Adam", "betas": [0.9, 0.95], "weight_decay": 0.1})
 
@@ -80,7 +81,7 @@ def test_create_optimizer_from_config_invalid(mocked_module: BaseTrainingModule)
     mocked_module.config.training.optimization.optimizer = OmegaConf.create(
         {"_target_": "nonexistent.OptimizerClass"},
     )
-    with pytest.raises(Exception, match="Error locating target"):
+    with pytest.raises(BuilderError, match="Could not import target"):
         mocked_module.configure_optimizers()
 
 

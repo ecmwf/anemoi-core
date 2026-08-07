@@ -13,24 +13,16 @@ from abc import abstractmethod
 from typing import Optional
 
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 from omegaconf import ListConfig
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.bounding import build_boundings
-from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.utils.config import broadcast_config_keys
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,25 +33,45 @@ class BaseGraphModel(nn.Module):
     def __init__(
         self,
         *,
-        model_config: DictConfig,
+        node_attributes: nn.Module,
+        residual: nn.ModuleDict,
+        boundings: nn.ModuleDict,
         data_indices: dict,
         statistics: dict,
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
+        hidden_nodes_name: str | list[str],
+        num_channels: int,
+        latent_skip: bool,
     ) -> None:
-        """Initializes the graph neural network.
+        """Initialize the model from already-built sub-objects (dependency injection).
+
+        The polymorphic sub-objects (``node_attributes``, ``residual``, ``boundings`` and,
+        in subclasses, the encoder/processor/decoder) are constructed by a ``ModelBuilder``
+        and passed in here; this constructor only stores them and computes the derived
+        index/shape bookkeeping used by ``forward``.
 
         Parameters
         ----------
-        model_config : DictConfig
-            Model configuration
+        node_attributes : nn.Module
+            Built ``NamedNodesAttributes``.
+        residual : nn.ModuleDict
+            Built per-dataset residual connections.
+        boundings : nn.ModuleDict
+            Built per-dataset output bounding modules.
         data_indices : dict
-            Data indices
+            Data indices.
         statistics : dict
-            Data statistics
+            Data statistics.
         graph_data : HeteroData
-            Graph definition
+            Graph definition.
+        hidden_nodes_name : str or list[str]
+            Name(s) of the hidden node set(s).
+        num_channels : int
+            Latent channel width.
+        latent_skip : bool
+            Whether to add a latent skip connection around the processor.
         """
         super().__init__()
         self._graph_data = graph_data
@@ -69,32 +81,18 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = hidden_nodes_name
+        self.num_channels = num_channels
+        self.latent_skip = latent_skip
 
-        self.num_channels = model_config.model.num_channels
-        self.latent_skip = model_config.model.model.latent_skip
-
-        trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
-            data=self.dataset_names,
-            hidden=self._graph_name_hidden,
-        )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
+        self.node_attributes = node_attributes
 
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
-        # build networks
-        self._build_networks(model_config)
-
-        # build residual connection
-        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
-
-        # build boundings
-        # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
-        # Multi-dataset: create ModuleDict with ModuleList per dataset
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        self.residual = residual
+        self.boundings = boundings
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
@@ -223,11 +221,6 @@ class BaseGraphModel(nn.Module):
         return dim_sizes[0]
 
     @abstractmethod
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Builds the networks for the model."""
-        pass
-
-    @abstractmethod
     def _assemble_input(
         self,
         x,
@@ -240,34 +233,6 @@ class BaseGraphModel(nn.Module):
     @abstractmethod
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
-
-    def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
-        self.residual = torch.nn.ModuleDict()
-        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
-        sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
-        for dataset_name in self.dataset_names:
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-            self.residual[dataset_name] = instantiate(
-                residual_config,
-                graph=self._graph_data,
-                data_node_name=data_node_name,
-                statistics=self.statistics[dataset_name],
-                data_indices=self.data_indices[dataset_name],
-                dataset_name=dataset_name,
-                sparse_projector_num_chunks=sparse_projector_num_chunks,
-            )
-
-    def _build_named_node_attributes_graph(self) -> HeteroData:
-        node_attributes_graph = HeteroData()
-        for dataset_name in self.dataset_names:
-            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
-            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
-
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
-            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
-            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
-
-        return node_attributes_graph
 
     @abstractmethod
     def forward(
