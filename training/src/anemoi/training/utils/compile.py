@@ -107,6 +107,11 @@ def prepare_compilation(
     # allow torch compile to pass logging calls through to the logger, otherwise it will try to compile them and error
     torch._dynamo.config.ignore_logger_methods.add(logging.Logger.info)
     torch._dynamo.config.ignore_logger_methods.add(logging.Logger.warning)
+    # avoid warning:
+    #'The AccumulateGrad node's stream does not match the stream of the node that produced the incoming gradient.'
+    # at the start of BWD when compiling the whole processor
+    # TODO(cathal): verify this is not a problem for performance and can be safely ignored
+    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
 
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
