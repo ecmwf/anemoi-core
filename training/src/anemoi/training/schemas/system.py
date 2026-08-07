@@ -50,6 +50,8 @@ class InputSchema(PydanticBaseModel):
     "Path to the directory containing smoothing matrices for the multiscale loss"
     warm_start: Path | None = None
     "Path of the checkpoint file to use for warm starting the training"
+    compile_cache: Path | None = Field(default=None)
+    "Path to the directory containing the compressed torch.compile byte-cache"
 
 
 class CheckpointsSchema(BaseModel):
