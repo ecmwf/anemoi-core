@@ -39,7 +39,7 @@ PARTIAL_METADATA_SCHEMA = {
                 # extra entries populated by offset-forecaster only
                 "input_offsets": None,
                 "output_offsets": None,
-                "rollout_shifts": None,
+                "rollout_shift": None,
                 "advance_map": None,
             },
             "data_indices": {
