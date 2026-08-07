@@ -427,6 +427,39 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
     assert plotted_output.plot_kwargs == {}
 
 
+def test_on_validation_batch_end_shares_cache_across_callbacks():
+    """Two callbacks on the same batch share pl_module._plot_cache; a new batch resets it."""
+    batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
+    pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
+    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
+    pl_module.model.post_processors = {"data": _IdentityProcessor()}
+
+    batch = {"data": torch.randn(batch_size, 3, n_ens, nlatlon, nvar)}
+    output = _step_output([{"data": torch.zeros(batch_size, 1, n_ens, nlatlon, nvar)}])
+    trainer = MagicMock()
+    trainer.current_epoch = 0
+
+    cb1 = PlotSample(sample_idx=0, parameters=["a", "b"], dataset_names=["data"], every_n_batches=1)
+    cb2 = PlotHistogram(sample_idx=0, parameters=["a", "b"], dataset_names=["data"], every_n_batches=1)
+    for cb in (cb1, cb2):
+        cb.plot = MagicMock()
+
+    cb1.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+    cb2.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=0)
+
+    assert hasattr(pl_module, "_plot_cache"), "pl_module should have _plot_cache after first callback"
+    assert pl_module._plot_cache_batch_idx == 0
+    cache_after_batch0 = pl_module._plot_cache
+
+    # same batch: cache object must be the same (shared, not replaced)
+    assert pl_module._plot_cache is cache_after_batch0
+
+    # new batch: cache must be reset
+    cb1.on_validation_batch_end(trainer, pl_module, output, batch, batch_idx=1)
+    assert pl_module._plot_cache_batch_idx == 1
+    assert pl_module._plot_cache is not cache_after_batch0
+
+
 def test_process_time_interpolator_output_shapes():
     """BasePlotAdditionalMetrics.process: time-interpolator task yields expected shapes."""
     callback = PlotSample(
@@ -495,6 +528,10 @@ def test_process_temporal_downscaler_multi_out_squeeze():
 
 def test_process_cache_shared_across_callbacks():
     """A shared processed_cache avoids redundant post-processing across PlotSample, PlotSpectrum, PlotHistogram.
+
+    Note: this test exercises the process() caching mechanism in isolation by passing a dict directly.
+    It does not test the production wiring (pl_module._plot_cache shared via on_validation_batch_end);
+    that is covered by test_on_validation_batch_end_shares_cache_across_callbacks.
 
     Verifies:
     - post-processor called once per (dataset, members) pair despite N callbacks
