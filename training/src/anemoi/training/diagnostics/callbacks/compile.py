@@ -28,7 +28,7 @@ class CompileCache(Callback):
     Artifacts are saved once after the requested number of steps.
     """
 
-    def __init__(self, compile_cache_file: str, save_after_steps: int = 1) -> None:
+    def __init__(self, compile_cache_file: str, save_after_steps: int = 10) -> None:
         super().__init__()
         self.compile_cache_file = compile_cache_file
         self.save_after_steps = save_after_steps

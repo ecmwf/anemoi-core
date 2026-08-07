@@ -1100,10 +1100,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         self._cached_halo_cache_specs = None
         self._cached_partition = None
 
-    # halo info is data-dependent and therefore can't be compiled
-    # instead, run with fullgraph=False, compute the halo info eagerly and cache it
-    # run the computer intensive parts of the forward pass compiled
-    @torch._dynamo.disable()
     def _get_or_build_cached_halo_info(
         self,
         x: Tensor,
