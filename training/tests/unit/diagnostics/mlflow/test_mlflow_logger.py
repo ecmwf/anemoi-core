@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import contextlib
 import inspect
 from pathlib import Path
 
@@ -26,8 +27,8 @@ def tmp_path(tmp_path_factory: pytest.TempPathFactory) -> str:
 
 
 @pytest.fixture
-def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> Path:
-    uri = (Path(tmp_path) / "mlruns").as_uri()
+def tmp_uri(monkeypatch: pytest.MonkeyPatch, tmp_path: str) -> str:
+    uri = f"sqlite:///{Path(tmp_path) / 'mlflow.db'}"
     monkeypatch.setenv("MLFLOW_TRACKING_URI", uri)
     return uri
 
@@ -73,12 +74,16 @@ def default_logger(tmp_path: str, tmp_uri: str) -> AnemoiMLflowLogger:
     )
 
 
+def sqlite_uri_for(save_dir: str) -> str:
+    return f"sqlite:///{Path(save_dir).resolve() / 'mlflow.db'}"
+
+
 def create_run(save_dir: str, experiment_name: str) -> str:
     import contextlib
 
     import mlflow
 
-    mlflow.set_tracking_uri(f"file://{save_dir}")
+    mlflow.set_tracking_uri(sqlite_uri_for(save_dir))
     with contextlib.suppress(mlflow.exceptions.MlflowException):
         mlflow.create_experiment(experiment_name)
     mlflow.set_experiment(experiment_name)
@@ -89,13 +94,55 @@ def create_run(save_dir: str, experiment_name: str) -> str:
 
 def test_offline_logger(default_offline_config: omegaconf.DictConfig) -> None:
     mlflow_logger = instantiate(default_offline_config.diagnostics.log.mlflow)
-    assert not mlflow_logger.tracking_uri
+    save_dir = default_offline_config.diagnostics.log.mlflow.save_dir
+    assert mlflow_logger.tracking_uri == sqlite_uri_for(save_dir)
+
+
+def test_offline_db_created(default_offline_config: omegaconf.DictConfig) -> None:
+    save_dir = Path(default_offline_config.diagnostics.log.mlflow.save_dir)
+    instantiate(default_offline_config.diagnostics.log.mlflow)
+    assert (save_dir / "mlflow.db").exists(), "mlflow.db was not created in save_dir"
+
+
+def test_offline_artifact_location(default_offline_config: omegaconf.DictConfig) -> None:
+    import mlflow
+
+    save_dir = Path(default_offline_config.diagnostics.log.mlflow.save_dir).resolve()
+    mlflow_logger = instantiate(default_offline_config.diagnostics.log.mlflow)
+    # Trigger experiment creation by accessing the experiment property
+    _ = mlflow_logger.experiment
+    mlflow.set_tracking_uri(mlflow_logger.tracking_uri)
+    experiment = mlflow.get_experiment_by_name(default_offline_config.diagnostics.log.mlflow.experiment_name)
+    assert experiment is not None
+    assert experiment.artifact_location == str(save_dir / "mlartifacts")
+
+
+def test_offline_legacy_store_warning(
+    tmp_path_factory: pytest.TempPathFactory,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import logging
+
+    legacy_dir = tmp_path_factory.mktemp("legacy_mlruns")
+    (legacy_dir / "0").mkdir()  # numeric subdir mimics old filesystem store layout
+    with caplog.at_level(logging.WARNING, logger="anemoi.training.diagnostics.mlflow.logger"), contextlib.suppress(
+        Exception,
+    ):
+        AnemoiMLflowLogger(
+            experiment_name="test",
+            offline=True,
+            authentication=False,
+            save_dir=str(legacy_dir),
+        )
+    assert any(
+        "legacy" in msg.lower() for msg in caplog.messages
+    ), "Expected a deprecation warning about legacy MLflow filesystem store"
 
 
 def test_offline_resumed_logger(default_offline_config: omegaconf.DictConfig) -> None:
-
+    save_dir = default_offline_config.diagnostics.log.mlflow.save_dir
     run_id = create_run(
-        save_dir=default_offline_config.diagnostics.log.mlflow.save_dir,
+        save_dir=save_dir,
         experiment_name=default_offline_config.diagnostics.log.mlflow.experiment_name,
     )
     logger_resumed = instantiate(
@@ -103,12 +150,13 @@ def test_offline_resumed_logger(default_offline_config: omegaconf.DictConfig) ->
         run_id=run_id,
         fork_run_id=None,
     )
-    assert logger_resumed.tracking_uri == default_offline_config.diagnostics.log.mlflow.save_dir
+    assert logger_resumed.tracking_uri == sqlite_uri_for(save_dir)
 
 
 def test_offline_forked_logger(default_offline_config: omegaconf.DictConfig) -> None:
+    save_dir = default_offline_config.diagnostics.log.mlflow.save_dir
     fork_run_id = create_run(
-        save_dir=default_offline_config.diagnostics.log.mlflow.save_dir,
+        save_dir=save_dir,
         experiment_name=default_offline_config.diagnostics.log.mlflow.experiment_name,
     )
     logger_forked = instantiate(
@@ -116,7 +164,7 @@ def test_offline_forked_logger(default_offline_config: omegaconf.DictConfig) -> 
         run_id=None,
         fork_run_id=fork_run_id,
     )
-    assert logger_forked.tracking_uri == default_offline_config.diagnostics.log.mlflow.save_dir
+    assert logger_forked.tracking_uri == sqlite_uri_for(save_dir)
 
 
 def test_mlflowlogger_params_limit(default_logger: AnemoiMLflowLogger) -> None:

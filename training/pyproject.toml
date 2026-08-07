@@ -90,12 +90,13 @@ optional-dependencies.s3 = [
   "anemoi-utils[s3]>=0.5.7",
 ]
 optional-dependencies.tests = [
-  "anemoi-graphs[tri]",                                     # required to load the gnn checkpoint as part of the tests
-  "anemoi-models[spectral]",                                # required to test the DCT2D spectral loss
-  "anemoi-training[azure,mlflow,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
+  "anemoi-graphs[tri]",                              # required to load the gnn checkpoint as part of the tests
+  "anemoi-models[spectral]",                         # required to test the DCT2D spectral loss
+  "anemoi-training[azure,plotting,remote,s3,wandb]", # AzureMlflowLogger / remote checkpoints / S3Source / plotting integration
   "hypothesis>=6.11",
+  "mlflow[sqlalchemy]",                              # TODO MOVE TO ANEMOI-UTILS
   "pytest>=8",
-  "pytest-asyncio>=0.23",                                   # required for async checkpoint tests
+  "pytest-asyncio>=0.23",                            # required for async checkpoint tests
   "pytest-mock>=3",
   "pytest-skip-slow>=0.0.5",
   "sshfs",

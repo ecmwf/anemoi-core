@@ -7,18 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import os
-
 # Use non-GUI backend before any test (or plot) code imports matplotlib.
 # Avoids slow backend probing (Tk/Qt) in headless/CI and speeds up plotting tests.
 import matplotlib as mpl
 
 mpl.use("Agg")
-
-# Newer mlflow releases put the filesystem tracking backend ("./mlruns") in maintenance
-# mode and raise unless this opt-out is set; the offline logger tests depend on the
-# file store. Set before any test code imports mlflow.
-os.environ.setdefault("MLFLOW_ALLOW_FILE_STORE", "true")
 
 from pathlib import Path
 from typing import Any
