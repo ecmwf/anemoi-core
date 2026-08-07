@@ -1,3 +1,6 @@
+defaults:
+  - compile: max
+
 num_channels: 1024
 cpu_offload: False
 
