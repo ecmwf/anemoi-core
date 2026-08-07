@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -372,3 +373,216 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
     # forcing variable should be refreshed from batch for both grid points
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
+
+
+# ── OffsetForecaster: equivalence with Forecaster on a regular grid ────────────
+
+_TIMESTEP_HOURS = 6
+
+
+def _offset_equivalent(
+    multistep_input: int,
+    multistep_output: int,
+    timestep_hours: int = _TIMESTEP_HOURS,
+) -> OffsetForecaster:
+    """Build the ``OffsetForecaster`` equivalent to ``Forecaster(N, M, timestep)``.
+
+    A regular forecaster reading ``N`` steps and predicting ``M`` steps on a grid of
+    spacing ``timestep`` maps onto input offsets ``[-(N-1)T, ..., 0]``, output offsets
+    ``[T, ..., MT]`` and a rollout shift of ``MT``.
+    """
+    input_offsets = [f"{-i * timestep_hours}h" for i in range(multistep_input)]
+    output_offsets = [f"{(i + 1) * timestep_hours}h" for i in range(multistep_output)]
+    rollout_shift = f"{multistep_output * timestep_hours}h"
+    return OffsetForecaster(
+        input_offsets=input_offsets,
+        output_offsets=output_offsets,
+        rollout_shift=rollout_shift,
+    )
+
+
+@pytest.mark.parametrize(
+    ("n_step_input", "n_step_output", "expected"),
+    [
+        (1, 1, [2.0]),
+        (2, 2, [3.0, 4.0]),
+        (2, 3, [4.0, 5.0]),
+        (3, 2, [3.0, 4.0, 5.0]),
+        (3, 1, [2.0, 3.0, 4.0]),
+        (1, 2, [3.0]),
+    ],
+)
+def test_offset_forecaster_advance_matches_forecaster(
+    n_step_input: int,
+    n_step_output: int,
+    expected: list[float],
+) -> None:
+    """OffsetForecaster._advance_dataset_input matches the legacy Forecaster on a regular grid."""
+    data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
+    legacy = Forecaster(multistep_input=n_step_input, multistep_output=n_step_output, timestep="6h")
+    offset = _offset_equivalent(n_step_input, n_step_output)
+
+    b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
+    x = torch.zeros((b, n_step_input, e, g, v), dtype=torch.float32)
+    for step in range(n_step_input):
+        x[:, step] = float(step + 1)
+
+    y_pred = torch.stack(
+        [
+            torch.full((b, e, g, v), float(n_step_input + step + 1), dtype=torch.float32)
+            for step in range(n_step_output)
+        ],
+        dim=1,
+    )
+    batch = torch.zeros((b, n_step_input + n_step_output, e, g, v), dtype=torch.float32)
+
+    out_legacy = legacy._advance_dataset_input(
+        x.clone(),
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+    out_offset = offset._advance_dataset_input(
+        x.clone(),
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+
+    torch.testing.assert_close(out_offset, out_legacy)
+    # Anchor against the known-correct legacy behaviour so a shared bug cannot hide.
+    assert out_offset[0, :, 0, 0, 0].tolist() == expected
+
+
+def test_offset_forecaster_advance_matches_forecaster_with_boundary_and_forcing() -> None:
+    """Equivalence also holds on the boundary-mask and forcing-refresh code paths."""
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = _make_minimal_index_collection(name_to_index, forcing=["force"])
+    legacy = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    offset = _offset_equivalent(2, 1)
+
+    def _make_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # tensor dims: (batch, time, ens, grid, variable)
+        x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
+        y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
+        batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
+        batch[:, 2, 0, :, 0] = torch.tensor([100.0, 200.0])
+        batch[:, 2, 0, :, 1] = torch.tensor([1000.0, 2000.0])
+        return x, y_pred, batch
+
+    x, y_pred, batch = _make_inputs()
+    out_legacy = legacy._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask=Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask"),
+        grid_shard_slice=slice(None),
+    )
+
+    x, y_pred, batch = _make_inputs()
+    out_offset = offset._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask=Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask"),
+        grid_shard_slice=slice(None),
+    )
+
+    torch.testing.assert_close(out_offset, out_legacy)
+
+
+# ── OffsetForecaster: _convert_and_validate ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "rollout_shift", "match"),
+    [
+        # duplicate offsets are not well-formed
+        (["0h", "0h"], ["6h"], "default", "input_offsets contains duplicate"),
+        (["0h"], ["6h", "6h"], "default", "output_offsets contains duplicate"),
+        # an output must come strictly after every input for a forecasting task
+        (["0h", "6h"], ["6h", "12h"], "default", "strictly greater"),
+        (["-6h", "0h"], ["-3h", "3h"], "default", "strictly greater"),
+        # no valid shift exists
+        (["-6h", "0h"], ["7h", "10h"], "default", "No valid autoregressive rollout shift"),
+        # explicit shift that repeats an output across rollout steps is rejected
+        (["-6h", "0h"], ["6h", "12h"], "6h", "is not a valid autoregressive"),
+    ],
+)
+def test_offset_convert_and_validate_rejects_invalid(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    rollout_shift: str,
+    match: str,
+) -> None:
+    """_convert_and_validate raises ValueError for ill-formed or inconsistent offsets."""
+    with pytest.raises(ValueError, match=match):
+        OffsetForecaster._convert_and_validate(input_offsets, output_offsets, rollout_shift)
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "rollout_shift", "expected_hours"),
+    [
+        # single step: only valid shift equals the output horizon
+        (["0h"], ["6h"], "default", 6),
+        # regular grid: default infers the output horizon M*T
+        (["-6h", "0h"], ["6h", "12h"], "default", 12),
+        # same, but supplied explicitly
+        (["-6h", "0h"], ["6h", "12h"], "12h", 12),
+        # irregular grid with several valid shifts: default picks the largest
+        (["0h"], ["6h", "10h"], "default", 10),
+        # ...and a smaller valid shift is accepted when requested
+        (["0h"], ["6h", "10h"], "6h", 6),
+    ],
+)
+def test_offset_convert_and_validate_returns_expected_rollout_shift(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    rollout_shift: str,
+    expected_hours: int,
+) -> None:
+    """_convert_and_validate returns the expected rollout shift for valid offsets."""
+    _, _, shift = OffsetForecaster._convert_and_validate(input_offsets, output_offsets, rollout_shift)
+    assert shift == datetime.timedelta(hours=expected_hours)
+
+
+def _hours(*values: float) -> list[datetime.timedelta]:
+    return [datetime.timedelta(hours=v) for v in values]
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "expected_inputs", "expected_outputs"),
+    [
+        # strings are parsed and sorted ascending
+        (["0h", "-6h"], ["12h", "6h"], _hours(-6, 0), _hours(6, 12)),
+        # single offsets
+        (["0h"], ["6h"], _hours(0), _hours(6)),
+        # mixed units are normalised to timedeltas
+        (["-360m", "0h"], ["720m", "6h"], _hours(-6, 0), _hours(6, 12)),
+        # fractional-hour (sub-grid) offsets
+        (["0h"], ["45m", "90m"], _hours(0), _hours(0.75, 1.5)),
+    ],
+)
+def test_offset_convert_and_validate_returns_sorted_timedeltas(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    expected_inputs: list[datetime.timedelta],
+    expected_outputs: list[datetime.timedelta],
+) -> None:
+    """_convert_and_validate parses offset strings into sorted timedeltas."""
+    converted_inputs, converted_outputs, _ = OffsetForecaster._convert_and_validate(
+        input_offsets,
+        output_offsets,
+        "default",
+    )
+    assert converted_inputs == expected_inputs
+    assert converted_outputs == expected_outputs
+    assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
