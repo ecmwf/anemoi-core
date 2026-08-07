@@ -26,6 +26,10 @@ class CompileCache(Callback):
 
     Artifacts are loaded at the start of the very first batch.
     Artifacts are saved once after the requested number of steps.
+
+    By default, artifacts are saved after 10 steps. this allows some
+    different shapes and cached code paths (e.g. using a prebuilt halo)
+    to be captured.
     """
 
     def __init__(self, compile_cache_file: str, save_after_steps: int = 10) -> None:
@@ -72,3 +76,14 @@ class CompileCache(Callback):
         if batch_idx == self.save_after_steps:
             LOGGER.info("Saving torch.compile cache to %s", self.compile_cache_file)
             save_compile_cache(self.compile_cache_file)
+
+    def on_fit_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Explicitly cleanup any cuda graph trees to ensure anemoi does not hang on exit.
+
+        When compiling the mappers with cuda graphs and using model sharding, a
+        hang on exit has been observed. Calling reset_cudagraph_trees() explicitly
+        at the end of training seems to resolve this issue. However, it is an
+        internal API and may not be available in future versions of PyTorch.
+        """
+        del trainer, pl_module
+        torch._inductor.cudagraph_trees.reset_cudagraph_trees()
