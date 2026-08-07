@@ -827,3 +827,29 @@ def temporal_downscaler_ensemble_config(
     assert isinstance(cfg, DictConfig)
 
     return cfg, url_dataset
+
+
+@pytest.fixture
+def offset_forecaster_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url, _ = build_global_config(
+        ["model=graphtransformer"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+
+    OmegaConf.set_struct(cfg.task, False)
+    cfg.task = {
+        "_target_": "anemoi.training.tasks.OffsetForecaster",
+        "input_offsets": ["-12H", "0H"],
+        "output_offsets": ["6H", "12H"],
+        "rollout": {
+            "start": 2,
+            "epoch_increment": 0,
+            "maximum": 2,
+        },
+    }
+
+    return cfg, url

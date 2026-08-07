@@ -436,6 +436,24 @@ def test_config_validation_temporal_downscaler_ensemble(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_offset_forecaster(
+    offset_forecaster_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = offset_forecaster_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_config(offset_forecaster_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = offset_forecaster_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_evaluator(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,

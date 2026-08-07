@@ -135,6 +135,72 @@ Rollout behavior:
    ``multistep_input`` outputs are fed into the next rollout step.
 
 
+******************
+ OffsetForecaster
+******************
+
+:class:`~anemoi.training.tasks.forecasting.OffsetForecaster` is an
+experimental generalization of
+:class:`~anemoi.training.tasks.forecasting.Forecaster` that declares the
+sample directly through time offsets, i.e. times relative to the start of the forecast:
+
+- ``input_offsets`` — input time offsets as frequency strings, e.g.
+  ``["-6H", "0H"]``.
+- ``output_offsets`` — target time offsets, e.g. ``["6H"]``.
+
+- ``rollout`` / ``validation_rollout`` — as for
+  :class:`~anemoi.training.tasks.forecasting.Forecaster`.
+
+Basic forecaster
+================
+
+The standard forecaster (two input steps, one output step, ``6H``
+timestep) written with offsets:
+
+.. code:: yaml
+
+  task:
+    _target_: anemoi.training.tasks.OffsetForecaster
+    input_offsets: ["-6H", "0H"]
+    output_offsets: ["6H"]
+
+Mixed input/output frequencies
+==============================
+
+Read two 6-hourly steps and predict the next six hours at 1-hourly
+resolution:
+
+.. code:: yaml
+
+  task:
+    _target_: anemoi.training.tasks.OffsetForecaster
+    input_offsets: ["-6H", "0H"]
+    output_offsets: ["1H", "2H", "3H", "4H", "5H", "6H"]
+
+The rollout shift
+=================
+
+The model can forecast arbitrarily far into the future by rollout: it is
+applied repeatedly, each step feeding its own outputs (and inputs) back as the inputs of
+the next. The ``rollout_shift`` is the time interval between two consecutive
+rollout steps — the amount by which every input and output offset is advanced
+at each step.
+
+By default ``rollout_shift`` is set to the largest possible value. In some
+configurations several shifts are possible, so ``OffsetForecaster`` exposes it as
+an optional argument that lets the user override the default.
+For example, with a single input and outputs ``["2H", "3H"]`` both ``2H`` and
+``3H`` are possible. ``3H`` is the largest, and therefore the default, but the user can select ``2H`` as follows:
+
+.. code:: yaml
+
+  task:
+    _target_: anemoi.training.tasks.OffsetForecaster
+    input_offsets: ["0H"]
+    output_offsets: ["2H", "3H"]
+    rollout_shift: "2H"   # overwrites the default, 3H
+
+
 *********************
  TemporalDownscaler
 *********************
