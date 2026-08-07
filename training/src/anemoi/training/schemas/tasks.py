@@ -57,8 +57,7 @@ class OffsetForecasterSchema(BaseModel):
     "Output time offsets as duration strings."
     rollout_shift: str = Field(default="0H", example="6H")
     "Time shift applied to the offsets between rollout steps."
-    consistency_check: bool = Field(default=True, example=True)
-    "Whether to validate the input/output offsets and rollout shift at task construction."
+    "Rollout configuration for autoregressive training."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
