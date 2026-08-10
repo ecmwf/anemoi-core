@@ -146,7 +146,7 @@ sample directly through time offsets, i.e. times relative to the forecast initia
 
 - ``input_offsets`` — input time offsets as frequency strings, e.g.
   ``["-6H", "0H"]``.
-- ``output_offsets`` — target time offsets, e.g. ``["6H"]``.
+- ``output_offsets`` — target time offsets as frequency strings, e.g. ``["6H"]``.
 
 - ``rollout`` / ``validation_rollout`` — as for
   :class:`~anemoi.training.tasks.forecasting.Forecaster`.
