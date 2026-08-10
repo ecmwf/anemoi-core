@@ -140,7 +140,7 @@ Rollout behavior:
 ******************
 
 :class:`~anemoi.training.tasks.forecasting.OffsetForecaster` is an
-experimental generalization of
+experimental generalisation of
 :class:`~anemoi.training.tasks.forecasting.Forecaster` that declares the
 sample directly through time offsets, i.e. times relative to the forecast initialisation time:
 
