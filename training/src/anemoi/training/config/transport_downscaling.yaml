@@ -1,23 +1,74 @@
 defaults:
 - data: zarr
-- dataloader: native_grid
+- dataloader: downscaling
 - diagnostics: evaluation
 - system: example
-- graph: multi_scale
-- model: graphtransformer_transport_tendency_edm
+- model: graphtransformer_transport_residual_edm
+- training: downscaling
+- graph: fused_downscaling
 - task: spatial_downscaler
-- training: edm_diffusion
 - _self_
 
 
 # set to true to switch on config validation
-config_validation: True
+config_validation: false
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      tracking_uri: null
+
 
 data:
+  frequency: 1h
+  datasets:
+    in_lres:
+      forcing: []
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none:
+              - 2t
+    in_hres:
+      forcing:
+        - cos_julian_day
+        - cos_latitude
+        - cos_local_time
+        - cos_longitude
+        - lsm
+        - sin_julian_day
+        - sin_latitude
+        - sin_local_time
+        - sin_longitude
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: none
+    out_hres:
+      forcing: []
+      diagnostic: []
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            none: []
+
+  # CrossGridProjector reprojects the lres input onto the hres grid before
+  # concatenation with in_hres. Loaded from the .npz truncation matrix so no
+  # extra graph edge is needed.
   spatial_processors:
     in_lres:
       _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
-      edges_name: [in_lres, to, out_hres]
+      file_path: ${system.input.truncation}
       row_normalize: True
 
 training:
@@ -27,3 +78,100 @@ training:
       kind: log_normal
       mean: 0.0
       std: 3.5
+  max_epochs: 2
+
+# TODO clean up paths, for debugging only
+system:
+  input:
+    # HRES zarr (used for in_hres and out_hres).
+    dataset: ???
+    # LRES zarr (used for in_lres).
+    dataset_lres: ???
+    graph: lognorm35_100k_34788975_graph.pt
+    # Anemoi dataset (zarr) providing ``statistics_tendencies`` for residual normalization.
+    # If null, ResidualPredictionMode falls back to state statistics with a warning.
+    residual_statistics: null
+    # LRES→HRES sparse projection matrix (.npz) used by CrossGridProjector.
+    truncation: ???
+    # HRES→LRES sparse projection matrix (.npz), reserved for InterpolationConnection.
+    truncation_inv: ???
+
+
+dataloader:
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  limit_batches:
+    training: 3
+    validation: 3
+  training:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: 1900
+        end: '1900-10-31'
+      out_hres:
+        dataset_config:
+          statistics_tendencies: ${system.input.residual_statistics}
+          select: [2t]
+        start: 1900
+        end: '1900-10-31'
+  validation:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+        start: '1900-11-01'
+        end: '1900-12-31'
+      out_hres:
+        dataset_config:
+          select: [2t]
+        start: '1900-11-01'
+        end: '1900-12-31'
+  test:
+    datasets:
+      in_lres:
+        dataset_config:
+          select: [2t]
+      in_hres:
+        dataset_config:
+          select:
+            - cos_julian_day
+            - cos_latitude
+            - cos_local_time
+            - cos_longitude
+            - lsm
+            - sin_julian_day
+            - sin_latitude
+            - sin_local_time
+            - sin_longitude
+      out_hres:
+        dataset_config:
+          select: [2t]
