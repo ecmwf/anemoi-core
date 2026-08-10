@@ -2324,7 +2324,17 @@ def _make_residual_module(
         get_data_output_target=_get_data_output_target,
         reduce_data_output_target_to_model_output=_reduce,
         config=SimpleNamespace(
-            training=SimpleNamespace(transport={"objective": "edm_diffusion"}),
+            training=SimpleNamespace(
+                transport={
+                    "objective": "edm_diffusion",
+                    "encoder_decoder_roles": {
+                        "enc_dec_0": {
+                            "reference": lres_name,
+                            "target": target_name,
+                        },
+                    },
+                },
+            ),
         ),
     )
     return module, {
@@ -2347,6 +2357,7 @@ def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes(
     )
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
+    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
 
     # Normalized batch — a fully normalized tensor for lres and target on the same grid.
     b, t, e, g = 2, 1, 1, 4
@@ -2356,9 +2367,9 @@ def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes(
 
     prepared = mode.prepare_target(batch, x={})
 
-    # Denormalized lres cached for reconstruction: 5.0 + (-100.0) = -95.0
-    assert set(prepared.aux) >= {"x_lres_on_hres", "transport_reference_source"}
-    torch.testing.assert_close(prepared.aux["x_lres_on_hres"], lres_tensor - 100.0)
+    # Denormalized reference cached for reconstruction: 5.0 + (-100.0) = -95.0
+    assert set(prepared.aux) >= {"x_ref_on_target_grid", "transport_reference_source"}
+    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], lres_tensor - 100.0)
 
     # loss_target is the normalized residual in DATA_OUTPUT space.
     # denorm(target) - denorm(lres) = (8 - 100) - (5 - 100) = -92 - (-95) = 3
@@ -2383,6 +2394,7 @@ def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target(
     )
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
+    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
 
     b, t, e, g = 2, 1, 1, 4
     lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
@@ -2430,26 +2442,30 @@ def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> 
         tend_post_offset=0.0,
     )
     module.config = SimpleNamespace(
-        training=SimpleNamespace(transport={"objective": "stochastic_interpolant"}),
+        training=SimpleNamespace(
+            transport={
+                "objective": "stochastic_interpolant",
+                "encoder_decoder_roles": {"enc_dec_0": {"reference": "in_lres", "target": "out"}},
+            },
+        ),
     )
     with pytest.raises(NotImplementedError, match="stochastic_interpolant"):
         ResidualPredictionMode(module)
 
 
-def test_residual_prediction_mode_requires_exactly_one_spatial_preprocessor() -> None:
-    """prepare_target validates that exactly one dataset has a spatial pre-processor."""
+def test_residual_prediction_mode_reference_dataset_raises_when_roles_absent() -> None:
+    """_build_encoder_decoder_roles_by_target raises ValueError when transport.encoder_decoder_roles is not set."""
     module, _ = _make_residual_module(
         pre_offset=0.0,
         post_offset=0.0,
         tend_pre_offset=0.0,
         tend_post_offset=0.0,
     )
-    module.model.spatial_pre_processors = {"a": object(), "b": object()}
+    module.config.training.transport = {"objective": "edm_diffusion"}  # no encoder_decoder_roles
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
-
-    with pytest.raises(ValueError, match="exactly one spatial pre-processor"):
-        mode.prepare_target({}, x={})
+    with pytest.raises(ValueError, match="is not configured"):
+        mode._build_encoder_decoder_roles_by_target()
 
 
 def test_residual_prediction_mode_falls_back_to_state_processors_when_tendency_absent() -> None:
@@ -2464,6 +2480,7 @@ def test_residual_prediction_mode_falls_back_to_state_processors_when_tendency_a
     module.model.post_processors_tendencies = {}
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
+    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
 
     b, t, e, g = 1, 1, 1, 2
     batch = {

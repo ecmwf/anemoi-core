@@ -751,11 +751,40 @@ class EnsembleTrainingSchema(BaseTrainingSchema):
     "Training method."
 
 
+class EncoderDecoderRoleSchema(BaseModel):
+    """Roles for one encoder/decoder triple in a spatial downscaling model.
+
+    Each entry in ``transport.encoder_decoder_roles`` names the datasets that play each
+    semantic role for a given encoder/decoder pair.  Keys are encoder/decoder names and
+    will align with named encoders once the encoder-configurability feature is merged.
+    """
+
+    reference: str
+    "Low-resolution input projected onto the high-res grid; used as the residual baseline."
+    target: str
+    "High-resolution output dataset predicted by the model."
+    conditioning: str | None = None
+    "Optional additional high-res conditioning input (encoder-only; no target counterpart)."
+
+
 class TransportTrainingConfigSchema(BaseModel):
-    prediction_mode: Literal["state", "tendency"] = "state"
+    prediction_mode: Literal["state", "tendency", "residual"] = "state"
     "Endpoint semantics for the transport objective."
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
+    encoder_decoder_roles: dict[str, EncoderDecoderRoleSchema] | None = None
+    """Encoder/decoder role assignments for residual prediction mode, keyed by encoder/decoder name.
+
+    Required when ``prediction_mode: residual``.  Each value names the datasets
+    playing the ``reference``, ``target``, and optionally ``conditioning`` roles
+    for one encoder/decoder triple.  Example for a single enc/dec pair::
+
+        encoder_decoder_roles:
+          enc_dec_0:
+            reference: in_lres
+            target: out_hres
+            conditioning: in_hres  # optional
+    """
 
 
 class TransportTrainingSchema(BaseTrainingSchema):

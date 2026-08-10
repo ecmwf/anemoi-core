@@ -67,8 +67,8 @@ class SpatialDownscaler(BaseSingleStepTask):
     ) -> dict[str, torch.Tensor]:
         """Extract model inputs from a batch, restricted to ``input_datasets``.
 
-        Unlike the forecaster, the split between inputs and targets is bet of
-        time offsets (configured via ``offsets``).
+        Unlike the forecaster, the split between inputs and targets is by dataset name. All
+        inputs and outputs have the same set of time offsets (configured via ``offsets``).
 
         Parameters
         ----------

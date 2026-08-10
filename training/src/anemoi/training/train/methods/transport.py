@@ -302,9 +302,11 @@ class ResidualPredictionMode(PredictionMode):
     residual can be computed in physical space, then renormalizes it with residual
     (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
 
-    The lres dataset is identified as the single entry in
-    ``model.spatial_pre_processors`` (i.e. the dataset registered via
-    ``config.data.spatial_processors``), which projects the lres input onto the hres grid.
+    The lres dataset is identified via ``transport.encoder_decoder_roles`` in the training
+    config.  Each entry names the ``reference``, ``target``, and optionally ``conditioning``
+    datasets for one encoder/decoder triple.  ``_encoder_decoder_roles_by_target`` inverts this into a
+    ``{target_dataset_name: role}`` dict so that ``prepare_target`` can look up the correct
+    reference dataset for each target independently — for multiple enc/dec pairs.
 
     Uses ``pre_processors_tendencies`` / ``post_processors_tendencies`` for residual
     normalization, falling back to state processors when tendency stats are absent.
@@ -315,6 +317,41 @@ class ResidualPredictionMode(PredictionMode):
     def __init__(self, module: BaseTransportTraining) -> None:
         super().__init__(module)
         self._validate_objective()
+        self._encoder_decoder_roles_by_target = self._build_encoder_decoder_roles_by_target()
+
+    def _build_encoder_decoder_roles_by_target(self) -> dict:
+        """Build a ``{target_dataset_name: role}`` index from ``transport.encoder_decoder_roles``.
+
+        Raises ``ValueError`` if ``encoder_decoder_roles`` is not configured or if any
+        two triples map to the same target dataset (which would be ambiguous).
+        """
+        transport = getattr(self.module.config.training, "transport", {}) or {}
+        enc_dec_roles = transport.get("encoder_decoder_roles", None)
+        if not enc_dec_roles:
+            msg = (
+                "transport.encoder_decoder_roles is not configured. "
+                "Set transport.encoder_decoder_roles in your training config with at least one "
+                "entry containing 'reference' and 'target' keys."
+            )
+            raise ValueError(msg)
+        roles_by_target: dict = {}
+        for enc_name, role in enc_dec_roles.items():
+            target = role.get("target") if hasattr(role, "get") else getattr(role, "target", None)
+            reference = role.get("reference") if hasattr(role, "get") else getattr(role, "reference", None)
+            if not target or not reference:
+                msg = (
+                    f"encoder_decoder_roles['{enc_name}'] must specify both 'reference' and 'target'. "
+                    f"Got: {role!r}."
+                )
+                raise ValueError(msg)
+            if target in roles_by_target:
+                msg = (
+                    f"encoder_decoder_roles: target dataset '{target}' appears in more than one "
+                    f"encoder/decoder triple, which is ambiguous."
+                )
+                raise ValueError(msg)
+            roles_by_target[target] = role
+        return roles_by_target
 
     def _validate_objective(self) -> None:
         objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
@@ -336,16 +373,13 @@ class ResidualPredictionMode(PredictionMode):
             return tend
         return self.module.model.post_processors
 
-    def _lres_dataset_name(self) -> str:
-        """Identify the lres dataset by its registered spatial pre-processor."""
-        lres_names = list(self.module.model.spatial_pre_processors.keys())
-        if len(lres_names) != 1:
-            msg = (
-                "ResidualPredictionMode expects exactly one spatial pre-processor "
-                f"(the lres dataset); got: {lres_names}."
-            )
+    def _reference_dataset_name_for_target(self, target_dataset_name: str) -> str:
+        """Return the reference dataset name for a given target dataset."""
+        role = self._encoder_decoder_roles_by_target.get(target_dataset_name)
+        if role is None:
+            msg = f"No encoder_decoder_roles entry found for target dataset '{target_dataset_name}'."
             raise ValueError(msg)
-        return lres_names[0]
+        return role.get("reference") if hasattr(role, "get") else role.reference
 
     def prepare_target(
         self,
@@ -354,34 +388,39 @@ class ResidualPredictionMode(PredictionMode):
     ) -> PreparedPredictionTarget:
         """Compute the normalized residual target from an already-normalized batch.
 
-        Delegates the per-channel residual/state split to
-        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`
-        (mirror of the tendency prediction mode, which delegates to
-        ``compute_tendency`` on the tendency model).  Prognostic channels are
-        normalized as residuals against the projected low-res source; diagnostic
-        channels are kept as normalized state.
+        For each target dataset, looks up its paired reference dataset from
+        ``_encoder_decoder_roles_by_target``, denormalizes the reference projection, and delegates
+        the per-channel residual/state split to
+        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`.
+        Prognostic channels become normalized residuals; diagnostic channels are kept
+        as normalized state.
         """
         del x
-        lres_name = self._lres_dataset_name()
-
-        # Denormalize the projected lres source once and cache it for reconstruction.
-        x_lres_on_hres = self.module.model.post_processors[lres_name](
-            batch[lres_name],
-            in_place=False,
-        )
 
         target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         target_data_output = self.module.get_data_output_target(target_full)
 
+        # Build per-target dicts: denormalized reference projection and name→index mapping.
+        x_ref_on_target_grid: dict[str, torch.Tensor] = {}
+        reference_variable_name_to_column_index_by_target: dict[str, dict] = {}
+        for target_name in target_data_output:
+            ref_name = self._reference_dataset_name_for_target(target_name)
+            x_ref_on_target_grid[target_name] = self.module.model.post_processors[ref_name](
+                batch[ref_name],
+                in_place=False,
+            )
+            reference_variable_name_to_column_index_by_target[target_name] = self.module.data_indices[
+                ref_name
+            ].name_to_index
+
         # Delegate the residual / diagnostic split to the model.
         residual_pre = self._residual_pre_processors()
-        lres_name_to_index = self.module.data_indices[lres_name].name_to_index
         model_residual_data_output = self.module.model.model.compute_residual(
             y=target_data_output,
-            x_lres_denorm=dict.fromkeys(target_data_output, x_lres_on_hres),
+            x_reference_denorm=x_ref_on_target_grid,
             pre_processors_state=self.module.model.pre_processors,
             pre_processors_residual=residual_pre,
-            lres_name_to_index=lres_name_to_index,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
             input_post_processor=self.module.model.post_processors,
             skip_imputation=True,
         )
@@ -393,12 +432,9 @@ class ResidualPredictionMode(PredictionMode):
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=target_full,
             aux={
-                # Denormalized projected lres, cached for reconstruction so we do
-                # not have to denormalize twice.
-                "x_lres_on_hres": x_lres_on_hres,
-                # Cache the LRES name_to_index alongside so ``reconstruct_prediction``
-                # can re-align columns by name without another lookup.
-                "lres_name_to_index": lres_name_to_index,
+                # store the denormalized reference projection and name→index mapping for reconstructing the state later
+                "x_ref_on_target_grid": x_ref_on_target_grid,
+                "reference_variable_name_to_column_index_by_target": reference_variable_name_to_column_index_by_target,
                 "transport_reference_source": self._reference_state_target_space(batch),
             },
         )
@@ -431,17 +467,17 @@ class ResidualPredictionMode(PredictionMode):
         passes ``output_pre_processor`` so the returned tensor lives in the
         same normalized state space as ``metric_target``.
         """
-        x_lres_on_hres = prepared.aux["x_lres_on_hres"]
-        lres_name_to_index = prepared.aux["lres_name_to_index"]
+        x_ref_on_target_grid = prepared.aux["x_ref_on_target_grid"]
+        reference_variable_name_to_column_index_by_target = prepared.aux[
+            "reference_variable_name_to_column_index_by_target"
+        ]
         residual_post = self._residual_post_processors()
         return self.module.model.model.add_residual_to_state(
-            x_lres_denorm=dict.fromkeys(prediction, x_lres_on_hres),
+            x_reference_denorm=x_ref_on_target_grid,
             residual=prediction,
             post_processors_state=self.module.model.post_processors,
             post_processors_residual=residual_post,
-            lres_name_to_index=lres_name_to_index,
-            # Re-normalize with the state pre-processor so metric code sees the
-            # same normalized state space as ``prepared.metric_target``.
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
             output_pre_processor=self.module.model.pre_processors,
             skip_imputation=True,
         )

@@ -136,47 +136,80 @@ def _make_bare_model(
         attr_ndims or {"in_lres": 2, "in_hres": 2, "out_hres": 3},
         grid=grid,
     )
-    model._resolve_roles()
+    model.target_dataset_names = ["out_hres"]
+    model.target_dataset_name = "out_hres"
+    model._roles_by_target = {
+        "out_hres": {"reference": "in_lres", "target": "out_hres", "conditioning": "in_hres"},
+    }
+    model._input_dataset_names_by_target = {"out_hres": ["in_lres", "in_hres"]}
     return model
 
 
 # ── role inference ────────────────────────────────────────────────────────────
 
 
-def test_resolve_roles_identifies_target_and_input_datasets_from_indices() -> None:
-    """The single dataset with non-empty ``model.output`` is the target; the rest are inputs."""
-    model = _make_bare_model()
+def test_resolve_roles_identifies_target_and_input_datasets_from_encoder_decoder_roles() -> None:
+    """The dataset listed as ``target`` in each triple is a target; reference/conditioning are inputs."""
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    model.data_indices = _make_downscaler_indices()
+    model.dataset_names = list(model.data_indices.keys())
+    config = {
+        "training": {
+            "transport": {
+                "encoder_decoder_roles": {
+                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres", "conditioning": "in_hres"},
+                },
+            },
+        },
+    }
+    model._resolve_roles(config)
+    assert model.target_dataset_names == ["out_hres"]
     assert model.target_dataset_name == "out_hres"
-    assert set(model.input_dataset_names) == {"in_lres", "in_hres"}
+    assert model._input_dataset_names_by_target["out_hres"] == ["in_lres", "in_hres"]
 
 
-def test_resolve_roles_rejects_zero_targets() -> None:
-    """If no dataset has model output variables the model refuses to init."""
+def test_resolve_roles_rejects_duplicate_target() -> None:
+    """Two entries with the same ``target`` value must be rejected."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    # Both datasets have only forcing variables → no model output.
-    model.data_indices = {
-        "in_lres": _make_index_collection({"t2m": 0}, forcing=["t2m"]),
-        "in_hres": _make_index_collection({"z": 0}, forcing=["z"]),
-    }
+    model.data_indices = _make_downscaler_indices()
     model.dataset_names = list(model.data_indices.keys())
-    with pytest.raises(ValueError, match="exactly one target dataset"):
-        model._resolve_roles()
+    config = {
+        "training": {
+            "transport": {
+                "encoder_decoder_roles": {
+                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
+                    "enc_dec_1": {"reference": "in_lres", "target": "out_hres"},  # duplicate!
+                },
+            },
+        },
+    }
+    with pytest.raises(ValueError, match="more than one entry"):
+        model._resolve_roles(config)
 
 
-def test_resolve_roles_rejects_more_than_one_target() -> None:
-    """Two datasets with model output variables must be rejected."""
+def test_resolve_roles_allows_multiple_unique_targets() -> None:
+    """Two triples with different targets are both valid — each builds its own enc/dec pair."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    model.data_indices = {
-        "out_a": _make_index_collection({"v": 0}),
-        "out_b": _make_index_collection({"v": 0}),
-    }
+    model.data_indices = _make_downscaler_indices()
     model.dataset_names = list(model.data_indices.keys())
-    with pytest.raises(ValueError, match="exactly one target dataset"):
-        model._resolve_roles()
+    config = {
+        "training": {
+            "transport": {
+                "encoder_decoder_roles": {
+                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
+                    "enc_dec_1": {"reference": "in_lres", "target": "out_hres_2"},
+                },
+            },
+        },
+    }
+    model._resolve_roles(config)
+    assert model.target_dataset_names == ["out_hres", "out_hres_2"]
 
 
 # ── dimension arithmetic ─────────────────────────────────────────────────────
@@ -194,9 +227,9 @@ def test_calculate_input_dim_sums_all_input_datasets_plus_noised_target_and_node
 
 
 def test_calculate_input_dim_ignores_non_target_datasets() -> None:
-    """_calculate_input_dim is only meaningful for the target dataset."""
+    """_calculate_input_dim is only meaningful for target datasets."""
     model = _make_bare_model()
-    with pytest.raises(ValueError, match="only defined for the target"):
+    with pytest.raises(ValueError, match="only defined for target datasets"):
         model._calculate_input_dim("in_lres")
 
 
@@ -268,8 +301,9 @@ def test_assemble_input_concatenates_input_datasets_y_noised_and_node_attrs() ->
 def test_assemble_input_uses_input_dataset_order_from_role_resolution() -> None:
     """Assembly must iterate ``input_dataset_names`` in a fixed order so the encoder sees a stable layout."""
     model = _make_bare_model()
-    # Force a deterministic order by mutating the list; ``_assemble_input`` must respect it.
-    model.input_dataset_names = ["in_hres", "in_lres"]
+    # Force a deterministic order by mutating the per-target input list;
+    # ``_assemble_input`` must respect it.
+    model._input_dataset_names_by_target["out_hres"] = ["in_hres", "in_lres"]
 
     batch = 1
     ensemble = 1
@@ -411,7 +445,12 @@ def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
         {"in_lres": 2, "in_hres": 2, "out_hres": 3},
         grid=4,
     )
-    model._resolve_roles()
+    model.target_dataset_names = ["out_hres"]
+    model.target_dataset_name = "out_hres"
+    model._roles_by_target = {
+        "out_hres": {"reference": "in_lres", "target": "out_hres", "conditioning": "in_hres"},
+    }
+    model._input_dataset_names_by_target = {"out_hres": ["in_lres", "in_hres"]}
     return model
 
 
@@ -467,15 +506,15 @@ def test_compute_residual_uses_residual_pre_for_prognostic_and_state_pre_for_dia
 
     out = model.compute_residual(
         y={"out_hres": y},
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
-        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
 
-    # Prognostic channels: residual_pre((y - x_lres) + 0) = (y - x_lres) + 10
+    # Prognostic channels: residual_pre((y - x_reference) + 0) = (y - x_reference) + 10
     # t2m: (10 - 3) + 10 = 17, u10: (20 - 4) + 10 = 26
     # Diagnostic channel: state_pre(precip) = 30 + 100 = 130
     expected = torch.tensor([[[[[17.0, 26.0, 130.0]]]]])
@@ -500,16 +539,16 @@ def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnos
     x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
 
     state = model.add_residual_to_state(
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         residual={"out_hres": residual},
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
-        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
         output_pre_processor=None,
         skip_imputation=True,
     )
 
-    # Prognostic: residual_post(residual) + x_lres = (17 - 10) + 3 = 10, (26 - 10) + 4 = 20
+    # Prognostic: residual_post(residual) + x_reference = (17 - 10) + 3 = 10, (26 - 10) + 4 = 20
     # Diagnostic: state_post(residual) = 130 - 100 = 30
     expected = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
     torch.testing.assert_close(state["out_hres"], expected)
@@ -536,20 +575,20 @@ def test_compute_residual_and_add_residual_to_state_round_trip() -> None:
 
     residual = model.compute_residual(
         y={"out_hres": y},
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
-        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
 
     reconstructed = model.add_residual_to_state(
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         residual=residual,
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
-        lres_name_to_index=model.data_indices["in_lres"].name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
         output_pre_processor=None,
         skip_imputation=True,
     )
@@ -576,10 +615,10 @@ def test_compute_residual_aligns_lres_columns_by_name_when_layouts_differ() -> N
 
     out = model.compute_residual(
         y={"out_hres": y},
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
-        lres_name_to_index=lres_name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": lres_name_to_index},
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
@@ -602,11 +641,11 @@ def test_add_residual_to_state_aligns_lres_columns_by_name_when_layouts_differ()
     x_lres_denorm = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])
 
     state = model.add_residual_to_state(
-        x_lres_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": x_lres_denorm},
         residual={"out_hres": residual},
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
-        lres_name_to_index=lres_name_to_index,
+        reference_variable_name_to_column_index_by_target={"out_hres": lres_name_to_index},
         output_pre_processor=None,
         skip_imputation=True,
     )
@@ -617,35 +656,35 @@ def test_add_residual_to_state_aligns_lres_columns_by_name_when_layouts_differ()
 
 
 def test_compute_residual_raises_when_target_prognostic_missing_from_lres() -> None:
-    """A clear error is raised if the LRES dataset lacks a target prognostic variable."""
+    """A clear error is raised if the reference dataset lacks a target prognostic variable."""
     model = _make_mixed_bare_model()
 
-    # LRES has u10 but not t2m — the model can't compute the t2m residual.
-    lres_name_to_index = {"u10": 0}
+    # Reference has u10 but not t2m — the model can't compute the t2m residual.
+    reference_name_to_index = {"u10": 0}
 
-    with pytest.raises(ValueError, match=r"t2m.*LRES"):
+    with pytest.raises(KeyError, match=r"t2m"):
         model.compute_residual(
             y={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
-            x_lres_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
+            x_reference_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
             pre_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
             pre_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            lres_name_to_index=lres_name_to_index,
+            reference_variable_name_to_column_index_by_target={"out_hres": reference_name_to_index},
             input_post_processor={"out_hres": _IndexAwareProcessor(offset=0.0)},
             skip_imputation=True,
         )
 
 
-def test_add_residual_to_state_raises_when_target_prognostic_missing_from_lres() -> None:
+def test_add_residual_to_state_raises_when_target_prognostic_missing_from_reference() -> None:
     """Same validation as ``compute_residual`` but on the reverse operation."""
     model = _make_mixed_bare_model()
-    lres_name_to_index = {"u10": 0}
-    with pytest.raises(ValueError, match=r"t2m.*LRES"):
+    reference_name_to_index = {"u10": 0}
+    with pytest.raises(KeyError, match=r"t2m"):
         model.add_residual_to_state(
-            x_lres_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
+            x_reference_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
             residual={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
             post_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
             post_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            lres_name_to_index=lres_name_to_index,
+            reference_variable_name_to_column_index_by_target={"out_hres": reference_name_to_index},
             output_pre_processor=None,
             skip_imputation=True,
         )
@@ -685,37 +724,42 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
     torch.testing.assert_close(result["out_hres"], expected)
 
 
-# ── _resolve_roles TODO fix: config-aware role inference ────────────────────
+# ── _resolve_roles: explicit config-based role resolution ───────────────────
 
 
-def test_resolve_roles_treats_spatial_processor_source_as_input_even_when_it_has_output_vars() -> None:
-    """A dataset registered under ``config.data.spatial_processors`` is always an input.
+def test_resolve_roles_input_datasets_are_reference_and_conditioning_for_each_triple() -> None:
+    """``_input_dataset_names_by_target`` lists reference first, then conditioning.
 
-    This makes the role inference robust to configurations where the low-res
-    dataset carries variables classified as prognostic (i.e. non-empty
-    ``model.output``): the spatial-processor registration is authoritative.
+    This is authoritative regardless of the variable layout in ``data_indices``.
     """
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    # in_lres has t2m as prognostic (present in input AND output), so
-    # ``model.output`` is non-empty — but the config marks it as a
-    # spatial-processor source, so it must still be recognised as an input.
     model.data_indices = {
         "in_lres": _make_index_collection({"t2m": 0}),
         "out_hres": _make_index_collection({"t2m": 0, "precip": 1}, diagnostic=["precip"]),
     }
     model.dataset_names = list(model.data_indices.keys())
-    model_config = DictConfig(
-        {"data": {"spatial_processors": {"in_lres": {"_target_": "some.CrossGridProjector"}}}},
+    config = {
+        "training": {
+            "transport": {
+                "encoder_decoder_roles": {
+                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
+                },
+            },
+        },
+    }
+    model._resolve_roles(config)
+    assert model.target_dataset_names == ["out_hres"]
+    assert model._input_dataset_names_by_target["out_hres"] == ["in_lres"]
+
+
+def test_resolve_roles_raises_without_encoder_decoder_roles() -> None:
+    """Raises ``ValueError`` when called with a config that has no ``encoder_decoder_roles``."""
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    model._resolve_roles(model_config=model_config)
-    assert model.target_dataset_name == "out_hres"
-    assert model.input_dataset_names == ["in_lres"]
-
-
-def test_resolve_roles_without_config_falls_back_to_output_heuristic() -> None:
-    """Backward-compatible: calling ``_resolve_roles`` without a config still works."""
-    model = _make_bare_model()  # this calls ``_resolve_roles()`` without config
-    assert model.target_dataset_name == "out_hres"
-    assert set(model.input_dataset_names) == {"in_lres", "in_hres"}
+    model.data_indices = _make_downscaler_indices()
+    model.dataset_names = list(model.data_indices.keys())
+    with pytest.raises(ValueError, match="encoder_decoder_roles"):
+        model._resolve_roles({"training": {"transport": {}}})

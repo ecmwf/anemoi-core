@@ -74,6 +74,12 @@ data:
 training:
   transport:
     prediction_mode: residual
+    # Encoder/decoder role assignments for ResidualPredictionMode, keyed by encoder/decoder name.
+    encoder_decoder_roles:
+      enc_dec_0:
+        reference: in_lres
+        target: out_hres
+        conditioning: in_hres
     training_condition:
       kind: log_normal
       mean: 0.0
