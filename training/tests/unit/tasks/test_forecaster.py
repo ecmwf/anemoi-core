@@ -499,6 +499,54 @@ def test_offset_forecaster_advance_matches_forecaster_with_boundary_and_forcing(
     torch.testing.assert_close(out_offset, out_legacy)
 
 
+# ── OffsetForecaster: advance on irregular grids (no Forecaster equivalent) ────
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "expected"),
+    [
+        # Mixed advance: input slot 0 is reused from the input window (inin),
+        # slot 1 is filled from the first prediction (outin). Shift inferred as 6h.
+        (["-6h", "0h"], ["6h", "9h"], [2.0, 10.0]),
+        # Two reused input slots plus one prediction. Shift inferred as 6h.
+        (["-12h", "-6h", "0h"], ["6h", "9h"], [2.0, 3.0, 10.0]),
+        # Both slots refreshed from non-adjacent predictions. Shift inferred as 10h.
+        (["-6h", "0h"], ["4h", "6h", "10h"], [10.0, 30.0]),
+    ],
+)
+def test_offset_forecaster_advance_irregular_offsets(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    expected: list[float],
+) -> None:
+    """_advance_dataset_input handles irregular grids that no legacy Forecaster can represent."""
+    data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
+    task = OffsetForecaster(input_offsets=input_offsets, output_offsets=output_offsets)
+
+    n_input = len(input_offsets)
+    n_output = len(output_offsets)
+    b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
+    x = torch.zeros((b, n_input, e, g, v), dtype=torch.float32)
+    for step in range(n_input):
+        x[:, step] = float(step + 1)
+
+    y_pred = torch.stack(
+        [torch.full((b, e, g, v), float(10 * (step + 1)), dtype=torch.float32) for step in range(n_output)],
+        dim=1,
+    )
+    batch = torch.zeros((b, n_input + n_output, e, g, v), dtype=torch.float32)
+
+    updated = task._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+    assert updated[0, :, 0, 0, 0].tolist() == expected
+
+
 # ── OffsetForecaster: _convert_and_validate ───────────────────────────────────
 
 
