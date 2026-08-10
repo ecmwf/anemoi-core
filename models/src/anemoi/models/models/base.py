@@ -308,6 +308,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -329,6 +330,9 @@ class BaseGraphModel(nn.Module):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional arguments.
 
@@ -364,10 +368,18 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            if spatial_pre_processors:
+                for dataset_name in dataset_names:
+                    if dataset_name in spatial_pre_processors:
+                        x[dataset_name] = spatial_pre_processors[dataset_name](
+                            x[dataset_name],
+                            model_comm_group=model_comm_group,
+                            grid_shard_sizes=(grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None),
+                        )
+
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
-
-            # Perform forward pass
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
