@@ -51,9 +51,9 @@ class OffsetForecasterSchema(BaseModel):
 
     target_: Literal["anemoi.training.tasks.OffsetForecaster"] = Field(..., alias="_target_")
     "Task class path for the offset-based forecasting task."
-    input_offsets: list[str] = Field(example=["-6H", "0H"])
+    input_offsets: list[str] = Field(example=["-6H", "0H"], min_length=1)
     "Input time offsets as duration strings."
-    output_offsets: list[str] = Field(example=["6H"])
+    output_offsets: list[str] = Field(example=["6H"], min_length=1)
     "Output time offsets as duration strings."
     rollout_shift: str = Field(default="default", example="6H")
     "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
