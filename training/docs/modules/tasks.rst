@@ -145,14 +145,17 @@ experimental generalisation of
 sample directly through time offsets, i.e. times relative to the forecast initialisation time:
 
 - ``input_offsets`` — input time offsets as frequency strings, e.g.
-  ``["-6H", "0H"]``.
-- ``output_offsets`` — target time offsets as frequency strings, e.g. ``["6H"]``.
+  ``["-1H", "-30m", "0m"]``.
+- ``output_offsets`` — target time offsets as frequency strings, e.g. ``["30M",  "1h"]``.
 
 - ``rollout`` / ``validation_rollout`` — as for
   :class:`~anemoi.training.tasks.forecasting.Forecaster`.
 
+Examples
+========
+
 Basic forecaster
-================
+----------------
 
 The standard forecaster (two input steps, one output step, ``6H``
 timestep) written with offsets:
@@ -163,9 +166,13 @@ timestep) written with offsets:
     _target_: anemoi.training.tasks.OffsetForecaster
     input_offsets: ["-6H", "0H"]
     output_offsets: ["6H"]
+    rollout:
+      start: 1
+      epoch_increment: 0
+      maximum: 1
 
 Mixed input/output frequencies
-==============================
+------------------------------
 
 Read two 6-hourly steps and predict the next six hours at 1-hourly
 resolution:
@@ -176,6 +183,10 @@ resolution:
     _target_: anemoi.training.tasks.OffsetForecaster
     input_offsets: ["-6H", "0H"]
     output_offsets: ["1H", "2H", "3H", "4H", "5H", "6H"]
+    rollout:
+      start: 1
+      epoch_increment: 1
+      maximum: 6
 
 The rollout shift
 =================
