@@ -62,7 +62,6 @@ class RolloutConfig:
 class BaseForecaster(BaseTask):
     """Abstract forecasting task implementation.
 
-    Actual implementations should inherit from this class.
     For rollout training, training offsets extend up to the current
     ``rollout.step`` so the dataloader only loads the required time
     steps. ``rollout.step`` grows via ``on_train_epoch_end``.
