@@ -142,7 +142,7 @@ Rollout behavior:
 :class:`~anemoi.training.tasks.forecasting.OffsetForecaster` is an
 experimental generalization of
 :class:`~anemoi.training.tasks.forecasting.Forecaster` that declares the
-sample directly through time offsets, i.e. times relative to the start of the forecast:
+sample directly through time offsets, i.e. times relative to the forecast initialisation time:
 
 - ``input_offsets`` — input time offsets as frequency strings, e.g.
   ``["-6H", "0H"]``.
