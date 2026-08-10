@@ -25,7 +25,9 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.models.data.views import FlatView
     from anemoi.models.models.base import BaseGraphModel
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -86,7 +88,7 @@ class DecodingTargetFeature(ABC):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -96,7 +98,7 @@ class DecodingTargetFeature(ABC):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -118,7 +120,7 @@ class DecodingTargetFeature(ABC):
 class CoordinatesFeature(DecodingTargetFeature):
     """Sin/cos encoded lat-lon coordinates."""
 
-    needs_sharding = True
+    needs_sharding = False
 
     @cached_property
     def dim(self) -> int:
@@ -128,12 +130,11 @@ class CoordinatesFeature(DecodingTargetFeature):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
-        target = x_target.flatten()
-        return torch.cat([torch.sin(target.coordinates), torch.cos(target.coordinates)], dim=-1)
+        return torch.cat([torch.sin(x_target.coordinates), torch.cos(x_target.coordinates)], dim=-1)
 
 
 @register_target_feature("forcings")
@@ -160,7 +161,7 @@ class InputForcingsFeature(DecodingTargetFeature):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -194,15 +195,15 @@ class TargetForcingsFeature(DecodingTargetFeature):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
-        assert len(x_target.variables) == self.model.num_input_channels_forcings[dataset_name], (
-            f"Expected {self.model.num_input_channels_forcings[dataset_name]} forcing variables, "
-            f"but got {len(x_target.variables)}."
+        assert x_target.data.shape[-1] == self.dim, (
+            f"Expected flattened target forcing width {self.dim}, "
+            f"but got {x_target.data.shape[-1]}."
         )
-        return x_target.flatten().data
+        return x_target.data
 
 
 @register_target_feature("prognostics")
@@ -229,7 +230,7 @@ class PrognosticsFeature(DecodingTargetFeature):
         self,
         x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -269,9 +270,9 @@ class TrainableParametersFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: Tensor,
+        x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: Tensor | None,
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -306,9 +307,9 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: Tensor,
+        x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: Tensor | None,
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -348,9 +349,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: Tensor,
+        x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: Tensor | None,
+        x_target: "FlatView",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -358,9 +359,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def tensor(
         self,
-        x_input_data: Tensor,
+        x_input_data: "SourceView",
         x_encoded_data: Tensor | None,
-        x_target: Tensor | None,
+        x_target: "FlatView",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -380,23 +381,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
         ]
 
         if len(parts) == 1:
-            target_features = parts[0]
-        else:
-            target_features = torch.cat(parts, dim=-1)
+            return parts[0]
 
-        # Prepare additional target information for the decoder (coordinates and timedeltas)
-        target_flat = x_target.flatten()
-        target_coords = target_flat.coordinates
-        target_timedeltas = target_flat.timedeltas
-        if grid_shard_sizes is not None:
-            target_coords = gather_tensor(target_coords, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
-
-            if target_timedeltas is not None:
-                target_timedeltas = gather_tensor(
-                    target_timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group
-                )
-
-        return target_coords, target_timedeltas, target_features
+        return torch.cat(parts, dim=-1)
 
 
 def create_decoding_target_features(

@@ -579,10 +579,11 @@ class DynamicGraphProvider(BaseGraphProvider):
             raise ValueError("src_batch_sizes and dst_batch_sizes must be provided together.")
         if len(src_batch_sizes) != len(dst_batch_sizes):
             raise ValueError("src_batch_sizes and dst_batch_sizes must contain the same number of samples.")
-        if sum(src_batch_sizes) != src_coords.shape[0]:
-            raise ValueError("src_batch_sizes must sum to the number of source coordinates.")
-        if sum(dst_batch_sizes) != dst_coords.shape[0]:
-            raise ValueError("dst_batch_sizes must sum to the number of destination coordinates.")
+        # these checks don't work with sharding since coords may be gathered:
+        # if sum(src_batch_sizes) != src_coords.shape[0]:
+        #     raise ValueError("src_batch_sizes must sum to the number of source coordinates.")
+        # if sum(dst_batch_sizes) != dst_coords.shape[0]:
+        #     raise ValueError("dst_batch_sizes must sum to the number of destination coordinates.")
 
         edge_attrs = []
         edge_indices = []
