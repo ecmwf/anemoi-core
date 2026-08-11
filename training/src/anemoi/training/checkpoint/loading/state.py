@@ -7,7 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Training state dataclass for checkpoint loading."""
+"""Training state dataclass for checkpoint loading.
+
+``TrainingState`` is an observational record of training progress (epoch,
+global step, best metric, metric history) extracted from a checkpoint and
+surfaced on :attr:`CheckpointContext.metadata` for inspection and tooling.
+
+It does **not** drive the resume: under the single-owner design the live
+optimizer / scheduler / fit-loop restore is owned by Lightning's ``ckpt_path``
+at ``trainer.fit()`` (see :class:`WarmStartLoader`). This type exists so that
+the extracted state is observable and mutable on the context — callers that
+build their own pipeline outside the trainer can read or adjust it — without
+re-introducing a second writer to the live training state.
+"""
 
 from __future__ import annotations
 

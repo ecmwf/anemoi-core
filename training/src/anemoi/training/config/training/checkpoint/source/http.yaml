@@ -1,0 +1,5 @@
+# Checkpoint source — download a checkpoint over HTTP(S). Set `url` to the
+# checkpoint location; optionally set `expected_checksum` (sha256) to verify
+# integrity after download.
+_target_: anemoi.training.checkpoint.sources.http.HTTPSource
+url: https://host.example/path/to/checkpoint.ckpt

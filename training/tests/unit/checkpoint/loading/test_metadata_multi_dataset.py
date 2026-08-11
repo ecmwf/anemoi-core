@@ -13,8 +13,9 @@ PR #998 review (Ana): production code at
 ``anemoi.training.train.tasks.base.AnemoiLightningModule.on_load_checkpoint``
 builds ``_ckpt_model_name_to_index`` as a dict keyed by dataset name
 because ``hyper_parameters["data_indices"]`` is now
-``dict[str, IndexCollection]``. The pipeline must handle both that shape
-and the legacy single-IndexCollection shape.
+``dict[str, IndexCollection]``. The pipeline handles that shape and rejects
+the legacy single-IndexCollection shape with a clear error pointing at the
+checkpoint migration path.
 """
 
 from __future__ import annotations
@@ -59,8 +60,13 @@ async def test_multi_dataset_data_indices_builds_dataset_keyed_dict() -> None:
 
 
 @pytest.mark.asyncio
-async def test_single_dataset_legacy_shape_still_works() -> None:
-    """Legacy single-IndexCollection shape produces a flat name_to_index attribute."""
+async def test_single_dataset_legacy_shape_raises() -> None:
+    """Legacy single-IndexCollection shape is rejected.
+
+    The current loaders require the dataset-keyed dict, so an old single-dataset
+    checkpoint raises ``TypeError`` pointing at the migration path; it must be
+    upgraded before loading.
+    """
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
@@ -69,9 +75,8 @@ async def test_single_dataset_legacy_shape_still_works() -> None:
     model = _Model()
 
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    await WeightsOnlyLoader().process(context)
-
-    assert model._ckpt_model_name_to_index == name_to_index
+    with pytest.raises(TypeError, match="migration sync"):
+        await WeightsOnlyLoader().process(context)
 
 
 @pytest.mark.asyncio

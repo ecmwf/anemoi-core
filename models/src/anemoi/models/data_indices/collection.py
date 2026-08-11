@@ -76,7 +76,10 @@ class IndexCollection:
             )
         }
         self.data = DataIndex(
-            diagnostic=self.diagnostic, forcing=self.forcing, target=self.target, name_to_index=self.name_to_index
+            diagnostic=self.diagnostic,
+            forcing=self.forcing,
+            target=self.target,
+            name_to_index=self.name_to_index,
         )
         self.model = ModelIndex(
             diagnostic=self.diagnostic,
@@ -131,18 +134,36 @@ class IndexCollection:
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))
 
-    def compare_variables(self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
+    def compare_variables(
+        self,
+        ckpt_name_to_index: dict[str, int],
+        data_name_to_index: dict[str, int],
+        *,
+        allow_subset: bool = False,
+    ) -> None:
         """Compare the order of the variables in the model from checkpoint and the data.
 
         Parameters
         ----------
+        ckpt_name_to_index : dict[str, int]
+            The dictionary mapping variable names to their indices in the checkpoint/model.
         data_name_to_index : dict[str, int]
             The dictionary mapping variable names to their indices in the data.
+        allow_subset : bool, optional
+            When True, tolerate the current data being a strict subset of the checkpoint's
+            variables (fine-tuning into a model with FEWER variables, e.g. issue #838), as
+            long as the shared variables keep the same relative order. The dropped variables
+            are logged and the check passes instead of raising: the variable-dependent
+            encoder/decoder layers are re-initialised for the reduced set by the loading
+            strategy, so their checkpoint ordering does not need to match. Default False
+            preserves the strict behaviour used by the sanity checks and normal training.
 
         Raises
         ------
         ValueError
-            If the variable order in the model and data is verifiably different.
+            If the variable order in the model and data is verifiably different. When
+            allow_subset is True this is still raised if the current data introduces new
+            variables or reorders the shared ones.
         """
         if ckpt_name_to_index is None:
             LOGGER.info("No variable order to compare. Skipping variable order check.")
@@ -181,6 +202,26 @@ class IndexCollection:
             LOGGER.warning("Variables only in model: %s", only_in_model)
         if only_in_data:
             LOGGER.warning("Variables only in data: %s", only_in_data)
+
+        # Fine-tuning into a model with FEWER variables (issue #838): the current data is a
+        # strict subset of the checkpoint's variables. This is a legitimate reduction as long
+        # as the shared variables keep the same relative order, because the loading strategy
+        # re-initialises the variable-dependent layers for the reduced set. Their absolute
+        # indices are allowed to shift (removing variables re-indexes the survivors).
+        if allow_subset and keys2 and not only_in_data:
+            ckpt_order = sorted(common_keys, key=ckpt_name_to_index.__getitem__)
+            data_order = sorted(common_keys, key=data_name_to_index.__getitem__)
+            if ckpt_order == data_order:
+                LOGGER.warning(
+                    "Continuing with a reduced variable set (allow_subset=True): %d of %d "
+                    "checkpoint variables are absent from the current data and will be "
+                    "re-initialised: %s",
+                    len(only_in_model),
+                    len(keys1),
+                    sorted(only_in_model),
+                )
+                return
+
         if set(only_in_model.values()) == set(only_in_data.values()):
             # This checks if the order is the same, but the naming is different. This is not be treated as an error.
             LOGGER.warning(
@@ -207,5 +248,13 @@ class IndexCollection:
             raise ValueError(error_msg)
 
 
-for cls in [BaseTensorIndex, InputTensorIndex, OutputTensorIndex, BaseIndex, DataIndex, ModelIndex, IndexCollection]:
+for cls in [
+    BaseTensorIndex,
+    InputTensorIndex,
+    OutputTensorIndex,
+    BaseIndex,
+    DataIndex,
+    ModelIndex,
+    IndexCollection,
+]:
     yaml.add_representer(cls, cls.representer)

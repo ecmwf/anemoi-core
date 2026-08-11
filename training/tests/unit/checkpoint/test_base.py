@@ -9,6 +9,7 @@
 
 """Tests for checkpoint base classes."""
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -232,3 +233,16 @@ class TestPipelineStage:
         assert result.metadata["modified"] is True
         assert result.checkpoint_path == Path("/modified/path.pt")
         assert context == result  # Should be same object
+
+
+def test_context_construction_emits_no_consistency_warning(caplog: pytest.LogCaptureFixture) -> None:
+    """Structural-coherence checks moved to validation.validate_pipeline_health.
+
+    Constructing a context with an optimizer but no model used to emit a warning
+    from __post_init__; that duplicated check was removed, so construction is silent.
+    """
+    optimizer = torch.optim.SGD(SimpleModel().parameters(), lr=0.1)
+    with caplog.at_level(logging.WARNING):
+        context = CheckpointContext(optimizer=optimizer)
+        context.model = None
+    assert not [record for record in caplog.records if "ptimizer" in record.getMessage()]
