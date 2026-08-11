@@ -330,18 +330,26 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        x_target_flat: "FlatView" = x_target.flatten()
+        grid_shard_sizes = x_target_flat.shard_sizes
 
         target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
-        target_coords, target_timedeltas, x_target_latent = target_features.tensor(
+        x_target_latent = target_features.tensor(
             x_input_data,
             x_encoded_data,
-            x_target,
+            x_target_flat,
             batch_size=batch_size,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
         )
+
+        target_coords = x_target_flat.coordinates
+        target_timedeltas = x_target_flat.timedeltas
+        if grid_shard_sizes is not None:
+            target_coords = gather_tensor(target_coords, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
+            if target_timedeltas is not None:
+                target_timedeltas = gather_tensor(target_timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
 
         # Fail fast with a clear message if the decoder destination features do not line up with the
         # target nodes. Only valid when unsharded (under sharding the composite gathers
