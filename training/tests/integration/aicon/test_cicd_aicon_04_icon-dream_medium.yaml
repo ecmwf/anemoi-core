@@ -173,7 +173,7 @@ model:
   encoders:
     0:
       source_datasets: [ "data" ]
-      dataset_fusing_strategy: "not_supported"
+      dataset_fusing_strategy: "none"
       mapper:
         _target_: anemoi.models.layers.mapper.GNNForwardMapper
         num_channels: ${model.num_channels}

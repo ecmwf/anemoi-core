@@ -42,9 +42,17 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
-# Encoder dataset-fusing strategies currently implemented. Extend as new strategies
-# (e.g. "concat_channels", "concat_grids", "sequential") are added.
-SUPPORTED_FUSING_STRATEGIES = {"not_supported"}
+# Encoder dataset-fusing strategies currently implemented.
+# - "none": no fusion. The natural choice for a single-source encoder; several source datasets
+#   are only accepted if they share an input dimension, and each is encoded independently.
+# - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
+#   latents are combined by the latent aggregator.
+# - "joint": a single encoder pass over the union of all source nodes.
+SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
+
+# Strategies for which per-dataset "thin" source projections are built, so that source
+# datasets of differing feature widths (channel counts) can share one encoder.
+PROJECTING_FUSING_STRATEGIES = {"sequential", "joint"}
 
 
 def split_graph_config(
@@ -200,9 +208,13 @@ class BaseGraphModel(nn.Module):
         self.encoder2datasets: dict[str, list[str]] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
         for encoder_name, encoder_config in encoders_config.items():
-            datasets_to_encode = encoder_config["source_datasets"]
+            datasets_to_encode = list(encoder_config["source_datasets"])
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
+                assert d not in self.dataset2encoder, (
+                    f"Dataset '{d}' is claimed by encoders '{self.dataset2encoder[d]}' and "
+                    f"'{encoder_name}'. Each dataset must be encoded by exactly one encoder."
+                )
                 self.dataset2encoder[d] = encoder_name
             self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
 
@@ -243,6 +255,31 @@ class BaseGraphModel(nn.Module):
                 raise ValueError(
                     f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
                     + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
+                )
+
+            source_datasets = self.encoder2datasets[encoder_name]
+            if len(source_datasets) == 1:
+                continue
+
+            if fusing_strategy == "joint":
+                # Gridded and tabular sources disagree on the destination index space: tabular
+                # sources are encoded against a batch-repeated hidden node set, gridded ones
+                # against the plain hidden nodes. They cannot share one joint encoder pass.
+                static_flags = {d: self.is_dataset_static[d] for d in source_datasets}
+                if len(set(static_flags.values())) > 1:
+                    raise ValueError(
+                        f"Encoder '{encoder_name}' fuses gridded and non-gridded datasets jointly "
+                        f"({static_flags}), which is not supported because they use different "
+                        "destination index spaces. Use dataset_fusing_strategy: 'sequential' instead."
+                    )
+
+                # Joint encoding of several sources needs the merged source index space and edge
+                # fusion, which is not implemented yet. Fail here rather than encoding the sources
+                # one by one, which would silently drop all but the last of them.
+                raise NotImplementedError(
+                    f"Encoder '{encoder_name}' requests dataset_fusing_strategy: 'joint' over "
+                    f"{source_datasets}, which is not implemented yet. "
+                    "Use 'sequential' to encode each source dataset with shared encoder weights."
                 )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices

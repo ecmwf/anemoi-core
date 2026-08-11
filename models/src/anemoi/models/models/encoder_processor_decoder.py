@@ -9,6 +9,7 @@
 
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from typing import Optional
 
@@ -29,6 +30,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
+from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -42,14 +44,24 @@ def latlons_to_sincos(latlon: torch.Tensor) -> torch.Tensor:
     return torch.cat([torch.sin(latlon), torch.cos(latlon)], dim=-1)
 
 
-def sum_dataset_latents(
-    dataset_latents: dict[str, torch.Tensor],
-    hidden_latent: torch.Tensor,
-    num_channels: int,
-) -> torch.Tensor:
-    """Sum encoded dataset contributions, preserving a tensor zero for empty inputs."""
-    zero_latent = hidden_latent.new_zeros((hidden_latent.shape[0], num_channels))
-    return sum(dataset_latents.values(), start=zero_latent)
+@dataclass(frozen=True)
+class EncoderSource:
+    """One source dataset, assembled and paired with its encoder edges.
+
+    Produced by _prepare_encoder_source and consumed by the fusing strategies, so that
+    assembling a source is done identically however it is later encoded.
+    """
+
+    dataset_name: str
+    x_data_latent: Tensor
+    x_skip: Tensor | None
+    coordinates: Tensor
+    batch_sizes: tuple[int, ...] | None
+    shard_sizes: ShardSizes
+    edge_attr: Tensor
+    edge_index: Tensor
+    edge_shard_sizes: ShardSizes
+    shard_info: BipartiteGraphShardInfo
 
 
 class AnemoiModelEncProcDec(BaseGraphModel):
@@ -90,6 +102,66 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         features = [attribute.compute(x_flat.timedeltas) for attribute in attribute_builders.values()]
         return torch.cat(features, dim=-1)
 
+    def _encoder_projects_sources(self, encoder_name: str) -> bool:
+        """Whether this encoder maps its source datasets through per-dataset projections.
+
+        Only multi-source encoders using a real fusing strategy do; single-source encoders keep
+        feeding the mapper their assembled input directly, so their weights are unchanged.
+        """
+        return (
+            len(self.encoder2datasets[encoder_name]) > 1
+            and self.encoder_fusing_strategy[encoder_name] in PROJECTING_FUSING_STRATEGIES
+        )
+
+    def _project_source(self, encoder_name: str, dataset_name: str, x_data_latent: Tensor) -> Tensor:
+        """Apply this encoder's thin projection for one source dataset, if it has one."""
+        if encoder_name not in self.encoder_src_projection:
+            return x_data_latent
+        return self.encoder_src_projection[encoder_name][dataset_name](x_data_latent)
+
+    def _build_encoders(self, model_config: DotDict) -> None:
+        """Instantiate one mapper per encoder, plus thin source projections where needed.
+
+        Requires self.encoder_graph_provider to be populated, since an encoder's edge
+        dimension comes from its source datasets' graph providers.
+        """
+        self.encoder = torch.nn.ModuleDict()
+        # Per-dataset "thin" projections onto a shared width, for multi-source encoders whose
+        # source datasets differ in input dimension. Keyed [encoder_name][dataset_name].
+        self.encoder_src_projection = torch.nn.ModuleDict()
+
+        for encoder_name, encoder_config in model_config.encoders.items():
+            in_dims = {d: self.input_dim[d] for d in self.encoder2datasets[encoder_name]}
+            edge_dims = {d: self.encoder_graph_provider[d].edge_dim for d in self.encoder2datasets[encoder_name]}
+            assert (
+                len(set(edge_dims.values())) == 1
+            ), f"All datasets for encoder {encoder_name} must have the same edge dimension, but got {edge_dims}."
+
+            projects = self._encoder_projects_sources(encoder_name)
+            if projects:
+                in_channels_src = encoder_config.get("fusion_projection_dim") or max(in_dims.values())
+            else:
+                assert len(set(in_dims.values())) == 1, (
+                    f"All datasets for encoder {encoder_name} must have the same input dimension, "
+                    f"but got {in_dims}. Set dataset_fusing_strategy to 'sequential' or 'joint' to "
+                    "fuse datasets of differing widths through per-dataset projections."
+                )
+                in_channels_src = next(iter(in_dims.values()))
+
+            self.encoder[encoder_name] = instantiate(
+                encoder_config.mapper,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=in_channels_src,
+                in_channels_dst=self.input_dim_latent,
+                edge_dim=next(iter(edge_dims.values())),
+            )
+
+            if projects:
+                Linear = self.encoder[encoder_name].layer_factory.Linear
+                self.encoder_src_projection[encoder_name] = torch.nn.ModuleDict(
+                    {d: Linear(dim, in_channels_src) for d, dim in in_dims.items()}
+                )
+
     def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -113,21 +185,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
 
-        self.encoder = torch.nn.ModuleDict()
-        for encoder_name, encoder_config in model_config.encoders.items():
-            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
-            assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
-                f"All datasets for encoder {encoder_name} must have the same input dimension, "
-                f"but got {encoder_in_channels_src}."
-            )
-
-            self.encoder[encoder_name] = instantiate(
-                encoder_config.mapper,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=encoder_in_channels_src[0],
-                in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
-            )
+        self._build_encoders(model_config)
 
         # Latent aggregator: combines encoder outputs before the processor
         self.latent_aggregator = instantiate(
@@ -355,6 +413,115 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group.size() == 1 or ensemble_size == 1
             ), "Ensemble size per device must be 1 when model is sharded across GPUs"
 
+    def _prepare_encoder_source(
+        self,
+        x: "SourceView",
+        *,
+        dataset_name: str,
+        batch_size: int,
+        hidden_coordinates: Tensor,
+        hidden_coordinates_batched: Tensor,
+        hidden_batch_sizes: tuple[int, ...],
+        shard_sizes_hidden: ShardSizes,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> EncoderSource | None:
+        """Assemble one source dataset and its encoder edges.
+
+        Returns ``None`` when the dataset contributes no nodes to this batch, in which case the
+        caller skips it entirely (no skip connection, no latent).
+        """
+        data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = self._assemble_input(
+            x,
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+            dataset_name=dataset_name,
+        )
+        if data_coords.shape[0] == 0:
+            return None
+
+        graph_batch_kwargs = (
+            {"src_batch_sizes": data_batch_sizes, "dst_batch_sizes": hidden_batch_sizes}
+            if data_batch_sizes is not None
+            else {}
+        )
+        edge_attr, edge_index, edge_shard_sizes = self.encoder_graph_provider[dataset_name].get_edges(
+            batch_size=batch_size,
+            src_coords=data_coords,
+            dst_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
+            src_timedeltas=data_timedeltas,
+            model_comm_group=model_comm_group,
+            **graph_batch_kwargs,
+        )
+        edge_attr = edge_attr.to(device=x_data_latent.device, dtype=x_data_latent.dtype)
+        edge_index = edge_index.to(x_data_latent.device)
+        assert edge_index.shape[1] == edge_attr.shape[0], (
+            f"Encoder edge_index shape {list(edge_index.shape)} does not match "
+            f"edge_attr shape {list(edge_attr.shape)} for dataset {dataset_name}."
+        )
+
+        return EncoderSource(
+            dataset_name=dataset_name,
+            x_data_latent=x_data_latent,
+            x_skip=x_skip,
+            coordinates=data_coords,
+            batch_sizes=data_batch_sizes,
+            shard_sizes=shard_sizes_data,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            edge_shard_sizes=edge_shard_sizes,
+            shard_info=BipartiteGraphShardInfo(
+                src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
+                dst_nodes=shard_sizes_hidden,
+                edges=edge_shard_sizes,
+            ),
+        )
+
+    def _encode_sources(
+        self,
+        encoder_name: str,
+        sources: list[EncoderSource],
+        *,
+        x_hidden_latent: Tensor,
+        x_data_latent_dict: dict[str, Tensor],
+        batch_size: int,
+        model_comm_group: ProcessGroup | None = None,
+    ) -> dict[str, Tensor]:
+        """Encode one encoder's source datasets, returning its latents keyed by latent key.
+
+        With ``sequential`` (and with ``none``) every source dataset gets its own
+        pass through the shared encoder against the same unmodified hidden latent, and yields its
+        own latent; the latent aggregator combines them.
+        """
+        projects = self._encoder_projects_sources(encoder_name)
+        latents: dict[str, Tensor] = {}
+
+        for source in sources:
+            x_src = self._project_source(encoder_name, source.dataset_name, source.x_data_latent)
+            x_data_latent, x_latent = self.encoder[encoder_name](
+                (x_src, x_hidden_latent),
+                batch_size=batch_size,
+                shard_info=source.shard_info,
+                edge_attr=source.edge_attr,
+                edge_index=source.edge_index,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
+            )
+            # Decoder target features expect the *assembled* (pre-projection) width, so a
+            # projecting encoder reports its input rather than the mapper's src passthrough.
+            x_data_latent_dict[source.dataset_name] = source.x_data_latent if projects else x_data_latent
+            latents[self._latent_key(encoder_name, source.dataset_name)] = x_latent
+
+        return latents
+
+    def _aggregate_latents(self, dataset_latents: dict[str, Tensor], x_hidden_latent: Tensor) -> Tensor:
+        """Combine per-encoder latents into the processor input."""
+        if not dataset_latents:
+            # Every source dataset was empty in this batch: hand the processor a zero latent
+            # rather than an empty aggregation.
+            return x_hidden_latent.new_zeros((x_hidden_latent.shape[0], self.latent_aggregator.hidden_dim))
+
+        return self.latent_aggregator(dataset_latents)
+
     def forward(
         self,
         batch: Batch,
@@ -391,7 +558,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
-        # Process each dataset through its corresponding encoder
+        # Latents produced by the encoders, keyed by latent key (dataset name today; a joint
+        # encoder will contribute a single entry under its own name)
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
@@ -411,68 +579,46 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
-        for dataset_name in dataset_names:
-            if dataset_name not in self.input_datasets:
+        # Encoders are iterated in config order, and their source datasets in the order listed
+        # under `source_datasets`, so the fusing order is the one the user wrote down.
+        for encoder_name, source_datasets in self.encoder2datasets.items():
+            sources = []
+            for dataset_name in source_datasets:
+                if dataset_name not in batch:
+                    continue
+
+                source = self._prepare_encoder_source(
+                    batch[dataset_name],
+                    dataset_name=dataset_name,
+                    batch_size=batch_size,
+                    hidden_coordinates=hidden_coordinates,
+                    hidden_coordinates_batched=hidden_coordinates_batched,
+                    hidden_batch_sizes=hidden_batch_sizes,
+                    shard_sizes_hidden=shard_sizes_hidden,
+                    model_comm_group=model_comm_group,
+                )
+                if source is None:  # no data points for this dataset in this batch
+                    continue
+
+                x_skip_dict[dataset_name] = source.x_skip
+                sources.append(source)
+
+            if not sources:
                 continue
 
-            data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = (
-                self._assemble_input(
-                    batch[dataset_name],
+            dataset_latents.update(
+                self._encode_sources(
+                    encoder_name,
+                    sources,
+                    x_hidden_latent=x_hidden_latent,
+                    x_data_latent_dict=x_data_latent_dict,
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
-                    dataset_name=dataset_name,
                 )
             )
-            if data_coords.shape[0] == 0:
-                continue
 
-            x_skip_dict[dataset_name] = x_skip
-
-            graph_batch_kwargs = (
-                {"src_batch_sizes": data_batch_sizes, "dst_batch_sizes": hidden_batch_sizes}
-                if data_batch_sizes is not None
-                else {}
-            )
-            encoder_edge_attr, encoder_edge_index, enc_edge_shard_sizes = self.encoder_graph_provider[
-                dataset_name
-            ].get_edges(
-                batch_size=batch_size,
-                src_coords=data_coords,
-                dst_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
-                src_timedeltas=data_timedeltas,
-                model_comm_group=model_comm_group,
-                **graph_batch_kwargs,
-            )
-            encoder_edge_attr = encoder_edge_attr.to(device=x_data_latent.device, dtype=x_data_latent.dtype)
-            encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
-            assert encoder_edge_index.shape[1] == encoder_edge_attr.shape[0], (
-                f"Encoder edge_index shape {list(encoder_edge_index.shape)} does not match "
-                f"edge_attr shape {list(encoder_edge_attr.shape)} for dataset {dataset_name}."
-            )
-
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
-                dst_nodes=shard_sizes_hidden,
-                edges=enc_edge_shard_sizes,
-            )
-
-            # Encoder for this dataset
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_latent, x_latent = self.encoder[encoder_name](
-                (x_data_latent, x_hidden_latent),
-                batch_size=batch_size,
-                shard_info=enc_shard_info,
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-            x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
-
-        # Combine all dataset latents
-        # x_latent = sum_dataset_latents(dataset_latents, x_hidden_latent, self.num_channels)
-        x_latent = self.latent_aggregator(dataset_latents)
+        # Combine all encoded latents
+        x_latent = self._aggregate_latents(dataset_latents, x_hidden_latent)
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
@@ -575,10 +721,23 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         return output
 
+    def _latent_key(self, encoder_name: str, dataset_name: str) -> str:
+        """Key under which one encoded latent is handed to the latent aggregator.
+
+        Strategies that encode each source dataset separately contribute one latent per dataset
+        and so key by dataset name. ``joint`` encodes all its sources in a single pass and
+        contributes one already-fused latent, keyed by the encoder name.
+        """
+        if self.encoder_fusing_strategy[encoder_name] == "joint":
+            return encoder_name
+        return dataset_name
+
     def _get_latent_aggregator_channels(self) -> dict[str, int]:
-        """Return encoder output widths by dataset."""
+        """Return encoder output widths by latent key."""
         return {
-            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            self._latent_key(self.dataset2encoder[dataset_name], dataset_name): self.encoder[
+                self.dataset2encoder[dataset_name]
+            ].hidden_dim
             for dataset_name in self.input_datasets
         }
 

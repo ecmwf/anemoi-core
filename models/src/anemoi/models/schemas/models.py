@@ -253,8 +253,23 @@ class EncodersSchema(BaseModel):
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
-    "Dataset fusing strategy. Default to 'not_supported'."
+    dataset_fusing_strategy: Literal["none", "sequential", "joint"] = Field(default="none")
+    """How several source datasets are combined by this encoder.
+
+    - 'none' (default): no fusion. The natural choice for a single-source encoder; with several
+      source datasets each is encoded separately and they must share an input dimension.
+    - 'sequential': one encoder pass per source dataset, in the order listed in
+      ``source_datasets``, with shared encoder weights. The resulting latents are combined
+      by the latent aggregator.
+    - 'joint': a single encoder pass over the union of all source nodes, so each hidden node
+      attends to every source dataset at once.
+    """
+    fusion_projection_dim: Optional[PositiveInt] = Field(default=None)
+    """Width the per-dataset 'thin' source projections map to, for multi-source encoders.
+
+    Only used when ``source_datasets`` has more than one entry and the fusing strategy is
+    'sequential' or 'joint'. Defaults to the widest source dataset's input dimension.
+    """
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
