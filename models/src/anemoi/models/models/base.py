@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from collections import defaultdict
 from typing import Optional
 
 import torch
@@ -157,12 +156,6 @@ class BaseGraphModel(nn.Module):
         )
         self.node_attributes = NodeTrainableParameters(trainable_parameters, self._graph_data)
 
-        # HACK: returns True for "data" and "grid" labels, False for everything else (obs)
-        # TODO: this info should come through the config, not be hardcoded here.
-        # The model should not know about the dataset names.
-        self.use_encoder_data_output = defaultdict(
-            bool, {"data": True, "grid": True, "era5": True, "cerra": True, "operan": True}
-        )
         self.dynamic_node_attributes: dict[str, dict[str, object]] = {}
         self.dynamic_node_attribute_dims: dict[str, int] = {}
 
@@ -211,10 +204,13 @@ class BaseGraphModel(nn.Module):
             datasets_to_encode = list(encoder_config["source_datasets"])
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
-                assert d not in self.dataset2encoder, (
-                    f"Dataset '{d}' is claimed by encoders '{self.dataset2encoder[d]}' and "
-                    f"'{encoder_name}'. Each dataset must be encoded by exactly one encoder."
-                )
+                if d in self.dataset2encoder:
+                    raise ValueError(
+                        f"Dataset '{d}' is listed under source_datasets of both encoder "
+                        f"'{self.dataset2encoder[d]}' and encoder '{encoder_name}'. Each dataset must "
+                        "be encoded by exactly one encoder; list it once, and use "
+                        "dataset_fusing_strategy to control how that encoder combines its sources."
+                    )
                 self.dataset2encoder[d] = encoder_name
             self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
 
@@ -272,15 +268,6 @@ class BaseGraphModel(nn.Module):
                         f"({static_flags}), which is not supported because they use different "
                         "destination index spaces. Use dataset_fusing_strategy: 'sequential' instead."
                     )
-
-                # Joint encoding of several sources needs the merged source index space and edge
-                # fusion, which is not implemented yet. Fail here rather than encoding the sources
-                # one by one, which would silently drop all but the last of them.
-                raise NotImplementedError(
-                    f"Encoder '{encoder_name}' requests dataset_fusing_strategy: 'joint' over "
-                    f"{source_datasets}, which is not implemented yet. "
-                    "Use 'sequential' to encode each source dataset with shared encoder weights."
-                )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():

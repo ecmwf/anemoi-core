@@ -200,8 +200,7 @@ class TargetForcingsFeature(DecodingTargetFeature):
         dataset_name: str,
     ) -> Tensor:
         assert x_target.data.shape[-1] == self.dim, (
-            f"Expected flattened target forcing width {self.dim}, "
-            f"but got {x_target.data.shape[-1]}."
+            f"Expected flattened target forcing width {self.dim}, " f"but got {x_target.data.shape[-1]}."
         )
         return x_target.data
 
