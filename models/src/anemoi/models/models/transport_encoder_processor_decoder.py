@@ -1121,7 +1121,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         ------
         ValueError
             If ``training.transport.encoder_decoder_roles`` is not configured, or
-            if the same target dataset appears in more than one triple.
+            if the same target dataset appears in more than one triple, or if
+            the set of prognostic variables in any target does not match its
+            reference dataset exactly (see :meth:`_validate_prognostics_match`).
         """
         enc_dec_roles = model_config.get("training", {}).get("transport", {}).get("encoder_decoder_roles", None) or {}
         if not enc_dec_roles:
@@ -1155,6 +1157,62 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         # Convenience alias used by forward paths that are not yet generalized
         # to multiple targets (e.g. ``_forward_transport_network``).
         self.target_dataset_name: str = self.target_dataset_names[0]
+
+        # Fail fast on residual-baseline misconfiguration: every target prognostic
+        # variable must also be prognostic in its reference dataset.
+        self._validate_prognostics_match()
+
+    def _validate_prognostics_match(self) -> None:
+        """Require the set of prognostic variables in the target and its reference to match exactly.
+
+        Residual prediction pairs each prognostic channel of the target with a
+        column of the same name in the reference tensor.  If the two sets of
+        prognostic variable names differ, the residual math is semantically
+        undefined either because:
+
+        * the target has a prognostic variable with no reference baseline
+          (present as forcing in the reference, or missing altogether), or
+        * the reference has a prognostic variable that the target does not
+          predict as prognostic (its baseline is ignored, likely a config
+          mistake).
+
+        The check applies only to the reference dataset of each role triple;
+        the conditioning dataset is unconstrained.
+
+        Users hitting this error should either:
+
+        * make the prognostic variable sets match on both sides, or
+        * mark the offending target variable as diagnostic (direct prediction
+          — bypasses the residual baseline).
+
+        Raises
+        ------
+        ValueError
+            If the target's prognostic variable set does not match the
+            reference dataset's prognostic variable set.
+        """
+        errors: list[str] = []
+        for target_name, role in self._roles_by_target.items():
+            reference_name = role["reference"]
+            target_prognostic_names = set(self.data_indices[target_name].prognostic)
+            reference_prognostic_names = set(self.data_indices[reference_name].prognostic)
+            if target_prognostic_names == reference_prognostic_names:
+                continue
+
+            only_in_target = sorted(target_prognostic_names - reference_prognostic_names)
+            only_in_reference = sorted(reference_prognostic_names - target_prognostic_names)
+            errors.append(
+                f"target '{target_name}' vs reference '{reference_name}': prognostic variable "
+                f"sets differ (only in target: {only_in_target}; only in reference: "
+                f"{only_in_reference}).",
+            )
+        if errors:
+            bullets = "\n  - ".join(errors)
+            msg = (
+                "encoder_decoder_roles: residual prediction requires the set of prognostic "
+                "variables in each target dataset to match its reference dataset exactly:\n  - " + bullets
+            )
+            raise ValueError(msg)
 
     # ── dimension arithmetic ─────────────────────────────────────────────────
 
@@ -1267,6 +1325,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         name, so the two datasets only need to agree on the *names* of the
         prognostic variables — not on their positions.
 
+        ``_resolve_roles`` has already verified via
+        :meth:`_validate_prognostics_match` that every target prognostic
+        variable exists as a prognostic column in its reference dataset, so no
+        missing-name check is needed here.
+
         Parameters
         ----------
         target_dataset_name : str
@@ -1285,24 +1348,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             output of the target dataset, in the same order as
             ``self.data_indices[target_dataset_name].prognostic`` (which also
             matches the order of ``indices.model.output.prognostic``).
-
-        Raises
-        ------
-        KeyError
-            If any target prognostic variable is not present in the reference
-            dataset's ``name_to_index``.
         """
         reference_variable_name_to_column_index = reference_variable_name_to_column_index_by_target[target_dataset_name]
         target_prognostic_names = self.data_indices[target_dataset_name].prognostic
-        missing = [name for name in target_prognostic_names if name not in reference_variable_name_to_column_index]
-        if missing:
-            msg = (
-                f"Target dataset '{target_dataset_name}' has prognostic variables not found in its "
-                f"reference dataset's name_to_index: {missing} "
-                f"(available: {sorted(reference_variable_name_to_column_index)}). "
-                "All prognostic variables in the target must exist in the reference dataset."
-            )
-            raise KeyError(msg)
         return torch.tensor(
             [reference_variable_name_to_column_index[name] for name in target_prognostic_names],
             dtype=torch.long,

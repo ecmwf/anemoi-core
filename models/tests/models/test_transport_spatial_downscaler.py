@@ -48,19 +48,20 @@ def _make_index_collection(
 
 
 def _make_downscaler_indices() -> dict[str, IndexCollection]:
-    """Three datasets: in_lres (forcing-like), in_hres (forcing-like), out_hres (target)."""
-    # in_lres: two variables, both treated as forcing so model.output is empty.
-    in_lres = _make_index_collection(
-        {"t2m": 0, "u10": 1},
-        forcing=["t2m", "u10"],
-    )
-    # in_hres: one forcing variable, model.output empty.
+    """Three datasets: in_lres (reference), in_hres (conditioning), out_hres (target).
+
+    The target's prognostic variables (``t2m``, ``u10``) must also be
+    prognostic in the reference dataset for ``_resolve_roles`` to accept the
+    configuration (see ``_validate_prognostics_match``).
+    """
+    # in_lres: reference dataset — must expose the same variables as prognostic.
+    in_lres = _make_index_collection({"t2m": 0, "u10": 1})
+    # in_hres: conditioning-only; role of ``z`` is unconstrained.
     in_hres = _make_index_collection(
         {"z": 0},
         forcing=["z"],
     )
-    # out_hres: two output variables. No forcing / diagnostic / target overrides:
-    # both variables are prognostic (present in input and output).
+    # out_hres: two output variables, both prognostic (no forcing / diagnostic).
     out_hres = _make_index_collection({"t2m": 0, "u10": 1})
     return {"in_lres": in_lres, "in_hres": in_hres, "out_hres": out_hres}
 
@@ -196,7 +197,11 @@ def test_resolve_roles_allows_multiple_unique_targets() -> None:
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    model.data_indices = _make_downscaler_indices()
+    # Both target datasets must have prognostic variable sets matching the reference.
+    model.data_indices = {
+        **_make_downscaler_indices(),
+        "out_hres_2": _make_index_collection({"t2m": 0, "u10": 1}),
+    }
     model.dataset_names = list(model.data_indices.keys())
     config = {
         "training": {
@@ -411,15 +416,12 @@ def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> Non
 def _make_mixed_downscaler_indices() -> dict[str, IndexCollection]:
     """Target with two prognostic and one diagnostic variable.
 
-    The lres dataset has the two prognostic variables at the same variable
-    indices as the target, matching how spatial downscaling typically pairs
-    lres/hres channels.  The diagnostic variable (``precip``) has no lres
-    counterpart — it is predicted directly as a state.
+    The lres dataset has the two prognostic variables also declared as
+    prognostic, matching how spatial downscaling typically pairs lres/hres
+    channels.  The diagnostic variable (``precip``) has no lres counterpart —
+    it is predicted directly as a state.
     """
-    in_lres = _make_index_collection(
-        {"t2m": 0, "u10": 1},
-        forcing=["t2m", "u10"],
-    )
+    in_lres = _make_index_collection({"t2m": 0, "u10": 1})
     in_hres = _make_index_collection({"z": 0}, forcing=["z"])
     # ``precip`` is diagnostic so it appears in ``model.output.diagnostic``;
     # ``t2m`` and ``u10`` are prognostic (present in input and output).
@@ -763,3 +765,45 @@ def test_resolve_roles_raises_without_encoder_decoder_roles() -> None:
     model.dataset_names = list(model.data_indices.keys())
     with pytest.raises(ValueError, match="encoder_decoder_roles"):
         model._resolve_roles({"training": {"transport": {}}})
+
+
+# ── _resolve_roles: reference/target prognostic role consistency ───────────
+
+
+def _resolve_roles_config(
+    target: str = "out_hres",
+    reference: str = "in_lres",
+    conditioning: str | None = None,
+) -> dict:
+    role: dict[str, str] = {"reference": reference, "target": target}
+    if conditioning is not None:
+        role["conditioning"] = conditioning
+    return {"training": {"transport": {"encoder_decoder_roles": {"enc_dec_0": role}}}}
+
+
+def test_resolve_roles_rejects_target_prognostic_absent_from_reference() -> None:
+    """A target prognostic that does not exist at all in the reference is a config error."""
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    model.data_indices = {
+        "in_lres": _make_index_collection({"u10": 0}),
+        "out_hres": _make_index_collection({"t2m": 0}),
+    }
+    model.dataset_names = list(model.data_indices.keys())
+    with pytest.raises(ValueError, match=r"only in target: \['t2m'\]"):
+        model._resolve_roles(_resolve_roles_config())
+
+
+def test_resolve_roles_rejects_reference_prognostic_absent_from_target() -> None:
+    """A prognostic in the reference that the target does not predict prognostically is also a config error."""
+    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
+        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    )
+    model.data_indices = {
+        "in_lres": _make_index_collection({"t2m": 0, "u10": 1}),  # both prognostic
+        "out_hres": _make_index_collection({"t2m": 0}),  # only t2m
+    }
+    model.dataset_names = list(model.data_indices.keys())
+    with pytest.raises(ValueError, match=r"only in reference: \['u10'\]"):
+        model._resolve_roles(_resolve_roles_config())
