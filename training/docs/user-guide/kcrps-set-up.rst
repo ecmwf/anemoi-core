@@ -6,6 +6,13 @@ This guide is intended for users who want to train an ensemble
 CRPS-based model and are already familiar with the basic training
 configurations.
 
+It focuses on the changes relative to deterministic training. Detailed
+reference material for graph-based truncation, multiscale loss
+configuration, and residual projections lives in
+:ref:`Field Truncation <usage-field_truncation>`,
+:ref:`multiscale-loss-functions`, and
+:ref:`anemoi-models:residual-connections`.
+
 The CRPS training requires the following changes to the deterministic
 training:
 
@@ -47,13 +54,21 @@ training:
    :end-before: num_gpus_per_ensemble:
 
 The `truncation` and `truncation_inv` can be used in the deterministic
-or CRPS training. As described in :ref:`Field Truncation`, it transforms
-the input to the model.
+or CRPS training. As described in :ref:`Field Truncation
+<usage-field_truncation>`, truncation smooths the skipped connection and
+can also be reused for multiscale loss computation.
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
    :start-after: truncation_inv:
    :end-before: # Changes in datamodule
+
+Graph-based truncation is also supported via
+``graph.projections.truncation`` together with
+``model.residual: TruncatedConnection``. The canonical graph-based and
+file-based examples are documented in
+:ref:`Field Truncation <usage-field_truncation>` and
+:ref:`anemoi-models:residual-connections`.
 
 The CRPS training uses a different DDP strategy which requires to
 specify the number of GPUs per ensemble.
@@ -105,29 +120,51 @@ Each ensemble member samples random noise at every time step. The noise
 is embedded and injected into the latent space of the processor using a
 conditional layer norm.
 
-Optionally, noise can be generated on a coarser grid and projected to
-the processor grid using a sparse projection matrix. This is configured
-via the ``noise_matrix`` parameter, which should point to a ``.npz``
-file created with ``anemoi-graphs export_to_sparse`` (see
-:ref:`usage-create_sparse_matrices`). Additional options
-``row_normalize_noise_matrix`` and ``autocast`` control how the
-projection matrix is applied.
+Noise can optionally be projected before conditioning:
+
+- ``noise_matrix`` loads a precomputed sparse matrix from disk.
+- ``noise_edges_name`` points to a graph edge type that maps a custom
+  source node set to the hidden grid.
+
+In the graph-based form, define the source nodes and corresponding
+source-to-hidden edge in the graph config, then point the noise injector
+to that edge:
 
 .. code:: yaml
 
-   layer_kernels:
-      processor:
-         LayerNorm:
-            _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-            normalized_shape: ${model.num_channels}
-            condition_shape: ${model.noise_injector.noise_channels_dim}
-            zero_init: True
-            autocast: false
-         ...
+   graph:
+      nodes:
+         noise:
+            node_builder:
+               _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+               grid: o32
+      edges:
+         - source_name: noise
+           target_name: hidden
+           edge_builders:
+              - _target_: anemoi.graphs.edges.KNNEdges
+                num_nearest_neighbours: 32
+           attributes:
+              gauss_weight:
+                 _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+                 norm: l1
+                 sigma: 0.1
+
+   model:
+      noise_injector:
+         _target_: anemoi.models.layers.ensemble.NoiseConditioning
+         noise_std: 1
+         noise_channels_dim: 4
+         noise_mlp_hidden_dim: 32
+         noise_edges_name: [noise, to, hidden]
+         edge_weight_attribute: gauss_weight
 
 In order to condition the latent space on the noise, we need to use a
 different layer norm in the processor, here the
 :class:`anemoi.models.layers.normalization.ConditionalLayerNorm`.
+See :doc:`anemoi-models:modules/models` for the ensemble model
+architecture and :doc:`anemoi-models:modules/normalization` for the
+normalization layers.
 
 ****************************
  Changes in training config
@@ -171,6 +208,10 @@ function (`Lang et al. (2024b) <https://arxiv.org/abs/2412.15832>`_):
 
 The `alpha` parameter is a trade-off parameter between the CRPS and the
 fair CRPS.
+
+If you want multiscale CRPS training, the reference documentation for
+``MultiscaleLossWrapper`` and the two supported ``loss_matrices_graph``
+forms is in :ref:`multiscale-loss-functions`.
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml

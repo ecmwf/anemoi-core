@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -167,7 +167,13 @@ class AnemoiProfiler(AnemoiTrainer):
             self.to_wandb()
 
         elif self.logger and self.logger.logger_name == "mlflow":
-            self.to_mlflow()
+            if self.config.diagnostics.log.mlflow.offline:
+                # Offline mlflow writes to a throwaway local file store with no server backing it;
+                # logging the profiler reports there has no value and the offline FileStore is only
+                # partially initialised (e.g. missing the .trash folder that log_table scans).
+                LOGGER.info("MLflow is offline; skipping profiler report logging to the local store.")
+            else:
+                self.to_mlflow()
 
     def report(self) -> str:
         """Print report to console."""
@@ -272,10 +278,12 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar["_target_"] = (
-            ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
-        )
         callbacks = super().callbacks
+
+        # Force the profiler's own progress bar.
+        callbacks = [c for c in callbacks if not isinstance(c, pl.callbacks.ProgressBar)]
+        callbacks.append(ProfilerProgressBar())
+
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
@@ -283,7 +291,13 @@ class AnemoiProfiler(AnemoiTrainer):
             available = check_torch_version()
 
             if available:  # if torch is below 2.1.0, the callback will not be added
-                callbacks.append(MemorySnapshotRecorder(self.config))
+                callbacks.append(
+                    MemorySnapshotRecorder(
+                        dirpath=self.config.system.output.profiler,
+                        steps=self.config.diagnostics.benchmark_profiler.snapshot.steps,
+                        warmup=self.config.diagnostics.benchmark_profiler.snapshot.warmup,
+                    ),
+                )
         return callbacks
 
     def get_example_input_array(self) -> dict[str, torch.Tensor]:
@@ -295,7 +309,7 @@ class AnemoiProfiler(AnemoiTrainer):
         for dataset_name in batch:
             example_input_array[dataset_name] = batch[dataset_name][
                 :,
-                0 : self.config.training.multistep_input,
+                0 : self.task.num_input_timesteps,
                 ...,
                 self.data_indices[dataset_name].data.input.full,
             ]
@@ -339,7 +353,7 @@ class AnemoiProfiler(AnemoiTrainer):
         self.export_to_logger()
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def main(config: DictConfig) -> None:
     AnemoiProfiler(config).profile()
 

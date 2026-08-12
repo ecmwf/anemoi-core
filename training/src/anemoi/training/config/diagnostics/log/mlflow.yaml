@@ -9,6 +9,8 @@ mlflow:
   system: False
   terminal: True
   run_name: null # If set to null, the run name will be the a random UUID
+  prefix: '' # Prefix for metric keys logged to MLflow
+  log_hyperparams: True
   on_resume_create_child: True
   expand_hyperparams: # Which keys in hyperparams to expand
     - config

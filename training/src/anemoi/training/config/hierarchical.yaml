@@ -5,7 +5,8 @@ defaults:
 - system: example
 - graph: hierarchical_3level
 - model: graphtransformer
-- training: default
+- task: forecaster
+- training: single
 - _self_
 
 config_validation: True

@@ -56,20 +56,47 @@ class EnsembleProcessGroups(NamedTuple):
     ens_comm_subgroup: Any
 
 
-def create_model_process_groups(model_comm_group_ranks: list[np.ndarray]) -> list[Any]:
+def create_model_process_groups(
+    model_comm_group_ranks: list[np.ndarray],
+    *,
+    use_local_synchronization: bool,
+) -> list[Any]:
     """Create model communication process groups from rank layouts."""
-    return [torch.distributed.new_group(ranks) for ranks in model_comm_group_ranks]
+    return [
+        torch.distributed.new_group(ranks, use_local_synchronization=use_local_synchronization)
+        for ranks in model_comm_group_ranks
+    ]
 
 
-def create_reader_process_groups(reader_group_ranks: np.ndarray) -> list[list[Any]]:
+def create_reader_process_groups(
+    reader_group_ranks: np.ndarray,
+    *,
+    use_local_synchronization: bool,
+) -> list[list[Any]]:
     """Create reader process groups from rank layouts."""
-    return [[torch.distributed.new_group(ranks) for ranks in group_ranks] for group_ranks in reader_group_ranks]
+    return [
+        [
+            torch.distributed.new_group(ranks, use_local_synchronization=use_local_synchronization)
+            for ranks in group_ranks
+        ]
+        for group_ranks in reader_group_ranks
+    ]
 
 
-def create_ensemble_process_groups(layout: EnsembleLayout) -> EnsembleProcessGroups:
+def create_ensemble_process_groups(
+    layout: EnsembleLayout,
+    *,
+    use_local_synchronization: bool,
+) -> EnsembleProcessGroups:
     """Create process groups from ensemble rank layouts."""
-    ens_comm_groups = [torch.distributed.new_group(ranks) for ranks in layout.ens_comm_group_ranks]
-    ens_comm_subgroups = [torch.distributed.new_group(ranks) for ranks in layout.ens_comm_subgroup_ranks]
+    ens_comm_groups = [
+        torch.distributed.new_group(ranks, use_local_synchronization=use_local_synchronization)
+        for ranks in layout.ens_comm_group_ranks
+    ]
+    ens_comm_subgroups = [
+        torch.distributed.new_group(ranks, use_local_synchronization=use_local_synchronization)
+        for ranks in layout.ens_comm_subgroup_ranks
+    ]
     ens_comm_group = ens_comm_groups[layout.ens_comm_group_id]
     ens_comm_subgroup = ens_comm_subgroups[layout.ens_comm_subgroup_id]
     return EnsembleProcessGroups(ens_comm_groups, ens_comm_subgroups, ens_comm_group, ens_comm_subgroup)

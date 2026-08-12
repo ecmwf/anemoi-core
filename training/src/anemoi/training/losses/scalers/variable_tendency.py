@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,6 +18,8 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
+from anemoi.utils.dates import as_timedelta
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -46,6 +48,8 @@ class BaseTendencyScaler(BaseScaler):
             Data statistics dictionary
         statistics_tendencies : dict
             Data statistics dictionary for tendencies
+        timestep : str, optional
+            Tendency statistics lead time. Defaults to the first available lead time.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
         """
@@ -60,17 +64,17 @@ class BaseTendencyScaler(BaseScaler):
             assert isinstance(statistics_tendencies, Mapping), "statistics_tendencies must be a mapping."
             assert "lead_times" in statistics_tendencies, "statistics_tendencies must contain 'lead_times' key."
 
+            lead_times = statistics_tendencies.get("lead_times")
+            assert lead_times is not None, "lead_times must be a non-empty list"
+            lead_times = list(lead_times)
+            assert lead_times, "lead_times must be a non-empty list"
             if timestep is None:
-                lead_times = statistics_tendencies.get("lead_times")
-                assert lead_times is not None, "lead_times must be a non-empty list"
-                lead_times = list(lead_times)
-                assert lead_times, "lead_times must be a non-empty list"
                 timestep = lead_times[0]
                 LOGGER.warning(
                     "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
                     timestep,
                 )
-            self.timestep = timestep
+            self.timestep = frequency_to_string(as_timedelta(timestep))
             self.statistics_tendencies = statistics_tendencies.get(self.timestep)
             assert self.statistics_tendencies is not None, f"No tendency statistics for timestep '{self.timestep}'."
         else:

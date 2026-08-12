@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -128,7 +128,7 @@ class TestNamedNodesAttributes:
             assert output[:, 2 * TestNamedNodesAttributes.ndim :].requires_grad
 
     def test_forward_no_trainable(self, graph_data):
-        no_trainable_attributes = NamedNodesAttributes({nodes_name: 0 for nodes_name in self.nodes_names}, graph_data)
+        no_trainable_attributes = NamedNodesAttributes({}, graph_data)
         batch_size = 2
 
         for nodes_name in self.nodes_names:

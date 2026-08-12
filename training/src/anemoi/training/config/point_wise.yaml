@@ -5,7 +5,8 @@ defaults:
 - system: example
 - graph: point_wise
 - model: point_wise
-- training: default
+- task: forecaster
+- training: single
 - _self_
 
 

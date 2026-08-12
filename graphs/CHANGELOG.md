@@ -8,6 +8,87 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.6](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.5...graphs-0.9.6) (2026-08-11)
+
+
+### Features
+
+* Create and ship py.typed ([#1249](https://github.com/ecmwf/anemoi-core/issues/1249)) ([d0cfe4c](https://github.com/ecmwf/anemoi-core/commit/d0cfe4c88198d0aa9f9acf47009e4822734731b0))
+
+
+### Bug Fixes
+
+* **graphs:** Replace qhull joggle with merged facets in PlanarAreaWeights ([#1298](https://github.com/ecmwf/anemoi-core/issues/1298)) ([80af680](https://github.com/ecmwf/anemoi-core/commit/80af68077da1ead39ba072e7acd571461a49734c))
+* **graphs:** Use weights_only=True when loading graphs in anemoi-graphs ([#1303](https://github.com/ecmwf/anemoi-core/issues/1303)) ([ab292a5](https://github.com/ecmwf/anemoi-core/commit/ab292a52ab938da491bed7fe462b70de6f332802))
+
+
+### Reverts
+
+* "fix(graphs): use weights_only=True when loading graphs in anemoi-graphs" ([#1311](https://github.com/ecmwf/anemoi-core/issues/1311)) ([c30e3e8](https://github.com/ecmwf/anemoi-core/commit/c30e3e8fe304bc97b8103b86b9dbb81707bc8497))
+
+## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.4...graphs-0.9.5) (2026-07-23)
+
+
+### Features
+
+* **graphs:** Add MutualKNNEdges edge builder ([#1137](https://github.com/ecmwf/anemoi-core/issues/1137)) ([e6b8acc](https://github.com/ecmwf/anemoi-core/commit/e6b8accd56c3ce4e18439d5e0b5f81b0b54cb711))
+* Projections for spectral losses ([#1087](https://github.com/ecmwf/anemoi-core/issues/1087)) ([a4ea5df](https://github.com/ecmwf/anemoi-core/commit/a4ea5df2f6281e9a706c70d379ca88c36fe31b80))
+
+
+### Bug Fixes
+
+* **graphs:** AICON hidden to hidden topology ([#1183](https://github.com/ecmwf/anemoi-core/issues/1183)) ([ea31de5](https://github.com/ecmwf/anemoi-core/commit/ea31de5c8df7ab4d8b99c22b303208046fd498a3))
+* Remove version limit ([#1178](https://github.com/ecmwf/anemoi-core/issues/1178)) ([821b1f0](https://github.com/ecmwf/anemoi-core/commit/821b1f0ee73d1fb4310d3f8a679001697e2331f0))
+* Revert torch limit ([#1204](https://github.com/ecmwf/anemoi-core/issues/1204)) ([8308654](https://github.com/ecmwf/anemoi-core/commit/8308654424a0dca1cc28274cace3e00c21fc5088))
+* Support pyg-lib for fast graph building when using pyg &gt;= 2.8 ([#1179](https://github.com/ecmwf/anemoi-core/issues/1179)) ([c147200](https://github.com/ecmwf/anemoi-core/commit/c147200dec04cacbb413998b95ef8641f3a023c2))
+
+
+### Performance Improvements
+
+* **graphs:** Vectorize PlanarAreaWeights with shoelace area ([#1191](https://github.com/ecmwf/anemoi-core/issues/1191)) ([ab12c53](https://github.com/ecmwf/anemoi-core/commit/ab12c534f99ff05b054568b0e92b4655ccbec81a))
+
+## [0.9.4](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.3...graphs-0.9.4) (2026-05-14)
+
+
+### Features
+
+* Graph for skipped and multiscale suggestions ([#1052](https://github.com/ecmwf/anemoi-core/issues/1052)) ([a5eeaef](https://github.com/ecmwf/anemoi-core/commit/a5eeaef1615906974f684e39197f17be7fe9afb4))
+* **graphs:** Add option to disable node scaling by degree ([#1078](https://github.com/ecmwf/anemoi-core/issues/1078)) ([0e93646](https://github.com/ecmwf/anemoi-core/commit/0e9364615c2ef476c0b26dd2b8404c76933e63d4))
+
+
+### Bug Fixes
+
+* **graphs:** Fix node selection in interactive 3D graph viewer ([#1088](https://github.com/ecmwf/anemoi-core/issues/1088)) ([0acd429](https://github.com/ecmwf/anemoi-core/commit/0acd429d33bba64b8685d23c901995cdd2199542))
+
+## [0.9.3](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.2...graphs-0.9.3) (2026-04-23)
+
+
+### Features
+
+* **graphs:** Option to exclude self edges in KNN graphs ([#1065](https://github.com/ecmwf/anemoi-core/issues/1065)) ([04c881d](https://github.com/ecmwf/anemoi-core/commit/04c881dd293a0d90d05079ea1ce13a7b4ce602f5))
+
+
+### Bug Fixes
+
+* **graphs,aicon:** Icon mesh vertex mask ([#975](https://github.com/ecmwf/anemoi-core/issues/975)) ([e19b259](https://github.com/ecmwf/anemoi-core/commit/e19b25995535e451df97439f8f349dafa8d9e9d4))
+
+
+### Documentation
+
+* **graphs:** Correct a diagram on how multiscale edges work ([#1051](https://github.com/ecmwf/anemoi-core/issues/1051)) ([48c180c](https://github.com/ecmwf/anemoi-core/commit/48c180ce455708941a86a4a4273754c3f6f93102))
+
+## [0.9.2](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.1...graphs-0.9.2) (2026-04-21)
+
+
+### Bug Fixes
+
+* **graphs:** Support passing a graph object directly to GraphExporter ([#1032](https://github.com/ecmwf/anemoi-core/issues/1032)) ([d1f2d92](https://github.com/ecmwf/anemoi-core/commit/d1f2d92861ff049e601dcf25bfe977b1c4f4073c))
+
+
+### Documentation
+
+* **graphs:** Add refinement level 10 ([#1039](https://github.com/ecmwf/anemoi-core/issues/1039)) ([ee1d68b](https://github.com/ecmwf/anemoi-core/commit/ee1d68bec99a108cdea17b2669639ffe54d93a75))
+
 ## [0.9.1](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.0...graphs-0.9.1) (2026-03-26)
 
 

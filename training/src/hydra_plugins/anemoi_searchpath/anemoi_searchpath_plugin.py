@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -19,16 +19,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiSearchPathPlugin(SearchPathPlugin):
-    """Prepend the Anemoi home directory to the hydra searchpath."""
+    """Configure the Hydra search path for anemoi-training.
+
+    Search paths, in decreasing priority:
+    1. the path passed via ``--config-path`` (Hydra's primary ``@hydra.main`` path),
+    2. the current working directory,
+    3. the packaged default configs (``pkg://anemoi.training/config``).
+
+    CWD and the packaged configs are both appended (not prepended), so any path
+    already in the search path — including the ``--config-path`` installed by
+    ``@hydra.main`` — keeps higher priority.
+    """
 
     def manipulate_search_path(self, search_path: ConfigSearchPath) -> None:
-        """Prepend the Anemoi directories to the hydra searchpath.
-
-        This builds the hierarchy of the search path by prepending the Anemoi
-        directories to the search path. The hierarchy is as follows in decreasing priority:
-        - Current working directory
-        - Anemoi Config Env directory
-        - Anemoi Home directory
+        """Append the current working directory and the packaged configs.
 
         Parameters
         ----------
@@ -36,46 +40,27 @@ class AnemoiSearchPathPlugin(SearchPathPlugin):
             Hydra ConfigSearchPath object.
 
         """
-        for suffix in ("", "config"):
-            anemoi_home_path = Path(Path.home(), ".config", "anemoi", "training", suffix)
-            if anemoi_home_path.exists() and not Path(anemoi_home_path, "config").exists():
-                search_path.prepend(
-                    provider="anemoi-home-searchpath-plugin",
-                    path=str(anemoi_home_path),
-                )
-                LOGGER.info("Prepending Anemoi Home (%s) to the search path.", anemoi_home_path)
-                LOGGER.debug("Search path is now: %s", search_path)
-
-        for suffix in ("", "config"):
-            env_anemoi_config_path = os.getenv("ANEMOI_CONFIG_PATH")
-            if env_anemoi_config_path is None:
-                continue
-            anemoi_config_path = Path(env_anemoi_config_path, suffix)
-            if anemoi_config_path.exists() and not Path(anemoi_config_path, "config").exists():
-                search_path.prepend(
-                    provider="anemoi-env-searchpath-plugin",
-                    path=str(anemoi_config_path),
-                )
-                LOGGER.info("Prepending Anemoi Config Env (%s) to the search path.", anemoi_config_path)
-                LOGGER.debug("Search path is now: %s", search_path)
+        if os.environ.get("ANEMOI_CONFIG_PATH"):
+            LOGGER.warning(
+                "ANEMOI_CONFIG_PATH is set but is no longer read by anemoi-training. "
+                "Use --config-path to specify a config directory.",
+            )
 
         for suffix in ("", "config"):
             cwd_path = Path.cwd() / suffix
             if cwd_path.exists() and not Path(cwd_path, "config").exists():
-                search_path.prepend(
+                search_path.append(
                     provider="anemoi-cwd-searchpath-plugin",
                     path=str(cwd_path),
                 )
-                LOGGER.info("Prepending current user directory (%s) to the search path.", cwd_path)
+                LOGGER.info("Appending current working directory (%s) to the search path.", cwd_path)
                 LOGGER.debug("Search path is now: %s", search_path)
 
-        # Add package config path as lowest priority fallback (issue #570)
-        # This enables discovery of default configs like 'training/default'
-        # Appended (not prepended) so user configs maintain higher priority
+        # Lowest-priority fallback: the default configs shipped inside the package
+        # (issue #570 / #656). This is how config.yaml's `defaults:` groups are found.
         search_path.append(
             provider="anemoi-package-searchpath-plugin",
             path="pkg://anemoi.training/config",
         )
         LOGGER.debug("Appended package config path (pkg://anemoi.training/config) to search path.")
-
         LOGGER.info("Search path is now: %s", search_path)

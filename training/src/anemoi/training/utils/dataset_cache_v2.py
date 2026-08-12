@@ -162,7 +162,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Determine which dataset(s) we're working with
         # For MultiDataset, cache the first dataset by default
         # Use self.ds_train which uses our cached property
-        self.dataset_names = list(self.ds_train.datasets.keys())
+        self.dataset_names = self.ds_train.dataset_names
         self.primary_dataset_name = self.dataset_names[0]
         LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for zarr metadata")
         
@@ -200,8 +200,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
         # Use self.ds_train which accesses our cached property that stores the wrapped instance
         train_dataset = self.ds_train
         
-        for dataset_name, dataset in train_dataset.datasets.items():
+        for dataset_name in train_dataset.dataset_names:
             if dataset_name == self.primary_dataset_name:
+                dataset = train_dataset.data_readers[dataset_name]
                 original_data = dataset.data
                 LOGGER.info(f"Rank {self.rank}: Injecting cache wrapper for dataset '{dataset_name}' (type: {type(original_data).__name__})")
                 dataset.data = CachedDataWrapper(original_data, self)
@@ -212,12 +213,6 @@ class DatasetCache(AnemoiDatasetsDataModule):
                     LOGGER.error(f"Rank {self.rank}: Cache wrapper injection FAILED for '{dataset_name}' - data is still {type(dataset.data).__name__}")
             else:
                 LOGGER.info(f"Rank {self.rank}: Skipping cache injection for dataset '{dataset_name}' (only caching primary dataset)")
-        
-        # Double-check after injection
-        LOGGER.info(f"Rank {self.rank}: Verifying injection after completion:")
-        for dataset_name, dataset in train_dataset.datasets.items():
-            LOGGER.info(f"Rank {self.rank}:   Dataset '{dataset_name}' data type: {type(dataset.data).__name__}")
-
 
     def _copy_zarr_metadata(self, source_filesystem, target_path):
         """Copy zarr metadata from the source filesystem to the target path. This allows us to use zarr interfaces on the cache."""
@@ -369,7 +364,7 @@ class DatasetCache(AnemoiDatasetsDataModule):
         
         # Get the primary dataset's raw data for caching
         # Use self.ds_train to access our cached property
-        primary_dataset = self.ds_train.datasets[self.primary_dataset_name]
+        primary_dataset = self.ds_train.data_readers[self.primary_dataset_name]
         primary_data = primary_dataset.data  # Underlying dataset (e.g., Zarr)
         
         # Check if we're accessing the wrapper itself (avoid infinite recursion)
@@ -414,8 +409,9 @@ class DatasetCache(AnemoiDatasetsDataModule):
 
             data = self.remote_zarrs[cache_location][date]
             
-        if self.rank == 0 and (verbose or (self.total_fetches % 10 == 0)):
-            LOGGER.info(f"Rank {self.rank}: hits_local={self.stats['local']}, hits_remote={self.stats['remote']}, misses={self.stats['miss']}")
+        #TODO(cathal): print cache stats at the end of each epoch
+        if self.rank == 0 and self.total_fetches % 10 == 0:
+            LOGGER.debug(f"Rank {self.rank}: hits_local={self.stats['local']}, hits_remote={self.stats['remote']}, misses={self.stats['miss']}")
             
         return data
 

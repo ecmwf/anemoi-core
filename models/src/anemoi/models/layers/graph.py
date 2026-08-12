@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+
+from collections import defaultdict
 
 import einops
 import torch
@@ -72,10 +74,7 @@ class NamedNodesAttributes(nn.Module):
         """Initialize NamedNodesAttributes."""
         super().__init__()
 
-        for nodes_name in graph_data.node_types:
-            assert (
-                nodes_name in trainable_parameters
-            ), f"Number of trainable parameters for nodes group '{nodes_name}' not provided in config.model.trainable_parameters."
+        trainable_parameters = defaultdict(int, trainable_parameters)
 
         self.define_fixed_attributes(graph_data, trainable_parameters)
 

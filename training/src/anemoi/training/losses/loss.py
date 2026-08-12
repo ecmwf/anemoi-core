@@ -10,27 +10,141 @@
 
 import logging
 from collections import defaultdict
+from dataclasses import dataclass
 
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.data_indices.tensor import OutputTensorIndex
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
+from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 METRIC_RANGE_DTYPE = dict[str, list[int]]
 
 NESTED_LOSSES = ["anemoi.training.losses.MultiscaleLossWrapper"]
+WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
 LOGGER = logging.getLogger(__name__)
+
+
+def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
+    """Return runtime kwargs for classes that declare ``needs_graph_data``."""
+    if not getattr(target_cls, "needs_graph_data", False):
+        return {}
+    result: dict = {}
+    if graph_data is not None:
+        result["graph_data"] = graph_data
+    if extra_kwargs:
+        result.update(extra_kwargs)
+    return result
+
+
+@dataclass(frozen=True)
+class LossFactoryContext:
+    """Factory-supplied context that only selected loss classes use."""
+
+    available_scalers: dict[str, TENSOR_SPEC] | None = None
+    data_indices: IndexCollection | None = None
+
+    def for_loss_class(self, loss_class: type[BaseLoss]) -> tuple[dict, bool, bool]:
+        """Return the context kwargs explicitly declared by a loss class."""
+        context_keys = getattr(loss_class, "factory_context_keys", frozenset())
+
+        constructor_kwargs = {}
+        takes_scalers = _has_factory_context_key(context_keys, LossFactoryContextKey.AVAILABLE_SCALERS)
+        takes_data_indices = self.data_indices is not None and _has_factory_context_key(
+            context_keys,
+            LossFactoryContextKey.DATA_INDICES,
+        )
+
+        if takes_scalers:
+            constructor_kwargs["available_scalers"] = self.available_scalers
+
+        if takes_data_indices:
+            constructor_kwargs["data_indices"] = self.data_indices
+
+        return constructor_kwargs, takes_scalers, takes_data_indices
+
+
+def _has_factory_context_key(
+    context_keys: frozenset[LossFactoryContextKey | str],
+    key: LossFactoryContextKey,
+) -> bool:
+    """Accept enum keys while remaining compatible with any existing string declarations."""
+    return key in context_keys or key.value in context_keys
+
+
+def _filter_scalers(
+    scalers_to_include: list[str],
+    scalers: dict[str, TENSOR_SPEC],
+) -> dict[str, TENSOR_SPEC]:
+    """Return the subset of named scalers requested by the loss config."""
+    filtered_scalers = {}
+    for name in scalers_to_include:
+        if name not in scalers:
+            error_msg = f"Scaler {name!r} not found in valid scalers: {list(scalers.keys())}"
+            raise ValueError(error_msg)
+        filtered_scalers[name] = scalers[name]
+    return filtered_scalers
+
+
+def _extract_constructor_context(
+    loss_config: dict,
+    *,
+    context: LossFactoryContext,
+) -> tuple[dict, bool, bool]:
+    """Collect optional constructor kwargs declared by the target loss class."""
+    target = loss_config.get("_target_")
+    if target is None:
+        return {}, False, False
+
+    return context.for_loss_class(get_class(target))
+
+
+def _propagate_combined_scalers(loss_config: dict, scalers_to_include: list) -> None:
+    """Propagate parent scalers to CombinedLoss sub-losses that don't specify their own."""
+    for sub_loss in loss_config.get("losses", []):
+        if (
+            isinstance(sub_loss, dict)
+            and "scalers" not in sub_loss
+            and "MultiscaleLossWrapper" not in sub_loss.get("_target_", "")
+        ):
+            sub_loss["scalers"] = list(scalers_to_include)
+
+
+def _build_wrapped_loss(
+    loss_config: dict,
+    scalers_to_include: list,
+    scalers: dict[str, TENSOR_SPEC] | None,
+    data_indices: "IndexCollection | None",
+) -> BaseLoss:
+    """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
+    inner_loss_config = loss_config.pop("loss_fn")
+    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+    wrapper = instantiate(loss_config, loss_fn=inner_loss)
+    # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
+    if scalers_to_include and scalers:
+        resolved = (
+            [s for s in scalers if f"!{s}" not in scalers_to_include]
+            if "*" in scalers_to_include
+            else list(scalers_to_include)
+        )
+        _apply_scalers(wrapper, resolved, scalers, data_indices)
+    return wrapper
 
 
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
     scalers: dict[str, TENSOR_SPEC] | None = None,
-    data_indices: dict | None = None,
+    data_indices: IndexCollection | None = None,
+    graph_data: object | None = None,
+    data_node_name: str | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -46,8 +160,12 @@ def get_loss_function(
         If a scaler is to be added to the loss, ensure it is in `scalers` in the loss config.
         For instance, if `scalers: ['variable']` is set in the config, and `variable` in `scalers`
         `variable` will be added to the scaler of the loss function.
-    data_indices : dict, optional
+    data_indices : IndexCollection, optional
         Indices of the training data
+    graph_data : object, optional
+        Graph data passed to loss classes that declare ``needs_graph_data = True``.
+    data_node_name : str, optional
+        Dataset node name passed to loss classes that declare ``needs_graph_data = True``.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -64,26 +182,89 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
+    target_cls = get_class(loss_config["_target_"])
+    predicted_variables = loss_config.pop("predicted_variables", None)
+    target_variables = loss_config.pop("target_variables", None)
+    compatibility_options = loss_config.pop("check_variables_compatibility", {})
 
-    if "_target_" in loss_config and loss_config["_target_"] in NESTED_LOSSES:
+    graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
+    target = loss_config.get("_target_")
+
+    # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
+    if "CombinedLoss" in (target or "") and scalers_to_include:
+        _propagate_combined_scalers(loss_config, scalers_to_include)
+
+    if target in NESTED_LOSSES:
         per_scale_loss_config = loss_config.pop("per_scale_loss")
-        per_scale_loss = get_loss_function(OmegaConf.create(per_scale_loss_config), scalers, data_indices)
-        return instantiate(loss_config, per_scale_loss=per_scale_loss, **kwargs)
+        per_scale_loss = get_loss_function(
+            OmegaConf.create(per_scale_loss_config),
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+            **kwargs,
+        )
+        return instantiate(
+            loss_config,
+            per_scale_loss=per_scale_loss,
+            **kwargs,
+            **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        )
 
-    if scalers is None:
-        scalers = {}
+    if target in WRAPPED_LOSSES:
+        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
+
+    scalers = scalers or {}
 
     if "*" in scalers_to_include:
         scalers_to_include = [s for s in list(scalers.keys()) if f"!{s}" not in scalers_to_include]
 
-    loss_function = instantiate(loss_config, **kwargs, _recursive_=False)
+    available_scalers = _filter_scalers(scalers_to_include, scalers) if has_scalers_config else None
+    # If the target class requests AVAILABLE_SCALERS (e.g. CombinedLoss), always
+    # pass the full unfiltered scalers so child losses can control their own.
+    if (
+        hasattr(target_cls, "factory_context_keys")
+        and LossFactoryContextKey.AVAILABLE_SCALERS in target_cls.factory_context_keys
+    ):
+        available_scalers = scalers
+    factory_context = LossFactoryContext(
+        available_scalers=available_scalers,
+        data_indices=data_indices,
+    )
+    constructor_kwargs, takes_scalers, takes_data_indices = _extract_constructor_context(
+        loss_config,
+        context=factory_context,
+    )
+
+    loss_function = instantiate(
+        loss_config,
+        **constructor_kwargs,
+        **kwargs,
+        **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        _recursive_=False,
+    )
 
     if not isinstance(loss_function, BaseLoss):
         error_msg = f"Loss must be a subclass of 'BaseLoss', not {type(loss_function)}"
         raise TypeError(error_msg)
-    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
 
+    if takes_scalers:
+        scalers_to_include = []
+        scalers = {}
+    if takes_data_indices:
+        data_indices = None
+
+    if data_indices is not None:
+        loss_function = LossVariableMapper(
+            loss=loss_function,
+            predicted_variables=predicted_variables,
+            target_variables=target_variables,
+            data_indices=data_indices,
+        )
+        loss_function.compatibility_options = dict(compatibility_options)
+    _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 
 
@@ -91,7 +272,7 @@ def _apply_scalers(
     loss_function: BaseLoss,
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
-    data_indices: dict | None,
+    data_indices: IndexCollection | None,
 ) -> None:
     """Attach scalers to a loss function and set data indices if needed."""
     for key in scalers_to_include:
@@ -106,9 +287,6 @@ def _apply_scalers(
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
-
-        if hasattr(loss_function, "set_data_indices"):
-            loss_function.set_data_indices(data_indices)
 
 
 def get_metric_ranges(

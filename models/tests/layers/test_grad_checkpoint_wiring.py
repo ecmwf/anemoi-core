@@ -12,6 +12,8 @@ import torch
 
 import anemoi.models.layers.mapper as mapper_module
 import anemoi.models.layers.processor as processor_module
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.mapper import GNNBackwardMapper
 from anemoi.models.layers.mapper import GNNForwardMapper
 from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
@@ -188,8 +190,8 @@ def test_processor_forward_uses_disabled_checkpoint_flag(monkeypatch):
     )
 
     x = torch.rand(10, 8)
-    shard_shapes = [list(x.shape)]
-    output = processor(x, batch_size=1, shard_shapes=shard_shapes)
+    shard_info = GraphShardInfo(nodes=[10])
+    output = processor(x, batch_size=1, shard_info=shard_info)
 
     assert output.shape == x.shape
     assert calls == [False, False]
@@ -218,8 +220,8 @@ def test_mapper_forward_uses_disabled_checkpoint_flag(monkeypatch):
     )
 
     x = (torch.rand(6, 4), torch.rand(5, 4))
-    shard_shapes = [list(x[0].shape)], [list(x[1].shape)]
-    x_src, x_dst = mapper(x, batch_size=1, shard_shapes=shard_shapes)
+    shard_info = BipartiteGraphShardInfo(src_nodes=[6], dst_nodes=[5])
+    x_src, x_dst = mapper(x, batch_size=1, shard_info=shard_info)
 
     assert x_src.shape == x[0].shape
     assert x_dst.shape == (5, 8)

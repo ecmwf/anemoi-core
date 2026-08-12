@@ -60,8 +60,6 @@ training:
       end: 2020
       trajectory: null
 
-validation_rollout: 1 # number of rollouts to use for validation
-
 # Multi-dataset validation with same datasets, different time period
 validation:
   datasets:

@@ -35,6 +35,8 @@ training:
 
 diagnostics:
   callbacks: []
+  plot:
+    callbacks: []
   enable_checkpointing: False
   print_memory_summary: true
   benchmark_profiler:

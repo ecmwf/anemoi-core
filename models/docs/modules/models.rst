@@ -19,6 +19,9 @@ processor, and decoder components (`Lang et al. (2024a)
    :no-undoc-members:
    :show-inheritance:
 
+Residual connections (including graph-based truncation) are configured in
+the model config; see :ref:`residual-connections` for details.
+
 ******************************************
  Ensemble Encoder-Processor-Decoder Model
 ******************************************
@@ -36,6 +39,10 @@ Key features:
    :members:
    :no-undoc-members:
    :show-inheritance:
+
+For the training-side CRPS setup, including loss, truncation, and
+ensemble-specific configuration changes, see
+:doc:`anemoi-training:user-guide/kcrps-set-up`.
 
 **********************************************
  Hierarchical Encoder-Processor-Decoder Model
@@ -66,22 +73,6 @@ scaling ensures that the processing capacity grows proportionally with
 the depth of the hierarchy, enabling efficient handling of data.
 
 .. autoclass:: anemoi.models.models.hierarchical.AnemoiModelEncProcDecHierarchical
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-*************************
- Time Interpolator Model
-*************************
-
-A specialized architecture for time interpolation tasks.
-
-Key features:
-
-   #. Ability to select time indices for forcing and predictions
-   #. Allows for provision of t0 and t6 and predictions of t1->5
-
-.. autoclass:: anemoi.models.models.interpolator.AnemoiModelEncProcDecMultiOutInterpolator
    :members:
    :no-undoc-members:
    :show-inheritance:
