@@ -28,11 +28,8 @@ from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
 
-# A Voronoi cell is trusted when every vertex lies within this factor of the node's median
-# neighbour distance. On any rectangular lattice the furthest vertex sits at
-# sqrt(dx^2 + dy^2) / 2, below the median neighbour distance (dx + dy) / 2 at every aspect
-# ratio, so interior cells always pass; cells deformed by the edge of the node set have
-# vertices several node spacings out and fail by a wide margin.
+# Max vertex distance, in units of a node's median neighbour distance, for its Voronoi
+# cell to be trusted. Interior lattice cells pass at any aspect ratio; edge cells fail.
 TRUST_FACTOR = 1.2
 
 
@@ -126,28 +123,27 @@ class PlanarAreaWeights(BaseAreaWeights):
         median[occupied] = (lower + upper) / 2
         return median
 
-    def _trusted_cells(self, v: Voronoi, points: np.ndarray) -> np.ndarray:
-        """Which Voronoi cells the tessellation got right.
-
-        A cell is trusted when its region is bounded and every vertex lies within
-        ``TRUST_FACTOR`` times the node's median neighbour distance. Cells on the edge of
-        the node set are unbounded, or stretch out to vertices several node spacings away,
-        so they fail; interior cells of any quasi-uniform node set pass (see the note on
-        ``TRUST_FACTOR``).
-        """
-        n_points = len(points)
-        median = self._median_neighbour_distance(v, points)
-        regions = [v.regions[idx] if idx >= 0 else [] for idx in v.point_region[:n_points]]
+    @staticmethod
+    def _flatten_regions(v: Voronoi, point_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vertex indices of the given points' regions, flattened, with each region's length."""
+        region_indices = v.point_region[point_indices]
+        regions = [v.regions[idx] if idx >= 0 else [] for idx in region_indices]
         lengths = np.array([len(region) for region in regions], dtype=np.intp)
         flat = np.fromiter(
             (vertex_idx for region in regions for vertex_idx in region),
             dtype=np.intp,
             count=int(lengths.sum()),
         )
+        return lengths, flat
+
+    def _trusted_cells(self, v: Voronoi, points: np.ndarray) -> np.ndarray:
+        """Mask of the cells that are bounded, with every vertex within reach of their node."""
+        n_points = len(points)
+        median = self._median_neighbour_distance(v, points)
+        lengths, flat = self._flatten_regions(v, np.arange(n_points))
         owner = np.repeat(np.arange(n_points), lengths)
 
-        # -1 in a region marks a vertex at infinity; np.maximum only keeps the index valid,
-        # such regions are rejected by the first term.
+        # -1 marks a vertex at infinity; the clamp keeps indexing valid, the first term rejects it
         reach = np.linalg.norm(v.vertices[np.maximum(flat, 0)] - points[owner], axis=1)
         far = (flat < 0) | (reach > TRUST_FACTOR * median[owner])
         return (lengths >= 3) & (np.bincount(owner[far], minlength=n_points) == 0)
@@ -175,20 +171,14 @@ class PlanarAreaWeights(BaseAreaWeights):
             Area of the Voronoi cell of each of ``point_indices``.
         """
         n_points = len(point_indices)
-        regions = [v.regions[v.point_region[idx]] for idx in point_indices]
-        lengths = np.array([len(region) for region in regions], dtype=np.intp)
+        lengths, flat = PlanarAreaWeights._flatten_regions(v, point_indices)
 
         # Regions must be bounded polygons (>= 3 vertices); trusted cells all are.
         assert (
             n_points == 0 or lengths.min() >= 3
         ), "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
 
-        # Flatten the ragged regions; per-region offsets and a wrap-around "next vertex" index.
-        flat = np.fromiter(
-            (vertex_idx for region in regions for vertex_idx in region),
-            dtype=np.intp,
-            count=int(lengths.sum()),
-        )
+        # Per-region offsets and a wrap-around "next vertex" index.
         starts = np.zeros(n_points, dtype=np.intp)
         np.cumsum(lengths[:-1], out=starts[1:])
         ends = starts + lengths
@@ -219,12 +209,8 @@ class PlanarAreaWeights(BaseAreaWeights):
     def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute area weights.
 
-        The tessellation only defines the cells of interior nodes; a cell on the edge of
-        the node set is unbounded or stretches far beyond the nodes. Rather than closing
-        those cells geometrically, every untrusted cell takes the area of the nearest
-        trusted one, which on a quasi-uniform grid is the exact answer. A node set with no
-        trusted cell at all (fewer than 3 nodes, collinear, or too irregular) gets uniform
-        weights.
+        Untrusted (edge or unbounded) cells take the area of the nearest trusted cell;
+        a node set with no trusted cell at all gets uniform weights.
 
         Parameters
         ----------
@@ -269,12 +255,10 @@ class PlanarAreaWeights(BaseAreaWeights):
             return np.ones(len(latlons))
 
         areas = np.empty(len(latlons))
-        trusted_idx = np.flatnonzero(trusted)
-        untrusted_idx = np.flatnonzero(~trusted)
-        areas[trusted_idx] = self._voronoi_region_areas(v, trusted_idx)
-        if len(untrusted_idx):
-            _, nearest = cKDTree(latlons[trusted_idx]).query(latlons[untrusted_idx])
-            areas[untrusted_idx] = areas[trusted_idx[nearest]]
+        areas[trusted] = self._voronoi_region_areas(v, np.flatnonzero(trusted))
+        if not trusted.all():
+            _, nearest = cKDTree(latlons[trusted]).query(latlons[~trusted])
+            areas[~trusted] = areas[trusted][nearest]
         return areas
 
 
@@ -310,28 +294,14 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         self.mask_node_attr_name = mask_node_attr_name
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        """Compute the weights over the masked nodes alone, and zero elsewhere.
-
-        The masked nodes are tessellated on their own. Tessellating every node and
-        applying the mask afterwards instead leaves the cells on the edge of the mask
-        bounded by whatever lies outside it, which inflates them.
-        """
+        """Compute the weights over the masked nodes tessellated on their own, and zero elsewhere."""
         assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
         mask = nodes[self.mask_node_attr_name].squeeze()
         selected = mask.cpu().numpy() != 0
         latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
 
         area_weights = np.zeros(len(latlons))
-        if (n_selected := selected.sum()) < 3:
-            LOGGER.warning(
-                "%s: '%s' selects %d nodes, fewer than 3. Using uniform weights over them.",
-                type(self).__name__,
-                self.mask_node_attr_name,
-                n_selected,
-            )
-            area_weights[selected] = 1.0
-        else:
-            area_weights[selected] = self.compute_area_weights(latlons[selected])
+        area_weights[selected] = self.compute_area_weights(latlons[selected])
 
         # multiplying rather than indexing keeps a fractional mask scaling the weights
         return torch.from_numpy(area_weights).to(mask.device) * mask

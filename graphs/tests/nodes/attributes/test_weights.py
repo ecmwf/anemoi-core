@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import numpy as np
 import pytest
 import torch
 from torch_geometric.data import HeteroData
@@ -107,8 +108,6 @@ def test_masked_planar_area_weights_fail(graph_with_nodes: HeteroData):
 
 def test_planar_area_weights_exact_on_lattices():
     """Cell areas are exact on rectangular lattices, perimeter included, at any aspect ratio."""
-    import numpy as np
-
     for dx, dy in [(0.1, 0.1), (0.5, 0.1), (1.0, 0.1)]:
         x, y = np.meshgrid(np.arange(40) * dx, np.arange(30) * dy)
         latlons = np.column_stack([x.ravel(), y.ravel()])
@@ -118,8 +117,6 @@ def test_planar_area_weights_exact_on_lattices():
 
 def test_planar_area_weights_degenerate_inputs():
     """Collinear nodes fall back to uniform weights; duplicated nodes stay finite."""
-    import numpy as np
-
     collinear = np.column_stack([np.arange(50) * 0.1, np.zeros(50)])
     np.testing.assert_array_equal(PlanarAreaWeights().compute_area_weights(collinear), 1.0)
 
@@ -130,14 +127,7 @@ def test_planar_area_weights_degenerate_inputs():
 
 
 def test_masked_planar_area_weights_subset():
-    """Masked weights come from the masked nodes alone, and a fractional mask scales them.
-
-    A dense patch inside a coarse background: tessellating everything and masking
-    afterwards would bound the patch's edge cells by the background, inflating them up to
-    ~15x here. Tessellated on their own they are exactly dx * dy everywhere.
-    """
-    import numpy as np
-
+    """Masked weights come from the masked nodes alone, and a fractional mask scales them."""
     coarse = np.meshgrid(np.arange(0, 10, 0.5), np.arange(0, 10, 0.5))
     fine = np.meshgrid(np.arange(4, 6, 0.1), np.arange(4, 6, 0.1))
     background = np.column_stack([coarse[0].ravel(), coarse[1].ravel()])
@@ -161,12 +151,7 @@ def test_masked_planar_area_weights_subset():
 
 
 def test_voronoi_region_areas_matches_convexhull():
-    """`_voronoi_region_areas` matches per-cell ConvexHull volumes, non-convex regions included.
-
-    A stored region polygon that is not convex makes plain shoelace under-count, so one is
-    injected to prove the ConvexHull fallback recovers the exact area.
-    """
-    import numpy as np
+    """`_voronoi_region_areas` matches per-cell ConvexHull volumes, non-convex regions included."""
     from scipy.spatial import ConvexHull
     from scipy.spatial import Voronoi
 
