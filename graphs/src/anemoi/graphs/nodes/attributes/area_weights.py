@@ -237,6 +237,16 @@ class PlanarAreaWeights(BaseAreaWeights):
         np.ndarray
             Planar area weights.
         """
+        # Longitude is stored in [0, 2pi), not centred on the node set. A region
+        # straddling that branch cut (e.g. around the prime meridian) would otherwise
+        # place physically adjacent nodes ~2pi apart in this planar embedding, corrupting
+        # the tessellation and the nearest-trusted-cell fallback along the cut. Recentring
+        # is a rigid shift of the embedding, so cell areas are unaffected elsewhere.
+        lat, lon = latlons[:, 0], latlons[:, 1]
+        lon_center = np.arctan2(np.sin(lon).mean(), np.cos(lon).mean())
+        lon = (lon - lon_center + np.pi) % (2 * np.pi) - np.pi + lon_center
+        latlons = np.column_stack([lat, lon])
+
         try:
             # Merged facets, not the joggle: joggle scales with the bounding box rather
             # than the node spacing, so it fails on stretched grids (#690).
