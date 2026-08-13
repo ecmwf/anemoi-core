@@ -98,7 +98,7 @@ class ICONMultiMesh:
 
         self.reflvl_vertex = reflvl_vertex
         self.max_level = max_level if max_level is not None else reflvl_vertex.max()
-        self.min_level = min_level
+        self.min_level = min_level if min_level is not None else 0
 
         # restrict edge-vertex list to multi_mesh level "max_level":
         if self.max_level < self.reflvl_vertex.max():
