@@ -85,7 +85,7 @@ class ICONMeshNodeSchema(BaseModel):
     "Name of NetCDF ICON grid file."
     max_level: int
     "Maximum refinement level of the multi mesh / cell grid."
-    min_level: int | None = 0
+    min_level: int = 0
     "Minimum refinement level of the multi mesh / cell grid. (Usually 0)"
 
 
