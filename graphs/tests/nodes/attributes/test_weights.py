@@ -122,7 +122,7 @@ def test_planar_area_weights_shoelace_matches_convexhull():
     resolution = attr._compute_mean_nearest_distance(latlons)
     boundary_points = attr._get_boundary_ring(latlons, resolution)
     extended_points = np.vstack([latlons, boundary_points])
-    v = Voronoi(extended_points, qhull_options="QJ Pp")
+    v = Voronoi(extended_points, qhull_options="Qbb Qc Qz Pp")
 
     # Reference: the original per-node implementation.
     reference = np.array([ConvexHull(v.vertices[v.regions[v.point_region[idx]]]).volume for idx in range(len(latlons))])
@@ -136,12 +136,11 @@ def test_planar_area_weights_shoelace_matches_convexhull():
 def test_planar_area_weights_degenerate_fallback():
     """A region with an interior vertex falls back to the exact ConvexHull area.
 
-    Heavy qhull joggling can emit interior Voronoi vertices, making a stored region
-    polygon non-convex so plain shoelace under-counts its area (observed on real
-    stretched-grid data: up to ~21% on a few cells). The detector must flag such a
-    region and the ConvexHull fallback must recover the exact hull area. Small random
-    fixtures rarely emit a genuine (non-collinear) interior vertex, so we inject one
-    into a real Voronoi region to exercise that path deterministically.
+    A stored region polygon that is not convex makes plain shoelace under-count its
+    area. The detector must flag such a region and the ConvexHull fallback must recover
+    the exact hull area. The merged-facet qhull options are not expected to emit such a
+    region in practice, so we inject one into a real Voronoi region to exercise that
+    path deterministically -- this pins the guard's behaviour, not its frequency.
     """
     import numpy as np
     from scipy.spatial import ConvexHull
@@ -155,7 +154,7 @@ def test_planar_area_weights_degenerate_fallback():
     resolution = PlanarAreaWeights()._compute_mean_nearest_distance(points)
     boundary_points = PlanarAreaWeights()._get_boundary_ring(points, resolution)
     extended_points = np.vstack([points, boundary_points])
-    v = Voronoi(extended_points, qhull_options="QJ Pp")
+    v = Voronoi(extended_points, qhull_options="Qbb Qc Qz Pp")
     n = len(points)
 
     # Pick a bounded region (no -1) with >= 4 vertices to deform.
