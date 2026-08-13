@@ -128,7 +128,7 @@ class ICONMultiMesh:
     def multi_mesh_edges(self) -> np.ndarray:
         """Returns the multi-mesh edges as an arrays of vertex indices."""
         # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        edges = np.concatenate([edges for edges in self.edge_vertices[: self.max_level] if (edges.size > 0)], axis=0)
+        edges = np.concatenate([edges for edges in self.edge_vertices if (edges.size > 0)], axis=0)
         return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
