@@ -128,7 +128,7 @@ class ICONMultiMesh:
     def multi_mesh_edges(self) -> np.ndarray:
         """Returns the multi-mesh edges as an arrays of vertex indices."""
         # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        edges = np.concatenate([edges for edges in self.edge_vertices[:self.max_level] if (edges.size>0)], axis=0)
+        edges = np.concatenate([edges for edges in self.edge_vertices[: self.max_level] if (edges.size > 0)], axis=0)
         return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
@@ -153,8 +153,8 @@ class ICONMultiMesh:
         num_vertices = vertex_mask.shape[0]
         vertex_glb2loc = np.full(num_vertices, -1, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
-        vertex_glb2loc_tmp= [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level+1]]
-        for i in range(0,self.max_level+1):
+        vertex_glb2loc_tmp = [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]]
+        for i in range(0, self.max_level + 1):
             vertex_glb2loc_tmp[i] = np.array([sublist for sublist in vertex_glb2loc_tmp[i] if -1 not in sublist])
 
         return (
@@ -183,7 +183,7 @@ class ICONMultiMesh:
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(max(self.min_level,1), self.reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(max(self.min_level, 1), self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
