@@ -274,9 +274,10 @@ class ICONCellDataGrid:
     uuidOfHGrid: str
     nodeset: NodeSet  # set of ICON cell circumcenters
     max_level: int
+    min_level: int
     select_c: np.ndarray
 
-    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = None):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
@@ -292,6 +293,7 @@ class ICONCellDataGrid:
             self.uuidOfHGrid = ncfile.uuidOfHGrid
 
         self.max_level = max_level if max_level is not None else reflvl_cell.max()
+        self.min_level = min_level if min_level is not None else 0
 
         # restrict to level `max_level`:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
