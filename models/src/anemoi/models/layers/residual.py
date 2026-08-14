@@ -15,6 +15,7 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
@@ -534,40 +535,65 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
 
         self.lpass_filter = self._truncate_with_anti_aliasing if anti_aliasing else self._truncate_without_anti_aliasing
 
-    def _x_filter(self) -> torch.Tensor:
-        f = torch.square(self.filter)
+    def _x_filter(self, rows: list[int] | None = None) -> torch.Tensor:
+        filt = self.filter if rows is None else self.filter[rows]
+        f = torch.square(filt)
         f = torch.cumsum(f, -1)
         return f / (1 + f)
 
-    def _w_filter(self) -> torch.Tensor:
-        walias = self.isht(torch.view_as_complex(self.walias))
+    def _w_filter(self, rows: list[int] | None = None) -> torch.Tensor:
+        walias = self.walias if rows is None else self.walias[rows]
+        walias = self.isht(torch.view_as_complex(walias))
         return torch.sigmoid(walias)
 
-    def _truncate_without_anti_aliasing(self, x: torch.Tensor) -> torch.Tensor:
+    def _truncate_without_anti_aliasing(self, x: torch.Tensor, rows: list[int] | None = None) -> torch.Tensor:
         x = self.x_fsht(x)
-        f = self._x_filter()
+        f = self._x_filter(rows)
         x = x * (1 - f.unsqueeze(-1))
         return self.x_isht(x)
 
-    def _truncate_with_anti_aliasing(self, x: torch.Tensor) -> torch.Tensor:
+    def _truncate_with_anti_aliasing(self, x: torch.Tensor, rows: list[int] | None = None) -> torch.Tensor:
         x_skip = self.x_fsht(x)
-        f = self._x_filter()
-        walias = self._w_filter()
+        f = self._x_filter(rows)
+        walias = self._w_filter(rows)
 
         x_skip = x_skip * (1 - f.unsqueeze(-1))
         return walias * x + (1 - walias) * self.x_isht(x_skip)
 
-    def _apply_truncation(self, x_last: torch.Tensor) -> torch.Tensor:
-        x_last = einops.rearrange(x_last, "... values var -> ... var values")
-        x_last[..., self._truncation_input_idx, :] = self.lpass_filter(x_last[..., self._truncation_input_idx, :])
-        return einops.rearrange(x_last, "... var values -> ... values var")
+    def _apply_truncation(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
+        channel_shard_sizes = get_shard_sizes(x_last, -1, model_comm_group)
+        rows = None  # None -> use all filter/walias rows (unsharded)
+        if grid_shard_sizes is not None:
+            x_last = all_to_all_transpose(x_last, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+            rank = dist.get_rank(group=model_comm_group)
+            offset = sum(channel_shard_sizes[:rank])
+            rows = list(range(offset, offset + channel_shard_sizes[rank]))
 
-    def _learnable(self, x_last: torch.Tensor) -> torch.Tensor:
+        x_last = einops.rearrange(x_last, "... values var -> ... var values")
+        x_last = self.lpass_filter(x_last, rows)
+        x_last = einops.rearrange(x_last, "... var values -> ... values var")
+
+        if grid_shard_sizes is not None:
+            x_last = all_to_all_transpose(x_last, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+
+        return x_last
+
+    def _learnable(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
         if self.truncate:
-            x_last = self._apply_truncation(x_last)
+            x_last_truncate_subset = x_last[..., self._truncation_input_idx]
+            x_last_truncate_subset = self._apply_truncation(
+                x_last_truncate_subset, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
+            )
+            x_last[..., self._truncation_input_idx] = x_last_truncate_subset
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
         weight = einops.rearrange(weight, "... var values -> ... values var")
+
+        if grid_shard_sizes is not None:
+            rank = dist.get_rank(group=model_comm_group)
+            offset = sum(grid_shard_sizes[:rank])
+            local_size = grid_shard_sizes[rank]
+            weight = weight[..., offset : offset + local_size, :]
 
         gain = 1 - torch.sigmoid(weight[0, ...]) * (1 - self.theta_buff) - self.theta_buff
         out = gain * x_last[..., self._internal_input_idx] + weight[1, ...]
@@ -584,5 +610,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         x_last = x[:, -1, ...]
         out = torch.zeros_like(x_last)
-        out[..., self._internal_input_idx] = self._learnable(x_last)
+        out[..., self._internal_input_idx] = self._learnable(
+            x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
+        )
         return self._expand_time(out, n_step_output)
