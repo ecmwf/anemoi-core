@@ -12,7 +12,6 @@ import logging
 import time
 from abc import ABC
 from abc import abstractmethod
-from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -22,12 +21,12 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import get_distributed_device
+from anemoi.graphs.utils import pyg_lib_available
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-
-PYG_LIB_AVAILABLE = find_spec("pyg_lib") is not None
 
 PYG_LIB_INSTRUCTIONS = r"""The 'pyg_lib' library is not installed.
 Installing 'pyg_lib' can significantly improve performance for graph creation.
@@ -181,8 +180,10 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
             return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
 
-        if PYG_LIB_AVAILABLE:
-            edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
+        if pyg_lib_available():
+            # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
+            with cuda_device_of(source_coords.device):
+                edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
         else:
             LOGGER.warning(PYG_LIB_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
@@ -208,8 +209,10 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         # 3d cartesian coordinates
 
-        if PYG_LIB_AVAILABLE:
-            edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
+        if pyg_lib_available():
+            # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
+            with cuda_device_of(source_coords.device):
+                edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
             LOGGER.warning(PYG_LIB_INSTRUCTIONS)

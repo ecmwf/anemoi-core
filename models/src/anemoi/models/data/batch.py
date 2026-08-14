@@ -50,6 +50,61 @@ def _to_device(value, device, *, non_blocking: bool):
     return value
 
 
+def _resolve_device(device: torch.device | str) -> torch.device:
+    """Resolve ``device`` to a concrete device, filling in the current CUDA index.
+
+    ``torch.device("cuda") != torch.device("cuda:0")``, so cache lookups keyed on a
+    device need the index pinned down first.
+    """
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        device = torch.device("cuda", torch.cuda.current_device())
+    return device
+
+
+def _cached_static_coords(
+    name: str,
+    value,
+    device: torch.device,
+    *,
+    cache: dict[str, torch.Tensor],
+    non_blocking: bool,
+):
+    """Return the device copy of a static coordinate tensor, transferring on first use.
+
+    Static coordinates are constant for the whole run - the grid of a dataset is fixed
+    by the graph nodes it is bound to - so a single H2D copy per dataset serves every
+    batch. ``cache`` is owned by the caller (one per process) and populated here.
+
+    Shape, dtype and device are still checked against ``value``, so a cache entry that
+    does not describe this batch is refreshed rather than silently returned.
+    """
+    cached = cache.get(name)
+    if (
+        isinstance(cached, torch.Tensor)
+        and isinstance(value, torch.Tensor)
+        and cached.device == device
+        and cached.shape == value.shape
+        and cached.dtype == value.dtype
+    ):
+        return cached
+
+    if cached is not None:
+        LOGGER.debug(
+            "Static coordinates for %r no longer match the cached copy (cached %s on %s, got %s on %s); refreshing.",
+            name,
+            tuple(cached.shape),
+            cached.device,
+            tuple(value.shape) if isinstance(value, torch.Tensor) else type(value).__name__,
+            value.device if isinstance(value, torch.Tensor) else "n/a",
+        )
+
+    moved = _to_device(value, device, non_blocking=non_blocking)
+    if isinstance(moved, torch.Tensor):
+        cache[name] = moved
+    return moved
+
+
 def _pin_memory(value):
     """Recursively pin tensors, pass non-tensors through. See :func:`_to_device`."""
     if isinstance(value, torch.Tensor):
@@ -243,26 +298,56 @@ class Batch:
         """Return ``(name, tensor)`` pairs (mapping protocol)."""
         return ((dataset_name, self[dataset_name]) for dataset_name in self.dataset_names)
 
-    def to(self, device: torch.device | str, *, non_blocking: bool = True) -> "Batch":
+    def to(
+        self,
+        device: torch.device | str,
+        *,
+        non_blocking: bool = True,
+        static_coord_cache: dict[str, torch.Tensor] | None = None,
+    ) -> "Batch":
         """Move the batch to ``device``.
 
+        Every tensor in the returned batch - data, coordinates and timedeltas -
+        lives on ``device``. Consumers rely on that: :meth:`SourceView.allgather
+        <anemoi.models.data.views.GriddedSourceView.allgather>` gathers coordinates
+        alongside data in one collective and does not move them itself.
+
         Static coordinate tensors (those whose dataset name is listed in
-        ``metadata["static_coords"]``) are skipped: they are expected to have
-        been moved to the model device once, at training start, and never
-        transferred again. Non-tensor metadata leaves (e.g. ``boundaries``
-        ``slice`` objects for sparse observations) are passed through
-        untouched.
+        ``metadata["static_coords"]``) describe a grid that is fixed for the whole
+        run, so passing ``static_coord_cache`` transfers each of them once and reuses
+        that device copy for every later batch. Without a cache they are transferred
+        like anything else - correct, one small H2D copy per batch.
+
+        Non-tensor metadata leaves (e.g. ``boundaries`` ``slice`` objects for sparse
+        observations) are passed through untouched.
+
+        Parameters
+        ----------
+        device : torch.device or str
+            Target device.
+        non_blocking : bool, optional
+            Passed to :meth:`torch.Tensor.to`, by default True.
+        static_coord_cache : dict[str, torch.Tensor], optional
+            Caller-owned cache of static coordinates already on ``device``, keyed by
+            dataset name. Populated on first use and mutated in place. Omit it to
+            transfer static coordinates on every call.
 
         Returns a new :class:`Batch`; the receiver is not mutated.
         """
+        device = _resolve_device(device)
         new_data = {name: _to_device(tensor, device, non_blocking=non_blocking) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
         new_coordinates: dict[str, torch.Tensor | list[torch.Tensor]] = {}
         for name, value in self.coordinates.items():
-            if name in static:
-                # Skip the H2D transfer; the tensors are already on device.
-                new_coordinates[name] = value
+            if name in static and static_coord_cache is not None:
+                new_coordinates[name] = _cached_static_coords(
+                    name,
+                    value,
+                    device,
+                    cache=static_coord_cache,
+                    non_blocking=non_blocking,
+                )
                 continue
             new_coordinates[name] = _to_device(value, device, non_blocking=non_blocking)
 
@@ -283,7 +368,11 @@ class Batch:
         )
 
     def pin_memory(self) -> "Batch":
-        """Pin host memory for non-static tensors. Static coords are left untouched."""
+        """Pin host memory for non-static tensors. Static coords are left untouched.
+
+        Pinning static coordinates would buy nothing: with a ``static_coord_cache``
+        (see :meth:`to`) they cross to the device once per run, not once per batch.
+        """
         new_data = {name: _pin_memory(tensor) for name, tensor in self.data.items()}
 
         static = self.static_coord_datasets
@@ -621,6 +710,9 @@ class Batch:
         ``group``. All processes must call this method with the same group
         and have batches of the same size and dataset structure.
 
+        Idempotent: datasets that are already full-grid (shard_sizes is None) are left
+        untouched, and a fully replicated batch returns self
+
         Parameters
         ----------
         group : ProcessGroup or None
@@ -629,12 +721,14 @@ class Batch:
         Returns
         -------
         Batch
-            A new :class:`Batch` with allgathered data.
+            A new Batch with allgathered data, or self if nothing was sharded.
         """
         batch = self
         for dataset in self.dataset_names:
             view = self[dataset]
             gathered_view = view.allgather(group=group)
+            if gathered_view is view:
+                continue  # replicated dataset: nothing to rebuild
             batch = batch.update_source(dataset, gathered_view)
 
         return batch

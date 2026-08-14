@@ -359,6 +359,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = 0
         self.reader_group_size = 1
 
+        # Static (time-invariant) coordinate tensors, kept on the model device across
+        # steps so transfer_batch_to_device copies them once per run instead of per
+        # batch. Derived state - deliberately not a buffer, nothing to checkpoint.
+        self._static_coord_cache: dict[str, torch.Tensor] = {}
+
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
@@ -563,7 +568,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def update_scalers(self, callback: AvailableCallbacks) -> None:
         """Update scalers, calling the defined function on them, updating if not None."""
-        # Multi-dataset case: {'dataset_a': {'nan_mask_weights': scaler, ...}, 'dataset_b': {...}}
         for dataset_name, dataset_scalers in self.updating_scalars.items():
             for name, scaler_builder in dataset_scalers.items():
                 self._update_scaler_for_dataset(
@@ -650,8 +654,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Prepared y_pred, y, and grid_shard_slice
         """
         # Sharding metadata now lives on the source views (None when replicated).
+        # A single gather decision is applied to both views, so they must agree.
+        y_shard_sizes = getattr(y, "shard_sizes", None)
+        y_pred_shard_sizes = getattr(y_pred, "shard_sizes", None)
+        if y_shard_sizes != y_pred_shard_sizes:
+            msg = (
+                f"Prediction and target sharding disagree for dataset {dataset_name!r}: "
+                f"prediction shard_sizes={y_pred_shard_sizes}, target shard_sizes={y_shard_sizes}. "
+                "Both views must be sharded identically (or both replicated) before the loss."
+            )
+            raise ValueError(msg)
+
+        # grid_shard_slice is gridded-only (it slices per-grid scalers/masks), so the gather
+        # decision must come from the shard metadata itself - otherwise a sharded tabular
+        # view would be left un-gathered and the loss computed on a partial grid.
         grid_shard_slice = self._grid_shard_slice(y)
-        is_sharded = grid_shard_slice is not None
+        is_sharded = y_shard_sizes is not None
 
         sharding_supported = (self.loss_supports_sharding) and (  # loss calculated in training and validation mode
             self.metrics_support_sharding or not validation_mode
@@ -976,8 +994,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         device: torch.device,
         _dataloader_idx: int = 0,
     ) -> Batch:
-        """Transfer the :class:`Batch` to ``device`` (skipping static coords)."""
-        return batch.to(device, non_blocking=True)
+        """Transfer the :class:`Batch` to ``device``, reusing cached static coordinates."""
+        return batch.to(device, non_blocking=True, static_coord_cache=self._static_coord_cache)
 
     @abstractmethod
     def _step(

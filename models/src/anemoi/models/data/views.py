@@ -25,6 +25,7 @@ from torch.distributed import ProcessGroup
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
 
 LOGGER = logging.getLogger(__name__)
@@ -171,16 +172,26 @@ class SourceView(ABC):
         the group. The view's data and coordinates are allgathered, while
         metadata like layout and variables are unchanged.
 
+        shard_sizes is None means the view is replicated (not sharded), and
+        implementations must then return self unchanged. allgather is therefore
+        idempotent and safe to call defensively - callers rely on that, since the batch is
+        gathered once in on_after_batch_transfer (when model.keep_batch_sharded is
+        false) and again by the validation diagnostics.
+
+        shard_sizes records one entry per rank of the group the view was sharded over,
+        so gathering must use that same group; implementations validate this and raise
+        ValueError on a mismatch rather than mis-gathering or hanging.
+
         Parameters
         ----------
         group : ProcessGroup or None
-            The process group to allgather across. If None, defaults to the
-            global process group.
+            The process group to allgather across. None means single-rank, i.e. the
+            view is already complete.
 
         Returns
         -------
         SourceView
-            A new view with allgathered data.
+            A new view with allgathered data, or self when already full-grid.
         """
         pass
 
@@ -243,7 +254,7 @@ class GriddedSourceView(SourceView):
 
         return FlatView(
             data=flattened_data,
-            coordinates=coordinates.to(device),
+            coordinates=coordinates,  # already on device; see Batch.to
             timedeltas=None,
             device=device,
             shard_sizes=self.shard_sizes,
@@ -303,29 +314,64 @@ class GriddedSourceView(SourceView):
         the group. The view's data is allgathered across the grid dimension
         while metadata like layout and variables are unchanged.
 
+        No-op when the view is replicated (shard_sizes is None) or when group spans
+        a single rank, which makes repeated calls idempotent.
+
+        Coordinates are gathered alongside the data and so must already be on the same
+        device; :meth:`Batch.to <anemoi.models.data.batch.Batch.to>` guarantees that.
+        A mismatch raises ValueError rather than being silently transferred.
+
         Parameters
         ----------
         group : ProcessGroup or None
-            The process group to allgather across. If None, defaults to the
-            global process group.
+            The process group to allgather across. None means single-rank, i.e. the
+            view is already complete.
 
         Returns
         -------
         GriddedSourceView
-            A new view with allgathered data.
+            A new view with allgathered data, or self when already full-grid.
+
+        Raises
+        ------
+        ValueError
+            If shard_sizes does not describe ``group``, or if coordinates and data
+            live on different devices.
         """
+        if self.shard_sizes is None:
+            return self  # replicated: nothing to gather
+
+        # Validate before the single-rank fast path below, so that gathering over the wrong
+        # process group is reported instead of silently dropping the shard metadata.
+        check_shard_sizes_match_group(self.shard_sizes, group, context=f"gridded source view {self.name!r}")
+
+        if not model_is_distributed(group):
+            return self.clone(shard_sizes=None)
+
+        gathered_coords = self.coordinates
+        if gathered_coords is not None and gathered_coords.device != self.device:
+            # Batch.to() is responsible for putting coordinates on the model device;
+            # a mismatch here would be gathered on the wrong backend, so say so plainly.
+            msg = (
+                f"Gridded source view {self.name!r} has coordinates on {gathered_coords.device} "
+                f"but data on {self.device}; both must be on the same device before allgather. "
+                "Batch.to() moves them together - check that this batch went through it."
+            )
+            raise ValueError(msg)
+
         gathered_data = gather_tensor(
             self.data,
             dim=self.layout.grid,
             sizes=self.shard_sizes,
             mgroup=group,
         )
-        gathered_coords = gather_tensor(
-            self.coordinates.to(self.device),  # TODO(Jan): why are coords not on device?
-            dim=0,
-            sizes=self.shard_sizes,
-            mgroup=group,
-        )
+        if gathered_coords is not None:
+            gathered_coords = gather_tensor(
+                gathered_coords,
+                dim=0,
+                sizes=self.shard_sizes,
+                mgroup=group,
+            )
 
         return self.clone(data=gathered_data, coordinates=gathered_coords, shard_sizes=None)
 
@@ -544,6 +590,16 @@ class TabularSourceView(SourceView):
         """
         if self.shard_sizes is None:
             return self  # nothing to gather
+
+        # Validate every per-window descriptor up front, so a wrong-group gather is reported
+        # before any partial sequence of per-window collectives has been issued.
+        for sample_idx, sample_shard_sizes in enumerate(self.shard_sizes):
+            for window_idx, window_shard_sizes in enumerate(sample_shard_sizes):
+                check_shard_sizes_match_group(
+                    window_shard_sizes,
+                    group,
+                    context=f"tabular source view {self.name!r} (sample {sample_idx}, window {window_idx})",
+                )
 
         if not model_is_distributed(group):
             return self.clone(shard_sizes=None)

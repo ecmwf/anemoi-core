@@ -9,7 +9,6 @@
 
 
 import logging
-from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -19,11 +18,11 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import get_distributed_device
+from anemoi.graphs.utils import pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
-
-PYG_LIB_AVAILABLE = find_spec("pyg_lib") is not None
 
 
 class _PygLibAreaMaskBackend:
@@ -67,12 +66,14 @@ class _PygLibAreaMaskBackend:
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
 
-        edge_index = radius(
-            x=self._ref_vectors,
-            y=query_vectors,
-            r=chord_threshold,
-            max_num_neighbors=1,
-        )
+        # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
+        with cuda_device_of(self._ref_vectors.device):
+            edge_index = radius(
+                x=self._ref_vectors,
+                y=query_vectors,
+                r=chord_threshold,
+                max_num_neighbors=1,
+            )
 
         mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
         mask[edge_index[0]] = True
@@ -147,7 +148,7 @@ class AreaMaskBuilder:
         self.mask_attr_name = mask_attr_name
 
         self.device = get_distributed_device()
-        if PYG_LIB_AVAILABLE:
+        if pyg_lib_available():
             self._backend = _PygLibAreaMaskBackend(device=self.device)
         else:
             self._backend = _KDTreeAreaMaskBackend()

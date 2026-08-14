@@ -8,31 +8,85 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import Enum
+from importlib.util import find_spec
 
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
+LOGGER = logging.getLogger(__name__)
+
+FORCE_CPU_ENV_VAR = "ANEMOI_GRAPHS_FORCE_CPU"
+DISABLE_PYG_LIB_ENV_VAR = "ANEMOI_GRAPHS_DISABLE_PYG_LIB"
+
 
 def get_distributed_device() -> torch.device:
-    """Get the distributed device.
+    """Get the device that graph building should use on this rank.
+    Also makes the current CUDA device match the returned device.
+
+    Set ``ANEMOI_GRAPHS_FORCE_CPU=1`` to build graphs on the CPU instead.
 
     Returns
     -------
     torch.device
-        The distributed device.
+        The device to build the graph on.
     """
-    if torch.cuda.is_available():
-        import os
+    if os.environ.get(FORCE_CPU_ENV_VAR):
+        return torch.device("cpu")
 
-        local_rank = int(os.environ.get("SLURM_LOCALID", 0))
-        device = torch.device(f"cuda:{local_rank}")
-    else:
-        device = "cpu"
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
 
-    return device
+    local_rank = int(os.environ.get("SLURM_LOCALID", "0"))
+
+    device_count = torch.cuda.device_count()
+    if local_rank >= device_count:
+        LOGGER.warning(
+            "SLURM_LOCALID=%d but only %d CUDA device(s) are visible; building the graph on "
+            "cuda:%d. Check that the number of tasks per node matches the number of GPUs.",
+            local_rank,
+            device_count,
+            local_rank % device_count,
+        )
+        local_rank = local_rank % device_count
+
+    # Keep the current device in sync with where the data will live - see docstring.
+    torch.cuda.set_device(local_rank)
+
+    return torch.device(f"cuda:{local_rank}")
+
+
+@contextmanager
+def cuda_device_of(device: torch.device | str | None) -> Iterator[None]:
+    """Temporarily make the current CUDA device the one ``device`` refers to.
+
+    Defence in depth for kernels that lack their own device guard (see get_distributed_device).
+    A no-op for CPU tensors and when no device is given, so it is safe to wrap call sites unconditionally.
+    """
+    device = torch.device(device) if device is not None else None
+    if device is None or device.type != "cuda":
+        yield
+        return
+
+    with torch.cuda.device(device):
+        yield
+
+
+def pyg_lib_available() -> bool:
+    """Whether the pyg-lib accelerated neighbour-search kernels should be used.
+
+    Set ANEMOI_GRAPHS_DISABLE_PYG_LIB=1 to fall back to the scikit-learn implementation.
+    """
+    if os.environ.get(DISABLE_PYG_LIB_ENV_VAR):
+        return False
+
+    return find_spec("pyg_lib") is not None
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
