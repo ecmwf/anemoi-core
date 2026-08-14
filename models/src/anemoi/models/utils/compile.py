@@ -57,6 +57,18 @@ def _meets_library_versions_for_compile() -> bool:
     return version_req and has_triton
 
 
+def _drop_global_state_guards(guard_entries: list) -> list[bool]:
+    """Guard filter that drops dynamo's process-global-state guard.
+
+    The global-state guard (grad mode, num_threads, ...) fails on autograd worker threads,
+    whose thread-local intra-op setting differs from the main thread's. Activation
+    checkpointing recomputes forwards on those threads, so a compiled module inside a
+    checkpointed region recompiles mid-recomputation and the saved-tensor bookkeeping
+    breaks with a non-deterministic ``CheckpointError`` (pytorch/pytorch#166926).
+    """
+    return [entry.guard_type != "GLOBAL_STATE" for entry in guard_entries]
+
+
 def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Module:
     """Marks modules within 'model' for compilation, according to 'compile_config'.
 
@@ -78,7 +90,12 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
         entry = _get_compile_entry(module, compile_config)
         # entry is 'None' if compilation was not requested for this module
         if entry is not None:
-            options = entry.get("options", default_compile_options)
+            options = dict(entry.get("options", default_compile_options))
+            # guard_filter_fn requires torch >= 2.8 and cannot be combined with mode
+            if "mode" not in options and torch.__version__ >= "2.8":
+                inner_options = dict(options.get("options", {}))
+                inner_options.setdefault("guard_filter_fn", _drop_global_state_guards)
+                options["options"] = inner_options
 
             LOGGER.debug("%s will be compiled with the following options: %s", str(module), str(options))
             # It is just marked for JIT-compilation later
