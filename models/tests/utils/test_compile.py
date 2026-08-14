@@ -161,6 +161,67 @@ def test_compile_layer_kernel() -> None:
     assert torch.allclose(result, result_compiled)
 
 
+def _run_with_thread_count_change(compile_entry: dict) -> int:
+    """Compile a ConditionalLayerNorm via mark_for_compilation, run it under two different
+    intra-op thread counts, and return the number of unique compiled graphs."""
+    torch._dynamo.reset()
+    from torch._dynamo.utils import counters
+
+    counters.clear()
+
+    num_channels = 64
+    cond_shape = 16
+    ln = ConditionalLayerNorm(num_channels, condition_shape=cond_shape)
+    ln_compiled = mark_for_compilation(ln, OmegaConf.create({"compile": [compile_entry]}).compile)
+
+    x_in = torch.randn(num_channels)
+    cond = torch.randn(cond_shape)
+    prev_num_threads = torch.get_num_threads()
+    try:
+        torch.set_num_threads(max(prev_num_threads, 2))
+        ln_compiled(x_in, cond)
+        torch.set_num_threads(1)
+        ln_compiled(x_in, cond)
+    finally:
+        torch.set_num_threads(prev_num_threads)
+
+    return counters["stats"].get("unique_graphs", 0)
+
+
+def test_guard_filter_suppresses_global_state_recompile() -> None:
+    if not _meets_library_versions_for_compile() or torch.__version__ < "2.8":
+        LOGGER.warning("skipping 'test_guard_filter_suppresses_global_state_recompile'")
+        return
+
+    entry = {"module": "anemoi.models.layers.normalization.ConditionalLayerNorm"}
+    assert _run_with_thread_count_change(entry) == 1
+
+
+def test_guard_filter_opt_out() -> None:
+    if not _meets_library_versions_for_compile() or torch.__version__ < "2.8":
+        LOGGER.warning("skipping 'test_guard_filter_opt_out'")
+        return
+
+    entry = {
+        "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+        "filter_global_state_guards": False,
+    }
+    assert _run_with_thread_count_change(entry) == 2
+
+
+def test_guard_filter_mode_translation() -> None:
+    """A compile entry with `mode` must not raise the torch.compile mode/options conflict."""
+    if not _meets_library_versions_for_compile() or torch.__version__ < "2.8":
+        LOGGER.warning("skipping 'test_guard_filter_mode_translation'")
+        return
+
+    entry = {
+        "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+        "options": {"mode": "default"},
+    }
+    assert _run_with_thread_count_change(entry) == 1
+
+
 def test_compile_save_checkpoint() -> None:
     """Tests that a compiled module can be pickled and saved as a checkpoint"""
     # Skip this test if library versions aren't met
