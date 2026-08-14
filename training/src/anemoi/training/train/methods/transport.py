@@ -306,8 +306,10 @@ class ResidualPredictionMode(PredictionMode):
     datasets for one encoder/decoder triple.  ``_encoder_decoder_roles_by_target`` inverts this into a
     ``{target_dataset_name: role}`` dict so that ``prepare_target`` can look up the correct
     reference dataset for each target independently — for multiple enc/dec pairs.
-    Uses ``pre_processors_tendencies`` / ``post_processors_tendencies`` for residual
-    normalization, falling back to state processors when tendency stats are absent.
+    Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
+    normalization; those processors are built from the zero lead-time entry of
+    ``statistics_tendencies`` because the residual is defined against the current
+    reference state, not against a state a forecast lead away.
     Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
     """
 
@@ -357,18 +359,31 @@ class ResidualPredictionMode(PredictionMode):
             raise NotImplementedError(error_msg)
 
     def _residual_pre_processors(self) -> dict:
-        """Return tendency pre-processors if available, else state pre-processors."""
-        tend = getattr(self.module.model, "pre_processors_tendencies", None)
-        if tend and len(tend) > 0:
-            return tend
-        return self.module.model.pre_processors
+        """Return the residual pre-processors (zero lead-time normalization).
+
+        These are built by :class:`~anemoi.models.interface.AnemoiModelInterface`
+        from ``statistics_tendencies["0h"]`` when the model class sets
+        ``uses_zero_offset_statistics = True`` (see the spatial downscaler).
+        """
+        residual_proc = getattr(self.module.model, "pre_processors_residual", None)
+        if not residual_proc or len(residual_proc) == 0:
+            msg = (
+                "ResidualPredictionMode: pre_processors_residual is not configured. "
+                "Provide statistics_tendencies with a '0h' entry to normalize the residuals with dedicated statistics."
+            )
+            raise ValueError(msg)
+        return residual_proc
 
     def _residual_post_processors(self) -> dict:
-        """Return tendency post-processors if available, else state post-processors."""
-        tend = getattr(self.module.model, "post_processors_tendencies", None)
-        if tend and len(tend) > 0:
-            return tend
-        return self.module.model.post_processors
+        """Return the residual post-processors (zero lead-time normalization)."""
+        residual_proc = getattr(self.module.model, "post_processors_residual", None)
+        if not residual_proc or len(residual_proc) == 0:
+            msg = (
+                "ResidualPredictionMode: post_processors_residual is not configured. "
+                "Provide statistics_tendencies with a '0h' entry to normalize the residuals with dedicated statistics."
+            )
+            raise ValueError(msg)
+        return residual_proc
 
     def _reference_dataset_name_for_target(self, target_dataset_name: str) -> str:
         """Return the reference dataset name for a given target dataset."""

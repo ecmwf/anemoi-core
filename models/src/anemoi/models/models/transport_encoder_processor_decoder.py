@@ -1081,25 +1081,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
 
 class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncProcDec):
-    """Transport model for spatial downscaling.
-    Uses a single encoder/processor/decoder pathway on the *target* (hres) grid.
-    Input datasets (e.g. ``in_lres``, ``in_hres``) are concatenated as extra
-    per-node features on the target grid.  ``in_lres`` must live on the target
-    grid by the time this model sees it — the projection is performed by the
-    spatial pre-processor (a ``SpatialPreprocessor`` registered on the interface)
-    before normalization, either in training's ``on_after_batch_transfer`` or in
-    the model's ``_before_sampling`` hook during inference.
-    Role inference
-    --------------
-    * ``target_dataset_name``: the single dataset with non-empty
-      ``model.output`` variables.  Exactly one target dataset is required.
-    * ``input_dataset_names``: all other datasets present in ``data_indices``.
-    Combination strategy
-    --------------------
-    The encoder input on the target grid is
-    ``[x_in_dataset_0 | x_in_dataset_1 | ... | y_noised | node_attrs]``.
-    Concatenation is the simplest option, used for now.
-    """
+    """Transport model for spatial downscaling that predicts residuals relative to a low res dataset."""
+
+    #: Residual normalization uses zero lead-time statistics (see
+    #: :class:`anemoi.models.models.base.BaseGraphModel.uses_zero_offset_statistics`).
+    uses_zero_offset_statistics: bool = True
 
     def __init__(
         self,
@@ -1127,29 +1113,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         )
 
     def _resolve_roles(self, model_config: DotDict) -> None:
-        """Build per-target role index from ``training.transport.encoder_decoder_roles``.
-        Reads the encoder/decoder role triples from the config and populates:
-        * ``_roles_by_target`` — ``{target_dataset_name: role}`` index used
-          throughout the model to look up the reference and conditioning
-          datasets for a given target.
-        * ``target_dataset_names`` — ordered list of target datasets, one per
-          enc/dec triple.
-        * ``_input_dataset_names_by_target`` — ``{target: [reference, conditioning?]}``
-          mapping used by ``_calculate_input_dim`` and ``_assemble_input``.
-        * ``target_dataset_name`` — convenience alias for the single-target case
-          (required by forward paths not yet generalized to multiple targets).
-        Parameters
-        ----------
-        model_config : DotDict
-            Full Hydra config (i.e. ``self.config`` in ``AnemoiModelInterface``).
-        Raises
-        ------
-        ValueError
-            If ``training.transport.encoder_decoder_roles`` is not configured, or
-            if the same target dataset appears in more than one triple, or if
-            the set of prognostic variables in any target does not match its
-            reference dataset exactly (see :meth:`_validate_prognostics_match`).
-        """
+        """Build per-target role index from ``training.transport.encoder_decoder_roles``."""
+
         enc_dec_roles = model_config.get("training", {}).get("transport", {}).get("encoder_decoder_roles", None) or {}
         if not enc_dec_roles:
             msg = (
@@ -1188,28 +1153,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         self._validate_prognostics_match()
 
     def _validate_prognostics_match(self) -> None:
-        """Require the set of prognostic variables in the target and its reference to match exactly.
-        Residual prediction pairs each prognostic channel of the target with a
-        column of the same name in the reference tensor.  If the two sets of
-        prognostic variable names differ, the residual math is semantically
-        undefined either because:
-        * the target has a prognostic variable with no reference baseline
-          (present as forcing in the reference, or missing altogether), or
-        * the reference has a prognostic variable that the target does not
-          predict as prognostic (its baseline is ignored, likely a config
-          mistake).
-        The check applies only to the reference dataset of each role triple;
-        the conditioning dataset is unconstrained.
-        Users hitting this error should either:
-        * make the prognostic variable sets match on both sides, or
-        * mark the offending target variable as diagnostic (direct prediction
-          — bypasses the residual baseline).
-        Raises
-        ------
-        ValueError
-            If the target's prognostic variable set does not match the
-            reference dataset's prognostic variable set.
-        """
+        """Require the set of prognostic variables in the target and its reference to match exactly."""
         errors: list[str] = []
         for target_name, role in self._roles_by_target.items():
             reference_name = role["reference"]
@@ -1236,16 +1180,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     # ── dimension arithmetic ─────────────────────────────────────────────────
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Return the encoder input dimension on the target grid for ``dataset_name``.
-        The target-grid encoder sees, per node:
-        * The concatenation of each input dataset's variables over the input
-          history (``n_step_input * num_input_channels[input_ds]``), where the
-          input datasets for this triple are the reference and (optionally)
-          the conditioning dataset.
-        * The corrupted target ``y_noised``
-          (``n_step_output * num_output_channels[target]``).
-        * The target-grid node attributes.
-        """
+        """Return the encoder input dimension on the target grid for ``dataset_name``."""
         if dataset_name not in self.target_dataset_names:
             msg = (
                 "AnemoiTransportSpatialDownscalerModelEncProcDec._calculate_input_dim is "
@@ -1263,14 +1198,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         """Populate per-dataset channel counts for every dataset but per-dataset
         input/target/output dims only for the target.
-        Input datasets are never encoded via their own encoder in this model —
-        they are projected onto the target grid and concatenated as extra
-        per-node features before the (single) target-grid encoder.  So computing
-        ``input_dim`` / ``target_dim`` / ``output_dim`` for them is meaningless
-        and would trigger the ``_calculate_input_dim`` guard.  ``num_input_channels``
-        and ``num_output_channels`` still need to be populated for every dataset
-        because the target's encoder input dim sums input channels across all
-        input datasets.
         """
         self.num_input_channels = {}
         self.num_output_channels = {}
@@ -1337,27 +1264,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         target prognostic variable we look up its column in the reference tensor by
         name, so the two datasets only need to agree on the *names* of the
         prognostic variables — not on their positions.
-        ``_resolve_roles`` has already verified via
-        :meth:`_validate_prognostics_match` that every target prognostic
-        variable exists as a prognostic column in its reference dataset, so no
-        missing-name check is needed here.
-        Parameters
-        ----------
-        target_dataset_name : str
-            Name of the target dataset whose prognostic outputs should be
-            aligned against the reference source.
-        reference_variable_name_to_column_index_by_target : dict[str, dict[str, int]]
-            Mapping from target dataset name to the corresponding reference
-            dataset's ``name_to_index`` (variable name → column position).
-        device : torch.device
-            Device on which to place the returned index tensor.
-        Returns
-        -------
-        torch.Tensor
-            Long tensor of reference dataset column indices, one per prognostic
-            output of the target dataset, in the same order as
-            ``self.data_indices[target_dataset_name].prognostic`` (which also
-            matches the order of ``indices.model.output.prognostic``).
         """
         reference_variable_name_to_column_index = reference_variable_name_to_column_index_by_target[target_dataset_name]
         target_prognostic_names = self.data_indices[target_dataset_name].prognostic
@@ -1378,42 +1284,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Compute the normalized model target for spatial downscaling.
+
         Mirrors :meth:`AnemoiTransportTendModelEncProcDec.compute_tendency` but
         splits the target channels between residual (for prognostic output
         variables) and direct state (for diagnostic output variables) rather
         than between tendency and diagnostic.
-        Parameters
-        ----------
-        y : dict[str, torch.Tensor]
-            Normalized state target in the target dataset's DATA_OUTPUT layout.
-        x_reference_denorm : dict[str, torch.Tensor]
-            De-normalized reference input already projected onto the target grid,
-            keyed by target dataset name.  Channels follow the reference dataset's
-            raw DATA_FULL layout — variable positions can differ from the target
-            dataset.  Alignment against the target's prognostic outputs is done
-            by *variable name* via ``reference_variable_name_to_column_index_by_target``.
-        pre_processors_state : dict[str, Callable]
-            State pre-processor applied to diagnostic output channels.
-        pre_processors_residual : dict[str, Callable]
-            Residual (typically tendency-space) pre-processor applied to
-            prognostic output channels.
-        reference_variable_name_to_column_index_by_target : dict[str, dict[str, int]]
-            Mapping from target dataset name to the corresponding reference
-            dataset's ``name_to_index`` (variable name → column position).  Used
-            to locate the column in ``x_reference_denorm`` corresponding to each target
-            prognostic variable — so reference and target datasets can have their
-            variables in any order, provided the prognostic variable names match.
-        input_post_processor : Optional[Callable], optional
-            State post-processor used to de-normalize ``y`` before computing the
-            residual.  If ``None``, ``y`` is treated as already de-normalized.
-        skip_imputation : bool, optional
-            Forwarded to processors that support it.
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Normalized model target in the target dataset's DATA_OUTPUT layout.
-            Prognostic channels contain the normalized residual; diagnostic
-            channels contain the normalized state target.
         """
         assert set(y.keys()) == set(x_reference_denorm.keys()), "y and x_reference_denorm must share dataset keys."
 
@@ -1472,40 +1347,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         skip_imputation: bool = False,
     ) -> dict[str, torch.Tensor]:
         """Convert a predicted residual back to a state field.
+
         Mirrors :meth:`AnemoiTransportTendModelEncProcDec.add_tendency_to_state`
         but adds the projected low-resolution field to the prognostic channels
         instead of the previous state.  Diagnostic channels are recovered via
         the state post-processor.
-        Parameters
-        ----------
-        x_reference_denorm : dict[str, torch.Tensor]
-            De-normalized reference input projected onto the target grid, keyed
-            by target dataset name.  Channels follow the reference dataset's raw
-            DATA_FULL layout — variable positions can differ from the target
-            dataset.  Alignment against the target's prognostic outputs is done
-            by name via ``reference_variable_name_to_column_index_by_target``.
-        residual : dict[str, torch.Tensor]
-            Normalized model prediction in the target's DATA_OUTPUT layout.
-        post_processors_state : dict[str, Callable]
-            State post-processor used to de-normalize diagnostic channels.
-        post_processors_residual : dict[str, Callable]
-            Residual post-processor used to de-normalize prognostic channels.
-        reference_variable_name_to_column_index_by_target : dict[str, dict[str, int]]
-            Mapping from target dataset name to the corresponding reference
-            dataset's ``name_to_index``.  Used to locate the column in
-            ``x_reference_denorm`` corresponding to each target prognostic variable.
-        output_pre_processor : Optional[Callable], optional
-            State pre-processor applied to the full recovered state before
-            returning.  Used by training's ``reconstruct_prediction`` to hand a
-            normalized state back to the metric code; left ``None`` at
-            inference where callers expect a de-normalized state.
-        skip_imputation : bool, optional
-            Forwarded to processors that support it.
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            De-normalized (or re-normalized when ``output_pre_processor`` is
-            supplied) state fields in the target's DATA_OUTPUT layout.
         """
         state_outp: dict[str, torch.Tensor] = {}
         for dataset_name in residual.keys():
@@ -1564,19 +1410,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, None, ShardSizes]:
-        """Concatenate all input-dataset features, the noised target, and node attrs.
-        Parameters
-        ----------
-        x : dict[str, torch.Tensor]
-            Full input dict keyed by dataset name.  Each tensor has shape
-            ``(batch, time, ensemble, grid, vars)`` and (for ``in_lres``) is
-            already projected onto the target grid by the spatial pre-processor.
-        y_noised : dict[str, torch.Tensor]
-            Full noised-target dict keyed by dataset name.  Only the target
-            dataset's tensor is used.
-        dataset_name : str
-            Must equal ``self.target_dataset_name``.
-        """
+        """Concatenate all input-dataset features, the noised target, and node attrs."""
         assert dataset_name in self.target_dataset_names, (
             "AnemoiTransportSpatialDownscalerModelEncProcDec._assemble_input only supports "
             f"target datasets {self.target_dataset_names}; got '{dataset_name}'."
@@ -1821,7 +1655,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        post_processors_residual: Optional[dict[str, nn.Module]] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Turn the sampled normalized residual into a denormalized state prediction.
@@ -1839,12 +1673,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         x_reference_denorm = before_sampling_data[1]
         reference_variable_name_to_column_index_by_target = before_sampling_data[2]
 
-        # Choose residual (tendency) post-processors when present; fall back to
-        # state post-processors otherwise — mirrors ResidualPredictionMode.
-        residual_post = (
-            post_processors_tendencies
-            if post_processors_tendencies is not None and len(post_processors_tendencies) > 0
-            else post_processors
+        assert post_processors_residual is not None and len(post_processors_residual) > 0, (
+            "Residual downscaler _after_sampling requires post_processors_residual "
+            "(built from statistics_tendencies['0h'])."
         )
 
         if x_reference_denorm is not None:
@@ -1864,7 +1695,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 x_reference_denorm={name: x_reference_denorm for name in out},
                 residual=out,
                 post_processors_state=post_processors,
-                post_processors_residual=residual_post,
+                post_processors_residual=post_processors_residual,
                 reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
                 output_pre_processor=None,
                 skip_imputation=True,
@@ -1874,7 +1705,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             # No spatial pre-processor was applied — fall back to a plain
             # de-normalization of the sampled tensor.
             for dataset_name in list(out.keys()):
-                out[dataset_name] = residual_post[dataset_name](
+                out[dataset_name] = post_processors_residual[dataset_name](
                     out[dataset_name],
                     in_place=False,
                     data_index=self.data_indices[dataset_name].data.output.full,
@@ -1925,8 +1756,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         gather_out: bool = True,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
-        pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
-        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        pre_processors_residual: Optional[dict[str, nn.Module]] = None,
+        post_processors_residual: Optional[dict[str, nn.Module]] = None,
         spatial_pre_processors: Optional[dict[str, nn.Module]] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -1934,7 +1765,15 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         Accepts ``spatial_pre_processors`` (forwarded by ``AnemoiModelInterface``)
         and threads them through ``_before_sampling`` so ``in_lres`` is projected
         onto the target grid before normalization — matching the training flow.
+        The residual pre/post-processors are built from the zero lead-time
+        statistics (see :attr:`uses_zero_offset_statistics`) and are used to
+        normalize / de-normalize the residual prediction.
         """
+        # Ignore any tendency-processor kwargs forwarded by generic callers —
+        # residual downscaling does not use per-lead-time tendency stats.
+        kwargs.pop("pre_processors_tendencies", None)
+        kwargs.pop("post_processors_tendencies", None)
+
         with torch.no_grad():
             assert isinstance(batch, dict), "Input batch must be a dictionary!"
             for dataset_name, dataset_tensor in batch.items():
@@ -1950,8 +1789,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 model_comm_group,
                 spatial_pre_processors=spatial_pre_processors,
                 post_processors=post_processors,
-                pre_processors_tendencies=pre_processors_tendencies,
-                post_processors_tendencies=post_processors_tendencies,
                 **kwargs,
             )
 
@@ -1975,8 +1812,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 model_comm_group,
                 grid_shard_sizes,
                 gather_out,
-                pre_processors_tendencies=pre_processors_tendencies,
-                post_processors_tendencies=post_processors_tendencies,
+                post_processors_residual=post_processors_residual,
                 **kwargs,
             )
 

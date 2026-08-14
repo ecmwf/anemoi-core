@@ -397,7 +397,7 @@ def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> Non
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,
-        post_processors_tendencies={"out_hres": post_tend},
+        post_processors_residual={"out_hres": post_tend},
     )
 
     # residual_pred is denormalized by post_tend (subtracts 5): 3 - 5 = -2
@@ -709,7 +709,7 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,
-        post_processors_tendencies={"out_hres": residual_post},
+        post_processors_residual={"out_hres": residual_post},
     )
 
     # Prognostic: (residual_pred - 5) + x_lres = (7-5)+3 = 5, (12-5)+4 = 11

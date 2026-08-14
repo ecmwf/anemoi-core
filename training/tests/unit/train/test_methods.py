@@ -2386,8 +2386,10 @@ def _make_residual_module(
     - ``spatial_pre_processors`` is keyed by ``lres_name`` (the presence of the
       key is what identifies the lres dataset).
     - ``pre_processors`` / ``post_processors`` are keyed per dataset (state).
-    - ``pre_processors_tendencies`` / ``post_processors_tendencies`` provide the
-      residual normalization statistics.
+    - ``pre_processors_residual`` / ``post_processors_residual`` provide the
+      residual normalization statistics (zero lead-time).  The historical
+      ``tend_pre`` / ``tend_post`` keys in the returned processor dict alias
+      the residual pair — kept for readability in the test bodies.
     - ``model.model`` is a real ``AnemoiTransportSpatialDownscalerModelEncProcDec``
       built via ``__new__`` — only ``data_indices`` is wired, because that is
       all ``compute_residual`` / ``add_residual_to_state`` need.
@@ -2397,8 +2399,8 @@ def _make_residual_module(
     processors = {
         "state_pre": {name: _AdditiveProcessor(pre_offset) for name in (lres_name, target_name)},
         "state_post": {name: _AdditiveProcessor(post_offset) for name in (lres_name, target_name)},
-        "tend_pre": {target_name: _AdditiveProcessor(tend_pre_offset)},
-        "tend_post": {target_name: _AdditiveProcessor(tend_post_offset)},
+        "residual_pre": {target_name: _AdditiveProcessor(tend_pre_offset)},
+        "residual_post": {target_name: _AdditiveProcessor(tend_post_offset)},
     }
 
     name_to_index = name_to_index or {"v0": 0, "v1": 1}
@@ -2438,8 +2440,8 @@ def _make_residual_module(
             spatial_pre_processors={lres_name: object()},
             pre_processors=processors["state_pre"],
             post_processors=processors["state_post"],
-            pre_processors_tendencies=processors["tend_pre"],
-            post_processors_tendencies=processors["tend_post"],
+            pre_processors_residual=processors["residual_pre"],
+            post_processors_residual=processors["residual_post"],
         ),
         data_indices=data_indices,
         task=task,
@@ -2466,8 +2468,8 @@ def _make_residual_module(
         "post": processors["state_post"][target_name],
         "pre_lres": processors["state_pre"][lres_name],
         "post_lres": processors["state_post"][lres_name],
-        "tend_pre": processors["tend_pre"][target_name],
-        "tend_post": processors["tend_post"][target_name],
+        "tend_pre": processors["residual_pre"][target_name],
+        "tend_post": processors["residual_post"][target_name],
     }
 
 
@@ -2592,16 +2594,16 @@ def test_residual_prediction_mode_reference_dataset_raises_when_roles_absent() -
         mode._build_encoder_decoder_roles_by_target()
 
 
-def test_residual_prediction_mode_falls_back_to_state_processors_when_tendency_absent() -> None:
-    """If pre/post_processors_tendencies are empty the state processors normalize the residual."""
+def test_residual_prediction_mode_falls_back_to_state_processors_when_residual_absent() -> None:
+    """If pre/post_processors_residual are empty the state processors normalize the residual."""
     module, _procs = _make_residual_module(
         pre_offset=100.0,
         post_offset=-100.0,
-        tend_pre_offset=99.0,  # would be used if tendency processors were present
+        tend_pre_offset=99.0,  # would be used if residual processors were present
         tend_post_offset=-99.0,
     )
-    module.model.pre_processors_tendencies = {}
-    module.model.post_processors_tendencies = {}
+    module.model.pre_processors_residual = {}
+    module.model.post_processors_residual = {}
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
     mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}

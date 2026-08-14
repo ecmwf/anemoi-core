@@ -38,6 +38,10 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    uses_zero_offset_statistics: bool = False
+    # Set to ``True`` on models whose target is a residual against a reference
+    # state (e.g. spatial downscalers).
+
     def __init__(
         self,
         *,
@@ -380,6 +384,8 @@ class BaseGraphModel(nn.Module):
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+
+            # Perform forward pass
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
