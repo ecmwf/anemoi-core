@@ -15,6 +15,7 @@ from .hierarchical import AnemoiModelEncProcDecHierarchical
 from .autoencoder import AnemoiModelAutoEncoder  # isort: skip
 from .hierarchical_autoencoder import AnemoiModelHierarchicalAutoEncoder  # isort: skip
 from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
+from .transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec  # isort: skip
 from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "AnemoiModelEncProcDec",
     "AnemoiEnsModelEncProcDec",
     "AnemoiTransportModelEncProcDec",
+    "AnemoiTransportSpatialDownscalerModelEncProcDec",
     "AnemoiTransportTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiEnsModelEncProcDec",

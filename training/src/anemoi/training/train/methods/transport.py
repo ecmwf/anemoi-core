@@ -294,9 +294,196 @@ class TendencyPredictionMode(PredictionMode):
         }
 
 
+class ResidualPredictionMode(PredictionMode):
+    """Prediction mode for spatial downscaling: model predicts the residual y - interp(x_lres).
+
+    The batch enters this mode already normalized (like every other prediction mode).
+    ``prepare_target`` denormalizes the projected lres source and the target so the
+    residual can be computed in physical space, then renormalizes it with residual
+    (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
+    The lres dataset is identified via ``transport.encoder_decoder_roles`` in the training
+    config.  Each entry names the ``reference``, ``target``, and optionally ``conditioning``
+    datasets for one encoder/decoder triple.  ``_encoder_decoder_roles_by_target`` inverts this into a
+    ``{target_dataset_name: role}`` dict so that ``prepare_target`` can look up the correct
+    reference dataset for each target independently — for multiple enc/dec pairs.
+    Uses ``pre_processors_tendencies`` / ``post_processors_tendencies`` for residual
+    normalization, falling back to state processors when tendency stats are absent.
+    Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
+    """
+
+    def __init__(self, module: BaseTransportTraining) -> None:
+        super().__init__(module)
+        self._validate_objective()
+        self._encoder_decoder_roles_by_target = self._build_encoder_decoder_roles_by_target()
+
+    def _build_encoder_decoder_roles_by_target(self) -> dict:
+        """Build a ``{target_dataset_name: role}`` index from ``transport.encoder_decoder_roles``.
+
+        Raises ``ValueError`` if ``encoder_decoder_roles`` is not configured or if any
+        two triples map to the same target dataset (which would be ambiguous).
+        """
+        transport = getattr(self.module.config.training, "transport", {}) or {}
+        enc_dec_roles = transport.get("encoder_decoder_roles", None)
+        if not enc_dec_roles:
+            msg = (
+                "transport.encoder_decoder_roles is not configured. "
+                "Set transport.encoder_decoder_roles in your training config with at least one "
+                "entry containing 'reference' and 'target' keys."
+            )
+            raise ValueError(msg)
+        roles_by_target: dict = {}
+        for enc_name, role in enc_dec_roles.items():
+            target = role.get("target") if hasattr(role, "get") else getattr(role, "target", None)
+            reference = role.get("reference") if hasattr(role, "get") else getattr(role, "reference", None)
+            if not target or not reference:
+                msg = (
+                    f"encoder_decoder_roles['{enc_name}'] must specify both 'reference' and 'target'. "
+                    f"Got: {role!r}."
+                )
+                raise ValueError(msg)
+            if target in roles_by_target:
+                msg = (
+                    f"encoder_decoder_roles: target dataset '{target}' appears in more than one "
+                    f"encoder/decoder triple, which is ambiguous."
+                )
+                raise ValueError(msg)
+            roles_by_target[target] = role
+        return roles_by_target
+
+    def _validate_objective(self) -> None:
+        objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
+        if objective_kind == "stochastic_interpolant":
+            error_msg = "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
+            raise NotImplementedError(error_msg)
+
+    def _residual_pre_processors(self) -> dict:
+        """Return tendency pre-processors if available, else state pre-processors."""
+        tend = getattr(self.module.model, "pre_processors_tendencies", None)
+        if tend and len(tend) > 0:
+            return tend
+        return self.module.model.pre_processors
+
+    def _residual_post_processors(self) -> dict:
+        """Return tendency post-processors if available, else state post-processors."""
+        tend = getattr(self.module.model, "post_processors_tendencies", None)
+        if tend and len(tend) > 0:
+            return tend
+        return self.module.model.post_processors
+
+    def _reference_dataset_name_for_target(self, target_dataset_name: str) -> str:
+        """Return the reference dataset name for a given target dataset."""
+        role = self._encoder_decoder_roles_by_target.get(target_dataset_name)
+        if role is None:
+            msg = f"No encoder_decoder_roles entry found for target dataset '{target_dataset_name}'."
+            raise ValueError(msg)
+        return role.get("reference") if hasattr(role, "get") else role.reference
+
+    def prepare_target(
+        self,
+        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
+    ) -> PreparedPredictionTarget:
+        """Compute the normalized residual target from an already-normalized batch.
+
+        For each target dataset, looks up its paired reference dataset from
+        ``_encoder_decoder_roles_by_target``, denormalizes the reference projection, and delegates
+        the per-channel residual/state split to
+        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`.
+        Prognostic channels become normalized residuals; diagnostic channels are kept
+        as normalized state.
+        """
+        del x
+
+        target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        target_data_output = self.module.get_data_output_target(target_full)
+
+        # Build per-target dicts: denormalized reference projection and name→index mapping.
+        x_ref_on_target_grid: dict[str, torch.Tensor] = {}
+        reference_variable_name_to_column_index_by_target: dict[str, dict] = {}
+        for target_name in target_data_output:
+            ref_name = self._reference_dataset_name_for_target(target_name)
+            x_ref_on_target_grid[target_name] = self.module.model.post_processors[ref_name](
+                batch[ref_name],
+                in_place=False,
+            )
+            reference_variable_name_to_column_index_by_target[target_name] = self.module.data_indices[
+                ref_name
+            ].name_to_index
+
+        # Delegate the residual / diagnostic split to the model.
+        residual_pre = self._residual_pre_processors()
+        model_residual_data_output = self.module.model.model.compute_residual(
+            y=target_data_output,
+            x_reference_denorm=x_ref_on_target_grid,
+            pre_processors_state=self.module.model.pre_processors,
+            pre_processors_residual=residual_pre,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            input_post_processor=self.module.model.post_processors,
+            skip_imputation=True,
+        )
+        model_residual = self.module.reduce_data_output_target_to_model_output(model_residual_data_output)
+
+        return PreparedPredictionTarget(
+            model_target=model_residual,
+            loss_target=model_residual_data_output,
+            loss_target_layout=IndexSpace.DATA_OUTPUT,
+            metric_target=target_full,
+            aux={
+                # store the denormalized reference projection and name→index mapping for reconstructing the state later
+                "x_ref_on_target_grid": x_ref_on_target_grid,
+                "reference_variable_name_to_column_index_by_target": reference_variable_name_to_column_index_by_target,
+                "transport_reference_source": self._reference_state_target_space(batch),
+            },
+        )
+
+    def _reference_state_target_space(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        # Only process target (output) datasets.  Input-only datasets (e.g. in_lres, in_hres)
+        # have no model-output variables and must not be passed to
+        # reduce_data_output_target_to_model_output, which would produce wrong shapes.
+        target_names = set(self.module.task.target_datasets)
+        reference: dict[str, torch.Tensor] = {}
+        for dataset_name, batch_dataset in batch.items():
+            if dataset_name not in target_names:
+                continue
+            var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
+            reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
+            if self.module.n_step_output > 1:
+                reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
+            reference[dataset_name] = reference_step
+        return self.module.reduce_data_output_target_to_model_output(reference)
+
+    def reconstruct_prediction(
+        self,
+        prediction: dict[str, torch.Tensor],
+        prepared: PreparedPredictionTarget,
+    ) -> dict[str, torch.Tensor]:
+        """Turn a normalized residual prediction back into a normalized state.
+
+        Delegates to
+        :meth:`AnemoiTransportSpatialDownscalerModelEncProcDec.add_residual_to_state`;
+        passes ``output_pre_processor`` so the returned tensor lives in the
+        same normalized state space as ``metric_target``.
+        """
+        x_ref_on_target_grid = prepared.aux["x_ref_on_target_grid"]
+        reference_variable_name_to_column_index_by_target = prepared.aux[
+            "reference_variable_name_to_column_index_by_target"
+        ]
+        residual_post = self._residual_post_processors()
+        return self.module.model.model.add_residual_to_state(
+            x_reference_denorm=x_ref_on_target_grid,
+            residual=prediction,
+            post_processors_state=self.module.model.post_processors,
+            post_processors_residual=residual_post,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            output_pre_processor=self.module.model.pre_processors,
+            skip_imputation=True,
+        )
+
+
 PREDICTION_MODE_CLASSES = {
     "state": StatePredictionMode,
     "tendency": TendencyPredictionMode,
+    "residual": ResidualPredictionMode,
 }
 
 

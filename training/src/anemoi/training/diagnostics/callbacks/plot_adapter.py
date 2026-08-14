@@ -131,6 +131,22 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
         return output_tensor
 
 
+class SpatialDownscalerPlotAdapter(BasePlotAdapter):
+    """Plot Adapter placeholder for SpatialDownscaler Task.
+
+    The downscaler predicts a single hres snapshot per sample; a proper adapter
+    will be added with downscaling-specific diagnostics.
+    """
+
+    def get_init_step(self) -> int:
+        return 0
+
+    def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
+        sample = data[0, ...].squeeze()
+        pred = output_tensor[0, ...].squeeze() if hasattr(output_tensor, "squeeze") else output_tensor
+        yield sample, sample, pred, "downscale"
+
+
 class AutoencoderPlotAdapter(BasePlotAdapter):
     """Plot Adapter for Autoencoder Task: single (sample, recon, tag) yield."""
 
