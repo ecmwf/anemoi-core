@@ -72,7 +72,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
 
     nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
-    nearest_neighbour.fit(coords_rad)
+    nearest_neighbour.fit(coords_rad.cpu())
 
     return nearest_neighbour
 
@@ -94,7 +94,7 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     float
         The reference distance of the grid.
     """
-    xyz = latlon_rad_to_cartesian(coords_rad)
+    xyz = latlon_rad_to_cartesian(coords_rad).cpu()
     nearest_neighbours = get_nearest_neighbour(xyz, mask)
     dists, _ = nearest_neighbours.kneighbors(xyz, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
