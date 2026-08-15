@@ -25,10 +25,6 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
-from anemoi.models.transport.settings import EdmSettings
-from anemoi.models.transport.settings import NoiseConditioningSettings
-from anemoi.models.transport.settings import StochasticInterpolantSettings
-from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
 from .decoder import GNNDecoderSchema  # noqa: TC001
@@ -87,47 +83,52 @@ class SparseProjectorSchema(BaseModel):
 
 
 class TransportSourceConfig(BaseModel):
-    kind: Literal["default", "zero", "gaussian", "reference_state"] = TransportSourceSettings.kind
+    """Configuration of the starting/source field for transport objectives.
+
+    The defaults map 1:1 to :class:`TransportSourceSettings` in
+    ``anemoi.models.transport.settings`` and are restated here so that importing
+    the schemas does not pull in the model code.
+    """
+
+    kind: Literal["default", "zero", "gaussian", "reference_state"] = "default"
     "Starting field used before the transport objective moves toward the target."
-    scale: NonNegativeFloat = Field(default=TransportSourceSettings.scale, examples=[TransportSourceSettings.scale])
+    scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
     "Multiplier applied to the starting/source field."
-    noise_scale: NonNegativeFloat = Field(default=TransportSourceSettings.noise_scale, examples=[0.1])
+    noise_scale: NonNegativeFloat = Field(default=0.0, examples=[0.1])
     "Additional additive Gaussian noise applied to the starting/source field."
 
 
 class TransportConfig(BaseModel):
+    """Configuration of the transport objective, path, conditioning and inference.
+
+    The defaults map 1:1 to :class:`EdmSettings`, :class:`NoiseConditioningSettings`
+    and :class:`StochasticInterpolantSettings` in ``anemoi.models.transport.settings``
+    and are restated here so that importing the schemas does not pull in the model code.
+    """
+
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Training and sampling objective used by the transport model."
-    sigma_data: PositiveFloat = Field(default=EdmSettings.sigma_data, examples=[EdmSettings.sigma_data])
+    sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Typical data scale used by EDM diffusion."
-    noise_channels: PositiveInt = Field(
-        default=NoiseConditioningSettings.channels,
-        examples=[NoiseConditioningSettings.channels],
-    )
+    noise_channels: PositiveInt = Field(default=32, examples=[32])
     "Number of channels in the noise or bridge-time embedding."
-    noise_cond_dim: PositiveInt = Field(
-        default=NoiseConditioningSettings.cond_dim,
-        examples=[NoiseConditioningSettings.cond_dim],
-    )
+    noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
-    sigma_max: PositiveFloat = Field(default=EdmSettings.sigma_max, examples=[EdmSettings.sigma_max])
+    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
     "Maximum EDM diffusion noise level used during training."
-    sigma_min: PositiveFloat = Field(default=EdmSettings.sigma_min, examples=[EdmSettings.sigma_min])
+    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
     "Minimum EDM diffusion noise level used during training."
-    rho: PositiveFloat = Field(default=EdmSettings.rho, examples=[EdmSettings.rho])
+    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
     "Shape parameter for the Karras EDM noise schedule."
-    si_alpha_schedule: Literal["linear"] = StochasticInterpolantSettings.alpha_schedule
+    si_alpha_schedule: Literal["linear"] = "linear"
     "Schedule for how strongly the SI bridge keeps the source field."
-    si_beta_schedule: Literal["linear", "quadratic"] = StochasticInterpolantSettings.beta_schedule
+    si_beta_schedule: Literal["linear", "quadratic"] = "linear"
     "Schedule for how strongly the SI bridge moves toward the target field."
-    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = StochasticInterpolantSettings.sigma_schedule
+    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = "brownian_bridge"
     "Schedule for the SI bridge-noise amplitude."
     source: TransportSourceConfig = Field(default_factory=TransportSourceConfig)
     "Configuration for the starting/source field."
-    si_noise_scale: NonNegativeFloat = Field(
-        default=StochasticInterpolantSettings.noise_scale,
-        examples=[StochasticInterpolantSettings.noise_scale],
-    )
+    si_noise_scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
     "Overall scale of the stochastic-interpolant bridge noise."
     training_condition: dict = Field(default_factory=dict)
     "Distribution used to sample one training noise level or bridge time per sample."
