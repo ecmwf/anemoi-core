@@ -52,6 +52,7 @@ from anemoi.utils.config import DotDict
 
 if is_triton_available():
     from anemoi.models.triton.gt import graph_transformer_attention_conv
+    from anemoi.models.triton.gt import graph_transformer_attention_fused_conv
 
 LOGGER = logging.getLogger(__name__)
 
@@ -582,6 +583,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         else:
             self.edge_pre_mlp = nn.Identity()
 
+        self.edge_dim = edge_dim
         self.graph_attention_backend = graph_attention_backend
         self._attention_backend_applied = False
         self.set_attention_function()
@@ -620,6 +622,25 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
     def run_node_dst_mlp(self, x, **layer_kwargs):
         return self.node_dst_mlp(self.layer_norm_mlp_dst(x, **layer_kwargs))
 
+    def _fused_edges_active(self, edge_attr: Tensor) -> bool:
+        """Whether the edge embedding can be fused into the triton attention kernels."""
+        if ATTENTION_BACKEND != "" and not self._attention_backend_applied:
+            self.set_attention_function()
+            self._attention_backend_applied = True
+
+        return (
+            self.graph_attention_backend == "triton"
+            and getattr(self, "shard_strategy", None) == "edges"
+            and isinstance(self.edge_pre_mlp, nn.Identity)
+            and isinstance(self.lin_edge, nn.Linear)
+            and self.edge_dim != self.num_heads * self.out_channels_conv  # keeps raw attrs distinguishable
+            and not edge_attr.requires_grad  # no trainable edge parameters
+        )
+
+    def _edges_are_raw(self, edges: Tensor) -> bool:
+        """Whether ``edges`` holds raw [E, edge_dim] attributes (fused path) instead of embeddings."""
+        return edges.ndim == 2 and edges.shape[-1] == self.edge_dim
+
     def get_qkve(
         self,
         x: OptPairTensor,
@@ -630,7 +651,10 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         query = self.lin_query(x_dst)
         key = self.lin_key(x_src)
         value = self.lin_value(x_src)
-        edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
+        if self._fused_edges_active(edge_attr):
+            edges = edge_attr  # embedded by lin_edge inside the attention kernels
+        else:
+            edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
 
         return query, key, value, edges
 
@@ -641,16 +665,17 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value: Tensor,
         edges: Tensor,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
-        query, key, value, edges = (
+        tensors = (query, key, value) if self._edges_are_raw(edges) else (query, key, value, edges)
+        rearranged = tuple(
             einops.rearrange(
                 t,
                 "nodes (heads vars) -> nodes heads vars",
                 heads=self.num_heads,
                 vars=self.out_channels_conv,
             )
-            for t in (query, key, value, edges)
+            for t in tensors
         )
-        return query, key, value, edges
+        return rearranged if len(rearranged) == 4 else (*rearranged, edges)
 
     def _apply_qk_norm(self, query: Tensor, key: Tensor) -> tuple[Tensor, Tensor]:
         if self.qk_norm:
@@ -783,6 +808,11 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
 
             if perm is not None:
                 edges = edges.index_select(0, perm)
+
+            if self._edges_are_raw(edges):
+                weight = self.lin_edge.weight.t().to(query.dtype)
+                bias = self.lin_edge.bias.to(query.dtype) if self.lin_edge.bias is not None else None
+                return graph_transformer_attention_fused_conv(query, key, value, edges, weight, bias, csc, reverse)
 
             args_conv = (edges, csc, reverse)
         else:

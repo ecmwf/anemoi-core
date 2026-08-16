@@ -17,8 +17,11 @@ from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
+    import anemoi.models.triton.gt as gt
     from anemoi.models.triton.gt import graph_transformer_attention
     from anemoi.models.triton.gt import graph_transformer_attention_conv
+    from anemoi.models.triton.gt import graph_transformer_attention_fused
+    from anemoi.models.triton.gt import graph_transformer_attention_fused_conv
 
 
 @pytest.fixture(autouse=True)
@@ -213,4 +216,79 @@ def test_graph_transformer_attention_opcheck(n_src: int, n_dst: int, h: int, d: 
     torch.library.opcheck(
         graph_transformer_attention,
         (query, key, value, edge_attr_csc, row, colptr, rowptr, edge_ids, edge_dst),
+    )
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 4),
+        (4, 10, 2, 6),
+        (4, 10, 6, 6),
+    ],
+)
+@pytest.mark.parametrize("bwd_min_degree", [0.0, 1e9])  # fully fused vs hybrid backward
+@pytest.mark.parametrize("with_bias", [True, False])
+def test_graph_transformer_fused_vs_unfused(
+    n_src: int, n_dst: int, h: int, d: int, bwd_min_degree: float, with_bias: bool, monkeypatch
+):
+    """Fused edge embedding matches embed-then-attend on output and all gradients."""
+    monkeypatch.setattr(gt, "FUSED_BWD_MIN_MEAN_DEGREE", bwd_min_degree)
+    torch.backends.cuda.matmul.allow_tf32 = False
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+    csc, perm, reverse = edge_index_to_csc(edge_index, num_nodes=(n_src, n_dst), reverse=True)
+
+    edge_dim = 3
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, edge_dim))
+    lin_edge = torch.nn.Linear(edge_dim, h * d, bias=with_bias)
+
+    edge_attr_csc = edge_attr[perm] if perm is not None else edge_attr
+
+    e = lin_edge(edge_attr_csc).reshape(m, h, d)
+    out_ref = graph_transformer_attention_conv(query, key, value, e, csc, reverse)
+    params = [query, key, value, lin_edge.weight] + ([lin_edge.bias] if with_bias else [])
+    grads_ref = torch.autograd.grad(out_ref.pow(2).sum(), params)
+
+    out_fused = graph_transformer_attention_fused_conv(
+        query, key, value, edge_attr_csc, lin_edge.weight.t(), lin_edge.bias, csc, reverse
+    )
+    grads_fused = torch.autograd.grad(out_fused.pow(2).sum(), params)
+
+    tolerance = 1e-4
+    torch.testing.assert_close(out_fused, out_ref, atol=tolerance, rtol=0)
+    for g_fused, g_ref in zip(grads_fused, grads_ref):
+        torch.testing.assert_close(g_fused, g_ref, atol=tolerance, rtol=0)
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize(
+    "n_src,n_dst,h,d",
+    [
+        (4, 10, 2, 4),
+        (4, 10, 6, 6),
+    ],
+)
+def test_graph_transformer_attention_fused_opcheck(n_src: int, n_dst: int, h: int, d: int):
+    """Validate schema, fake impl and autograd registration of the fused op."""
+    edge_index, m = build_bipartite_graph(n_src, n_dst)
+    (row, colptr), perm, (rowptr, edge_ids, edge_dst) = edge_index_to_csc(
+        edge_index, num_nodes=(n_src, n_dst), reverse=True
+    )
+
+    edge_dim = 3
+    query = torch.randn((n_dst, h, d), requires_grad=True)
+    key = torch.randn((n_src, h, d), requires_grad=True)
+    value = torch.randn((n_src, h, d), requires_grad=True)
+    edge_attr = torch.randn((m, edge_dim))
+    weight = torch.randn((edge_dim, h * d), requires_grad=True)
+    bias = torch.randn((h * d,), requires_grad=True)
+
+    torch.library.opcheck(
+        graph_transformer_attention_fused,
+        (query, key, value, edge_attr, weight, bias, row, colptr, rowptr, edge_ids, edge_dst),
     )
