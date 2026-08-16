@@ -720,10 +720,8 @@ def _gt_fused_bwd_dst_pass(
     D_OUT_ptr,
     D_Q_ptr,
     D_ptr,
-    A_ptr,  # [N_dst, ED, H]  sum attr*alpha
-    Bc_ptr,  # [N_dst, ED, H]  sum attr*dS
-    AS_ptr,  # [N_dst, H]      sum alpha
-    BS_ptr,  # [N_dst, H]      sum dS
+    A_ptr,  # [N_dst, ED+1, H]  sum attr*alpha, last row sum alpha (bias)
+    Bc_ptr,  # [N_dst, ED+1, H]  sum attr*dS,    last row sum dS (bias)
     N_dst,
     ED: tl.constexpr,
     H: tl.constexpr,
@@ -741,9 +739,11 @@ def _gt_fused_bwd_dst_pass(
 
     dst_off = dst_idx * H * C + H_C_off
     h_off = tl.arange(0, H_pad)
-    d_off = tl.arange(0, ED_pad)
-    dh_off = dst_idx * ED * H + d_off[:, None] * H + h_off[None, :]
-    dh_mask = (d_off[:, None] < ED) & (h_off[None, :] < H)
+    # accumulator rows: ED attribute rows plus one bias row (attr value 1.0)
+    EDb_pad: tl.constexpr = triton.next_power_of_2(ED + 1)
+    db_off = tl.arange(0, EDb_pad)
+    dh_off = dst_idx * (ED + 1) * H + db_off[:, None] * H + h_off[None, :]
+    dh_mask = (db_off[:, None] < ED + 1) & (h_off[None, :] < H)
 
     neigh_start = tl.load(COLPTR_ptr + dst_idx)
     neigh_end = tl.load(COLPTR_ptr + dst_idx + 1)
@@ -753,10 +753,8 @@ def _gt_fused_bwd_dst_pass(
         zeros_h = tl.zeros((H_pad,), dtype=tl.float32)
         tl.store(D_ptr + dst_idx * H + h_off, zeros_h, mask=H_mask)
         tl.store(D_Q_ptr + dst_off, tl.zeros((H_pad * C_pad,), dtype=out_dtype), mask=H_C_mask)
-        tl.store(A_ptr + dh_off, tl.zeros((ED_pad, H_pad), dtype=tl.float32), mask=dh_mask)
-        tl.store(Bc_ptr + dh_off, tl.zeros((ED_pad, H_pad), dtype=tl.float32), mask=dh_mask)
-        tl.store(AS_ptr + dst_idx * H + h_off, zeros_h, mask=H_mask)
-        tl.store(BS_ptr + dst_idx * H + h_off, zeros_h, mask=H_mask)
+        tl.store(A_ptr + dh_off, tl.zeros((EDb_pad, H_pad), dtype=tl.float32), mask=dh_mask)
+        tl.store(Bc_ptr + dh_off, tl.zeros((EDb_pad, H_pad), dtype=tl.float32), mask=dh_mask)
         return
 
     w, b = _load_edge_embed_weights(W_ptr, B_ptr, ED, ED_pad, H, C, H_C_mask, H_C_off)
@@ -767,17 +765,18 @@ def _gt_fused_bwd_dst_pass(
     m_j = tl.load(M_ptr + dst_idx * H + h_off, mask=H_mask).to(tl.float32)
 
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
-    accA = tl.zeros((ED_pad, H_pad), dtype=tl.float32)
-    accB = tl.zeros((ED_pad, H_pad), dtype=tl.float32)
-    asum = tl.zeros((H_pad,), dtype=tl.float32)
-    bsum = tl.zeros((H_pad,), dtype=tl.float32)
+    accA = tl.zeros((EDb_pad, H_pad), dtype=tl.float32)
+    accB = tl.zeros((EDb_pad, H_pad), dtype=tl.float32)
 
     e_idx = neigh_start
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
     for _ in range(num_edges):
-        attr, e_flat = _fused_edge_bias(ATTR_ptr, e_idx, w, b, ED, ED_pad)
+        attr, e_flat = _fused_edge_bias(ATTR_ptr, e_idx, w, b, ED, ED_pad)  # noqa: F841
         e = e_flat.reshape((H_pad, C_pad))
+        attrx = tl.where(
+            db_off == ED, 1.0, tl.load(ATTR_ptr + e_idx * ED + db_off, mask=db_off < ED, other=0.0).to(tl.float32)
+        )
 
         src = tl.load(ROW_ptr + e_idx)
         src_off = src * H * C + H_C_off
@@ -792,10 +791,8 @@ def _gt_fused_bwd_dst_pass(
         dS = alpha_ij * (dalpha - Dj)
 
         dq += dS[:, None] * ke * qk_scale
-        accA += attr[:, None] * alpha_ij[None, :]
-        accB += attr[:, None] * dS[None, :]
-        asum += alpha_ij
-        bsum += dS
+        accA += attrx[:, None] * alpha_ij[None, :]
+        accB += attrx[:, None] * dS[None, :]
 
         e_idx += 1
 
@@ -803,8 +800,6 @@ def _gt_fused_bwd_dst_pass(
     tl.store(D_Q_ptr + dst_off, dq.to(out_dtype).reshape((H_pad * C_pad,)), mask=H_C_mask)
     tl.store(A_ptr + dh_off, accA, mask=dh_mask)
     tl.store(Bc_ptr + dh_off, accB, mask=dh_mask)
-    tl.store(AS_ptr + dst_idx * H + h_off, asum, mask=H_mask)
-    tl.store(BS_ptr + dst_idx * H + h_off, bsum, mask=H_mask)
 
 
 @triton.jit
@@ -1008,10 +1003,8 @@ def graph_transformer_attention_fused_backward(
     dK = torch.empty_like(k)
     dV = torch.empty_like(v)
     D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-    A = torch.empty((N_dst, ED, H), device=q.device, dtype=torch.float32)
-    Bc = torch.empty((N_dst, ED, H), device=q.device, dtype=torch.float32)
-    asum = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-    bsum = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+    A = torch.empty((N_dst, ED + 1, H), device=q.device, dtype=torch.float32)
+    Bc = torch.empty((N_dst, ED + 1, H), device=q.device, dtype=torch.float32)
 
     _gt_fused_bwd_dst_pass[(N_dst,)](
         q,
@@ -1029,8 +1022,6 @@ def graph_transformer_attention_fused_backward(
         D,
         A,
         Bc,
-        asum,
-        bsum,
         N_dst,
         ED,
         H,
@@ -1059,13 +1050,16 @@ def graph_transformer_attention_fused_backward(
         grad_dtype,
     )
 
-    # dW = sum_e attr_e (x) dE_e, contracted per destination node
+    # dW = sum_e attr_e (x) dE_e, contracted per destination node; the extra
+    # accumulator row carries db. Contract in the gradient dtype: fp16/bf16
+    # batched GEMMs accumulate in fp32 and halve the d_out/q traffic.
     qk_scale = 1.0 / math.sqrt(C)
-    d_out32 = d_out.float()
-    q32 = q.float()
-    dW = torch.einsum("ndh,nhc->dhc", A, d_out32) + qk_scale * torch.einsum("ndh,nhc->dhc", Bc, q32)
-    db = torch.einsum("nh,nhc->hc", asum, d_out32) + qk_scale * torch.einsum("nh,nhc->hc", bsum, q32)
-    return dQ, dK, dV, dW.reshape(ED, H * C).to(weight.dtype), db.reshape(H * C).to(weight.dtype)
+    dWb = torch.einsum("ndh,nhc->dhc", A.to(d_out.dtype), d_out) + qk_scale * torch.einsum(
+        "ndh,nhc->dhc", Bc.to(q.dtype), q
+    )
+    dWb = dWb.reshape(ED + 1, H * C).to(weight.dtype)
+    # slices of one buffer: clone so the op outputs do not alias each other
+    return dQ, dK, dV, dWb[:ED].clone(), dWb[ED].clone()
 
 
 @graph_transformer_attention_fused_backward.register_fake
