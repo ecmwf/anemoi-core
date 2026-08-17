@@ -50,6 +50,7 @@ from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
+from .bounding import BoundingSchema 
 
 LOGGER = logging.getLogger(__name__)
 
@@ -150,92 +151,6 @@ class TrainableParameters(PydanticBaseModel):
     "Size of the learnable hidden node tensor. Default to 8."
 
 
-class ReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.ReluBounding"] = Field(..., alias="_target_")
-    "Relu bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the Relu method."
-
-
-class LeakyReluBoundingSchema(ReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-class FractionBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
-    "Fraction bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh fraction method."
-    min_val: float
-    "The minimum value for the HardTanh activation. Correspond to the minimum fraction of the total_var."
-    max_val: float
-    "The maximum value for the HardTanh activation. Correspond to the maximum fraction of the total_var."
-    total_var: str
-    "Variable from which the secondary variables are derived. \
-    For example, convective precipitation should be a fraction of total precipitation."
-
-
-class LeakyFractionBoundingSchema(FractionBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
-    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
-
-
-class HardtanhBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
-    "Hard tanh bounding method function from anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh method."
-    min_val: float
-    "The minimum value for the HardTanh activation."
-    max_val: float
-    "The maximum value for the HardTanh activation."
-
-
-class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
-    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
-
-
-class NormalizedReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
-    variables: list[str]
-    min_val: list[float]
-    normalizer: list[str]
-
-    @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(
-        self,
-    ) -> NormalizedReluBoundingSchema:
-        error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
-        match the number of variables ({len(self.variables)})"""
-        assert len(self.normalizer) == len(self.variables), error_msg
-        error_msg = f"""{self.__class__} requires that number of min_val ({len(self.min_val)}) or  match
-        the number of variables ({len(self.variables)})"""
-        assert len(self.min_val) == len(self.variables), error_msg
-        return self
-
-
-class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-Bounding = Annotated[
-    Union[
-        ReluBoundingSchema,
-        LeakyReluBoundingSchema,
-        FractionBoundingSchema,
-        LeakyFractionBoundingSchema,
-        HardtanhBoundingSchema,
-        LeakyHardtanhBoundingSchema,
-        NormalizedReluBoundingSchema,
-        NormalizedLeakyReluBoundingSchema,
-    ],
-    Field(discriminator="target_"),
-]
-
-
 class NoOutputMaskSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
@@ -295,7 +210,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Model schema."
     trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
     "Learnable node and edge parameters."
-    bounding: DatasetDict[list[Bounding]]
+    bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
@@ -454,6 +369,23 @@ class HierarchicalModelSchema(BaseModelSchema):
         discriminator="target_",
     )
     "Mapper used to downscale from a higher level to a lower level in the hierarchy."
+
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_num_channels_in_hierarchical_mapper(cls, data: Any) -> Any:
+        """Allow num_channels to be omitted. 
+        
+        It will be set at model build time.
+        """
+        for mapper_field in ("upscale_mapper", "downscale_mapper"):
+            if mapper_field in data:
+                mapper = data[mapper_field]
+                if isinstance(data, dict):
+                    mapper["num_channels"] = 1
+                elif isinstance(data, DictConfig):
+                    OmegaConf.update(mapper, "num_channels", 1, force_add=True)
+        return data
 
 
 ModelSchema = Union[

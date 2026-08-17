@@ -377,9 +377,7 @@ def test_training_cycle_mlflow_dry_run(
     cfg, url = mlflow_dry_run_config
 
     # Generate a dry run ID and set it in the config
-    run_id, _ = prepare_mlflow_run_id(
-        config=cfg,
-    )
+    run_id, _ = prepare_mlflow_run_id(config=cfg)
     cfg["training"]["run_id"] = run_id
 
     # Get training data
@@ -456,3 +454,7 @@ def test_evaluator(
     cfg.training.load_weights_only = True
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
+
+
+if __name__ == "__main__":
+    pytest.main(["-v", "training/tests/integration/test_training_cycle.py::test_training_cycle_hierarchical"])
