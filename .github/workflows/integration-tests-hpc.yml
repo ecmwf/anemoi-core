@@ -19,14 +19,26 @@ on:
     types: [opened, reopened, synchronize, labeled]
   merge_group:
 
+# Pushing to a PR supersedes any run still queued in Slurm; without this the old
+# run keeps burning HPC time for a commit nobody will merge.
+concurrency:
+  group: expensive-tests-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   build-env:
     name: build-env
     runs-on: hpc
     timeout-minutes: 120
-    # On a pull_request the expensive tests only run when the author opted in
-    # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-expensive-tests') }}
+    # Expensive tests run: on schedule/dispatch always; on a PR only when the author
+    # opted in via 'run-expensive-tests' AND the branch lives in this repo (fork PRs
+    # get no secrets and must not execute on the self-hosted HPC runner).
+    # merge_group is excluded: the same commits were already tested on the PR.
+    if: >-
+      ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      || (github.event_name == 'pull_request'
+      && contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
+      && github.event.pull_request.head.repo.full_name == github.repository) }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -154,3 +166,43 @@ jobs:
             **Time:** ${{ github.event.schedule }}
 
             cc: @ecmwf/anemoisecurity
+
+  # Single stable check-run name that can be marked as a required status check.
+  # Deliberately NOT a `uses:` job: those render as 'test_benchmark / run' when they
+  # run but as bare 'test_benchmark' when skipped, so no context string works in both
+  # states. 'build-env' is in `needs` because a failing build-env would otherwise skip
+  # the three test jobs, and a skipped job reports Success.
+  expensive-tests:
+    name: expensive-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
+    if: ${{ always() }}
+    steps:
+      - name: Summarise expensive-test results
+        env:
+          # Escape hatch: an HPC/Slurm outage or a known-flaky test can be unblocked by
+          # swapping the label, without needing an admin override.
+          OPT_OUT: ${{ github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'expensive-tests-not-needed') }}
+          BUILD_ENV: ${{ needs.build-env.result }}
+          BENCHMARK: ${{ needs.test_benchmark.result }}
+          TRAINING_CYCLE: ${{ needs.test_training_cycle.result }}
+          ACCURACY: ${{ needs.test_accuracy.result }}
+        run: |
+          set -eu
+          echo "build-env=$BUILD_ENV benchmark=$BENCHMARK training_cycle=$TRAINING_CYCLE accuracy=$ACCURACY"
+          if [ "$OPT_OUT" = "true" ]; then
+            echo "'expensive-tests-not-needed' is set - not gating on results."
+            exit 0
+          fi
+          rc=0
+          for r in "$BUILD_ENV" "$BENCHMARK" "$TRAINING_CYCLE" "$ACCURACY"; do
+            case "$r" in
+              success|skipped) ;;
+              *) rc=1 ;;
+            esac
+          done
+          if [ "$rc" -ne 0 ]; then
+            echo "::error::Expensive integration tests did not pass. See the job list for this run."
+          fi
+          exit $rc
