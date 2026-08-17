@@ -36,6 +36,7 @@ from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
 from .aggregator import AggregatorSchema  # noqa: TC001
+from .bounding import BoundingSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -50,7 +51,6 @@ from .processor import NoOpProcessorSchema  # noqa: TC001
 from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
 from .processor import TransformerProcessorSchema  # noqa: TC001
 from .residual import ResidualConnectionSchema
-from .bounding import BoundingSchema 
 
 LOGGER = logging.getLogger(__name__)
 
@@ -370,12 +370,11 @@ class HierarchicalModelSchema(BaseModelSchema):
     )
     "Mapper used to downscale from a higher level to a lower level in the hierarchy."
 
-
     @model_validator(mode="before")
     @classmethod
     def default_num_channels_in_hierarchical_mapper(cls, data: Any) -> Any:
-        """Allow num_channels to be omitted. 
-        
+        """Allow num_channels to be omitted.
+
         It will be set at model build time.
         """
         for mapper_field in ("upscale_mapper", "downscale_mapper"):

@@ -8,14 +8,15 @@
 #
 
 from __future__ import annotations
-from anemoi.utils.schemas import BaseModel
+
 from typing import Annotated
 from typing import Literal
 from typing import Union
 
 from pydantic import Field
-
 from pydantic import model_validator
+
+from anemoi.utils.schemas import BaseModel
 
 
 class ReluBoundingSchema(BaseModel):
