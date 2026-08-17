@@ -651,6 +651,8 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per reader group. Defaults to number of GPUs."
     use_local_synchronization: bool = Field(default=True, example=True)
     "Use synchronization local to the group when creating process groups."
+    broadcast_buffers: bool = Field(default=False, example=False)
+    "Broadcast model buffers at the start of each iteration. Defaults to False."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
