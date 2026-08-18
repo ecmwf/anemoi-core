@@ -30,6 +30,23 @@ import torch.distributed as dist
 
 LOGGER = logging.getLogger(__name__)
 
+_CAPACITY_ERROR_MESSAGES = (
+    "disk quota exceeded",
+    "no space left on device",
+    "not enough free space",
+)
+
+
+def _is_capacity_error(error: OSError) -> bool:
+    """Return whether an I/O error means the cache cannot admit more data."""
+    capacity_errnos = {errno.ENOSPC}
+    if hasattr(errno, "EDQUOT"):
+        capacity_errnos.add(errno.EDQUOT)
+    if error.errno in capacity_errnos:
+        return True
+    message = str(error).lower()
+    return any(fragment in message for fragment in _CAPACITY_ERROR_MESSAGES)
+
 
 class CacheConfigurationError(RuntimeError):
     """Raised when the cache cannot be configured safely."""
@@ -365,6 +382,8 @@ class DatasetCacheNamespace:
                 return True
             except OSError:
                 temporary.unlink(missing_ok=True)
+                if not marker.exists():
+                    entry.unlink(missing_ok=True)
                 raise
 
     def committed_positions(self):
@@ -389,6 +408,7 @@ class DatasetCache(pl.LightningDataModule):
         num_gpus_per_node=None,
         root_port=8000,
         delete_existing_cache=True,
+        min_free_bytes=1 << 30,
     ):
         super().__init__()
         self.ds = ds
@@ -400,6 +420,9 @@ class DatasetCache(pl.LightningDataModule):
         self.num_gpus_per_node = int(num_gpus_per_node or 1)
         self.root_port = int(root_port)
         self.delete_existing_cache = delete_existing_cache
+        self.min_free_bytes = int(min_free_bytes)
+        if self.min_free_bytes < 0:
+            raise ValueError("min_free_bytes must not be negative")
         self.is_initalised = False
         self.namespaces = {}
         self._dataset_aliases = {}
@@ -573,16 +596,32 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_misses.value += 1
         value = namespace.fetch_source(sequence, position)
         if not self.cache_full.value and not self._admission_disabled_path.exists():
-            try:
-                namespace.store(sequence, position, value)
-            except OSError as error:
-                if error.errno == errno.ENOSPC:
-                    self.cache_full.value = True
-                    self._admission_disabled_path.touch(exist_ok=True)
-                    LOGGER.warning("Node %s dataset cache is full; disabling admission", self.node_id)
-                else:
-                    raise
+            required_bytes = int(np.asarray(value).nbytes) + self.min_free_bytes
+            if shutil.disk_usage(self.cache_path).free < required_bytes:
+                self._disable_admission(
+                    f"insufficient free space for {np.asarray(value).nbytes} byte entry "
+                    f"with {self.min_free_bytes} byte reserve"
+                )
+            else:
+                try:
+                    namespace.store(sequence, position, value)
+                except OSError as error:
+                    if not _is_capacity_error(error):
+                        raise
+                    self._disable_admission(str(error))
         return value
+
+    def _disable_admission(self, reason):
+        """Disable new writes on this node while preserving cache reads."""
+        was_enabled = not self.cache_full.value and not self._admission_disabled_path.exists()
+        self.cache_full.value = True
+        try:
+            self._admission_disabled_path.touch(exist_ok=True)
+        except OSError as error:
+            if not _is_capacity_error(error):
+                raise
+        if was_enabled:
+            LOGGER.warning("Node %s dataset cache admission disabled: %s", self.node_id, reason)
 
     def fetch_many(self, dataset_id, sequence, positions):
         dataset_id = self._resolve_dataset_id(dataset_id)

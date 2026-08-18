@@ -10,6 +10,7 @@
 """Unit tests for anemoi.training.utils.dataset_cache."""
 
 import io
+import errno
 import socket
 import struct
 import threading
@@ -26,6 +27,7 @@ from anemoi.training.utils.dataset_cache import (
     TCPCacheClient,
     TCPCacheServer,
     _recv_exact,
+    _is_capacity_error,
 )
 
 
@@ -133,6 +135,22 @@ class TestRecvExact:
         sock = FakeSocket()
         result = _recv_exact(sock, 10)
         assert result is None
+
+
+class TestCapacityErrors:
+    @pytest.mark.parametrize(
+        "error",
+        [
+            OSError(errno.ENOSPC, "No space left on device"),
+            OSError("Not enough free space to write 1045875200 bytes after offset 128"),
+            OSError("Disk quota exceeded"),
+        ],
+    )
+    def test_recognizes_capacity_errors(self, error):
+        assert _is_capacity_error(error)
+
+    def test_does_not_hide_unrelated_io_error(self):
+        assert not _is_capacity_error(OSError(errno.EACCES, "Permission denied"))
 
 
 # ---------------------------------------------------------------------------
@@ -478,3 +496,18 @@ class TestDatasetCacheNamespace:
 
         np.testing.assert_array_equal(namespace.fetch_local(0, 2), data[0, :, :, 2, :])
         np.testing.assert_array_equal(namespace.fetch_local(1, 2), data[1, :, :, 2, :])
+
+    def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+
+        def fail_save(file, value, allow_pickle):
+            file.write(b"partial")
+            raise OSError("Not enough free space to write array")
+
+        monkeypatch.setattr(np, "save", fail_save)
+        with pytest.raises(OSError, match="Not enough free space"):
+            namespace.store(0, 3, sample_data[3])
+
+        entry, marker, _ = namespace._paths(0, 3)
+        assert not entry.exists()
+        assert not marker.exists()
