@@ -313,6 +313,18 @@ class TestTCPCacheServerClient:
         for idx in range(5):
             np.testing.assert_array_equal(results[idx], cache_data[idx])
 
+    def test_ephemeral_port_and_clean_shutdown(self, cache_data):
+        server = TCPCacheServer(cache_data, 0, host="127.0.0.1")
+        server.start()
+
+        assert server.port > 0
+        client = TCPCacheClient("127.0.0.1", server.port)
+        np.testing.assert_array_equal(client.fetch(3), cache_data[3])
+        client.close()
+
+        server.close()
+        assert not server._thread.is_alive()
+
 
 # ---------------------------------------------------------------------------
 # Tests for DatasetCache.priority_reduce (static-like method)

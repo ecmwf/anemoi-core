@@ -141,6 +141,7 @@ class TCPCacheServer:
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind((self.host, self.port))
         server.listen(64)
+        self.port = server.getsockname()[1]
         self._server_socket = server
         self._thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._thread.start()
@@ -170,9 +171,17 @@ class TCPCacheServer:
             connection.close()
 
     def close(self):
-        if self._server_socket is not None:
-            self._server_socket.close()
-            self._server_socket = None
+        server = self._server_socket
+        self._server_socket = None
+        if server is not None:
+            try:
+                server.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            server.close()
+        thread = getattr(self, "_thread", None)
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)
 
 
 class TCPCacheClient:
@@ -282,6 +291,11 @@ class _KeyedTCPClient:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
+
+
+class _ThreadingHTTPServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
 
 
 class DatasetCacheNamespace:
@@ -406,7 +420,7 @@ class DatasetCache(pl.LightningDataModule):
         hostname_suffix=None,
         remote_backend="tcp",
         num_gpus_per_node=None,
-        root_port=8000,
+        root_port=None,
         delete_existing_cache=True,
         min_free_bytes=1 << 30,
     ):
@@ -418,7 +432,7 @@ class DatasetCache(pl.LightningDataModule):
         self.hostname_suffix = hostname_suffix
         self.remote_backend = remote_backend
         self.num_gpus_per_node = int(num_gpus_per_node or 1)
-        self.root_port = int(root_port)
+        self.root_port = None if root_port is None else int(root_port)
         self.delete_existing_cache = delete_existing_cache
         self.min_free_bytes = int(min_free_bytes)
         if self.min_free_bytes < 0:
@@ -522,10 +536,18 @@ class DatasetCache(pl.LightningDataModule):
         self.is_initalised = True
         self._attach_dataset("training", self.ds.ds_train)
 
-        self.port = self.root_port + self.node_id
+        self.port = 0 if self.root_port is None else self.root_port + self.node_id
         if self.is_node_leader:
             self._start_server()
-        dist.barrier(group=self.proc_group)
+        advertised_port = self.port if self.is_node_leader else None
+        rank_ports = [None] * self.world_size
+        dist.all_gather_object(rank_ports, advertised_port, group=self.proc_group)
+        self._node_ports = {
+            node_id: int(rank_ports[leader_rank])
+            for node_id, leader_rank in self._node_leader_rank.items()
+        }
+        self.port = self._node_ports[self.node_id]
+        LOGGER.info("Node %s dataset cache listening on port %s", self.node_id, self.port)
 
     def train_dataloader(self):
         return self.ds._get_dataloader(self.ds_train, "training")
@@ -542,13 +564,27 @@ class DatasetCache(pl.LightningDataModule):
     def _start_server(self):
         if self.remote_backend == "tcp":
             self._server = _KeyedTCPServer(self, self.port)
-            self._server.start()
+            try:
+                self._server.start()
+            except OSError as error:
+                if error.errno != errno.EADDRINUSE or self.port == 0:
+                    raise
+                LOGGER.warning("Dataset cache port %s is occupied; selecting a free port", self.port)
+                self._server = _KeyedTCPServer(self, 0)
+                self._server.start()
+            self.port = self._server.port
             return
         if self.remote_backend not in {"zarr", "http"}:
             raise CacheConfigurationError(f"Unknown remote cache backend: {self.remote_backend}")
         handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(self.cache_root))
-        socketserver.TCPServer.allow_reuse_address = True
-        self._server = socketserver.ThreadingTCPServer(("", self.port), handler)
+        try:
+            self._server = _ThreadingHTTPServer(("", self.port), handler)
+        except OSError as error:
+            if error.errno != errno.EADDRINUSE or self.port == 0:
+                raise
+            LOGGER.warning("Dataset cache port %s is occupied; selecting a free port", self.port)
+            self._server = _ThreadingHTTPServer(("", 0), handler)
+        self.port = self._server.server_address[1]
         self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
         self._server_thread.start()
 
@@ -640,7 +676,7 @@ class DatasetCache(pl.LightningDataModule):
 
     def _endpoint(self, node_id):
         rank = self._node_leader_rank[node_id]
-        return Endpoint(self.hostnames[rank], self.root_port + node_id, node_id)
+        return Endpoint(self.hostnames[rank], self._node_ports[node_id], node_id)
 
     def _fetch_remote(self, node_id, key):
         endpoint = self._endpoint(node_id)
@@ -751,6 +787,9 @@ class DatasetCache(pl.LightningDataModule):
             elif server is not None:
                 server.shutdown()
                 server.server_close()
+                server_thread = getattr(self, "_server_thread", None)
+                if server_thread is not None:
+                    server_thread.join(timeout=5)
         self.ds.teardown(stage)
 
     close = teardown
