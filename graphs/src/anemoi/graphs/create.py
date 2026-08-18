@@ -13,67 +13,68 @@ from itertools import chain
 from pathlib import Path
 
 import torch
-from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.utils.builder import as_dict
+from anemoi.utils.builder import build
+from anemoi.utils.builder import build_all
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphCreator:
-    """Graph creator."""
+class GraphBuilder:
+    """Build a graph from already-constructed node/edge builders and post-processors.
 
-    config: DotDict
+    This is the object-injection API: rather than reading a configuration, it is handed
+    fully-built ``BaseNodeBuilder``/``BaseEdgeBuilder``/``PostProcessor`` objects (each
+    carrying its own attributes) and orchestrates graph creation from them. It is the
+    shared base for the config-driven :class:`GraphCreator`.
 
-    def __init__(
-        self,
-        config: str | Path | DotDict | DictConfig,
-    ):
-        if isinstance(config, Path) or isinstance(config, str):
-            self.config = DotDict.from_file(config)
-        elif isinstance(config, DictConfig):
-            self.config = DotDict(config)
-        else:
-            self.config = config
+    Parameters
+    ----------
+    nodes : list, optional
+        Built node builders. Each is applied in order via ``update_graph``.
+    edges : list, optional
+        Built edge builders. Each is applied in order via ``update_graph``.
+    post_processors : list, optional
+        Built post-processors applied after cleaning.
+    """
+
+    def __init__(self, nodes: list | None = None, edges: list | None = None, post_processors: list | None = None):
+        self.nodes = list(nodes or [])
+        self.edges = list(edges or [])
+        self.post_processors = list(post_processors or [])
 
     def update_graph(self, graph: HeteroData) -> HeteroData:
-        """Update the graph.
-
-        It instantiates the node builders and edge builders defined in the configuration
-        file and applies them to the graph.
-
-        Parameters
-        ----------
-        graph : HeteroData
-            The input graph to be updated.
-
-        Returns
-        -------
-        HeteroData
-            The updated graph with new nodes and edges added based on the configuration.
-        """
-        for nodes_name, nodes_cfg in self.config.get("nodes", {}).items():
-            graph = instantiate(nodes_cfg.node_builder, name=nodes_name).update_graph(
-                graph, attrs_config=nodes_cfg.get("attributes", {})
-            )
-
-        for edges_cfg in self.config.get("edges", {}):
-            for edge_builder_cfg in edges_cfg.edge_builders:
-                edge_builder = instantiate(
-                    edge_builder_cfg,
-                    source_name=edges_cfg.source_name,
-                    target_name=edges_cfg.target_name,
-                )
-                graph = edge_builder.update_graph(graph, attrs_config=None)
-
-            graph = edge_builder.register_attributes(graph, edges_cfg.get("attributes", {}))
+        """Register the nodes and edges of every builder onto ``graph``."""
+        for node_builder in self.nodes:
+            graph = node_builder.update_graph(graph)
+        for edge_builder in self.edges:
+            graph = edge_builder.update_graph(graph)
 
         if graph.num_nodes == 0:
-            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
+            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration.")
 
         return graph
+
+    def graph_config(self) -> dict:
+        """Synthesize the ``graph_config`` mapping post-processors expect.
+
+        Post-processors that recompute edge attributes look them up by source/target
+        node names; here they are provided directly as the built attribute objects.
+        """
+        return {
+            "edges": [
+                {
+                    "source_name": edge_builder.source_name,
+                    "target_name": edge_builder.target_name,
+                    "attributes": edge_builder.attributes,
+                }
+                for edge_builder in self.edges
+            ]
+        }
 
     def clean(self, graph: HeteroData) -> HeteroData:
         """Remove private attributes used during creation from the graph.
@@ -98,28 +99,10 @@ class GraphCreator:
         return graph
 
     def post_process(self, graph: HeteroData) -> HeteroData:
-        """Allow post-processing of the resulting graph.
-
-        This method applies any configured post-processors to the graph,
-        which can modify or enhance the graph structure or attributes.
-
-        Parameters
-        ----------
-        graph : HeteroData
-            The graph to be post-processed.
-
-        Returns
-        -------
-        HeteroData
-            The post-processed graph.
-
-        Notes
-        -----
-        Post-processors are applied in the order they are specified in the configuration.
-        Each post-processor should implement an `update_graph` method that takes and returns a HeteroData object.
-        """
-        for processor in self.config.get("post_processors", []):
-            graph = instantiate(processor).update_graph(graph, graph_config=self.config)
+        """Apply the post-processors to the graph, in order."""
+        graph_config = self.graph_config()
+        for processor in self.post_processors:
+            graph = processor.update_graph(graph, graph_config=graph_config)
 
         return graph
 
@@ -149,7 +132,7 @@ class GraphCreator:
             )
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
-        """Create the graph and save it to the output path.
+        """Create the graph and optionally save it to the output path.
 
         Parameters
         ----------
@@ -172,6 +155,75 @@ class GraphCreator:
             LOGGER.warning("No output path specified. The graph will not be saved.")
         else:
             self.save(graph, save_path, overwrite)
+
+        return graph
+
+
+class GraphCreator(GraphBuilder):
+    """Graph creator that builds the graph from a (Hydra-style) configuration."""
+
+    config: DotDict
+
+    def __init__(
+        self,
+        config: str | Path | DotDict | DictConfig,
+    ):
+        super().__init__()
+        if isinstance(config, Path) or isinstance(config, str):
+            self.config = DotDict.from_file(config)
+        elif isinstance(config, DictConfig):
+            self.config = DotDict(config)
+        else:
+            self.config = config
+
+    def update_graph(self, graph: HeteroData) -> HeteroData:
+        """Update the graph.
+
+        It builds the node builders and edge builders defined in the configuration
+        and applies them to the graph.
+
+        Parameters
+        ----------
+        graph : HeteroData
+            The input graph to be updated.
+
+        Returns
+        -------
+        HeteroData
+            The updated graph with new nodes and edges added based on the configuration.
+        """
+        config = as_dict(self.config)
+
+        for nodes_name, nodes_cfg in config.get("nodes", {}).items():
+            node_builder = build(nodes_cfg["node_builder"], name=nodes_name)
+            attributes = build_all(nodes_cfg.get("attributes", {}) or {})
+            graph = node_builder.update_graph(graph, attributes)
+
+        for edges_cfg in config.get("edges", []) or []:
+            edge_builders = [
+                build(edge_builder_cfg, source_name=edges_cfg["source_name"], target_name=edges_cfg["target_name"])
+                for edge_builder_cfg in edges_cfg["edge_builders"]
+            ]
+            for edge_builder in edge_builders:
+                graph = edge_builder.register_edges(graph)
+
+            attributes = build_all(edges_cfg.get("attributes", {}) or {})
+            graph = edge_builders[-1].register_attributes(graph, attributes)
+
+        if graph.num_nodes == 0:
+            LOGGER.warning("The graph that was created has no nodes. Please check your graph configuration file.")
+
+        return graph
+
+    def post_process(self, graph: HeteroData) -> HeteroData:
+        """Apply the post-processors defined in the configuration, in order.
+
+        Each post-processor is built from config and receives the (plain-dict) graph
+        configuration so that it can, e.g., recompute edge attributes after masking.
+        """
+        graph_config = as_dict(self.config)
+        for processor in graph_config.get("post_processors", []) or []:
+            graph = build(processor).update_graph(graph, graph_config=graph_config)
 
         return graph
 

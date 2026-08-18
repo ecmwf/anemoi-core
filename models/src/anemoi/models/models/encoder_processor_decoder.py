@@ -13,8 +13,8 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
 from torch import Tensor
+from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.graph import shard_tensor
@@ -23,77 +23,36 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiModelEncProcDec(BaseGraphModel):
-    """Message passing graph neural network."""
+    """Message passing graph neural network.
 
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Builds the model components."""
-        # Encoder data -> hidden
-        self.encoder_graph_provider = torch.nn.ModuleDict()
-        self.encoder = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name],
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
-            )
+    The encoder/processor/decoder and their graph providers are built by a
+    ``ModelBuilder`` and injected; this class only stores them and runs the forward pass.
+    """
 
-            self.encoder[dataset_name] = instantiate(
-                model_config.model.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent,
-                hidden_dim=self.num_channels,
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
-            )
-
-        # Processor hidden -> hidden
-        self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
-        )
-
-        self.processor = instantiate(
-            model_config.model.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            num_channels=self.num_channels,
-            edge_dim=self.processor_graph_provider.edge_dim,
-        )
-
-        # Decoder hidden -> data
-        self.decoder_graph_provider = torch.nn.ModuleDict()
-        self.decoder = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
-            )
-
-            self.decoder[dataset_name] = instantiate(
-                model_config.model.decoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.num_channels,
-                in_channels_dst=self.target_dim[dataset_name],
-                hidden_dim=self.num_channels,
-                out_channels_dst=self.output_dim[dataset_name],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
-            )
+    def __init__(
+        self,
+        *,
+        encoder: nn.ModuleDict,
+        processor: nn.Module,
+        decoder: nn.ModuleDict,
+        encoder_graph_provider: nn.ModuleDict,
+        processor_graph_provider: nn.Module,
+        decoder_graph_provider: nn.ModuleDict,
+        **base_kwargs,
+    ) -> None:
+        super().__init__(**base_kwargs)
+        self.encoder_graph_provider = encoder_graph_provider
+        self.encoder = encoder
+        self.processor_graph_provider = processor_graph_provider
+        self.processor = processor
+        self.decoder_graph_provider = decoder_graph_provider
+        self.decoder = decoder
 
     def _assemble_input(
         self,

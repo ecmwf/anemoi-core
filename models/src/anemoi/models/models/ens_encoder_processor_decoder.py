@@ -13,11 +13,9 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 from torch import Tensor
+from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -26,7 +24,6 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,33 +34,15 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DictConfig,
-        data_indices: dict,
-        statistics: dict,
-        graph_data: HeteroData,
-        n_step_input: int,
-        n_step_output: int,
+        noise_injector: nn.Module,
+        condition_on_residual: bool,
+        **base_kwargs,
     ) -> None:
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            n_step_input=n_step_input,
-            n_step_output=n_step_output,
-        )
-
-    def _build_networks(self, model_config: DotDict) -> None:
-        super()._build_networks(model_config)
-
-        self.noise_injector = instantiate(
-            model_config.model.noise_injector,
-            _recursive_=False,
-            num_channels=self.num_channels,
-            graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.model.get("sparse_projector", {}).get("num_chunks", 1),
-        )
+        # Must be set before super().__init__(): the base computes ``input_dim`` (via the
+        # overridden ``_calculate_input_dim``) which depends on ``condition_on_residual``.
+        self.condition_on_residual = condition_on_residual
+        super().__init__(**base_kwargs)
+        self.noise_injector = noise_injector
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         base_input_dim = super()._calculate_input_dim(dataset_name)

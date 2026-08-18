@@ -14,11 +14,8 @@ from typing import Optional
 
 import einops
 import torch
-from hydra.utils import instantiate
-from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
@@ -50,17 +47,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def __init__(
         self,
         *,
-        model_config: DictConfig,
-        data_indices: dict,
-        statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
-        graph_data: HeteroData,
+        noise_embedder: nn.Module,
+        transport_params: DotDict,
+        **base_kwargs,
     ) -> None:
-
-        model_config = DotDict(model_config)
-
-        transport_params = model_config.model.model.transport
+        # ``transport_params`` is parametrisation (not architecture): it is parsed into
+        # settings value objects here. The polymorphic ``noise_embedder`` and the
+        # encoder/processor/decoder are built by the ModelBuilder and injected.
+        transport_params = DotDict(transport_params)
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -71,16 +65,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.inference_defaults = transport_params.get("inference_defaults", {})
         self.transport_model_objective = get_transport_model_objective(transport_params.objective)
 
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            graph_data=graph_data,
-            n_step_input=n_step_input,
-            n_step_output=n_step_output,
-        )
+        super().__init__(**base_kwargs)
 
-        self.noise_embedder = instantiate(transport_params.noise_embedder)
+        self.noise_embedder = noise_embedder
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -647,27 +634,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
 
-    def __init__(
-        self,
-        *,
-        model_config: DictConfig,
-        data_indices: dict,
-        statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
-        graph_data: HeteroData,
-    ) -> None:
-        model_config = DotDict(model_config)
-
-        self.condition_on_residual = model_config.model.condition_on_residual
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            n_step_input=n_step_input,
-            n_step_output=n_step_output,
-            graph_data=graph_data,
-        )
+    def __init__(self, *, condition_on_residual: bool, **kwargs) -> None:
+        # Set before super().__init__(): the base computes ``input_dim`` (via the overridden
+        # ``_calculate_input_dim``) which depends on ``condition_on_residual``.
+        self.condition_on_residual = condition_on_residual
+        super().__init__(**kwargs)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)

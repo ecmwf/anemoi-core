@@ -55,7 +55,7 @@ def test_register_nodes():
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class):
     """Test LatLonNodes register correctly the weights."""
     node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
-    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
+    config = {"test_attr": attr_class()}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
 
