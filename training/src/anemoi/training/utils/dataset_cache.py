@@ -1,202 +1,193 @@
-import os
+"""Node-local dataset cache with optional cross-node reads."""
+
+from __future__ import annotations
+
 import errno
 import fcntl
-import shutil
-import torch
-import torch.distributed as dist
-from pathlib import Path
+import hashlib
 import http.server
+import io
+import json
+import logging
+import os
+import shutil
+import socket
 import socketserver
+import struct
+import threading
+from contextlib import contextmanager
+from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Value
-
-from anemoi.datasets import open_dataset
-
-import zarr
-from zarr.convenience import PathNotFoundError
-import threading
+from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import urlopen
 
 import numpy as np
-import socket
-import struct
-import io
-
-from abc import ABC, abstractmethod
-
-
 import pytorch_lightning as pl
-from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+import torch
+import torch.distributed as dist
 
-import logging
 LOGGER = logging.getLogger(__name__)
 
 
-USE_LOCKING = False  # Set to False to disable file locking (not recommended)
+class CacheConfigurationError(RuntimeError):
+    """Raised when the cache cannot be configured safely."""
 
-class CachedDataWrapper:
-    """Wrapper that intercepts data access and routes through cache."""
-    
-    def __init__(self, original_data, cache_instance):
-        self.original_data = original_data
-        self.cache = cache_instance
-        self._access_count = 0
-        LOGGER.info(f"CachedDataWrapper created for {type(original_data).__name__}")
-        
-    def __getitem__(self, index):
-        """Intercept array access and route through cache."""
-        self._access_count += 1
-        if self._access_count <= 5:
-            LOGGER.debug(f"CachedDataWrapper.__getitem__ called (access #{self._access_count}) with index type: {type(index).__name__}, value: {index if not isinstance(index, (tuple, slice)) or len(str(index)) < 50 else '...'}")
-        
-        # Handle different index types
-        if isinstance(index, tuple):
-            # Multi-dimensional indexing like data[time, :, :, grid]
-            time_idx = index[0]
-            rest_idx = index[1:] if len(index) > 1 else ()
-            
-            if isinstance(time_idx, slice):
-                # Slice access - fetch multiple time steps
-                start, stop, step = time_idx.indices(len(self.original_data))
-                LOGGER.debug(f"CachedDataWrapper: Fetching slice [{start}:{stop}:{step}] (total {(stop-start)//max(1,step or 1)} samples)")
-                results = []
-                for i in range(start, stop, step or 1):
-                    single_result = self.cache.fetch(i, verbose=False)
-                    if rest_idx:
-                        single_result = single_result[rest_idx]
-                    results.append(single_result)
-                return np.stack(results, axis=0)
-            elif isinstance(time_idx, int):
-                # Single time index
-                LOGGER.debug(f"CachedDataWrapper: Fetching single time index {time_idx}")
-                result = self.cache.fetch(time_idx, verbose=False)
-                if rest_idx:
-                    result = result[rest_idx]
-                return result
-            else:
-                # Fallback to original data access
-                LOGGER.warning(f"CachedDataWrapper: Unhandled tuple index type: {type(time_idx).__name__}, falling back to original data")
-                return self.original_data[index]
-        elif isinstance(index, (int, np.integer)):
-            # Single integer index
-            LOGGER.debug(f"CachedDataWrapper: Fetching single integer index {index}")
-            return self.cache.fetch(int(index), verbose=False)
-        elif isinstance(index, slice):
-            # Simple slice
-            start, stop, step = index.indices(len(self.original_data))
-            LOGGER.debug(f"CachedDataWrapper: Fetching simple slice [{start}:{stop}:{step}]")
-            results = []
-            for i in range(start, stop, step or 1):
-                results.append(self.cache.fetch(i, verbose=False))
-            return np.stack(results, axis=0)
-        else:
-            # Fallback for other index types
-            LOGGER.warning(f"CachedDataWrapper: Unhandled index type: {type(index).__name__}, falling back to original data")
-            return self.original_data[index]
 
-    def __len__(self):
-        return len(self.original_data)
-    
-    def __getattr__(self, name):
-        """Delegate attribute access to original data."""
-        return getattr(self.original_data, name)
+class RemoteCacheMiss(KeyError):
+    """Raised when a remote node does not contain a requested entry."""
+
+
+class RemoteCacheUnavailable(ConnectionError):
+    """Raised when a remote cache service cannot be reached."""
+
+
+@dataclass(frozen=True)
+class CacheKey:
+    dataset_id: str
+    sequence: int
+    position: int
+
+
+@dataclass(frozen=True)
+class Endpoint:
+    host: str
+    port: int
+    node_id: int
 
 
 def _recv_exact(sock, nbytes):
-    """Receive exactly *nbytes* from *sock*, or return None on clean EOF."""
+    """Receive exactly ``nbytes`` from a socket, or return ``None`` on EOF."""
     parts = []
     remaining = nbytes
-    while remaining > 0:
-        chunk = sock.recv(min(remaining, 1 << 20))  # up to 1 MB per recv
+    while remaining:
+        chunk = sock.recv(min(remaining, 1 << 20))
         if not chunk:
             return None
         parts.append(chunk)
         remaining -= len(chunk)
-    return b''.join(parts)
+    return b"".join(parts)
+
+
+class CachedDataWrapper:
+    """Compatibility wrapper routing first-axis indexing through a cache."""
+
+    def __init__(self, original_data, cache_instance):
+        self.original_data = original_data
+        self.cache = cache_instance
+        self._access_count = 0
+
+    def __getitem__(self, index):
+        self._access_count += 1
+        if isinstance(index, tuple):
+            time_index, rest = index[0], index[1:]
+            if isinstance(time_index, (int, np.integer)):
+                return self.cache.fetch(int(time_index))[rest]
+            return self._fetch_many(time_index)[(slice(None), *rest)]
+        if isinstance(index, (int, np.integer)):
+            return self.cache.fetch(int(index))
+        if isinstance(index, (slice, list, np.ndarray)):
+            return self._fetch_many(index)
+        return self.original_data[index]
+
+    def _fetch_many(self, indices):
+        if isinstance(indices, slice):
+            normalized = list(range(*indices.indices(len(self.original_data))))
+        else:
+            values = np.asarray(indices)
+            if values.ndim != 1 or not np.issubdtype(values.dtype, np.integer):
+                return self.original_data[indices]
+            normalized = values.tolist()
+        if not normalized:
+            return self.original_data[indices]
+        return np.stack([self.cache.fetch(int(index)) for index in normalized])
+
+    def __len__(self):
+        return len(self.original_data)
+
+    def __getattr__(self, name):
+        return getattr(self.original_data, name)
 
 
 class TCPCacheServer:
-    """TCP server that serves numpy arrays from the local zarr cache.
-
-    Protocol (persistent connection, many requests per connection):
-      Request:  4 bytes  – date index (uint32, big-endian)
-      Response: 8 bytes  – payload length (uint64, big-endian)
-                N bytes  – uncompressed .npy data (``np.save`` format)
-    """
+    """Legacy integer-key TCP server retained for compatibility and benchmarks."""
 
     def __init__(self, cache, port, host=""):
         self.cache = cache
         self.port = port
         self.host = host
+        self._server_socket = None
 
     def start(self):
-        srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        srv.bind((self.host, self.port))
-        srv.listen(64)
-        self._server_socket = srv
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind((self.host, self.port))
+        server.listen(64)
+        self._server_socket = server
         self._thread = threading.Thread(target=self._accept_loop, daemon=True)
         self._thread.start()
 
     def _accept_loop(self):
-        while True:
+        while self._server_socket is not None:
             try:
-                conn, _ = self._server_socket.accept()
-                threading.Thread(target=self._handle, args=(conn,), daemon=True).start()
+                connection, _ = self._server_socket.accept()
             except OSError:
                 break
+            threading.Thread(target=self._handle, args=(connection,), daemon=True).start()
 
-    def _handle(self, conn):
+    def _handle(self, connection):
         try:
             while True:
-                hdr = _recv_exact(conn, 4)
-                if hdr is None:
+                header = _recv_exact(connection, 4)
+                if header is None:
                     break
-                date = struct.unpack("!I", hdr)[0]
-                arr = np.asarray(self.cache[date])
-                buf = io.BytesIO()
-                np.save(buf, arr)
-                payload = buf.getvalue()
-                conn.sendall(struct.pack("!Q", len(payload)) + payload)
+                value = np.asarray(self.cache[struct.unpack("!I", header)[0]])
+                payload_buffer = io.BytesIO()
+                np.save(payload_buffer, value, allow_pickle=False)
+                payload = payload_buffer.getvalue()
+                connection.sendall(struct.pack("!Q", len(payload)) + payload)
         except (ConnectionResetError, BrokenPipeError, OSError):
             pass
         finally:
-            conn.close()
+            connection.close()
+
+    def close(self):
+        if self._server_socket is not None:
+            self._server_socket.close()
+            self._server_socket = None
 
 
 class TCPCacheClient:
-    """Persistent-connection client for :class:`TCPCacheServer`.
+    """Persistent client for :class:`TCPCacheServer`."""
 
-    Lazily connects on first ``fetch`` and reconnects automatically on failure.
-    Supports ``client[date]`` indexing for drop-in compatibility with zarr arrays.
-    """
-
-    def __init__(self, host, port):
+    def __init__(self, host, port, timeout=30.0):
         self.host = host
         self.port = port
+        self.timeout = timeout
         self._sock = None
 
     def _connect(self):
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((self.host, self.port))
-        self._sock = s
+        self._sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
 
     def fetch(self, date):
-        if self._sock is None:
-            self._connect()
-        try:
-            self._sock.sendall(struct.pack("!I", date))
-            hdr = _recv_exact(self._sock, 8)
-            if hdr is None:
-                raise ConnectionError("server closed connection")
-            length = struct.unpack("!Q", hdr)[0]
-            payload = _recv_exact(self._sock, length)
-            if payload is None:
-                raise ConnectionError("server closed connection")
-            return np.load(io.BytesIO(payload))
-        except (ConnectionResetError, BrokenPipeError, ConnectionError):
-            self._sock = None
-            self._connect()
-            return self.fetch(date)
+        for attempt in range(2):
+            try:
+                if self._sock is None:
+                    self._connect()
+                self._sock.sendall(struct.pack("!I", int(date)))
+                header = _recv_exact(self._sock, 8)
+                if header is None:
+                    raise ConnectionError("server closed connection")
+                payload = _recv_exact(self._sock, struct.unpack("!Q", header)[0])
+                if payload is None:
+                    raise ConnectionError("server closed connection")
+                return np.load(io.BytesIO(payload), allow_pickle=False)
+            except (ConnectionResetError, BrokenPipeError, ConnectionError, OSError):
+                self.close()
+                if attempt:
+                    raise
+        raise RemoteCacheUnavailable(f"Unable to connect to {self.host}:{self.port}")
 
     def __getitem__(self, date):
         return self.fetch(date)
@@ -207,465 +198,575 @@ class TCPCacheClient:
             self._sock = None
 
 
-#TODO change to overwriting the dataset insetad of data module?
-class DatasetCache(AnemoiDatasetsDataModule):
-    def __init__(self, ds, cache_root, dataset_path, proc_group=None, hostname_suffix=None, remote_backend="zarr"):
-        self.ds=ds
-        self.cache_root = Path(cache_root)
-        self.dataset_path=dataset_path
-        self.proc_group = proc_group
-        self.remote_backend = remote_backend  # "zarr" (HTTP zarr) or "tcp" (raw socket + uncompressed npy)
-        
-        # For multi-dataset scenarios, we cache the first dataset by default
-        # In the future, this could be made configurable
-        self.dataset_names = None
-        self.primary_dataset_name = None
-        
-        self.is_initalised = False
+class _KeyedTCPServer(TCPCacheServer):
+    """TCP service for canonical cache keys."""
 
-        # optional suffix which will be appended to hostnames
-        self.hostname_suffix=hostname_suffix
-        
-        # Cache statistics - use shared memory for cross-process visibility
-        self.cache_hits_local = Value('i', 0)  # 'i' = signed int
-        self.cache_hits_remote = Value('i', 0)
-        self.cache_misses = Value('i', 0)
-        self.total_fetches = Value('i', 0)
-        
-        # Store the wrapped dataset to prevent it from being recreated
-        self._cached_ds_train = None
-        self.dataset_names = self.ds.dataset_names
-        
-    @property
-    def ds_train(self):
-        """Return the training dataset with cache wrapper applied."""
-        if self._cached_ds_train is None:
-            self._cached_ds_train = self.ds.ds_train
-        return self._cached_ds_train
-        
+    def _handle(self, connection):
+        try:
+            while True:
+                header = _recv_exact(connection, 4)
+                if header is None:
+                    break
+                request_payload = _recv_exact(connection, struct.unpack("!I", header)[0])
+                if request_payload is None:
+                    break
+                request = json.loads(request_payload)
+                value = self.cache._fetch_local_only(
+                    request["dataset_id"], request["sequence"], request["position"]
+                )
+                if value is None:
+                    connection.sendall(b"\x00" + struct.pack("!Q", 0))
+                    continue
+                payload_buffer = io.BytesIO()
+                np.save(payload_buffer, value, allow_pickle=False)
+                payload = payload_buffer.getvalue()
+                connection.sendall(b"\x01" + struct.pack("!Q", len(payload)) + payload)
+        except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
+            pass
+        finally:
+            connection.close()
+
+
+class _KeyedTCPClient:
+    def __init__(self, endpoint: Endpoint, timeout=30.0):
+        self.endpoint = endpoint
+        self.timeout = timeout
+        self._sock = None
+
+    def fetch(self, key: CacheKey):
+        request = json.dumps(
+            {"dataset_id": key.dataset_id, "sequence": key.sequence, "position": key.position}
+        ).encode()
+        for attempt in range(2):
+            try:
+                if self._sock is None:
+                    self._sock = socket.create_connection(
+                        (self.endpoint.host, self.endpoint.port), timeout=self.timeout
+                    )
+                self._sock.sendall(struct.pack("!I", len(request)) + request)
+                header = _recv_exact(self._sock, 9)
+                if header is None:
+                    raise ConnectionError("server closed connection")
+                if header[0] == 0:
+                    raise RemoteCacheMiss(key)
+                payload = _recv_exact(self._sock, struct.unpack("!Q", header[1:])[0])
+                if payload is None:
+                    raise ConnectionError("server closed connection")
+                return np.load(io.BytesIO(payload), allow_pickle=False)
+            except RemoteCacheMiss:
+                raise
+            except (ConnectionResetError, BrokenPipeError, ConnectionError, OSError) as error:
+                self.close()
+                if attempt:
+                    raise RemoteCacheUnavailable(str(error)) from error
+        raise RemoteCacheUnavailable(str(self.endpoint))
+
+    def close(self):
+        if self._sock is not None:
+            self._sock.close()
+            self._sock = None
+
+
+class DatasetCacheNamespace:
+    """Atomic file-per-record cache for one dataset reader."""
+
+    def __init__(self, root: Path, dataset_id: str, reader, node_id: int):
+        self.dataset_id = dataset_id
+        self.reader = reader
+        self.node_id = node_id
+        self.num_sequences = int(reader.num_sequences)
+        self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
+        self.token = hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
+        self.path = root / self.token
+        self.entries_path = self.path / "entries"
+        self.markers_path = self.path / "committed"
+        self.locks_path = self.path / "locks"
+        for directory in (self.entries_path, self.markers_path, self.locks_path):
+            directory.mkdir(parents=True, exist_ok=True)
+        metadata_path = self.path / "metadata.json"
+        metadata = {
+            "dataset_id": dataset_id,
+            "num_sequences": self.num_sequences,
+            "sequence_lengths": self.sequence_lengths,
+            "schema_version": 1,
+        }
+        if metadata_path.exists():
+            if json.loads(metadata_path.read_text()) != metadata:
+                raise CacheConfigurationError(f"Cache metadata mismatch for {dataset_id}")
+        else:
+            temporary = metadata_path.with_suffix(f".{os.getpid()}.tmp")
+            temporary.write_text(json.dumps(metadata, sort_keys=True))
+            try:
+                os.replace(temporary, metadata_path)
+            except FileNotFoundError:
+                pass
+
+    def _normalize_position(self, sequence, position):
+        sequence = int(sequence)
+        if sequence < 0:
+            sequence += self.num_sequences
+        if sequence < 0 or sequence >= self.num_sequences:
+            raise IndexError(f"sequence {sequence} is out of range")
+        position = int(position)
+        length = self.sequence_lengths[sequence]
+        if position < 0:
+            position += length
+        if position < 0 or position >= length:
+            raise IndexError(f"position {position} is out of range for sequence {sequence}")
+        return sequence, position
+
+    def _paths(self, sequence, position):
+        sequence, position = self._normalize_position(sequence, position)
+        entry = self.entries_path / str(sequence) / f"{position}.npy"
+        marker = self.markers_path / str(sequence) / str(position)
+        lock = self.locks_path / str(sequence) / f"{position}.lock"
+        return entry, marker, lock
+
+    @contextmanager
+    def _entry_lock(self, lock_path):
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def fetch_local(self, sequence, position):
+        entry, marker, _ = self._paths(sequence, position)
+        if not marker.exists():
+            return None
+        try:
+            return np.load(entry, allow_pickle=False)
+        except FileNotFoundError:
+            return None
+
+    def fetch_source(self, sequence, position):
+        sequence, position = self._normalize_position(sequence, position)
+        if self.num_sequences == 1:
+            return np.asarray(self.reader.data[position])
+        return np.asarray(self.reader.data[sequence][:, :, position, :])
+
+    def store(self, sequence, position, value):
+        entry, marker, lock = self._paths(sequence, position)
+        with self._entry_lock(lock):
+            if marker.exists():
+                return False
+            entry.parent.mkdir(parents=True, exist_ok=True)
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
+            try:
+                with temporary.open("wb") as temporary_file:
+                    np.save(temporary_file, np.asarray(value), allow_pickle=False)
+                    temporary_file.flush()
+                    os.fsync(temporary_file.fileno())
+                os.replace(temporary, entry)
+                marker.touch(exist_ok=True)
+                return True
+            except OSError:
+                temporary.unlink(missing_ok=True)
+                raise
+
+    def committed_positions(self):
+        for sequence_path in self.markers_path.iterdir():
+            if sequence_path.is_dir():
+                for marker in sequence_path.iterdir():
+                    if marker.name.isdigit():
+                        yield int(sequence_path.name), int(marker.name)
+
+
+class DatasetCache(pl.LightningDataModule):
+    """Datamodule proxy coordinating one cache per node for every data reader."""
+
+    def __init__(
+        self,
+        ds,
+        cache_root,
+        dataset_path=None,
+        proc_group=None,
+        hostname_suffix=None,
+        remote_backend="tcp",
+        num_gpus_per_node=None,
+        root_port=8000,
+        delete_existing_cache=True,
+    ):
+        super().__init__()
+        self.ds = ds
+        self.cache_root = Path(cache_root or os.environ.get("TMPDIR", "/tmp"))
+        self.dataset_path = dataset_path
+        self.initial_proc_group = proc_group
+        self.hostname_suffix = hostname_suffix
+        self.remote_backend = remote_backend
+        self.num_gpus_per_node = int(num_gpus_per_node or 1)
+        self.root_port = int(root_port)
+        self.delete_existing_cache = delete_existing_cache
+        self.is_initalised = False
+        self.namespaces = {}
+        self._dataset_aliases = {}
+        self._remote_locations = {}
+        self._remote_registry_mtime = None
+        self._tcp_clients = {}
+        self._cached_datasets = {}
+        self.cache_hits_local = Value("q", 0)
+        self.cache_hits_remote = Value("q", 0)
+        self.cache_misses = Value("q", 0)
+        self.total_fetches = Value("q", 0)
+        self.cache_full = Value("b", False)
+
     def __getattr__(self, name):
-        """
-        Called *only* if the attribute wasn't found on self.
-        Delegate to the underlying dataset (self.ds).
-        """
         return getattr(self.ds, name)
 
-    @abstractmethod
-    def _start_server(self, directory, port):
-        """Start the server that will serve cached files to other nodes. Only called on node leaders."""
-        pass
+    @property
+    def ds_train(self):
+        return self._attach_dataset("training", self.ds.ds_train)
 
-    @abstractmethod
-    def _fetch_remote(self, date, verbose=False):
-        """Fetch a single date from a remote nodes cache."""
-        pass
+    @property
+    def ds_valid(self):
+        return self._attach_dataset("validation", self.ds.ds_valid)
 
-    #split between init and setup to match distirbuted strategy from PL structure (we need the proccess group to be initalised)
-    def setup(self, **kwargs):
-        
-        #use default global proc group if proc_group is none
-        #TODO you should be able to use it if you only run on a single gpu
-        if not dist.is_initialized(): #TODO and check proc_group is valid
-            raise ValueError("Torch distributed is not initalised, can't use distributed cache")
-                
-        self.global_rank = dist.get_rank(self.proc_group)
-        self.rank = self.global_rank % 4 # TODO pass system.hardware.gpus_per_node here
-        self.local_rank = self.rank  # alias for clarity
-        
-        self.device = torch.device(f"cuda:{self.rank}" if torch.cuda.is_available() else "cpu")
-        
-        # Set the CUDA device before any collective operations (required for NCCL)
-        if torch.cuda.is_available() and self.device.type == "cuda":
-            #TODO(cathal) fix silly hack which will only work on single nodes
-            torch.cuda.set_device(self.rank)
-            LOGGER.info(f"Rank {self.rank}: Set CUDA device to {self.rank}")
-        
-        self.world_size = dist.get_world_size(self.proc_group)
-        self.hostnames = self._get_all_hostnames(suffix=self.hostname_suffix)
+    @property
+    def ds_test(self):
+        return self._attach_dataset("test", self.ds.ds_test)
+
+    def _reader_fingerprint(self, stage, name, reader):
+        dates = getattr(reader.data, "dates", getattr(reader.data, "base_dates", None))
+        geometry = {
+            "schema_version": 1,
+            "name": name,
+            "shape": tuple(int(value) for value in reader.data.shape),
+            "num_sequences": int(reader.num_sequences),
+            "sequence_lengths": [int(reader.sequence_length(i)) for i in range(reader.num_sequences)],
+            "source": str(getattr(reader.data, "path", getattr(reader.data, "name", type(reader.data).__name__))),
+            "first_date": None if dates is None or len(dates) == 0 else str(dates[0]),
+            "last_date": None if dates is None or len(dates) == 0 else str(dates[-1]),
+            "variables": list(reader.variables),
+            "frequency": str(reader.frequency),
+            "resolution": str(reader.resolution),
+            "metadata": reader.metadata,
+        }
+        digest = hashlib.sha256(json.dumps(geometry, sort_keys=True, default=str).encode()).hexdigest()[:16]
+        return f"{name}:{digest}"
+
+    def _attach_dataset(self, stage, dataset):
+        if not self.is_initalised:
+            return dataset
+        cache_key = (stage, id(dataset))
+        if cache_key in self._cached_datasets:
+            return dataset
+        for name, reader in dataset.data_readers.items():
+            dataset_id = self._reader_fingerprint(stage, name, reader)
+            namespace = DatasetCacheNamespace(self.cache_path, dataset_id, reader, self.node_id)
+            self.namespaces[dataset_id] = namespace
+            self._dataset_aliases.setdefault(name, dataset_id)
+            reader.set_cache(self, dataset_id)
+        self._cached_datasets[cache_key] = dataset
+        return dataset
+
+    def setup(self, stage=None):
+        if self.is_initalised:
+            return
+        self.ds.setup(stage)
+        if not dist.is_initialized():
+            raise CacheConfigurationError("Torch distributed must be initialized before dataset caching")
+        self.global_rank = dist.get_rank(self.initial_proc_group)
+        self.world_size = dist.get_world_size(self.initial_proc_group)
         self.proc_group = dist.new_group(ranks=None, backend="gloo")
-
-        # Build a mapping from hostname -> node_id (integer) and figure out
-        # which node this rank lives on.  All ranks on the same node share
-        # the same node_id and the same cache directory.
-        unique_hosts = sorted(set(self.hostnames))
-        self._host_to_node_id = {h: i for i, h in enumerate(unique_hosts)}
-        self.node_id = self._host_to_node_id[self.hostnames[self.global_rank]]
+        host = socket.gethostname()
+        raw_hostnames = [None] * self.world_size
+        dist.all_gather_object(raw_hostnames, host, group=self.proc_group)
+        unique_hosts = sorted(set(raw_hostnames))
+        host_to_node = {value: index for index, value in enumerate(unique_hosts)}
+        self.node_id = host_to_node[host]
         self.num_nodes = len(unique_hosts)
-        # For each node pick the lowest global rank on that node – that rank
-        # is responsible for creating the cache dir and running the HTTP server.
-        self._node_leader_rank = {}
-        for grank, host in enumerate(self.hostnames):
-            nid = self._host_to_node_id[host]
-            if nid not in self._node_leader_rank:
-                self._node_leader_rank[nid] = grank
-        self.is_node_leader = (self.global_rank == self._node_leader_rank[self.node_id])
-        LOGGER.info(f"Rank {self.rank} (global {self.global_rank}): node_id={self.node_id}, is_node_leader={self.is_node_leader}")
+        self._node_leader_rank = {
+            node_id: next(rank for rank, value in enumerate(raw_hostnames) if value == node_host)
+            for node_id, node_host in enumerate(unique_hosts)
+        }
+        self.is_node_leader = self.global_rank == self._node_leader_rank[self.node_id]
+        self._raw_hostnames = raw_hostnames
+        self.hostnames = [value + (self.hostname_suffix or "") for value in raw_hostnames]
+        self.local_rank = int(os.environ.get("LOCAL_RANK", self.global_rank % self.num_gpus_per_node))
 
-        # Determine which dataset(s) we're working with
-        # For MultiDataset, cache the first dataset by default
-        # Use self.ds_train which uses our cached property
-        self.dataset_names = list(self.ds_train.datasets.keys())
-        self.primary_dataset_name = self.dataset_names[0]
-        LOGGER.info(f"DatasetCache: Found datasets {self.dataset_names}, using '{self.primary_dataset_name}' for zarr metadata")
-        
-        #creates space under self.cache_dir
-        self.filesystem= f"{self.dataset_path}" #TODO read from zarr metadata
-        
-        # once the dataset is loaded, this will become an array of len(dates) where the value corresponds to which node's cache a file is in
-        # -1 => filesystem
-        self.cache_registry=None
-        self._init_cache()
-       
-        # One server per node (HTTP for zarr backend, TCP for tcp backend),
-        # run by the node leader only.
-        self.root_port = 8000
+        self.cache_dir_name = f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
+        self.cache_path = self.cache_root / self.cache_dir_name
+        self._admission_disabled_path = self.cache_path / ".admission-disabled"
+        self._remote_registry_path = self.cache_path / ".remote-registry.json"
+        if self.is_node_leader:
+            if self.delete_existing_cache and self.cache_path.exists():
+                shutil.rmtree(self.cache_path)
+            self.cache_path.mkdir(parents=True, exist_ok=True)
+        dist.barrier(group=self.proc_group)
+        self.is_initalised = True
+        self._attach_dataset("training", self.ds.ds_train)
+
         self.port = self.root_port + self.node_id
         if self.is_node_leader:
-            self._start_server(self.cache_root, self.port)
-        # Barrier so all local ranks wait for the server to be up
-        dist.barrier(self.proc_group)
-        
-        # Inject cache wrapper into the underlying datasets
-        self._inject_cache_wrapper()
-        
-        LOGGER.info(f"{self.rank=}: Initalised a shared cache under {self.cache_path}")
-        self.is_initalised=True
+            self._start_server()
+        dist.barrier(group=self.proc_group)
 
-        # Remote connection handles – opened lazily in fetch()
-        self.remote_zarrs = [None] * self.num_nodes
-        self.remote_tcp_clients = [None] * self.num_nodes
-    
-    def _inject_cache_wrapper(self):
-        """Replace the underlying dataset's data accessor with cached version."""
-        # Use self.ds_train which accesses our cached property that stores the wrapped instance
-        train_dataset = self.ds_train
-        
-        for dataset_name, dataset in train_dataset.datasets.items():
-            if dataset_name == self.primary_dataset_name:
-                original_data = dataset.data
-                LOGGER.info(f"Rank {self.rank}: Injecting cache wrapper for dataset '{dataset_name}' (type: {type(original_data).__name__})")
-                dataset.data = CachedDataWrapper(original_data, self)
-                # Verify injection
-                if isinstance(dataset.data, CachedDataWrapper):
-                    LOGGER.info(f"Rank {self.rank}: Cache wrapper injected successfully for '{dataset_name}' - data is now {type(dataset.data).__name__}")
+    def train_dataloader(self):
+        return self.ds._get_dataloader(self.ds_train, "training")
+
+    def val_dataloader(self):
+        return self.ds._get_dataloader(self.ds_valid, "validation")
+
+    def test_dataloader(self):
+        return self.ds._get_dataloader(self.ds_test, "test")
+
+    def set_epoch(self, epoch):
+        self.ds.set_epoch(epoch)
+
+    def _start_server(self):
+        if self.remote_backend == "tcp":
+            self._server = _KeyedTCPServer(self, self.port)
+            self._server.start()
+            return
+        if self.remote_backend not in {"zarr", "http"}:
+            raise CacheConfigurationError(f"Unknown remote cache backend: {self.remote_backend}")
+        handler = partial(http.server.SimpleHTTPRequestHandler, directory=str(self.cache_root))
+        socketserver.TCPServer.allow_reuse_address = True
+        self._server = socketserver.ThreadingTCPServer(("", self.port), handler)
+        self._server_thread = threading.Thread(target=self._server.serve_forever, daemon=True)
+        self._server_thread.start()
+
+    def _resolve_dataset_id(self, dataset_id):
+        if dataset_id in self.namespaces:
+            return dataset_id
+        if dataset_id in self._dataset_aliases:
+            return self._dataset_aliases[dataset_id]
+        raise KeyError(f"Unknown cache dataset {dataset_id!r}")
+
+    def _normalize_positions(self, namespace, sequence, positions):
+        if isinstance(positions, slice):
+            return list(range(*positions.indices(namespace.sequence_lengths[int(sequence)])))
+        values = np.asarray(positions)
+        if values.ndim == 0:
+            return [int(values)]
+        if values.ndim != 1 or not np.issubdtype(values.dtype, np.integer):
+            raise IndexError("cache positions must be an integer, slice, or one-dimensional integer sequence")
+        return [int(value) for value in values]
+
+    def fetch(self, dataset_id, sequence=None, position=None, verbose=False):
+        if position is None:
+            position = dataset_id
+            dataset_id = next(iter(self.namespaces))
+            sequence = 0
+        dataset_id = self._resolve_dataset_id(dataset_id)
+        namespace = self.namespaces[dataset_id]
+        sequence, position = namespace._normalize_position(sequence, position)
+        key = CacheKey(dataset_id, sequence, position)
+        self.total_fetches.value += 1
+        local = namespace.fetch_local(sequence, position)
+        if local is not None:
+            self.cache_hits_local.value += 1
+            return local
+
+        self._load_remote_registry()
+        for remote_node in sorted(self._remote_locations.get(key, set()) - {self.node_id}):
+            try:
+                value = self._fetch_remote(remote_node, key)
+                self.cache_hits_remote.value += 1
+                return value
+            except (RemoteCacheMiss, RemoteCacheUnavailable):
+                self._remote_locations.get(key, set()).discard(remote_node)
+
+        self.cache_misses.value += 1
+        value = namespace.fetch_source(sequence, position)
+        if not self.cache_full.value and not self._admission_disabled_path.exists():
+            try:
+                namespace.store(sequence, position, value)
+            except OSError as error:
+                if error.errno == errno.ENOSPC:
+                    self.cache_full.value = True
+                    self._admission_disabled_path.touch(exist_ok=True)
+                    LOGGER.warning("Node %s dataset cache is full; disabling admission", self.node_id)
                 else:
-                    LOGGER.error(f"Rank {self.rank}: Cache wrapper injection FAILED for '{dataset_name}' - data is still {type(dataset.data).__name__}")
-            else:
-                LOGGER.info(f"Rank {self.rank}: Skipping cache injection for dataset '{dataset_name}' (only caching primary dataset)")
-        
-        # Double-check after injection
-        LOGGER.info(f"Rank {self.rank}: Verifying injection after completion:")
-        for dataset_name, dataset in train_dataset.datasets.items():
-            LOGGER.info(f"Rank {self.rank}:   Dataset '{dataset_name}' data type: {type(dataset.data).__name__}")
-       
-    def _init_cache(self, delete_existing_cache=True):
-        
-        if self.cache_root is None:
-            LOGGER.info("Cache root not given, defaulting to $TMPDIR")
-            self.cache_root=Path(os.getenv("TMPDIR"))
-        
-        #create space under cache_root for cache — single shared dir per node
-        assert self.cache_root.exists()
-        self.cache_path = Path(f"{self.cache_root}/cache")
-        
-        # Only the node leader creates/cleans the directory; others wait.
+                    raise
+        return value
+
+    def fetch_many(self, dataset_id, sequence, positions):
+        dataset_id = self._resolve_dataset_id(dataset_id)
+        namespace = self.namespaces[dataset_id]
+        normalized = self._normalize_positions(namespace, sequence, positions)
+        if not normalized:
+            if namespace.num_sequences == 1:
+                return np.asarray(namespace.reader.data[np.array([], dtype=np.int64)])
+            sample = namespace.fetch_source(sequence, 0)
+            return np.empty((0, *sample.shape), dtype=sample.dtype)
+        return np.stack([self.fetch(dataset_id, sequence, position) for position in normalized])
+
+    def _fetch_local_only(self, dataset_id, sequence, position):
+        namespace = self.namespaces.get(dataset_id)
+        return None if namespace is None else namespace.fetch_local(sequence, position)
+
+    def _endpoint(self, node_id):
+        rank = self._node_leader_rank[node_id]
+        return Endpoint(self.hostnames[rank], self.root_port + node_id, node_id)
+
+    def _fetch_remote(self, node_id, key):
+        endpoint = self._endpoint(node_id)
+        if self.remote_backend == "tcp":
+            client_key = (os.getpid(), node_id)
+            client = self._tcp_clients.get(client_key)
+            if client is None:
+                client = self._tcp_clients[client_key] = _KeyedTCPClient(endpoint)
+            return client.fetch(key)
+        namespace = self.namespaces[key.dataset_id]
+        remote_host = self._raw_hostnames[self._node_leader_rank[node_id]]
+        remote_cache_dir = f"cache-{hashlib.sha256(remote_host.encode()).hexdigest()[:12]}"
+        url = (
+            f"http://{endpoint.host}:{endpoint.port}/{remote_cache_dir}/{namespace.token}/entries/"
+            f"{key.sequence}/{key.position}.npy"
+        )
+        try:
+            with urlopen(url, timeout=30) as response:
+                return np.load(io.BytesIO(response.read()), allow_pickle=False)
+        except HTTPError as error:
+            if error.code == 404:
+                raise RemoteCacheMiss(key) from error
+            raise RemoteCacheUnavailable(str(error)) from error
+        except (URLError, OSError) as error:
+            raise RemoteCacheUnavailable(str(error)) from error
+
+    def update_global_view(self):
+        local_entries = []
+        for dataset_id, namespace in self.namespaces.items():
+            local_entries.extend(
+                (dataset_id, sequence, position, self.node_id)
+                for sequence, position in namespace.committed_positions()
+            )
+        gathered = [None] * self.world_size
+        dist.all_gather_object(gathered, local_entries, group=self.proc_group)
+        locations = {}
+        for entries in gathered:
+            for dataset_id, sequence, position, node_id in entries:
+                locations.setdefault(CacheKey(dataset_id, sequence, position), set()).add(node_id)
+        self._remote_locations = locations
         if self.is_node_leader:
-            if self.cache_path.exists() and delete_existing_cache:
-                LOGGER.info(f"Existing cache found under {self.cache_path}. Deleting because {delete_existing_cache=}")
-                shutil.rmtree(self.cache_path)
-            self.cache_path.mkdir(exist_ok=True)
-            
-            #copy zarr metadata from filesystem
-            # This is needed so we can load chunks from the cache like we would from the remote zarr
-            # BUT we will have a lot of gaps in the local copy, so we will have a seperate list self.cache_registry of which elements are present or not
-            #TODO replace with zarr.empty_like()
-            shutil.copy2(f"{self.filesystem}/data/.zarray", self.cache_path)
-            #shutil.copy2(f"{self.filesystem}/data/.zattrs", self.cache_path) #some datasets dont have, not sure if its needed tbh
-            shutil.copy2(f"{self.filesystem}/.zgroup", self.cache_path)
-        # Barrier so non-leaders don't use the dir before it exists
-        dist.barrier(self.proc_group)
-        
-        self.cache = zarr.open(self.cache_path, mode="a")  # append mode so all ranks can read+write
-        self.cache_full=False # prevents subsequent writing when cache is full
-        if USE_LOCKING:
-            # File-based lock so multiple local ranks don't write the same zarr chunk concurrently
-            self._write_lock_path = self.cache_path / ".write_lock"
-       
-        dates = len(self) + 2 # build in some buffer to avoid out of bounds errors, will be cleaned up in the future with a more robust solution than using integers for cache registry
-        
-        if self.cache_registry is None:
-            # Keep cache_registry on CPU with shared memory for DataLoader worker access
-            # Values are node_ids (not ranks); -1 => not cached anywhere
-            self.cache_registry = torch.zeros(dates, dtype=torch.int32, device='cpu').share_memory_()
-            self.cache_registry[:] = -1
-            LOGGER.info(f"Rank {self.rank}: Created cache registry on CPU with shared memory for {dates} dates")
-            
-        self.remote_cache_roots=self._get_all_cache_roots()
-        
-    def _get_hostname(self, rank):
-        return self.hostnames[rank]
-    
-    def _get_all_hostnames(self, suffix:str=None):
-        """Gather the hostname of every rank into a list (length = world_size).
+            payload = [
+                [key.dataset_id, key.sequence, key.position, sorted(node_ids)]
+                for key, node_ids in locations.items()
+            ]
+            temporary = self._remote_registry_path.with_suffix(f".{os.getpid()}.tmp")
+            temporary.write_text(json.dumps(payload, separators=(",", ":")))
+            os.replace(temporary, self._remote_registry_path)
+        dist.barrier(group=self.proc_group)
+        self._load_remote_registry(force=True)
+        metrics = torch.tensor(
+            [
+                self.cache_hits_local.value,
+                self.cache_hits_remote.value,
+                self.cache_misses.value,
+                self.total_fetches.value,
+            ],
+            dtype=torch.int64,
+        )
+        dist.all_reduce(metrics, group=self.proc_group)
+        if self.global_rank == 0:
+            LOGGER.info(
+                "Synchronized %s cache entries; totals: local=%s remote=%s misses=%s fetches=%s",
+                len(locations),
+                *metrics.tolist(),
+            )
 
-        Appends optional suffix to hostnames if given."""
-        my_host = socket.gethostname()
+    def _load_remote_registry(self, force=False):
+        try:
+            mtime = self._remote_registry_path.stat().st_mtime_ns
+        except FileNotFoundError:
+            return
+        if not force and mtime == self._remote_registry_mtime:
+            return
+        payload = json.loads(self._remote_registry_path.read_text())
+        self._remote_locations = {
+            CacheKey(dataset_id, int(sequence), int(position)): set(node_ids)
+            for dataset_id, sequence, position, node_ids in payload
+        }
+        self._remote_registry_mtime = mtime
 
-        # Gather all hostnames as Python objects
-        hostnames = [None for _ in range(self.world_size)]
-        dist.all_gather_object(hostnames, my_host, self.proc_group)
-        if suffix is not None:
-            #append the ib interface to the end of the hostnames
-            hostnames = [hostname + suffix for hostname in hostnames]
-        LOGGER.info(f"{self.rank=} {hostnames=}")
-        return hostnames
-    
-    def _get_all_cache_roots(self):
-        """Gather the cache roots of every rank into a list (length = world_size).
-        
-        needed bc $TMPDIR is different paths on different ranks
-        """
-        root = self.cache_root
+    def state_dict(self):
+        return {
+            "schema_version": 1,
+            "dataset_ids": sorted(self.namespaces),
+            "remote_backend": self.remote_backend,
+        }
 
-        # Gather all hostnames as Python objects
-        roots = [None for _ in range(self.world_size)]
-        dist.all_gather_object(roots, root, self.proc_group)
-        return roots
-    
-    @abstractmethod
-    def _shutdown_server(self):
-        """Shutdown the HTTP server and close the socket."""
-        pass
+    def load_state_dict(self, state_dict):
+        if state_dict.get("schema_version") != 1:
+            raise CacheConfigurationError("Unsupported dataset cache checkpoint schema")
+        checkpoint_ids = set(state_dict.get("dataset_ids", ()))
+        current_ids = set(self.namespaces)
+        if checkpoint_ids and checkpoint_ids != current_ids:
+            LOGGER.warning("Discarding stale cache registry state because dataset fingerprints changed")
 
-    def __del__(self):
-        #loops here and gets stuck
-        #if getattr(self, 'is_node_leader', False):
-        self._shutdown_server()
+    def teardown(self, stage=None):
+        if getattr(self, "_torn_down", False):
+            return
+        self._torn_down = True
+        for client in self._tcp_clients.values():
+            client.close()
+        self._tcp_clients.clear()
+        if getattr(self, "is_node_leader", False):
+            server = getattr(self, "_server", None)
+            if isinstance(server, _KeyedTCPServer):
+                server.close()
+            elif server is not None:
+                server.shutdown()
+                server.server_close()
+        self.ds.teardown(stage)
+
+    close = teardown
 
     def priority_reduce(self, stacked, cache_registry, node_id):
-        """ reduces global cache registries by taking local node first then any other node"""
-        valid_mask = stacked != -1
-        self_mask = stacked == node_id
-        has_self = self_mask.any(dim=0)
+        valid = stacked != -1
+        local = stacked == node_id
+        has_local = local.any(dim=0)
+        result = torch.full_like(cache_registry, -1)
+        result[has_local] = node_id
+        fallback = stacked.clone()
+        fallback[~valid] = -1
+        remaining = ~has_local
+        result[remaining] = fallback.max(dim=0).values[remaining]
+        return result
 
-        global_cache_registry = torch.full_like(cache_registry, -1)
-
-        # Prefer own node
-        global_cache_registry[has_self] = node_id
-
-        # Fallback to any other node
-        remaining = ~has_self
-        if remaining.any():
-            temp = stacked.clone()
-            temp[~valid_mask] = -1
-            fallback = temp.max(dim=0).values
-            global_cache_registry[remaining] = fallback[remaining]
-
-        return global_cache_registry
-
-    def update_global_view(self) -> None:
-        """ Communicate with other procs and share who has what files in their caches. Should be called after an epoch."""
-
-        all_gather_buffer = [
-            torch.zeros_like(self.cache_registry, device="cpu")
-            for _ in range(self.world_size)
-        ]
-
-        LOGGER.info(f"Starting all gather (local cache registry: {self.cache_registry})")
-        dist.all_gather(all_gather_buffer, self.cache_registry, group=self.proc_group)
-
-        self.cache_registry.copy_(self.priority_reduce(torch.stack(all_gather_buffer), self.cache_registry, self.node_id))
-        num_cached = (self.cache_registry != -1).sum().item()
-        LOGGER.info(f"Rank {self.rank}: Global cache registry updated. Cache now aware of {num_cached} cached items across all nodes")
-
-    def check_cache(self, date) -> list[int]:
-        """ checks either local or global registry. returns list of node_ids containing file in their SSD"""
-        # cache_registry stores node_ids, not ranks
+    def check_cache(self, date):
         cached_node = self.cache_registry[date].item()
-        if cached_node == -1:
-            return []
-        return [cached_node]
+        return [] if cached_node == -1 else [cached_node]
 
-    def fetch(self, date, verbose=False) -> np.ndarray:
-        """ Reads cache regsitry, based on result fetches file from local SSD, remote SSD or filesytem"""
+    def _normalize_date_index(self, date):
+        date = int(date)
+        if date < 0:
+            date += len(self.cache_registry)
+        if date < 0 or date >= len(self.cache_registry):
+            raise IndexError(f"cache index {date} is out of range for {len(self.cache_registry)} entries")
+        return date
 
-        #LOGGER.info(f"Rank {self.rank}: Fetching date {date} (verbose={verbose})")
-        
-        self.total_fetches.value += 1
-
-        cache_hits = self.check_cache(date)
-        
-        # Get the primary dataset's raw data for caching
-        # Use self.ds_train to access our cached property
-        primary_dataset = self.ds_train.datasets[self.primary_dataset_name]
-        primary_data = primary_dataset.data  # Underlying dataset (e.g., Zarr)
-        
-        # Check if we're accessing the wrapper itself (avoid infinite recursion)
-        if isinstance(primary_data, CachedDataWrapper):
-            primary_data = primary_data.original_data
-
-        if len(cache_hits) == 0:
-            #Cache miss, go to filesystem
-            
-            self.cache_misses.value += 1
-            data = primary_data[date]
-            
-            if not self.cache_full:
-                # add data to the shared node cache
-                # use a file lock so multiple local ranks don't write the same chunk concurrently
-                if self.cache_registry[date].item() == -1:  # quick non-locked check
-                    try:
-                        if USE_LOCKING:
-                            lock_fd = open(self._write_lock_path, 'w')
-                            fcntl.flock(lock_fd, fcntl.LOCK_EX)
-                        try:
-                            if self.cache_registry[date].item() == -1:  # double-check under lock
-                                self.cache[date] = data
-                                self.cache_registry[date] = self.node_id
-                        except Exception as e:
-                            LOGGER.error(f"Rank {self.rank}: Error writing date {date} to cache: {e}")
-                        finally:
-                            if USE_LOCKING:
-                                fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                                lock_fd.close()
-
-                    #TODO calculate and manage space rather then relying on catching an error
-                    except OSError as e:
-                        if e.errno == errno.ENOSPC or "Not enough free space" in str(e):
-                            self.cache_full=True
-                            LOGGER.info(f"Rank {self.rank}: Cache full! No more writing")
-                        else:
-                            raise e
-                else:
-                    # Another local rank already wrote this date
-                    self.cache_registry[date] = self.node_id
-            
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: CACHE MISS on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
-            
-        elif self.node_id in cache_hits:
-            #Cache hit on local node SSD – read from shared zarr cache
-            
-            self.cache_hits_local.value += 1
-            data = self.cache[date]            
-            
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: LOCAL CACHE HIT on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
-                
-        else:
-            #cache hit on remote node SSD
-            
-            self.cache_hits_remote.value += 1
-            remote_node_id = cache_hits[0]
-            
-            data = self._fetch_remote(date, verbose=verbose)
-
-            if verbose or (self.total_fetches.value % 10 == 0):
-                LOGGER.info(f"Rank {self.rank}: REMOTE CACHE HIT (node {remote_node_id}) on date {date} (total: hits_local={self.cache_hits_local.value}, hits_remote={self.cache_hits_remote.value}, misses={self.cache_misses.value})")
-            
-        return data
-
-    def __iter__(self) -> np.ndarray:
-        if not self.is_initalised:
-            self.setup()
-        
-        dates=len(self)
-            
-        for date in range(dates):
-            #LOGGER.info(f"Rank {self.rank}: Iterating date {date}/{dates}")
-            yield self.fetch(date)
-        
-    def __getitem__(self, index):
-        # allow integer or slice access
-        if isinstance(index, slice):
-            return [self.fetch(i) for i in range(*index.indices(len(self)))]
-        else:
-            return self.fetch(index)
-
-    def __len__(self):
-        # MultiDataset.valid_date_indices contains all valid time indices
-        # Use self.ds_train to access our cached property
-        return len(self.ds_train.valid_date_indices)
-    
-class ZarrDatasetCache(DatasetCache):
-    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
-    def _start_server(self, directory, port):
-        #directory = Path("/").resolve()
-        directory = Path(self.cache_root).resolve()
-        handler=http.server.SimpleHTTPRequestHandler
-        
-        def no_logging(*args):
-            return
-        handler.log_message=no_logging #by default the http server logs a lot to stdout, this silences it
-        
-        handler = partial(handler, directory=str(directory))
-        
-        # Allow socket reuse to avoid "Address already in use" errors
-        socketserver.TCPServer.allow_reuse_address = True
-        httpd = socketserver.TCPServer(("", port), handler)
-        thread = threading.Thread(target=httpd.serve_forever, daemon=True)
-        thread.start()
-        
-        # Store server metadata for proper shutdown
-        self.httpd = httpd
-        self.server_thread = thread
-        
-        LOGGER.info(f"Serving {directory} on http://{self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
-
-    def _get_remote_cache_url(self, remote_node_id):
-        remote_global_rank = self._node_leader_rank[remote_node_id]
-        remote_host = self._get_hostname(remote_global_rank)
-        port = self.root_port + remote_node_id
-        remote_cache_path = "cache" #just need relative path here, will be added to the root dir of our http server (e.g. $TMPDIR)
-        return f"http://{remote_host}:{port}/{remote_cache_path}"
-
-
-    def _fetch_remote(self, date, verbose=False):
-        if self.remote_zarrs[remote_node_id] is None:
-            remote_cache_url=self._get_remote_cache_url(remote_node_id)
+    @contextmanager
+    def _chunk_write_lock(self, date):
+        chunk_index = date // int(self.cache.chunks[0])
+        lock_path = self._chunk_lock_dir / f"{chunk_index}.lock"
+        with lock_path.open("a") as lock_file:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
             try:
-                self.remote_zarrs[remote_node_id] = zarr.open(remote_cache_url, mode='r')
-                LOGGER.info(f"Rank {self.rank}: Opened zarr interface to remote cache of node {remote_node_id}.")
-            except (PathNotFoundError, KeyError) as e:
-                LOGGER.info(f"Error opening remote date {date} from node {remote_node_id} to {self.rank}. full error: {e}. falling back to filesystem.")
-                data = primary_data[date]
-        data = self.remote_zarrs[remote_node_id][date]
+                yield
+            finally:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+    def _write_cache_entry(self, date, data):
+        marker = self._cache_entry_dir / str(date)
+        with self._chunk_write_lock(date):
+            if not marker.exists():
+                self.cache[date] = data
+                marker.touch()
+            self.cache_registry[date] = self.node_id
 
 
 class TCPDatasetCache(DatasetCache):
-    """ Should implement _start_server, _fetch_remote and optionally _shutdown_server"""
-    def _start_server(self, directory, port):
-        """Start a TCP cache server on this node leader."""
-        self.tcp_server = TCPCacheServer(self.cache, port)
-        self.tcp_server.start()
-        LOGGER.info(f"Serving cache via TCP on {self._get_hostname(self._node_leader_rank[self.node_id])}:{port}")
+    def __init__(self, *args, **kwargs):
+        kwargs["remote_backend"] = "tcp"
+        super().__init__(*args, **kwargs)
 
-    def _shutdown_server(self):
-        try:
-            if hasattr(self, 'httpd') and self.httpd is not None:
-                LOGGER.info(f"Rank {self.rank}: Shutting down HTTP server on port {self.port}")
-                #self.httpd.shutdown()
-                #TODO doesnt kill server, use pkill instead
-                #if hasattr(self, 'server_thread') and self.server_thread is not None:
-                #    self.server_thread.join(timeout=5)
-                # Close the socket to free the port
-                #self.httpd.server_close()
-                LOGGER.info(f"Rank {self.rank}: HTTP server shut down successfully")
-        except Exception as e:
-            LOGGER.warning(f"Rank {self.rank}: Error shutting down server: {e}")
 
-    def _get_remote_tcp_address(self, remote_node_id):
-        """Return (hostname, port) for the TCP cache server on *remote_node_id*."""
-        remote_global_rank = self._node_leader_rank[remote_node_id]
-        remote_host = self._get_hostname(remote_global_rank)
-        port = self.root_port + remote_node_id
-        return remote_host, port
-        
-
-    def _fetch_remote(self, date, verbose=False):
-        if self.remote_tcp_clients[remote_node_id] is None:
-            host, port = self._get_remote_tcp_address(remote_node_id)
-            self.remote_tcp_clients[remote_node_id] = TCPCacheClient(host, port)
-            LOGGER.info(f"Rank {self.rank}: Opened TCP connection to remote cache of node {remote_node_id} ({host}:{port}).")
-        data = self.remote_tcp_clients[remote_node_id].fetch(date)
-    
+class ZarrDatasetCache(DatasetCache):
+    def __init__(self, *args, **kwargs):
+        kwargs["remote_backend"] = "zarr"
+        super().__init__(*args, **kwargs)

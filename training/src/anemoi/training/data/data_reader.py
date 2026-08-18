@@ -106,10 +106,22 @@ class BaseAnemoiReader:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
         self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        self._cache = None
+        self._cache_dataset_id = None
         #: Sampling config used by :meth:`compute_anchors`.
         #: ``{"stride": 1}`` keeps every valid position;
         #: ``{"stride": None}`` uses stride = window size (non-overlapping).
         self.default_sampling: dict = {"stride": 1}
+
+    def set_cache(self, cache: object, dataset_id: str) -> None:
+        """Route sample reads through ``cache`` using the given dataset namespace."""
+        self._cache = cache
+        self._cache_dataset_id = dataset_id
+
+    def clear_cache(self) -> None:
+        """Restore direct reads from the source dataset."""
+        self._cache = None
+        self._cache_dataset_id = None
 
     # ------------------------------------------------------------------
     # Sequence / position geometry
@@ -289,8 +301,11 @@ class BaseAnemoiReader:
         For analysis datasets there is a single sequence, so ``sequence`` is
         ignored and ``positions`` index the time axis directly.
         """
-        del sequence  # analysis datasets have a single sequence
-        if isinstance(grid_shard_indices, slice):
+        if getattr(self, "_cache", None) is not None:
+            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions)
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
+        elif isinstance(grid_shard_indices, slice):
             x = self.data[positions, :, :, grid_shard_indices]
         else:
             x = self.data[positions, :, :, :]
@@ -385,6 +400,8 @@ class TrajectoryDataset(BaseAnemoiReader):
         if end is not None:
             open_kwargs["base_end"] = end
         self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
+        self._cache = None
+        self._cache_dataset_id = None
         self.default_sampling = sampling if sampling is not None else {"stride": None}
 
     @property
@@ -429,13 +446,19 @@ class TrajectoryDataset(BaseAnemoiReader):
         else:
             positions = np.asarray(positions).tolist()
 
-        # data[sequence] -> (variables, ensembles, steps, cells)
-        x = self.data[sequence]
-        x = x[:, :, positions, :]
-        if grid_shard_indices is not None:
-            x = x[..., grid_shard_indices]
+        if getattr(self, "_cache", None) is not None:
+            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions)
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
+        else:
+            # data[sequence] -> (variables, ensembles, steps, cells)
+            x = self.data[sequence]
+            x = x[:, :, positions, :]
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
+            x = rearrange(x, "variables ensemble steps gridpoints -> steps variables ensemble gridpoints")
 
-        x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
+        x = rearrange(x, "steps variables ensemble gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
 
     def tree(self, prefix: str = "") -> Tree:

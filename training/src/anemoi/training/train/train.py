@@ -53,8 +53,8 @@ from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
-#from anemoi.training.utils.dataset_cache import DatasetCache
-from anemoi.training.utils.dataset_cache_v2 import DatasetCache
+from anemoi.training.diagnostics.callbacks.cache_sync import CacheSyncCallback
+from anemoi.training.utils.dataset_cache import DatasetCache
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -717,9 +717,21 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        callbacks = list(self.callbacks)
+        if getattr(self.config.system.hardware, "cache_dir", None) is not None:
+            LOGGER.info("Caching datasets under '%s'", self.config.system.hardware.cache_dir)
+            self.datamodule = DatasetCache(
+                ds=self.datamodule,
+                cache_root=self.config.system.hardware.cache_dir,
+                dataset_path=f"{self.config.system.input.dataset}",
+                hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
+                num_gpus_per_node=self.config.system.hardware.num_gpus_per_node,
+            )
+            callbacks.append(CacheSyncCallback(cache=self.datamodule))
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
-            callbacks=self.callbacks,
+            callbacks=callbacks,
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
@@ -743,16 +755,6 @@ class AnemoiTrainer(ABC):
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-        
-        #TODO move to better place
-        if getattr(self.config.system.hardware, "cache_dir", None) is not None:
-            LOGGER.info(f"'config.system.hardware.cache_dir' given. Caching dataset under '{self.config.system.hardware.cache_dir}'")
-            #import pdb
-            #breakpoint()
-            dataset_path=f"{self.config.system.input.dataset}"
-            suffix=getattr(self.config.system.hardware, "hostname_suffix", None)
-            self.datamodule = DatasetCache(ds=self.datamodule, cache_root=self.config.system.hardware.cache_dir, dataset_path=dataset_path, hostname_suffix=suffix)
-
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")

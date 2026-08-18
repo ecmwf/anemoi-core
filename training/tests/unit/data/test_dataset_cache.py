@@ -22,6 +22,7 @@ import torch
 from anemoi.training.utils.dataset_cache import (
     CachedDataWrapper,
     DatasetCache,
+    DatasetCacheNamespace,
     TCPCacheClient,
     TCPCacheServer,
     _recv_exact,
@@ -178,6 +179,23 @@ class TestCachedDataWrapper:
         # Each time step is fetched individually and then sub-indexed
         expected = np.stack([sample_data[i][:, 0, :] for i in range(1, 4)], axis=0)
         np.testing.assert_array_equal(result, expected)
+
+    @pytest.mark.parametrize("indices", [[1, 4, 7], np.array([1, 4, 7], dtype=np.int64)])
+    def test_integer_sequence(self, indices, sample_data, fake_cache, fake_original):
+        wrapper = CachedDataWrapper(fake_original, fake_cache)
+        result = wrapper[indices]
+        np.testing.assert_array_equal(result, sample_data[indices])
+
+    @pytest.mark.parametrize("indices", [[1, 4, 7], np.array([1, 4, 7], dtype=np.int64)])
+    def test_tuple_integer_sequence(self, indices, sample_data, fake_cache, fake_original):
+        wrapper = CachedDataWrapper(fake_original, fake_cache)
+        result = wrapper[indices, :, 1, :]
+        np.testing.assert_array_equal(result, sample_data[indices, :, 1, :])
+
+    def test_empty_integer_sequence(self, sample_data, fake_cache, fake_original):
+        wrapper = CachedDataWrapper(fake_original, fake_cache)
+        result = wrapper[np.array([], dtype=np.int64)]
+        np.testing.assert_array_equal(result, sample_data[np.array([], dtype=np.int64)])
 
     def test_len(self, sample_data, fake_cache, fake_original):
         wrapper = CachedDataWrapper(fake_original, fake_cache)
@@ -383,3 +401,80 @@ class TestCheckCache:
         cache = self._make_cache_with_registry([3, -1, -1, -1, 0])
         assert cache.check_cache(0) == [3]
         assert cache.check_cache(4) == [0]
+
+
+class TestCacheWrites:
+    """Tests for first-axis indexing and chunk-protected writes."""
+
+    class FakeZarr:
+        chunks = (4, 2)
+
+        def __init__(self):
+            self.data = {}
+            self.write_count = 0
+
+        def __setitem__(self, index, value):
+            self.data[index] = value
+            self.write_count += 1
+
+    def _make_cache(self, tmp_path):
+        cache = DatasetCache.__new__(DatasetCache)
+        cache.cache = self.FakeZarr()
+        cache.cache_registry = torch.full((10,), -1, dtype=torch.int32)
+        cache.node_id = 2
+        cache._chunk_lock_dir = tmp_path / "locks"
+        cache._cache_entry_dir = tmp_path / "entries"
+        cache._chunk_lock_dir.mkdir()
+        cache._cache_entry_dir.mkdir()
+        return cache
+
+    def test_normalizes_negative_first_axis_index(self, tmp_path):
+        cache = self._make_cache(tmp_path)
+        assert cache._normalize_date_index(-1) == 9
+        with pytest.raises(IndexError):
+            cache._normalize_date_index(10)
+
+    def test_entry_is_written_only_once(self, tmp_path):
+        cache = self._make_cache(tmp_path)
+        cache._write_cache_entry(3, np.array([1]))
+        cache._write_cache_entry(3, np.array([2]))
+
+        assert cache.cache.write_count == 1
+        np.testing.assert_array_equal(cache.cache.data[3], np.array([1]))
+        assert cache.cache_registry[3].item() == cache.node_id
+        assert (cache._chunk_lock_dir / "0.lock").exists()
+
+
+class TestDatasetCacheNamespace:
+    class FakeReader:
+        def __init__(self, data):
+            self.data = data
+
+        @property
+        def num_sequences(self):
+            return 1 if self.data.ndim == 4 else self.data.shape[0]
+
+        def sequence_length(self, sequence=0):
+            return self.data.shape[0] if self.data.ndim == 4 else self.data.shape[-2]
+
+    def test_analysis_entry_is_committed_once(self, tmp_path, sample_data):
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+
+        first = namespace.fetch_source(0, 3)
+        assert namespace.store(0, 3, first)
+        assert not namespace.store(0, 3, np.zeros_like(first))
+
+        np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
+        assert list(namespace.committed_positions()) == [(0, 3)]
+
+    def test_trajectory_sequences_do_not_collide(self, tmp_path):
+        data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
+        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
+
+        value_0 = namespace.fetch_source(0, 2)
+        value_1 = namespace.fetch_source(1, 2)
+        namespace.store(0, 2, value_0)
+        namespace.store(1, 2, value_1)
+
+        np.testing.assert_array_equal(namespace.fetch_local(0, 2), data[0, :, :, 2, :])
+        np.testing.assert_array_equal(namespace.fetch_local(1, 2), data[1, :, :, 2, :])

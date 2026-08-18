@@ -1,37 +1,52 @@
-"""Callback to synchronize distributed cache registry after first validation epoch."""
+"""Trainer-safe synchronization for distributed dataset cache registries."""
 
 import logging
 
 import pytorch_lightning as pl
-import torch.distributed as dist
-
 LOGGER = logging.getLogger(__name__)
 
 
 class CacheSyncCallback(pl.Callback):
-    """Synchronize cache registry across all ranks after first validation epoch.
-    
-    This callback ensures all ranks call update_global_view() at the same synchronized point,
-    avoiding deadlocks from async calls during data fetching.
-    """
+    """Synchronize cache registries at epoch boundaries on every rank."""
 
-    def __init__(self, cache=None):
+    def __init__(self, cache=None, sync_every_n_epochs: int = 1):
         super().__init__()
-        self.sync_done = False
-        self.cache=cache # need to consume cache arg
+        if sync_every_n_epochs < 1:
+            raise ValueError("sync_every_n_epochs must be at least 1")
+        self.cache = cache
+        self.sync_every_n_epochs = sync_every_n_epochs
 
     def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-    #def on_train_batch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule, outputs, batch, batch_idx) -> None:
-        if not self.sync_done:
-            # Check if datamodule has the cache functionality
-            if hasattr(trainer.datamodule, "update_global_view"):
-                LOGGER.info(f"Rank {trainer.global_rank}: Synchronizing distributed cache registry... {trainer.datamodule.cache_registry=}")
-                trainer.datamodule.update_global_view()
-                LOGGER.info(f"Rank {trainer.global_rank}: Cache registry synchronized successfully.")
-                self.sync_done = True
-            else:
-                LOGGER.warning(
-                    f"Rank {trainer.global_rank}: DataModule does not have update_global_view() method. "
-                    "Skipping cache synchronization."
-                )
-                self.sync_done = True  # Don't keep trying
+        if (trainer.current_epoch + 1) % self.sync_every_n_epochs:
+            return
+        self._sync(trainer)
+
+    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        if "validate" in str(trainer.state.fn).lower():
+            self._sync(trainer)
+
+    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        if "test" in str(trainer.state.fn).lower():
+            self._sync(trainer)
+
+    def _sync(self, trainer: pl.Trainer) -> None:
+        cache = self.cache or trainer.datamodule
+        if hasattr(cache, "update_global_view"):
+            LOGGER.info("Rank %s synchronizing distributed cache registry", trainer.global_rank)
+            cache.update_global_view()
+
+    def state_dict(self) -> dict:
+        return {"sync_every_n_epochs": self.sync_every_n_epochs}
+
+    def load_state_dict(self, state_dict: dict) -> None:
+        self.sync_every_n_epochs = state_dict.get("sync_every_n_epochs", self.sync_every_n_epochs)
+
+    def teardown(
+        self,
+        trainer: pl.Trainer,
+        pl_module: pl.LightningModule,
+        stage: str,
+    ) -> None:
+        cache = self.cache or trainer.datamodule
+        if hasattr(cache, "teardown"):
+            cache.teardown(stage)
