@@ -7,7 +7,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CacheSyncCallback(pl.Callback):
-    """Synchronize cache registries at epoch boundaries on every rank."""
+    """Synchronize cache registries before validation and checkpointing."""
 
     def __init__(self, cache=None, sync_every_n_epochs: int = 1):
         super().__init__()
@@ -15,19 +15,18 @@ class CacheSyncCallback(pl.Callback):
             raise ValueError("sync_every_n_epochs must be at least 1")
         self.cache = cache
         self.sync_every_n_epochs = sync_every_n_epochs
+        self._last_synced_epoch = None
 
-    def on_train_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+    def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        """Exchange registries before rank-zero checkpoint I/O can separate ranks."""
+        if trainer.sanity_checking or "fit" not in str(trainer.state.fn).lower():
+            return
         if (trainer.current_epoch + 1) % self.sync_every_n_epochs:
             return
+        if self._last_synced_epoch == trainer.current_epoch:
+            return
         self._sync(trainer)
-
-    def on_validation_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        if "validate" in str(trainer.state.fn).lower():
-            self._sync(trainer)
-
-    def on_test_epoch_end(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        if "test" in str(trainer.state.fn).lower():
-            self._sync(trainer)
+        self._last_synced_epoch = trainer.current_epoch
 
     def _sync(self, trainer: pl.Trainer) -> None:
         cache = self.cache or trainer.datamodule
@@ -36,10 +35,14 @@ class CacheSyncCallback(pl.Callback):
             cache.update_global_view()
 
     def state_dict(self) -> dict:
-        return {"sync_every_n_epochs": self.sync_every_n_epochs}
+        return {
+            "sync_every_n_epochs": self.sync_every_n_epochs,
+            "last_synced_epoch": self._last_synced_epoch,
+        }
 
     def load_state_dict(self, state_dict: dict) -> None:
         self.sync_every_n_epochs = state_dict.get("sync_every_n_epochs", self.sync_every_n_epochs)
+        self._last_synced_epoch = state_dict.get("last_synced_epoch")
 
     def teardown(
         self,
