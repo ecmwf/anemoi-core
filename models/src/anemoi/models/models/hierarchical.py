@@ -417,7 +417,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_latent = x_latent_proc
 
         ## Downscale
-        for i in range(self.num_hidden - 1, 0, -1):
+        for i in reversed(range(0, self.num_hidden - 1)):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i - 1]
 
