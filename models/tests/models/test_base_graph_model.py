@@ -13,6 +13,7 @@ import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.fusion import SumLatentFusion
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -84,6 +85,11 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                     "hidden_nodes_name": "hidden",
                     "latent_skip": False,
                 },
+                "latent_fusion": {
+                    "_target_": "anemoi.models.layers.fusion.SumLatentFusion",
+                    "layer_kernels": {},
+                    "gradient_checkpointing": True,
+                },
                 "residual": {
                     "_target_": "anemoi.models.layers.residual.SkipConnection",
                 },
@@ -102,6 +108,9 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     )
 
     assert model.seen_hidden_name == "hidden"
+    assert isinstance(model.latent_fusion, SumLatentFusion)
+    assert model.latent_fusion.input_channels == model.input_dim_latent
+    assert model.latent_fusion.gradient_checkpointing is True
     assert "data" in model.residual
 
 
@@ -117,6 +126,11 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
                 "model": {
                     "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
                     "latent_skip": False,
+                },
+                "latent_fusion": {
+                    "_target_": "anemoi.models.layers.fusion.SumLatentFusion",
+                    "layer_kernels": {},
+                    "gradient_checkpointing": True,
                 },
                 "residual": {
                     "_target_": "anemoi.models.layers.residual.SkipConnection",

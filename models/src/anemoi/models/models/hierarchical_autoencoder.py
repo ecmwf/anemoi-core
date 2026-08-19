@@ -55,6 +55,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         nn.Module.__init__(self)
         self._graph_data = graph_data
         self.data_indices = data_indices
+        self.dataset_names = list(data_indices.keys())
         self.statistics = statistics
 
         model_config = DotDict(model_config)
@@ -79,6 +80,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # build networks
         self._build_networks(model_config)
 
+        # build encoder latent fusion
+        self._build_latent_fusion(model_config)
+
         # build residual connection
         self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
 
@@ -86,6 +90,14 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+
+    def _latent_fusion_num_channels(self) -> int:
+        """Return the channel width at the innermost hierarchical level."""
+        return self.hidden_dims[self._graph_name_hidden[-1]]
+
+    def _latent_fusion_input_channels(self) -> int:
+        """Return the learned hidden-state width at the innermost hierarchical level."""
+        return self.node_attributes.attr_ndims[self._graph_name_hidden[-1]]
 
     def _build_networks(self, model_config):
 
@@ -384,7 +396,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents in the innermost layer
-        x_latent = sum(dataset_latents.values())
+        x_latent = self._fuse_encoder_latents(x_hidden_latents[self._graph_name_hidden[-1]], dataset_latents)
 
         # Decoder
         x_out_dict = {}

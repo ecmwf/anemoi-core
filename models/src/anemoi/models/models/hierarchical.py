@@ -285,8 +285,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
-        # Combine all dataset latents in the innermost layer
-        x_latent = sum(dataset_latents.values())
+        # Fuse all dataset encoder outputs at the finest hidden level
+        x_latent = self._fuse_encoder_latents(x_hidden_latents[self._graph_name_hidden[0]], dataset_latents)
 
         ## Downscale
         x_encoded_latents_dict = {}

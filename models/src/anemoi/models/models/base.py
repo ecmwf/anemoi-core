@@ -88,6 +88,9 @@ class BaseGraphModel(nn.Module):
         # build networks
         self._build_networks(model_config)
 
+        # build encoder latent fusion
+        self._build_latent_fusion(model_config)
+
         # build residual connection
         self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
 
@@ -95,6 +98,32 @@ class BaseGraphModel(nn.Module):
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+
+    def _latent_fusion_num_channels(self) -> int:
+        """Return the channel width at the encoder fusion point."""
+        return self.num_channels
+
+    def _latent_fusion_input_channels(self) -> int:
+        """Return the learned hidden-state width at the encoder fusion point."""
+        return self.input_dim_latent
+
+    def _build_latent_fusion(self, model_config: DotDict) -> None:
+        """Build the configured encoder latent fusion module."""
+        self.latent_fusion = instantiate(
+            model_config.model.latent_fusion,
+            _recursive_=False,
+            input_channels=self._latent_fusion_input_channels(),
+            num_channels=self._latent_fusion_num_channels(),
+            dataset_names=self.dataset_names,
+        )
+
+    def _fuse_encoder_latents(
+        self,
+        hidden_latent: Tensor,
+        dataset_latents: dict[str, Tensor],
+    ) -> Tensor:
+        """Fuse per-dataset encoder outputs on their shared hidden grid."""
+        return self.latent_fusion(hidden_latent, dataset_latents)
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         # Multi-dataset: create dictionaries for each property
