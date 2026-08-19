@@ -12,12 +12,14 @@ from collections.abc import Callable
 import pytest
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import GraphEdgeCRPSLoss
@@ -439,6 +441,39 @@ def test_graph_scores_reject_unsupported_input_dtypes(
 
     assert f"prediction dtype {prediction_dtype}" in str(exc_info.value)
     assert f"target dtype {target_dtype}" in str(exc_info.value)
+
+
+def test_compile_config_uses_nested_graph_score_training_hook(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    mocker: MockerFixture,
+) -> None:
+    mocker.patch(
+        "anemoi.models.utils.compile._meets_library_versions_for_compile",
+        return_value=True,
+    )
+    compile_mock = mocker.patch(
+        "anemoi.training.losses.graph_score_base.torch.compile",
+        return_value=mocker.Mock(),
+    )
+    graph_loss = GraphEdgeCRPSLoss(graph_data=graph_data, loss_graph=loss_graph)
+    score_kernel = graph_loss._compute_local_score_tensor
+    combined_loss = CombinedLoss(graph_loss)
+    model = torch.nn.Module()
+    model.add_module("loss", torch.nn.ModuleDict({"data": combined_loss}))
+    compile_config = OmegaConf.create(
+        [
+            {
+                "module": "anemoi.training.losses.GraphEdgeCRPSLoss",
+                "options": {"dynamic": False},
+            },
+        ],
+    )
+
+    mark_for_compilation(model, compile_config)
+
+    compile_mock.assert_called_once_with(score_kernel, dynamic=False)
+    assert graph_loss._compute_local_score_tensor is compile_mock.return_value
 
 
 @pytest.mark.gpu
