@@ -1,0 +1,116 @@
+---
+# Training configuration for spatial downscaling with a residual EDM transport objective.
+#
+# Key differences from the standard transport/edm_diffusion configs:
+#   - prediction_mode: residual — the model learns normalized residuals
+#     ``y - interp(x_lres)``.  ``ResidualPredictionMode`` denormalizes lres and
+#     target internally so the residual is computed in physical space, then
+#     renormalized with tendency-space statistics.
+#   - training_condition: log_normal — EDM-style log-normal noise schedule.
+#   - Losses and metrics are scoped to out_hres only; in_lres and in_hres are
+#     conditioning inputs and do not contribute to the loss.
+defaults:
+  - optimization: default
+  - weight_averaging: null
+
+scalers:
+  datasets:
+    out_hres:
+      general_variable:
+        _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+        weights:
+          default: 1
+          2t: 2
+          10u: 0.1
+          10v: 0.1
+          2d: 0.5
+          tp: 0.025
+          cp: 0.0025
+      nan_mask_weights:
+        _target_: anemoi.training.losses.scalers.NaNMaskScaler
+      node_weights:
+        _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+        nodes_attribute_name: area_weight
+        norm: unit-sum
+
+training_loss:
+  datasets:
+    out_hres:
+      _target_: anemoi.training.losses.WeightedMSELoss
+      scalers: ['general_variable', 'nan_mask_weights', 'node_weights']
+      ignore_nans: True
+
+run_id: null
+fork_run_id: null
+transfer_learning: False
+load_weights_only: False
+update_ds_stats_on_ckpt_load:
+  states: False
+  tendencies: True
+
+deterministic: False
+precision: bf16-mixed
+accum_grad_batches: 1
+num_sanity_val_steps: 6
+
+gradient_clip:
+  val: 1.0
+  algorithm: norm
+
+optimization:
+  optimizer:
+    _target_: torch.optim.AdamW
+    weight_decay: 0.01
+    betas: [0.9, 0.95]
+    eps: 1.0e-08
+
+method:
+  _target_: anemoi.training.train.methods.TransportTraining
+
+transport:
+  prediction_mode: residual
+  objective: edm_diffusion
+  # Encoder/decoder role assignments for ResidualPredictionMode, keyed by encoder/decoder name.
+  # Keys will align with named encoders once the encoder-configurability feature is merged.
+  encoder_decoder_roles:
+    enc_dec_0:
+      reference: in_lres      # low-res input projected onto hres grid; residual baseline
+      target: out_hres        # high-res output the model predicts
+      conditioning: in_hres  # optional hres conditioning input
+  # Log-normal noise schedule — corresponds to probabilistic_low_noise in the old config.
+  # Switch to distribution: karras for high-noise training.
+  training_condition:
+    kind: log_normal
+    mean: 0.0
+    std: 3.5
+
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+  read_group_size: ${dataloader.read_group_size}
+
+loss_gradient_scaling: False
+
+max_epochs: null
+max_steps: 1000000
+
+validation_metrics:
+  datasets:
+    out_hres:
+      mse:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ['node_weights']
+        ignore_nans: True
+
+variable_groups:
+  datasets:
+    out_hres:
+      default: sfc
+
+metrics:
+  datasets:
+    out_hres:
+      - 2t
+
+submodules_to_freeze: []
+recompile_limit: 32

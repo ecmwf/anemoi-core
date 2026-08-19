@@ -1,0 +1,76 @@
+# ============================================================
+# Graph — one fused graph with a single encoder/decoder pair on the target
+# (hres) grid.
+#
+# ``AnemoiTransportSpatialDownscalerModelEncProcDec`` builds encoder/processor/
+# decoder only for the target dataset (``out_hres``).  Input datasets are
+# projected onto the target grid by ``CrossGridProjector`` and concatenated as
+# extra per-node features, so no separate input->hidden encoder is built.
+#
+# We declare ``in_lres`` and ``in_hres`` node groups so
+# ``uses_fused_dataset_graph`` succeeds and node-attribute / residual
+# construction (which iterate over every dataset name) can find their nodes.
+# ============================================================
+
+overwrite: True
+nodes:
+  in_hres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${system.input.dataset}
+    attributes: ${graph.attributes.nodes}
+  out_hres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${system.input.dataset}
+    attributes: ${graph.attributes.nodes}
+  in_lres:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${system.input.dataset_lres}
+    attributes: ${graph.attributes.nodes}
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5
+    attributes: ${graph.attributes.nodes}
+edges:
+  # Encoder edges (data-on-target-grid -> hidden). Inputs live on the target
+  # grid after CrossGridProjector, so the encoder is anchored at out_hres.
+  - source_name: out_hres
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.CutOffEdges
+        cutoff_factor: 0.7
+    attributes: ${graph.attributes.edges}
+  # Processor edges (hidden -> hidden).
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.MultiScaleEdges
+        x_hops: 1
+        scale_resolutions: [5]
+    attributes: ${graph.attributes.edges}
+  # Decoder edges (hidden -> target).
+  - source_name: hidden
+    target_name: out_hres
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 3
+        source_mask_attr_name: null
+        target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+attributes:
+  nodes:
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-std
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+post_processors: []

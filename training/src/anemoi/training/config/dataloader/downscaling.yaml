@@ -1,0 +1,99 @@
+# Dataloader configuration for spatial downscaling with three datasets:
+#   in_lres  — low-resolution conditioning input (separate zarr)
+#   in_hres  — high-resolution forcings (same zarr as out_hres)
+#   out_hres — high-resolution prediction target (same zarr as in_hres)
+#
+# Residual statistics are loaded via anemoi-datasets' open_dataset interface:
+#
+#   open_dataset(base, statistics_tendencies=residual_stats.zarr)
+#
+# Set system.input.residual_statistics to a zarr whose statistics_tendencies
+# contain the per-variable mean/stdev of (y_hres - interp(x_lres)).
+# If unset, ResidualPredictionMode falls back to state statistics with a warning.
+
+prefetch_factor: 2
+pin_memory: True
+read_group_size: ${system.hardware.num_gpus_per_model}
+
+num_workers:
+  training: 4
+  validation: 4
+  test: 4
+
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+dataset: ${system.input.dataset}
+
+training:
+  datasets:
+    in_lres:
+      dataset_config:
+        dataset: ${system.input.dataset_lres}
+        frequency: ${data.frequency}
+      start: null
+      end: 2020
+    in_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+      start: null
+      end: 2020
+    out_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        statistics_tendencies: ${system.input.residual_statistics}
+      start: null
+      end: 2020
+
+validation:
+  datasets:
+    in_lres:
+      dataset_config:
+        dataset: ${system.input.dataset_lres}
+        frequency: ${data.frequency}
+      start: 2021
+      end: 2021
+    in_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+      start: 2021
+      end: 2021
+    out_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        statistics_tendencies: ${system.input.residual_statistics}
+      start: 2021
+      end: 2021
+
+test:
+  datasets:
+    in_lres:
+      dataset_config:
+        dataset: ${system.input.dataset_lres}
+        frequency: ${data.frequency}
+      start: 2022
+      end: null
+    in_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+      start: 2022
+      end: null
+    out_hres:
+      dataset_config:
+        dataset: ${system.input.dataset}
+        frequency: ${data.frequency}
+        statistics_tendencies: ${system.input.residual_statistics}
+      start: 2022
+      end: null

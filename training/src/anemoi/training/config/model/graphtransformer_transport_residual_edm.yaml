@@ -1,0 +1,24 @@
+---
+# Model config for spatial downscaling with AnemoiTransportResidualModelEncProcDec.
+#
+# Inherits all encoder/processor/decoder architecture and EDM transport settings
+# from graphtransformer_transport_edm. The only downscaling-specific additions are:
+#   - _target_: AnemoiTransportResidualModelEncProcDec — uses a separate encoding
+#     path per input dataset and concatenates all inputs + noised residual before
+#     encoding the output (hres) nodes.
+#   - input_datasets: datasets whose features are fed into the encoder as conditioning.
+#   - output_datasets: datasets the decoder reconstructs (residual prediction targets).
+#
+# Architecture note: in_lres and in_hres share the hres grid after CrossGridProjector
+# remaps in_lres. Both are concatenated with y_noised as the encoder input for out_hres.
+defaults:
+  - graphtransformer_transport_edm
+  - _self_
+
+model:
+  _target_: anemoi.models.models.AnemoiTransportSpatialDownscalerModelEncProcDec
+  # Datasets whose normalized features are concatenated as conditioning input.
+  # in_lres arrives on the hres grid via CrossGridProjector (data.spatial_processors).
+  # input_datasets: [in_lres, in_hres]
+  # # Datasets the model decodes; the loss is computed on these residuals.
+  # output_datasets: [out_hres]
