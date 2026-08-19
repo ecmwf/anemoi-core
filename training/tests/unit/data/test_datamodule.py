@@ -74,8 +74,8 @@ def test_forecaster_uses_cumulative_tendency_statistics_for_each_output_step(moc
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["6h", "12h", "18h"]
 
 
-def test_task_tendency_delta_overrides_each_output_lead_time(mocker: MockFixture) -> None:
-    """Tasks with incremental targets can explicitly share one tendency delta."""
+def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(mocker: MockFixture) -> None:
+    """TemporalDownscaler uses per-lead-time cumulative tendency statistics."""
     task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
     datamodule = _make_datamodule(task)
     reader = _attach_statistics_reader(datamodule, mocker)
@@ -85,11 +85,11 @@ def test_task_tendency_delta_overrides_each_output_lead_time(mocker: MockFixture
     assert statistics == {
         "data": {
             "2h": {"delta": "2h"},
-            "4h": {"delta": "2h"},
+            "4h": {"delta": "4h"},
             "lead_times": ["2h", "4h"],
         },
     }
-    assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "2h"]
+    assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "4h"]
 
 
 @pytest.mark.parametrize(
