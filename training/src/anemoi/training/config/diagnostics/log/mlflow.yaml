@@ -16,5 +16,10 @@ mlflow:
     - config
   http_max_retries: 35
   max_params_length: 2000
+  # Directory for offline MLflow data. When offline=True, two items are created here:
+  #   mlflow.db       - SQLite tracking database (runs, metrics, params, tags)
+  #   mlartifacts/    - artifact storage (plots, checkpoints, terminal logs)
+  # To browse runs and find run IDs before syncing:
+  #   mlflow ui --backend-store-uri sqlite:///path/to/save_dir/mlflow.db
   save_dir: ${system.output.logs.mlflow}
 interval: 100 # passed to trainer.log_every_n_steps

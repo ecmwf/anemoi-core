@@ -141,8 +141,12 @@ class MlFlow(Command):
         sync.add_argument(
             "--source",
             "-s",
-            help="The MLflow logs source directory.",
-            metavar="DIR",
+            help=(
+                "The MLflow offline tracking source. "
+                "Accepts a SQLite URI (sqlite:///path/to/mlflow.db) "
+                "or a legacy filesystem mlruns directory path."
+            ),
+            metavar="URI_OR_DIR",
             required=True,
             default=argparse.SUPPRESS,
         )
@@ -257,6 +261,36 @@ class MlFlow(Command):
 
             extra_tags = {}
 
+            source = args.source
+            if source.startswith(("sqlite://", "http")):
+                LOGGER.info("Using source as-is: %s", source)
+                extra_tags["sync.offline_store"] = "sqlite" if source.startswith("sqlite://") else "remote"
+            else:
+                source_path = Path(source)
+                sqlite_db = source_path / "mlflow.db"
+                has_legacy_store = (
+                    any(d.is_dir() and d.name.isdigit() for d in source_path.iterdir())
+                    if source_path.is_dir()
+                    else False
+                )
+                if sqlite_db.exists():
+                    source = f"sqlite:///{source_path.resolve() / 'mlflow.db'}"
+                    LOGGER.info("Detected SQLite backend at %s", source)
+                    extra_tags["sync.offline_store"] = "sqlite"
+                elif has_legacy_store:
+                    LOGGER.warning(
+                        "Detected legacy filesystem store at '%s'. "
+                        "This backend is deprecated. Consider migrating with 'mlflow migrate-filestore'.",
+                        source,
+                    )
+                    extra_tags["sync.offline_store"] = "filesystem"
+                else:
+                    msg = (
+                        f"Source '{source}' does not look like a valid MLflow store "
+                        "(no mlflow.db and no numeric experiment directories found)."
+                    )
+                    raise ValueError(msg)
+
             if args.authentication:
                 from anemoi.utils.mlflow.auth import TokenAuth
 
@@ -273,7 +307,7 @@ class MlFlow(Command):
             log_level = "DEBUG" if args.verbose else "INFO"
 
             MlFlowSync(
-                args.source,
+                source,
                 args.destination,
                 args.run_id,
                 args.experiment_name,
