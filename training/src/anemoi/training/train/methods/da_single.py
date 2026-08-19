@@ -141,6 +141,20 @@ class DASingleTraining(SingleTraining):
         Corrector variables are read from the DATA_FULL target ``y`` at the
         target time. Datasets without a corrector network pass through unchanged.
 
+        The corrector runs under activation checkpointing during training: the
+        per-instrument GNNs build edge-sized messages of shape
+        ``(num_edges, 2 * hidden_dim + edge_features)`` at every layer, and those
+        activations are retained for *every* forecast step of the rollout, which
+        makes them the dominant memory term at long rollouts. Recomputing them in
+        the backward pass trades one extra corrector forward per step for that
+        memory. The corrector contains no dropout or other RNG, so the recompute
+        is numerically identical.
+
+        Note: for the same reason as the encoder/decoder mapper blocks, no module
+        reachable from here may be passed to ``torch.compile`` via
+        ``model.compile`` -- compiling inside a non-reentrant checkpoint region
+        reorders the saved activations and raises ``CheckpointError``.
+
         Parameters
         ----------
         y_pred : dict[str, torch.Tensor]
@@ -156,6 +170,19 @@ class DASingleTraining(SingleTraining):
         if len(self.corrector) == 0:
             return y_pred
 
+        if not torch.is_grad_enabled():
+            # Nothing to recompute for (validation / inference): no activations
+            # are stored, so checkpointing would only add overhead.
+            return self._corrector_forward(y_pred, y)
+
+        return checkpoint(self._corrector_forward, y_pred, y, use_reentrant=False)
+
+    def _corrector_forward(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Run the corrector networks. See :meth:`_apply_corrector`."""
         y_for_loss = {}
         for dataset_name, pred in y_pred.items():
             # nn.ModuleDict has no .get(), so SIM401's suggestion does not apply here.
