@@ -2433,6 +2433,9 @@ def _make_residual_module(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
     downscaler_model.data_indices = data_indices
+    # Default transport source is Gaussian noise — residual mode requires a
+    # non-``reference_state`` kind (see ``_validate_source_kind``).
+    downscaler_model.transport_source = SimpleNamespace(kind="default")
 
     module = SimpleNamespace(
         model=SimpleNamespace(
@@ -2494,7 +2497,12 @@ def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes(
     prepared = mode.prepare_target(batch, x={})
 
     # Denormalized reference cached for reconstruction: 5.0 + (-100.0) = -95.0
-    assert set(prepared.aux) >= {"x_ref_on_target_grid", "transport_reference_source"}
+    assert set(prepared.aux) >= {"x_ref_on_target_grid"}
+    # ``transport_reference_source`` is intentionally *not* populated: residual
+    # mode currently does not support the ``reference_state`` sampling-source
+    # kind, and populating a state-space reference here would be misleading —
+    # see ``test_residual_prediction_mode_rejects_reference_state_source_kind``.
+    assert "transport_reference_source" not in prepared.aux
     torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], lres_tensor - 100.0)
 
     # loss_target is the normalized residual in DATA_OUTPUT space.
@@ -2594,25 +2602,14 @@ def test_residual_prediction_mode_reference_dataset_raises_when_roles_absent() -
         mode._build_encoder_decoder_roles_by_target()
 
 
-def test_residual_prediction_mode_falls_back_to_state_processors_when_residual_absent() -> None:
-    """If pre/post_processors_residual are empty the state processors normalize the residual."""
-    module, _procs = _make_residual_module(
-        pre_offset=100.0,
-        post_offset=-100.0,
-        tend_pre_offset=99.0,  # would be used if residual processors were present
-        tend_post_offset=-99.0,
-    )
-    module.model.pre_processors_residual = {}
-    module.model.post_processors_residual = {}
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
-    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
+def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:
 
-    b, t, e, g = 1, 1, 1, 2
-    batch = {
-        "in_lres": torch.full((b, t, e, g, 2), 5.0),
-        "out": torch.full((b, t, e, g, 2), 8.0),
-    }
-    prepared = mode.prepare_target(batch, x={})
-    # Fallback to state pre-processor (+100) on the raw residual (=3): expect 103.
-    torch.testing.assert_close(prepared.model_target["out"], torch.full((b, t, e, g, 2), 103.0))
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    module.model.model.transport_source = SimpleNamespace(kind="reference_state")
+    with pytest.raises(NotImplementedError, match=r"reference_state"):
+        ResidualPredictionMode(module)

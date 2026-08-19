@@ -1588,14 +1588,20 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare the batch for sampling in the same order as training.
-        Steps:
+
+        Steps, matching :meth:`BaseTrainingModule.on_after_batch_transfer` and
+        :meth:`AnemoiTransportTendModelEncProcDec._before_sampling`:
+
         1. Add the ensemble dimension.
-        2. Apply spatial pre-processors on raw values so ``in_lres`` is projected
-           onto the target grid.
-        3. Shard grid-wise (if a comm group is present).
+        2. Shard grid-wise on the *source* grid.
+        3. Apply spatial pre-processors on the sharded raw values so ``in_lres``
+           is projected onto the target grid (the projector uses
+           ``all_to_all_transpose`` internally to redistribute grid and channel
+           shards during projection).
         4. Apply per-dataset ``pre_processors`` (state normalization).
-        5. Cache the denormalized projected reference so ``_after_sampling`` can
-           add it back to the sampled residual — mirrors how
+        5. Cache the denormalized projected reference and the reference dataset's
+           ``name_to_index`` as per-target dicts so ``_after_sampling`` can
+           reconstruct the state without any further wrapping — mirrors how
            ``ResidualPredictionMode`` caches ``x_ref_on_target_grid`` in training.
         """
         del kwargs
@@ -1608,44 +1614,54 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         spatial_pre_processors = spatial_pre_processors or {}
 
         for dataset_name, x in batch.items():
-            # (batch, time, grid, vars) → (batch, time, 1, grid, vars)
+            # 1. (batch, time, grid, vars) → (batch, time, 1, grid, vars)
             x = x[:, 0:n_step_input, None, ...]
 
-            # 2. Spatial projection on raw values.
+            # 2. Shard on the source grid before projection so the projector
+            #    can use its built-in all_to_all_transpose to redistribute
+            #    grid and channel shards during the sparse matmul.
+            source_shard_sizes = None
+            if model_comm_group is not None:
+                source_shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
+                x = shard_tensor(x, -2, source_shard_sizes, model_comm_group)
+                grid_shard_sizes[dataset_name] = source_shard_sizes
+
+            # 3. Spatial projection on raw (un-normalized) values.
             projector = spatial_pre_processors.get(dataset_name)
             if projector is not None:
-                x = projector(x, model_comm_group=model_comm_group, grid_shard_sizes=None)
-
-            # 3. Shard.
-            if model_comm_group is not None:
-                shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
-                assert grid_shard_sizes is not None
-                grid_shard_sizes[dataset_name] = shard_sizes
-                x = shard_tensor(x, -2, shard_sizes, model_comm_group)
+                x = projector(
+                    x,
+                    model_comm_group=model_comm_group,
+                    grid_shard_sizes=source_shard_sizes,
+                )
 
             # 4. Normalize.
             x = pre_processors[dataset_name](x, in_place=False)
             xs[dataset_name] = x
 
-        # 5. Cache the denormalized projected reference for reconstruction, along
-        #    with the reference dataset's name_to_index so ``_after_sampling`` can
-        #    align its columns against the target's prognostic outputs by name.
-        x_reference_denorm: torch.Tensor | None = None
-        reference_variable_name_to_column_index_by_target: dict[str, int] | None = None
-        if spatial_pre_processors:
-            assert (
-                post_processors is not None
-            ), "Downscaler _before_sampling needs post_processors to denormalize the projected lres."
-            reference_names = list(spatial_pre_processors.keys())
-            assert len(reference_names) == 1, (
-                "Downscaler expects exactly one spatial pre-processor "
-                f"(the reference dataset); got: {reference_names}."
+        # 5. Denormalize each target's projected reference and build the
+        #    per-target ``name_to_index`` mapping in one place so
+        #    ``_after_sampling`` doesn't need to re-wrap anything.
+        assert (
+            post_processors is not None
+        ), "Downscaler _before_sampling needs post_processors to denormalize the projected reference."
+        x_ref_on_target_grid_by_target: dict[str, torch.Tensor] = {}
+        reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]] = {}
+        for target_name in self.target_dataset_names:
+            reference_name = self._roles_by_target[target_name]["reference"]
+            x_ref_on_target_grid_by_target[target_name] = post_processors[reference_name](
+                xs[reference_name],
+                in_place=False,
             )
-            reference_name = reference_names[0]
-            x_reference_denorm = post_processors[reference_name](xs[reference_name], in_place=False)
-            reference_variable_name_to_column_index_by_target = self.data_indices[reference_name].name_to_index
+            reference_variable_name_to_column_index_by_target[target_name] = self.data_indices[
+                reference_name
+            ].name_to_index
 
-        return (xs, x_reference_denorm, reference_variable_name_to_column_index_by_target), grid_shard_sizes
+        return (
+            xs,
+            x_ref_on_target_grid_by_target,
+            reference_variable_name_to_column_index_by_target,
+        ), grid_shard_sizes
 
     def _after_sampling(
         self,
@@ -1659,18 +1675,17 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Turn the sampled normalized residual into a denormalized state prediction.
-        Delegates the per-channel arithmetic to :meth:`add_residual_to_state`
-        (mirror of :meth:`AnemoiTransportTendModelEncProcDec._after_sampling`).
-        Prognostic channels receive the low-res source added back; diagnostic
-        channels are recovered via the state post-processor.
+
+        Prognostic channels receive the low-res source added back; diagnostic channels are
+        recovered via the state post-processor.
         """
         del kwargs
 
         assert isinstance(before_sampling_data, tuple) and len(before_sampling_data) >= 3, (
             "Downscaler _after_sampling expects _before_sampling to return "
-            "(xs, x_reference_denorm, reference_variable_name_to_column_index_by_target)."
+            "(xs, x_ref_on_target_grid_by_target, reference_variable_name_to_column_index_by_target)."
         )
-        x_reference_denorm = before_sampling_data[1]
+        x_ref_on_target_grid_by_target = before_sampling_data[1]
         reference_variable_name_to_column_index_by_target = before_sampling_data[2]
 
         assert post_processors_residual is not None and len(post_processors_residual) > 0, (
@@ -1678,38 +1693,16 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             "(built from statistics_tendencies['0h'])."
         )
 
-        if x_reference_denorm is not None:
-            assert reference_variable_name_to_column_index_by_target is not None, (
-                "Downscaler _after_sampling received x_reference_denorm without a "
-                "reference_variable_name_to_column_index_by_target mapping from _before_sampling."
-            )
-            # Delegate to the residual/state split; returns de-normalized state
-            # (no output_pre_processor at inference time — callers expect the
-            # de-normalized field).
-            # Wrap the flat per-reference mapping into the per-target dict expected
-            # by add_residual_to_state (single enc/dec: same reference for all targets).
-            reference_variable_name_to_column_index_by_target = {
-                name: reference_variable_name_to_column_index_by_target for name in out
-            }
-            state = self.add_residual_to_state(
-                x_reference_denorm={name: x_reference_denorm for name in out},
-                residual=out,
-                post_processors_state=post_processors,
-                post_processors_residual=post_processors_residual,
-                reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
-                output_pre_processor=None,
-                skip_imputation=True,
-            )
-            out = dict(state)
-        else:
-            # No spatial pre-processor was applied — fall back to a plain
-            # de-normalization of the sampled tensor.
-            for dataset_name in list(out.keys()):
-                out[dataset_name] = post_processors_residual[dataset_name](
-                    out[dataset_name],
-                    in_place=False,
-                    data_index=self.data_indices[dataset_name].data.output.full,
-                )
+        state = self.add_residual_to_state(
+            x_reference_denorm=x_ref_on_target_grid_by_target,
+            residual=out,
+            post_processors_state=post_processors,
+            post_processors_residual=post_processors_residual,
+            reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
+            output_pre_processor=None,
+            skip_imputation=True,
+        )
+        out = dict(state)
 
         for dataset_name in list(out.keys()):
             if gather_out and model_comm_group is not None:

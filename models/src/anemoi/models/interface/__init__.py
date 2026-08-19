@@ -353,8 +353,6 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
-        # Add residual processors if they exist (populated only for models
-        # with ``uses_zero_offset_statistics = True``).
         if hasattr(self, "pre_processors_residual") and len(self.pre_processors_residual) > 0:
             predict_kwargs["pre_processors_residual"] = self.pre_processors_residual
         if hasattr(self, "post_processors_residual") and len(self.post_processors_residual) > 0:

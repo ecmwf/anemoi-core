@@ -101,13 +101,19 @@ class _AdditiveProcessor:
 
 
 class _IdentitySpatialProjector:
-    """Spatial pre-processor stub that just passes input through."""
+    """Spatial pre-processor stub that just passes input through.
+
+    Records every call (tensor + kwargs) so tests can assert both the *order*
+    of operations in ``_before_sampling`` and the arguments passed to the
+    projector (in particular ``grid_shard_sizes``, which must be the
+    source-grid shard sizes so behaviour matches the training path).
+    """
 
     def __init__(self) -> None:
-        self.calls: list[torch.Tensor] = []
+        self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, x: torch.Tensor, **_kwargs: Any) -> torch.Tensor:
-        self.calls.append(x)
+    def __call__(self, x: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+        self.calls.append({"x": x, "kwargs": kwargs})
         return x
 
 
@@ -355,19 +361,21 @@ def test_before_sampling_applies_spatial_preprocessor_and_pre_processors() -> No
         post_processors={"in_lres": post_lres, "out_hres": post_out},
     )
 
-    xs, x_lres_denorm, lres_name_to_index = result
+    xs, x_ref_by_target, ref_name_to_index_by_target = result
     # The projector must have been called with the raw lres batch first,
-    # before any normalization.
+    # before any normalization.  In single-process runs the source-grid shard
+    # sizes passed to the projector are ``None``.
     assert len(projector.calls) == 1
-    torch.testing.assert_close(projector.calls[0], batch_lres.unsqueeze(2))  # add ensemble dim
+    torch.testing.assert_close(projector.calls[0]["x"], batch_lres.unsqueeze(2))  # add ensemble dim
     # After spatial projection, ``pre_processors["in_lres"]`` is applied (adds 10).
     torch.testing.assert_close(xs["in_lres"], batch_lres.unsqueeze(2) + 10.0)
     torch.testing.assert_close(xs["in_hres"], batch_hres.unsqueeze(2) + 20.0)
-    # x_lres_denorm caches the denormalized projected lres:
+    # The denormalized projected reference is returned as a per-target dict:
     # normalized (batch + 10) then denormalized (subtract 10) = batch.
-    torch.testing.assert_close(x_lres_denorm, batch_lres.unsqueeze(2))
-    # The LRES dataset's name_to_index is threaded through for _after_sampling.
-    assert lres_name_to_index == model.data_indices["in_lres"].name_to_index
+    assert set(x_ref_by_target) == {"out_hres"}
+    torch.testing.assert_close(x_ref_by_target["out_hres"], batch_lres.unsqueeze(2))
+    # The reference dataset's name_to_index is threaded through as a per-target dict.
+    assert ref_name_to_index_by_target == {"out_hres": model.data_indices["in_lres"].name_to_index}
 
 
 def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> None:
@@ -391,8 +399,8 @@ def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> Non
         post_processors={"out_hres": post_state},
         before_sampling_data=(
             {"in_lres": None, "in_hres": None, "out_hres": None},
-            x_lres_denorm,
-            model.data_indices["in_lres"].name_to_index,
+            {"out_hres": x_lres_denorm},
+            {"out_hres": model.data_indices["in_lres"].name_to_index},
         ),
         model_comm_group=None,
         grid_shard_sizes=None,
@@ -703,8 +711,8 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
         post_processors={"out_hres": state_post},
         before_sampling_data=(
             {"in_lres": None, "in_hres": None, "out_hres": None},
-            x_lres_denorm,
-            model.data_indices["in_lres"].name_to_index,
+            {"out_hres": x_lres_denorm},
+            {"out_hres": model.data_indices["in_lres"].name_to_index},
         ),
         model_comm_group=None,
         grid_shard_sizes=None,

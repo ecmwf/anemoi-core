@@ -316,6 +316,7 @@ class ResidualPredictionMode(PredictionMode):
     def __init__(self, module: BaseTransportTraining) -> None:
         super().__init__(module)
         self._validate_objective()
+        self._validate_source_kind()
         self._encoder_decoder_roles_by_target = self._build_encoder_decoder_roles_by_target()
 
     def _build_encoder_decoder_roles_by_target(self) -> dict:
@@ -357,6 +358,22 @@ class ResidualPredictionMode(PredictionMode):
         if objective_kind == "stochastic_interpolant":
             error_msg = "ResidualPredictionMode does not yet support the stochastic_interpolant objective."
             raise NotImplementedError(error_msg)
+
+    def _validate_source_kind(self) -> None:
+        """Reject ``source.kind == 'reference_state'`` for residual mode.
+
+        Until a suitable anchor for the sampler is implemented, the combination is rejected so
+        misconfigurations fail fast at training setup.
+        """
+        transport_source = getattr(self.module.model.model, "transport_source", None)
+        source_kind = getattr(transport_source, "kind", None)
+        if source_kind == "reference_state":
+            msg = (
+                "ResidualPredictionMode does not support transport.source.kind='reference_state'. "
+                "Use 'gaussian', 'zero', or 'default' instead — a residual-space equivalent of the "
+                "reference-state source has not been implemented yet."
+            )
+            raise NotImplementedError(msg)
 
     def _residual_pre_processors(self) -> dict:
         """Return the residual pre-processors (zero lead-time normalization).
@@ -447,25 +464,8 @@ class ResidualPredictionMode(PredictionMode):
                 # store the denormalized reference projection and name→index mapping for reconstructing the state later
                 "x_ref_on_target_grid": x_ref_on_target_grid,
                 "reference_variable_name_to_column_index_by_target": reference_variable_name_to_column_index_by_target,
-                "transport_reference_source": self._reference_state_target_space(batch),
             },
         )
-
-    def _reference_state_target_space(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        # Only process target (output) datasets.  Input-only datasets (e.g. in_lres, in_hres)
-        # have no model-output variables and must not be passed to
-        # reduce_data_output_target_to_model_output, which would produce wrong shapes.
-        target_names = set(self.module.task.target_datasets)
-        reference: dict[str, torch.Tensor] = {}
-        for dataset_name, batch_dataset in batch.items():
-            if dataset_name not in target_names:
-                continue
-            var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
-            reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
-            if self.module.n_step_output > 1:
-                reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
-            reference[dataset_name] = reference_step
-        return self.module.reduce_data_output_target_to_model_output(reference)
 
     def reconstruct_prediction(
         self,
