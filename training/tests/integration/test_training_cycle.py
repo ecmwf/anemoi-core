@@ -456,3 +456,20 @@ def test_evaluator(
     cfg.training.load_weights_only = True
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_global_with_rollout(
+    gnn_config_with_rollout: tuple[DictConfig, str, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config_with_rollout
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    # The rollout step should be incremented after each epoch, so after 3 epochs it should be 4
+    assert (
+        trainer.task.rollout.step == 4
+    ), f"Expected rollout step after 3 epochs to be 4, got {trainer.task.rollout.step}"
