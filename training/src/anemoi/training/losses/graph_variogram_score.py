@@ -32,7 +32,6 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
             graph_data,
             graph_name="Graph variogram neighbourhood",
             allow_none=False,
-            require_square=True,
         )
         assert graph is not None
         super().__init__(graph=graph, no_autocast=no_autocast, ignore_nans=ignore_nans)

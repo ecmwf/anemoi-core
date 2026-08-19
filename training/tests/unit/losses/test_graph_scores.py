@@ -27,6 +27,7 @@ from anemoi.training.losses import GraphVariogramScoreLoss
 from anemoi.training.losses import MultiscaleLossWrapper
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
@@ -254,6 +255,35 @@ def test_graph_scores_match_reference(
     expected = reference(pred, target, graph_data)
 
     torch.testing.assert_close(actual, expected)
+
+
+@pytest.mark.parametrize("ignore_nans", [False, True])
+def test_graph_edge_energy_centering_preserves_spatial_offset_invariance(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+    ignore_nans: bool,
+) -> None:
+    prediction, target = score_inputs
+    prediction = prediction.float()
+    target = target.float()
+    if ignore_nans:
+        prediction[:, :, :, 1, 0] = torch.nan
+
+    member_offsets = torch.tensor([2**16, -(2**17), 2**18], dtype=prediction.dtype).view(1, 1, -1, 1, 1)
+    shifted_prediction = prediction + member_offsets
+    loss = GraphEdgeEnergyScoreLoss(
+        graph_data=graph_data,
+        loss_graph=loss_graph,
+        ignore_nans=ignore_nans,
+    )
+
+    score = loss(prediction, target, squash=False)
+    shifted_score = loss(shifted_prediction, target, squash=False)
+
+    assert torch.isfinite(score).all()
+    assert torch.isfinite(shifted_score).all()
+    torch.testing.assert_close(shifted_score, score)
 
 
 @pytest.mark.parametrize(
@@ -597,6 +627,31 @@ def test_graph_definition_applies_and_normalizes_weights(graph_data: HeteroData)
         ],
     )
     torch.testing.assert_close(matrix.to_dense(), expected)
+
+
+def test_graph_definition_validation_and_provider_normalize_weights_consistently(
+    graph_data: HeteroData,
+) -> None:
+    edge_store = graph_data["data", "to", "data"]
+    edge_store.weight = torch.tensor([2.0, 6.0, 3.0, 4.0, 6.0])
+    source, destination = edge_store.edge_index
+    validation_weights = GraphScoreGraph._row_normalize_weights(
+        destination,
+        edge_store.weight,
+        graph_data["data"].num_nodes,
+    )
+
+    loss = GraphEnergyScoreLoss(
+        graph_data=graph_data,
+        loss_graph={
+            "edges_name": ["data", "to", "data"],
+            "edge_weight_attribute": "weight",
+            "row_normalize": True,
+        },
+    )
+    provider_matrix = loss.graph_provider.get_edges().to_dense()
+
+    torch.testing.assert_close(provider_matrix[destination, source], validation_weights)
 
 
 def test_graph_definition_defaults_to_unnormalized_unit_weights(graph_data: HeteroData) -> None:

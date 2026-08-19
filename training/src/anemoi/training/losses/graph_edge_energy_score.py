@@ -20,6 +20,10 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
     """Energy score for graph edge differences.
 
+    This class inherits from ``BaseGraphEnergyScoreLoss`` rather than
+    ``BaseGraphEdgeScoreLoss`` because it calculates edge norms without
+    materializing an edge tensor.
+
     For node differences ``q``, the weighted squared edge norm is
     ``A @ q**2 - 2*q*(A @ q) + q**2*(A @ 1)``. This identity avoids an
     edge tensor.
@@ -40,7 +44,6 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
             graph_data,
             graph_name="Graph edge energy score neighbourhood",
             allow_none=False,
-            require_square=True,
         )
         assert graph is not None
         super().__init__(

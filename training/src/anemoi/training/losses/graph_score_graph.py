@@ -78,7 +78,6 @@ class GraphScoreGraph(nn.Module):
         *,
         graph_name: str,
         allow_none: bool = False,
-        require_square: bool = True,
     ) -> "GraphScoreGraph | None":
         """Validate a graph-score definition and build its CSR provider."""
         if graph_definition is None:
@@ -119,7 +118,6 @@ class GraphScoreGraph(nn.Module):
             edges_name,
             num_src_nodes,
             num_dst_nodes,
-            require_square=require_square,
         )
         cls._validate_weights(
             edge_index[1],
@@ -169,11 +167,7 @@ class GraphScoreGraph(nn.Module):
         edges_name: tuple[str, ...],
         num_src_nodes: int,
         num_dst_nodes: int,
-        *,
-        require_square: bool,
     ) -> None:
-        if not require_square:
-            return
         if edges_name[0] != edges_name[2]:
             msg = (
                 "Graph score losses require source and destination nodes to use the same node type, "

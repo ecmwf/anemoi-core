@@ -38,7 +38,6 @@ class GraphEnergyScoreLoss(BaseGraphEnergyScoreLoss):
             graph_data,
             graph_name="Graph energy score neighbourhood",
             allow_none=True,
-            require_square=True,
         )
         super().__init__(
             graph=graph,
