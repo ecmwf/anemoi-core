@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -251,7 +251,7 @@ class MigrationManifest:
         elif isinstance(op, RemoveOp):
             for source in op.source:
                 delete(
-                    cfg, source, new_comment=[f"{start_comment}: removed key {op.source}.", *op_comment, end_comment]
+                    cfg, source, new_comment=[f"{start_comment}: removed key {op.source}.", *op_comment, end_comment],
                 )
         elif isinstance(op, MoveOp):
             parent, key = parent_key(op.source)
@@ -365,7 +365,7 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
     migrations: list[Migration] = []
 
     for file in sorted(Path(location).iterdir()):
-        if not file.is_file() and file.suffix != ".py" or file.name == "__init__.py":
+        if (not file.is_file() and file.suffix != ".py") or file.name == "__init__.py":
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
         migration = importlib.import_module(f".{file.stem}", package)
@@ -400,7 +400,6 @@ class Migrator:
         migrations : Sequence[Migration] | None, default None
             List of migration to execute. If None, get migrations from the current folder.
         """
-
         if migrations is None:
             # remove the ".migrator" at the end to get parent folder as migration package
             migration_pkg, _, _ = __name__.rpartition(".")
@@ -438,7 +437,6 @@ class Migrator:
         bool
             Whether it is compatible
         """
-
         # No migration means checkpoint too old, no migrations available.
         if _version_key not in config:
             return False
