@@ -547,12 +547,12 @@ class ProjectionGraphProvider(BaseGraphProvider):
         sub_graph = graph[edges_name]
 
         if edge_weight_attribute:
-            weights = sub_graph[edge_weight_attribute].squeeze()
+            weights = sub_graph[edge_weight_attribute].reshape(-1)
         else:
             weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
 
         if src_node_weight_attribute:
-            weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+            weights = weights * graph[edges_name[0]][src_node_weight_attribute].reshape(-1)[sub_graph.edge_index[0]]
 
         matrix = coo_matrix(
             (
@@ -629,6 +629,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         """Return the sparse projection matrix.
 
@@ -646,15 +647,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Unused for sparse providers
         device : torch.device, optional
             Target device for matrix
+        dtype : torch.dtype, optional
+            Target dtype for matrix
 
         Returns
         -------
         Tensor
             Sparse projection matrix
         """
-        if device is not None:
-            # sparse tensors can't be registered as buffers with ddp, so move on demand
-            self.projection_matrix = self.projection_matrix.to(device)
+        if device is not None or dtype is not None:
+            # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
+            self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
     @classmethod
