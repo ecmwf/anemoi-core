@@ -154,7 +154,7 @@ def gnn_config_with_rollout(gnn_config: tuple[DictConfig, str, str]) -> tuple[Di
     cfg.task.rollout = {
         "start": 1,
         "epoch_increment": 1,
-        "maximum": 4,
+        "maximum": 5,
     }
     cfg.training.max_epochs = 3
     return cfg, url_dataset

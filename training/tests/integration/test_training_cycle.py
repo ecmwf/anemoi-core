@@ -54,6 +54,18 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
 
 
+def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
+    """Return the single run-id checkpoint directory produced by a training run."""
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    return run_dirs[0]
+
+
 @skip_if_offline
 @pytest.mark.slow
 def test_training_cycle_global(
@@ -278,16 +290,7 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     get_test_archive(url)
 
     AnemoiTrainer(cfg).train()
-    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
-
-    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
-
-    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-
-    checkpoint_dir = run_dirs[0]
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
     cfg.training.run_id = checkpoint_dir.name
@@ -472,4 +475,20 @@ def test_training_cycle_global_with_rollout(
     # The rollout step should be incremented after each epoch, so after 3 epochs it should be 4
     assert (
         trainer.task.rollout.step == 4
-    ), f"Expected rollout step after 3 epochs to be 4, got {trainer.task.rollout.step}"
+    ), f"Expected rollout step after 3 epochs to be 1+3=4, got {trainer.task.rollout.step}"
+
+    # Resume training from the checkpoint and verify the rollout counter is restored
+    # correctly and continues to increment on further epochs.
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.max_epochs = 6
+    resumed_trainer = AnemoiTrainer(cfg)
+    resumed_trainer.train()
+
+    # After two additional epochs the counter loaded from the checkpoint (4) must have advanced
+    # to the maximum specified in the beginning.
+    assert resumed_trainer.task.rollout.step == 5, (
+        "Expected rollout step after resuming for 2 more epochs to be 5 (maximum rollout step), "
+        f"got {resumed_trainer.task.rollout.step}"
+    )
