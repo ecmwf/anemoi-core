@@ -470,7 +470,6 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch,
                 batch_idx,
                 epoch=trainer.current_epoch,
-                processed_cache={},
                 **plot_kwargs,
                 **kwargs,
             )
@@ -671,10 +670,9 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         batch: dict[str, torch.Tensor],
         batch_idx: int,
         epoch: int,
-        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
-        _ = batch_idx, processed_cache
+        _ = batch_idx
 
         if self.latlons is None:
             self.latlons = {}
@@ -813,13 +811,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         outputs: TrainingStepOutput,
         batch: dict[str, torch.Tensor],
         members: Any = _UNSET_MEMBERS,
-        processed_cache: dict | None = None,
     ) -> tuple[np.ndarray, np.ndarray]:
         """Process the data and output tensors for plotting one dataset specified by dataset_name.
-
-        Results are cached in ``processed_cache`` when provided, keyed by ``(dataset_name, members)``.
-        Subsequent calls with the same key return the cached result without recomputation, avoiding
-        redundant post-processing when multiple callbacks process the same batch.
 
         Parameters
         ----------
@@ -837,16 +830,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             If not given, defaults to ``pl_module.plot_adapter.default_plot_members``
             (member 0 for non-ensemble adapters, all members for ensemble adapters).
             Pass ``None`` explicitly to select all members regardless of adapter default.
-        processed_cache : dict | None, optional
-            Optional dict for caching computed results across callbacks within the same batch.
-            Should be created fresh per batch (e.g. in ``on_validation_batch_end``) so that
-            it is not shared across batches. Safe for async execution since each batch
-            invocation captures its own dict. Default is None (no caching).
 
         Returns
         -------
         tuple[np.ndarray, np.ndarray]
-            The post-processed input data and output tensor for plotting.
+            The data and output tensors for plotting.
         """
         if isinstance(members, _Unset):
             members = pl_module.plot_adapter.default_plot_members
@@ -863,11 +851,6 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             list,
         ), "outputs.predictions must be a list of per-step dicts."
 
-        members_key = tuple(members) if isinstance(members, list) else members
-        cache_key = (dataset_name, members_key)
-        if processed_cache is not None and cache_key in processed_cache:
-            return processed_cache[cache_key]
-
         # prepare input and output tensors for plotting one dataset specified by dataset_name
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
 
@@ -883,10 +866,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
         data = data.numpy()
 
-        result = (data, output_tensor)
-        if processed_cache is not None:
-            processed_cache[cache_key] = result
-        return result
+        return data, output_tensor
 
     def process_output_tensor(
         self,
@@ -1016,7 +996,6 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         batch_idx: int,
         epoch: int,
         auxiliary_output: dict[str, torch.Tensor] | None = None,
-        processed_cache: dict | None = None,
     ) -> None:
         logger = trainer.logger
         local_rank = pl_module.local_rank
@@ -1030,7 +1009,6 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 outputs,
                 batch,
                 members=self._get_process_members(),
-                processed_cache=processed_cache,
             )
 
             auxiliary_tensor = None
