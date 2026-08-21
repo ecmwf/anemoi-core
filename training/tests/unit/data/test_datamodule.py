@@ -29,7 +29,7 @@ class TinyIterableDataset(IterableDataset):
         yield 0
 
 
-def _make_datamodule(task: BaseTask) -> AnemoiDatasetsDataModule:
+def _make_datamodule(task: BaseTask, *, persistent_workers: bool = True) -> AnemoiDatasetsDataModule:
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.task = task
     datamodule.config = DictConfig(
@@ -39,6 +39,7 @@ def _make_datamodule(task: BaseTask) -> AnemoiDatasetsDataModule:
                 "num_workers": {"training": 1, "validation": 1, "test": 1},
                 "pin_memory": False,
                 "prefetch_factor": 1,
+                "persistent_workers": persistent_workers,
             },
         },
     )
@@ -92,25 +93,39 @@ def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(m
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "4h"]
 
 
-@pytest.mark.parametrize(
-    ("rollout", "persistent_workers"),
-    [
-        ({"start": 1, "epoch_increment": 1, "maximum": 3}, False),
-        ({"start": 1, "epoch_increment": 0, "maximum": 3}, True),
-        ({"start": 3, "epoch_increment": 1, "maximum": 3}, False),
-    ],
-)
-def test_persistent_workers_follow_shared_rollout_progression_policy(
-    rollout: dict[str, int],
-    persistent_workers: bool,
-) -> None:
-    """All dataloaders share the same persistence policy based on rollout progression."""
-    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout)
-    datamodule = _make_datamodule(task)
+@pytest.mark.parametrize("persistent_workers", [False, True])
+def test_persistent_workers_follow_dataloader_config(persistent_workers: bool) -> None:
+    """All dataloaders use the configured persistence when rollout is fixed."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
+    )
+    datamodule = _make_datamodule(task, persistent_workers=persistent_workers)
 
     loaders = [datamodule._get_dataloader(TinyIterableDataset(), stage) for stage in ("training", "validation", "test")]
 
     assert [loader.persistent_workers for loader in loaders] == [persistent_workers] * len(loaders)
+
+
+def test_persistent_workers_are_disabled_when_rollout_changes(caplog: pytest.LogCaptureFixture) -> None:
+    """Changing rollout recreates workers so they receive updated dataset state."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
+    )
+    datamodule = _make_datamodule(task, persistent_workers=True)
+
+    loaders = [datamodule._get_dataloader(TinyIterableDataset(), stage) for stage in ("training", "validation", "test")]
+
+    assert [loader.persistent_workers for loader in loaders] == [False] * len(loaders)
+    assert datamodule.config.dataloader.persistent_workers is False
+    assert caplog.messages == [
+        "Setting dataloader.persistent_workers to false because the rollout changes between epochs.",
+    ]
 
 
 def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None:
@@ -181,3 +196,18 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         epoch=7,
         rollout=2,
     )
+
+
+def test_state_dict_restores_dataloader_epoch() -> None:
+    """Checkpoint state restores the epoch used by datasets and new workers."""
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.epoch = 4
+
+    state = datamodule.state_dict()
+
+    resumed_datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    resumed_datamodule.epoch = 0
+    resumed_datamodule.load_state_dict(state)
+
+    assert state == {"epoch": 4}
+    assert resumed_datamodule.epoch == 4

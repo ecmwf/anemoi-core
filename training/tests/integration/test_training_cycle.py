@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
@@ -480,6 +481,9 @@ def test_restart_training_with_rollout(
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.
     checkpoint_dir = get_single_checkpoint_dir(cfg)
+    checkpoint_path = sorted(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))[-1]
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["AnemoiDatasetsDataModule"]["epoch"] == 1
 
     cfg.training.run_id = checkpoint_dir.name
     cfg.training.max_epochs = 4

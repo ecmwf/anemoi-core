@@ -10,6 +10,7 @@
 
 import logging
 from functools import cached_property
+from typing import Any
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -162,15 +163,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 ),
             )
 
+    def state_dict(self) -> dict[str, Any]:
+        """Save the epoch used to seed newly started dataloader workers."""
+        return {"epoch": self.epoch}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore the dataloader epoch before Lightning starts worker processes."""
+        self.set_epoch(state_dict["epoch"])
+
     def _persistent_workers(self) -> bool:
-        """Return whether DataLoader workers can persist across epochs."""
+        """Return whether workers persist, disabling persistence for a changing rollout."""
+        persistent_workers = self.config.dataloader.persistent_workers
         rollout = getattr(self.task, "rollout", None)
-        if rollout is None:
-            return True
-        # Workers could also be persisted once rollout.step >= rollout.maximum,
-        # but that would make resumed runs behave differently from uninterrupted
-        # runs.
-        return rollout.epoch_increment == 0
+        if persistent_workers and rollout is not None and rollout.epoch_increment > 0:
+            LOGGER.warning(
+                "Setting dataloader.persistent_workers to false because the rollout changes between epochs.",
+            )
+            self.config.dataloader.persistent_workers = False
+            return False
+        return persistent_workers
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""

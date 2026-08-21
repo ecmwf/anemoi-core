@@ -31,6 +31,8 @@ class RolloutConfig:
         self.epoch_increment = epoch_increment
         self.maximum = maximum
         self.step = self.start
+        # Remember which epoch last increased the rollout so that running the
+        # hook again for the same epoch does not increase it twice.
         self._last_increased_epoch: int = -1
 
     def should_increase(self, current_epoch: int) -> bool:

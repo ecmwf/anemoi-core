@@ -1197,6 +1197,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        # Default epoch checkpoints are saved at validation end, before this
+        # hook. On resume Lightning finishes the saved epoch here, advancing the
+        # dataloader before newly created workers derive the seed for that epoch.
         self.trainer.datamodule.set_epoch(self.current_epoch + 1)
 
     def configure_optimizers(
