@@ -125,6 +125,36 @@ scalers.
              fair: true
              norm_over: spatial
 
+********************************
+ Selecting and Pairing Variables
+********************************
+
+``LossVariableMapper`` selects which forecast and target variables are passed
+to a loss. It is added
+automatically when a loss is created from the training configuration, so it
+should not be configured as the ``_target_`` directly. Instead, add
+``predicted_variables`` and, when needed, ``target_variables`` to the loss:
+
+.. code-block:: yaml
+
+   training_loss:
+     datasets:
+       your_dataset_name:
+         _target_: anemoi.training.losses.MAELoss
+         scalers: [node_weights]
+         predicted_variables: [tp]
+         target_variables: [imerg]
+
+The lists define pairs in the same order and must have the same length. Omit
+``target_variables`` to use the same variable names as
+``predicted_variables``. The wrapper also filters variable-dependent scalers
+to the selected predictions.
+
+For a ``CombinedLoss``, configure the variables on the child loss to which the
+selection applies. For ``MultiscaleLossWrapper``, configure them on its
+``per_scale_loss``. Pairing differently named variables also enables the
+compatibility checks described in :ref:`variable-compatibility-checks`.
+
 ******************************
  Time Aggregate Loss Functions
 ******************************

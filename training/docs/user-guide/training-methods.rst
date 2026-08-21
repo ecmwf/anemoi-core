@@ -92,14 +92,15 @@ Changes in System config
    :start-after: # Changes in system
    :end-before: num_gpus_per_ensemble:
 
-Field truncation can be used in deterministic or CRPS training to smooth
-the skip connection and provide projections for multiscale loss
-computation. The projection graph can be built from a coarse-grid
-configuration at startup or loaded from precomputed matrices. Configure
-the model residual as
-:class:`anemoi.models.layers.residual.TruncatedConnection`; see
+The ``truncation`` and ``truncation_inv`` entries are optional and are not
+required for CRPS training. They are used by the file-based form of
+:class:`anemoi.models.layers.residual.TruncatedConnection`; the graph-based
+form builds its projections at startup. See
 :ref:`Field Truncation <usage-field_truncation>` and
-:ref:`anemoi-models:residual-connections` for both forms.
+:ref:`anemoi-models:residual-connections` for the available truncation forms.
+
+For a multiscale training objective, prefer
+:ref:`MultiscaleLossWrapper <multiscale-loss-functions>`.
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
