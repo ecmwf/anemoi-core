@@ -8,6 +8,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.16.1](https://github.com/ecmwf/anemoi-core/compare/training-0.16.0...training-0.16.1) (2026-08-21)
+
+
+### Features
+
+* **training:** Graph scores ([#1268](https://github.com/ecmwf/anemoi-core/issues/1268)) ([11e8498](https://github.com/ecmwf/anemoi-core/commit/11e8498e4b3fa38c32e80089f521387f7d2f19ec))
+
+
+### Bug Fixes
+
+* Circular import ([#1322](https://github.com/ecmwf/anemoi-core/issues/1322)) ([89036bc](https://github.com/ecmwf/anemoi-core/commit/89036bc84623bb50efbb5af163099cb390b42b0b))
+* **training:** Honour diagnostics.enable_checkpointing in the trainer ([#1332](https://github.com/ecmwf/anemoi-core/issues/1332)) ([2236216](https://github.com/ecmwf/anemoi-core/commit/2236216eee65f5979f4f85e65b30be3849fa7cb1))
+
+
+### Performance Improvements
+
+* **training:** Use tensor.sum() on the scaling mask in ReweightedGraphNodeAttributeScaler ([#1328](https://github.com/ecmwf/anemoi-core/issues/1328)) ([ce8d0d6](https://github.com/ecmwf/anemoi-core/commit/ce8d0d6ea75f0f5925b94f40380af4b2118f5e62))
+
+
+### Reverts
+
+* **training:** "feat: reuse processing callbacks ([#1213](https://github.com/ecmwf/anemoi-core/issues/1213))" ([#1319](https://github.com/ecmwf/anemoi-core/issues/1319)) ([93476b7](https://github.com/ecmwf/anemoi-core/commit/93476b7a6ba35e1f0914b194f7971654b3d1e66b))
+
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-08-11)
 
 
