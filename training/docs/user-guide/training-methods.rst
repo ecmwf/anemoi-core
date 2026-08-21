@@ -92,14 +92,19 @@ Changes in System config
    :start-after: # Changes in system
    :end-before: num_gpus_per_ensemble:
 
-The `truncation` and `truncation_inv` can be used in the deterministic
-or CRPS training. As described in :ref:`Field Truncation`, it transforms
-the input to the model.
+Field truncation can be used in deterministic or CRPS training to smooth
+the skip connection and provide projections for multiscale loss
+computation. The projection graph can be built from a coarse-grid
+configuration at startup or loaded from precomputed matrices. Configure
+the model residual as
+:class:`anemoi.models.layers.residual.TruncatedConnection`; see
+:ref:`Field Truncation <usage-field_truncation>` and
+:ref:`anemoi-models:residual-connections` for both forms.
 
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
    :start-after: truncation_inv:
-   :end-before: # Changes in datamodule
+   :end-before: data:
 
 The CRPS training uses a different DDP strategy which requires to
 specify the number of GPUs per ensemble.
@@ -137,12 +142,49 @@ is embedded and injected into the latent space of the processor using a
 conditional layer norm.
 
 Optionally, noise can be generated on a coarser grid and projected to
-the processor grid using a sparse projection matrix. This is configured
-via the ``noise_matrix`` parameter, which should point to a ``.npz``
-file created with ``anemoi-graphs export_to_sparse`` (see
-:ref:`usage-create_sparse_matrices`). Additional options
-``row_normalize_noise_matrix`` and ``autocast`` control how the
-projection matrix is applied.
+the processor grid before conditioning. Use one of these configuration
+forms:
+
+- ``noise_matrix`` loads a precomputed sparse matrix from a ``.npz``
+  file created with ``anemoi-graphs export_to_sparse`` (see
+  :ref:`usage-create_sparse_matrices`).
+- ``noise_edges_name`` identifies a graph edge type that maps a custom
+  source node set to the hidden grid.
+
+For graph-based projection, define the source nodes and their edge to
+the hidden grid, then configure the noise injector to use that edge:
+
+.. code:: yaml
+
+   graph:
+      nodes:
+         noise:
+            node_builder:
+               _target_: anemoi.graphs.nodes.ReducedGaussianGridNodes
+               grid: o32
+      edges:
+         - source_name: noise
+           target_name: hidden
+           edge_builders:
+              - _target_: anemoi.graphs.edges.KNNEdges
+                num_nearest_neighbours: 32
+           attributes:
+              gauss_weight:
+                 _target_: anemoi.graphs.edges.attributes.GaussianDistanceWeights
+                 norm: l1
+                 sigma: 0.1
+
+   model:
+      noise_injector:
+         _target_: anemoi.models.layers.ensemble.NoiseConditioning
+         noise_std: 1
+         noise_channels_dim: 4
+         noise_mlp_hidden_dim: 32
+         noise_edges_name: [noise, to, hidden]
+         edge_weight_attribute: gauss_weight
+
+``row_normalize_noise_matrix`` and ``autocast`` control how either
+projection form is applied.
 
 .. code:: yaml
 
@@ -214,7 +256,6 @@ The ``backend`` parameter selects how the score is computed:
 .. literalinclude:: yaml/example_crps_config.yaml
    :language: yaml
    :start-after: # Changes in validation metrics
-   :end-before: diagnostics:
 
 Typically, the validation metrics are the same as the training loss, but
 different validation metrics can be added here (see :ref:`Losses`).
@@ -230,9 +271,9 @@ A typical config file for CRPS training is:
 
 .. _diffusion-training:
 
-****************************
+*****************************
  Transport objective training
-****************************
+*****************************
 
 Transport training covers probabilistic objectives that corrupt an
 endpoint and train a model to recover either the clean endpoint or the
