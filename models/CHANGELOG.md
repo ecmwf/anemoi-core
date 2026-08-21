@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.18.1](https://github.com/ecmwf/anemoi-core/compare/models-0.18.0...models-0.18.1) (2026-08-21)
+
+
+### Features
+
+* **training:** Graph scores ([#1268](https://github.com/ecmwf/anemoi-core/issues/1268)) ([11e8498](https://github.com/ecmwf/anemoi-core/commit/11e8498e4b3fa38c32e80089f521387f7d2f19ec))
+
+
+### Performance Improvements
+
+* **models:** Keep torch off the anemoi-training CLI import path ([#1329](https://github.com/ecmwf/anemoi-core/issues/1329)) ([c0cc4ba](https://github.com/ecmwf/anemoi-core/commit/c0cc4ba6dbec000c36e77184e765c341a9d0bf9c))
+
 ## [0.18.0](https://github.com/ecmwf/anemoi-core/compare/models-0.17.0...models-0.18.0) (2026-08-11)
 
 
