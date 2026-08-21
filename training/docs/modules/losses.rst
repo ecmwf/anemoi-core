@@ -125,9 +125,9 @@ scalers.
              fair: true
              norm_over: spatial
 
-***************************
+******************************
  Time Aggregate Loss Functions
-***************************
+******************************
 
 These loss functions encourage the model to produce **temporally consistent** outputs
 i.e. output sequences that are internally coherent over

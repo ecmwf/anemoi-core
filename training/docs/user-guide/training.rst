@@ -416,10 +416,11 @@ level has a weighting less than 0.2), defined in class
                cp: 0.0025
 
 .. code:: yaml
+
    datasets:
       your_dataset_name:
          pressure_level:
-            # Variable level scaler to be used
+            # Variable level scaler to be used
             _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
             group: pl
             y_intercept: 0.2
@@ -463,9 +464,9 @@ is set to 0, the learning rate will start at the maximum learning rate.
 If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
-***************
-Restarting a training run
-***************
+**************************
+ Restarting a training run
+**************************
 
 It may be necessary at certain points to restart the model training,
 i.e. because the training has exceeded the time limit on an HPC system

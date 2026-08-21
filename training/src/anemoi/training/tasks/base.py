@@ -41,14 +41,6 @@ class BaseTask(ABC):
     num_outputs : int
         Number of output time steps for the task.
 
-    Methods
-    -------
-    get_input_offsets() -> list[datetime.timedelta]
-        Get the list of input time offsets.
-    get_output_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the list of output time offsets.
-    get_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the full list of input and output time offsets.
     """
 
     name: str
@@ -228,8 +220,16 @@ class BaseSingleStepTask(BaseTask):
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
+        Parameters
+        ----------
+        *args
+            Positional arguments; the first item is the input state.
+        **_kwargs
+            Additional keyword arguments, which are ignored by the default implementation.
+
         Returns
         -------
-            dict[str, torch.Tensor]: The advanced input state for each dataset.
+        dict[str, torch.Tensor]
+            The advanced input state for each dataset.
         """
         return args[0]
