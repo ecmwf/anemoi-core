@@ -109,13 +109,23 @@ def test_persistent_workers_follow_dataloader_config(persistent_workers: bool) -
     assert [loader.persistent_workers for loader in loaders] == [persistent_workers] * len(loaders)
 
 
-def test_persistent_workers_are_disabled_when_rollout_changes(caplog: pytest.LogCaptureFixture) -> None:
-    """Changing rollout recreates workers so they receive updated dataset state."""
+@pytest.mark.parametrize(
+    "rollout",
+    [
+        pytest.param({"start": 1, "epoch_increment": 1, "maximum": 3}, id="progressing"),
+        pytest.param({"start": 3, "epoch_increment": 1, "maximum": 3}, id="at-maximum"),
+    ],
+)
+def test_persistent_workers_are_disabled_for_rollout_schedule(
+    rollout: dict[str, int],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An epoch increment disables persistence even after rollout reaches its maximum."""
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
         timestep="6h",
-        rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
+        rollout=rollout,
     )
     datamodule = _make_datamodule(task, persistent_workers=True)
 
