@@ -44,6 +44,7 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
             graph_data,
             graph_name="Graph edge energy score neighbourhood",
             allow_none=False,
+            remove_self_edges=True,
         )
         assert graph is not None
         super().__init__(
