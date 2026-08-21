@@ -291,7 +291,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in dataset_names:
+        for dataset_name in x.keys():
+            if dataset_name not in self.input_datasets:
+                continue
+
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 conditioned_target[dataset_name],
@@ -318,7 +321,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 edges=enc_edge_shard_sizes,
             )
 
-            x_data_latent, dataset_latents[dataset_name] = self.encoder[dataset_name](
+            # Encoder for this dataset
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=bse,
                 shard_info=enc_shard_info,
@@ -330,7 +335,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             x_data_latent_dict[dataset_name] = x_data_latent
 
-        x_latent = sum(dataset_latents.values())
+        # Combine all dataset latents
+        x_latent = self.latent_aggregator(dataset_latents)
 
         # Processor
         (
@@ -358,7 +364,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in dataset_names:
+        for dataset_name in self.target_datasets:
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -375,7 +381,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),
                 batch_size=bse,
                 shard_info=dec_shard_info,

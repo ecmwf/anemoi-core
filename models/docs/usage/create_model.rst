@@ -26,37 +26,58 @@ First, let's take the model configuration ``transformer.yaml``:
    model:
      _target_: anemoi.models.models.encoder_processor_decoder.AnemoiModelEncProcDec
 
-   num_channels: 1024
-
    processor:
      _target_: anemoi.models.layers.processor.TransformerProcessor
+     num_channels: 1024
      num_layers: 16
      num_chunks: 2
 
-   encoder:
-     _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-     trainable_size: 8
-     sub_graph_edge_attributes: ${model.attributes.edges}
-     num_chunks: 1
-     mlp_hidden_ratio: 4
-     num_heads: 16
+   encoders:
+     0:                        # user-defined group name (appears in the state-dict)
+       datasets: [ "data" ]           # datasets encoded by this group
+       dataset_fusing_strategy: "not_supported"
+       mapper:
+         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+         num_channels: 1024
+         trainable_size: 8
+         sub_graph_edge_attributes: ${model.attributes.edges}
+         num_chunks: 1
+         mlp_hidden_ratio: 4
+         num_heads: 16
 
-   decoder:
-     _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-     trainable_size: 8
-     sub_graph_edge_attributes: ${model.attributes.edges}
-     num_chunks: 1
-     mlp_hidden_ratio: 4
-     num_heads: 16
+   latent_aggregator:
+     _target_: anemoi.models.layers.aggregator.SumAggregator
+
+   decoders:
+     0:
+       datasets: [ "data" ]
+       input_target_features: [ "encoded_data" ]
+       mapper:
+         _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+         num_channels: 1024
+         trainable_size: 8
+         sub_graph_edge_attributes: ${model.attributes.edges}
+         num_chunks: 1
+         mlp_hidden_ratio: 4
+         num_heads: 16
 
    residual:
-      _target_: anemoi.models.layers.residual.SkipConnection
+     datasets:
+       data:
+         _target_: anemoi.models.layers.residual.SkipConnection
 
    attributes:
      edges:
      - edge_length
      - edge_dirs
      nodes: []
+
+Note the multi-dataset structure: ``encoders`` and ``decoders`` are
+dictionaries keyed by a user-defined group name, and ``residual`` (as
+well as ``bounding`` and ``output_mask``) is configured per dataset
+under a ``datasets`` key. This single-dataset example uses one encoder
+and one decoder group (see :ref:`usage-multi-dataset` for the full
+schema).
 
 Typically the model is instantiated in :doc:`Anemoi Training
 <anemoi-training:index>` or :doc:`Anemoi Inference
@@ -203,35 +224,48 @@ In this example, ``model_interface.model`` is the following:
 .. code:: python
 
    AnemoiModelEncProcDec(
-     (encoder_graph_provider): StaticGraphProvider(
-       (trainable): TrainableTensor()
-     )
-     (encoder): GraphTransformerForwardMapper(
-       (proc): GraphTransformerMapperBlock(
-         (lin_key): Linear(in_features=1024, out_features=1024, bias=True)
-         ...
+     (encoder_graph_provider): ModuleDict(
+       (data): StaticGraphProvider(
+         (trainable): TrainableTensor()
        )
      )
+     (encoder): ModuleDict(
+       (0): GraphTransformerForwardMapper(
+         (proc): GraphTransformerMapperBlock(
+           (lin_key): Linear(in_features=1024, out_features=1024, bias=True)
+           ...
+         )
+       )
+     )
+     (latent_aggregator): SumAggregator()
      (processor_graph_provider): StaticGraphProvider(
        (trainable): TrainableTensor()
      )
      (processor): TransformerProcessor(
        ...
      )
-     (decoder_graph_provider): StaticGraphProvider(
-       (trainable): TrainableTensor()
+     (decoder_graph_provider): ModuleDict(
+       (data): StaticGraphProvider(
+         (trainable): TrainableTensor()
+       )
      )
-     (decoder): GraphTransformerBackwardMapper(
-       (proc): GraphTransformerMapperBlock(
-         (lin_key): Linear(in_features=1024, out_features=1024, bias=True)
-         ...
+     (decoder): ModuleDict(
+       (0): GraphTransformerBackwardMapper(
+         (proc): GraphTransformerMapperBlock(
+           (lin_key): Linear(in_features=1024, out_features=1024, bias=True)
+           ...
+         )
+       )
      )
    )
 
-Note that each encoder, processor, and decoder has a corresponding
-``*_graph_provider`` that manages the graph edges and trainable edge
-parameters. The graph providers supply edge attributes and indices to
-their corresponding mappers/processors during the forward pass.
+The ``encoder`` and ``decoder`` are ``ModuleDict``\ s keyed by the group
+name declared in the config (here ``0``), and the per-encoder latents
+are merged by the ``latent_aggregator`` before the processor. Each
+encoder, processor, and decoder has a corresponding ``*_graph_provider``
+that manages the graph edges and trainable edge parameters, supplying
+edge attributes and indices to its mapper/processor during the forward
+pass.
 
 .. _layer-kernels:
 
@@ -326,13 +360,19 @@ feed-forward implementation via ``mlp_implementation``:
      mlp_hidden_ratio: 4
      mlp_implementation: mlp  # options: mlp, glu, swiglu, geglu, reglu
 
-   encoder:
-     mlp_hidden_ratio: 4
-     mlp_implementation: mlp
+   encoders:
+     0:
+       ...
+       mapper:
+         mlp_hidden_ratio: 4
+         mlp_implementation: mlp
 
-   decoder:
-     mlp_hidden_ratio: 4
-     mlp_implementation: mlp
+   decoders:
+     0:
+       ...
+       mapper:
+         mlp_hidden_ratio: 4
+         mlp_implementation: mlp
 
 Recommended ``mlp_hidden_ratio``:
 

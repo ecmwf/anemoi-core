@@ -21,15 +21,16 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.models.target_features import DecodingTargetFeature
+from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.utils.config import broadcast_config_keys
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -71,7 +72,6 @@ class BaseGraphModel(nn.Module):
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
-        self.num_channels = model_config.model.num_channels
         self.latent_skip = model_config.model.model.latent_skip
 
         trainable_parameters = broadcast_config_keys(
@@ -81,30 +81,96 @@ class BaseGraphModel(nn.Module):
         )
         self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
+        self._build_encoder_routing(model_config.model.encoders)
+        self._build_decoder_routing(model_config.model.decoders)
+
         self._calculate_shapes_and_indices(data_indices)
+
+        self._assert_model_routing()
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config)
+        self._build_networks(model_config.model)
 
         # build residual connection
-        self._build_residual(model_config.model.residual, model_config.model.get("sparse_projector", {}))
+        self._build_residual(
+            get_multiple_datasets_config(model_config.model.residual),
+            sparse_projector_config=model_config.model.get("sparse_projector", {}),
+        )
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
-        self.boundings = build_boundings(model_config, self.data_indices, self.statistics)
+        self.boundings = build_boundings(
+            get_multiple_datasets_config(model_config.model.get("bounding", [])),
+            data_indices=self.data_indices,
+            statistics=self.statistics,
+        )
+
+    def _build_encoder_routing(self, encoders_config: DotDict) -> None:
+        """Builds the dataset routing for encoders."""
+        self.dataset2encoder: dict[str, str] = {}
+        self.encoder2datasets: dict[str, list[str]] = {}
+        self.encoder_fusing_strategy: dict[str, str] = {}
+        for encoder_name, encoder_config in encoders_config.items():
+            datasets_to_encode = encoder_config["source_datasets"]
+            self.encoder2datasets[encoder_name] = datasets_to_encode
+            for d in datasets_to_encode:
+                self.dataset2encoder[d] = encoder_name
+            self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
+
+        self.input_datasets = list(self.dataset2encoder.keys())
+
+    def _build_decoder_routing(self, decoders_config: DotDict) -> None:
+        """Builds the dataset routing for decoders."""
+        self.dataset2decoder: dict[str, str] = {}
+        self.decoder2datasets: dict[str, list[str]] = {}
+        self.decoders_target_input: dict[str, DecodingTargetFeature] = {}
+        for decoder_name, decoder_config in decoders_config.items():
+            datasets_to_decode = decoder_config["target_datasets"]
+            self.decoder2datasets[decoder_name] = datasets_to_decode
+            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
+            for d in datasets_to_decode:
+                self.dataset2decoder[d] = decoder_name
+
+            self.decoders_target_input[decoder_name] = create_decoding_target_features(
+                decoder_config.input_target_features, datasets_to_decode, self
+            )
+
+        self.target_datasets = list(self.dataset2decoder.keys())
+
+    def _assert_model_routing(self) -> None:
+        """Asserts that the model routing is valid."""
+        not_input_datasets = set(self.input_datasets) - set(self.input_dim.keys())
+        assert all(
+            d in self.input_datasets for d in self.dataset2encoder.keys()
+        ), f"Datasets {not_input_datasets} are in input_datasets but not in data_indices provided to the model. "
+
+        not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
+        assert all(
+            d in self.target_datasets for d in self.dataset2decoder.keys()
+        ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+
+        for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
+            if fusing_strategy not in ("not_supported"):
+                raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
+
+        # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
+        for target_features in self.decoders_target_input.values():
+            target_features.validate()
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        """Compute per-dataset input/output channel counts, dimensions and internal data indices."""
         # Multi-dataset: create dictionaries for each property
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
+        self.num_input_channels_forcings = {}
         self.num_input_channels_decoding_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
-        self._decoding_forcing_input_idx = {}
+        self._forcing_input_idx = {}
         self.input_dim = {}
         self.input_dim_latent = self._calculate_input_dim_latent()
         self.target_dim = {}
@@ -113,28 +179,16 @@ class BaseGraphModel(nn.Module):
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-            self._decoding_forcing_input_idx[dataset_name] = [
-                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
-            ]
+            self._forcing_input_idx[dataset_name] = dataset_indices.model.input.forcing
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
+            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_decoding_forcings[dataset_name] = len(
-                self._decoding_forcing_input_idx[dataset_name]
-            )
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
             self.target_dim[dataset_name] = self._calculate_target_dim(dataset_name)
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
 
     @staticmethod
     def _as_hidden_node_names(
@@ -156,12 +210,33 @@ class BaseGraphModel(nn.Module):
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        """Calculate the encoder input dimension for a given dataset."""
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
+
     def _calculate_target_dim(self, dataset_name: str) -> int:
-        # Default behaviour is to pass the same input as to the encoder.
-        # TODO: abstract different options into the base class
-        return self._calculate_input_dim(dataset_name)
+        """Calculate the decoder target input dimension for a given dataset.
+
+        Decoder target features are per-node vectors attached to the destination nodes of the
+        hidden-to-data decoder. The returned width is the sum
+        of the feature blocks listed in ``decoders_target_input`` for this dataset's decoder.
+        """
+        if dataset_name not in self.dataset2decoder:
+            LOGGER.warning(
+                "Dataset '%s' does not have a decoder associated with it. Target dimension will be calculated as 0.",
+                dataset_name,
+            )
+            return 0
+
+        return self.decoders_target_input[self.dataset2decoder[dataset_name]].dim
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
+        """Calculate the decoder output dimension for a given dataset."""
         return self.n_step_output * self.num_output_channels[dataset_name]
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
@@ -241,16 +316,16 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
+    def _build_residual(self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict) -> None:
+        """Instantiate the per-dataset residual connection modules."""
         self.residual = torch.nn.ModuleDict()
-        fused = uses_fused_dataset_graph(self._graph_data, self.dataset_names)
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
-        for dataset_name in self.dataset_names:
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+        for dataset_name, residual_config in residual_configs.items():
+            assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                data_node_name=data_node_name,
+                data_node_name=dataset_name,
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
