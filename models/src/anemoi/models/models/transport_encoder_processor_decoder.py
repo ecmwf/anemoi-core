@@ -336,7 +336,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             x_data_latent_dict[dataset_name] = x_data_latent
 
         # Combine all dataset latents
-        x_latent = self.latent_aggregator(dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         (
