@@ -463,7 +463,7 @@ def test_evaluator(
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_global_with_rollout(
+def test_restart_training_with_rollout(
     gnn_config_with_rollout: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
 ) -> None:
@@ -472,23 +472,23 @@ def test_training_cycle_global_with_rollout(
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
-    # The rollout step should be incremented after each epoch, so after 3 epochs it should be 4
+    # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
     assert (
-        trainer.task.rollout.step == 4
-    ), f"Expected rollout step after 3 epochs to be 1+3=4, got {trainer.task.rollout.step}"
+        trainer.task.rollout.step == 3
+    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
 
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.
     checkpoint_dir = get_single_checkpoint_dir(cfg)
 
     cfg.training.run_id = checkpoint_dir.name
-    cfg.training.max_epochs = 6
+    cfg.training.max_epochs = 4
     resumed_trainer = AnemoiTrainer(cfg)
     resumed_trainer.train()
 
-    # After two additional epochs the counter loaded from the checkpoint (4) must have advanced
+    # After two additional epochs the counter loaded from the checkpoint (3) must have advanced
     # to the maximum specified in the beginning.
-    assert resumed_trainer.task.rollout.step == 5, (
-        "Expected rollout step after resuming for 2 more epochs to be 5 (maximum rollout step), "
+    assert resumed_trainer.task.rollout.step == 4, (
+        "Expected rollout step after resuming for 2 more epochs to be 4 (maximum rollout step), "
         f"got {resumed_trainer.task.rollout.step}"
     )
