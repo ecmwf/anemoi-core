@@ -7,10 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import contextlib
+
 import numpy as np
 import torch
 
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import current_device_context
+from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_edge_attributes
 from anemoi.graphs.utils import intersect_edges
 
@@ -74,3 +78,29 @@ def test_get_edge_attributes():
 
     edge_attrs = get_edge_attributes(mock_config, "other_nodes", "mock_nodes")
     assert edge_attrs == {}
+
+
+def test_get_distributed_device(monkeypatch):
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
+
+    monkeypatch.setenv("SLURM_LOCALID", "2")
+    assert get_distributed_device() == torch.device("cuda:2")
+
+    # one GPU bound per task: local rank must wrap around to a visible device
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
+    assert get_distributed_device() == torch.device("cuda:0")
+
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    monkeypatch.setenv("SLURM_LOCALID", "3")
+    assert get_distributed_device() == torch.device("cuda:1")
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    assert get_distributed_device() == torch.device("cpu")
+
+
+def test_current_device_context():
+    with current_device_context("cpu"):
+        pass
+    assert isinstance(current_device_context("cpu"), contextlib.nullcontext)
+    assert isinstance(current_device_context(torch.device("cuda:1")), torch.cuda.device)
