@@ -475,6 +475,46 @@ def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
     assert resumed_task.rollout.step == 5
 
 
+class _RecordingDataModule:
+    """Stands in for the datamodule, recording the window each refresh would load."""
+
+    def __init__(self, task: Forecaster) -> None:
+        self._task = task
+        self.epoch = 0
+        self.offsets = task.get_offsets("training")
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.offsets = self._task.get_offsets("training")
+
+
+def test_on_load_checkpoint_refreshes_dataloader_time_window() -> None:
+    """The datasets are resized for the restored rollout while the checkpoint is loaded.
+
+    Lightning creates the training dataloader's iterator -- forking its workers with a
+    copy of the dataset -- inside ``fit_loop.setup_data()``, before ``on_train_start``,
+    so refreshing any later is too late: the batch would be short of the time steps the
+    restored rollout asks for.
+    """
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    # The datasets were built for the config rollout, before the checkpoint was read.
+    datamodule = _RecordingDataModule(task)
+    assert len(datamodule.offsets) == 2  # inputs [0h] + outputs [6h]
+    module._trainer = SimpleNamespace(datamodule=datamodule)
+
+    checkpoint = {
+        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+        "epoch": 2,
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    # inputs [0h] + outputs [6h, 12h, 18h] for the restored rollout of 3
+    assert len(datamodule.offsets) == 4
+    assert datamodule.epoch == 2
+
+
 def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:
     """Checkpoints from before this fix (no task_state key) load without error."""
     module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 1, "maximum": 5})

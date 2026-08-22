@@ -123,6 +123,36 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
+    def _assert_time_indices_in_batch(
+        self,
+        time_indices: list[int],
+        batch: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> None:
+        """Raise if the batch does not carry all the requested time steps.
+
+        ``normalize_time_indices`` collapses a single index into a slice, and slicing past
+        the end of a tensor yields an empty tensor rather than raising, which only surfaces
+        later as a confusing shape mismatch. That happens whenever the time window the
+        dataloader was built for disagrees with the steps the task now asks for.
+        """
+        if not isinstance(time_indices, (list, tuple)) or not time_indices:
+            return
+
+        required = max(time_indices) + 1
+        for dataset_name, dataset_batch in batch.items():
+            available = dataset_batch.shape[1]
+            if available >= required:
+                continue
+            msg = (
+                f"Batch for dataset '{dataset_name}' holds {available} time steps but step "
+                f"{kwargs} needs index {required - 1} (indices {list(time_indices)}). The "
+                f"dataloader's loaded time window does not match the task's steps; if the "
+                f"rollout curriculum advanced, the datasets need refreshing "
+                f"(`datamodule.set_epoch`)."
+            )
+            raise ValueError(msg)
+
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
@@ -173,6 +203,7 @@ class BaseTask(ABC):
             variable space (all variables including forcings).
         """
         time_indices = self.get_batch_output_indices(**kwargs)
+        self._assert_time_indices_in_batch(time_indices, batch, **kwargs)
         time_indices = normalize_time_indices(time_indices)
 
         y = {}

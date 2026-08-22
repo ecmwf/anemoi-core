@@ -494,6 +494,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         }
 
         self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        # Resize the datasets for the curriculum state just restored: they were built for
+        # the rollout in the config, and Lightning forks the training dataloader's workers
+        # inside `fit_loop.setup_data()`, before any `on_train_*` hook could do it. No
+        # trainer is attached when a module is built via `load_from_checkpoint`.
+        trainer = getattr(self, "_trainer", None)
+        if trainer is not None and trainer.datamodule is not None:
+            trainer.datamodule.set_epoch(checkpoint.get("epoch", 0))
 
         # Extract variables_metadata for unit compatibility check
         self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
