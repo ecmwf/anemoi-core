@@ -521,6 +521,53 @@ def test_remote_shard_server(tmp_path):
 
 @pytest.mark.multigpu
 @pytest.mark.slow
+def test_ssd_cache_training_remote_runtime(
+    benchmark_config: tuple[DictConfig, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Benchmark cold and warm all-remote TCP cache training."""
+    config, test_case = benchmark_config
+    required_gpus = int(config.system.hardware.num_gpus_per_node)
+    if torch.cuda.device_count() < required_gpus:
+        pytest.skip(f"benchmark requires {required_gpus} GPUs, found {torch.cuda.device_count()}")
+
+    cache_root = Path(os.environ.get("TMPDIR", tempfile.gettempdir())) / (
+        f"anemoi-cache-benchmark-remote-only-{os.environ.get('SLURM_JOB_ID', 'local')}"
+    )
+    cache_root.mkdir(parents=True, exist_ok=True)
+    previous_profile_setting = os.environ.get("ANEMOI_DATASET_CACHE_PROFILE")
+    os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = "1"
+    try:
+        remote = _run_remote_training(config, cache_root, monkeypatch)
+    finally:
+        if previous_profile_setting is None:
+            os.environ.pop("ANEMOI_DATASET_CACHE_PROFILE")
+        else:
+            os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = previous_profile_setting
+
+    assert len(remote.durations) == 3
+    assert remote.cache_stats[0][2] > 0, "cold epoch did not populate the process caches"
+    assert all(remote_hits > local_hits for local_hits, remote_hits, _ in remote.cache_stats[1:]), (
+        f"TCP cache was not used after epoch 0: {remote.cache_stats}"
+    )
+
+    rank = dist.get_rank() if dist.is_initialized() else int(os.environ.get("LOCAL_RANK", 0))
+    if dist.is_initialized():
+        dist.barrier()
+    if rank == 0:
+        print(
+            f"{test_case} remote SSD cache: cold={remote.durations[0]:.3f}s "
+            f"warm={median(remote.durations[1:]):.3f}s cache_stats={remote.cache_stats} "
+            f"cache_io_seconds={remote.cache_io_seconds} dataloader_wait={remote.dataloader_wait_seconds:.3f}s "
+            f"transfer={remote.transfer_stats}",
+            flush=True,
+        )
+        shutil.rmtree(cache_root)
+    if dist.is_initialized():
+        dist.barrier()
+
+
+@pytest.mark.multigpu
+@pytest.mark.slow
 def test_ssd_cache_training_runtime(
     benchmark_config: tuple[DictConfig, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

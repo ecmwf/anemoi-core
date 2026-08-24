@@ -9,12 +9,14 @@ import http.server
 import io
 import json
 import logging
+import multiprocessing
 import os
 import shutil
 import socket
 import socketserver
 import struct
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import partial
@@ -36,6 +38,9 @@ _CAPACITY_ERROR_MESSAGES = (
     "no space left on device",
     "not enough free space",
 )
+_REMOTE_CHUNK_BYTES = 48 << 20
+_REMOTE_PIPELINE_DEPTH = 3
+_REMOTE_SERVER_CPUS = 4
 
 
 def _is_capacity_error(error: OSError) -> bool:
@@ -86,6 +91,95 @@ def _recv_exact(sock, nbytes):
         parts.append(chunk)
         remaining -= len(chunk)
     return b"".join(parts)
+
+
+def _recv_into(sock, nbytes):
+    payload = bytearray(nbytes)
+    view = memoryview(payload)
+    offset = 0
+    while offset < nbytes:
+        received = sock.recv_into(view[offset:])
+        if not received:
+            return None
+        offset += received
+    return payload
+
+
+def _add(counter, value):
+    with counter.get_lock():
+        counter.value += value
+
+
+def _read_shard(entries, request):
+    grid = slice(*request["grid"])
+    paths = [
+        Path(entries[request["dataset_id"]]) / str(request["sequence"]) / f"{position}.npy"
+        for position in request["positions"]
+    ]
+    if not paths or not all(path.exists() for path in paths):
+        return None
+    first = np.load(paths[0], allow_pickle=False, mmap_mode="r")[..., grid]
+    result = np.empty((len(paths), *first.shape), dtype=first.dtype)
+    result[0] = first
+    for index, path in enumerate(paths[1:], 1):
+        result[index] = np.load(path, allow_pickle=False, mmap_mode="r")[..., grid]
+    return result
+
+
+def _send_shard(connection, value):
+    if value is None:
+        connection.sendall(b"\x00" + struct.pack("!I", 0) + struct.pack("!Q", 0))
+        return
+    metadata = json.dumps({"dtype": value.dtype.str, "shape": value.shape}, separators=(",", ":")).encode()
+    connection.sendall(b"\x01" + struct.pack("!I", len(metadata)) + struct.pack("!Q", value.nbytes) + metadata)
+    connection.sendall(memoryview(value).cast("B"))
+
+
+def _handle_file_requests(connection, entries, counters):
+    try:
+        while True:
+            header = _recv_exact(connection, 4)
+            if header is None:
+                break
+            payload = _recv_exact(connection, struct.unpack("!I", header)[0])
+            if payload is None:
+                break
+            started = perf_counter_ns()
+            value = _read_shard(entries, json.loads(payload))
+            _add(counters[0], perf_counter_ns() - started)
+            started = perf_counter_ns()
+            _send_shard(connection, value)
+            _add(counters[1], perf_counter_ns() - started)
+    except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
+        pass
+    finally:
+        connection.close()
+
+
+def _serve_cache(port, entries, stop, ready, counters, affinity):
+    try:
+        if affinity and hasattr(os, "sched_setaffinity"):
+            os.sched_setaffinity(0, affinity)
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server.bind(("", port))
+        server.listen(64)
+        server.settimeout(0.5)
+        ready.send((server.getsockname()[1], None))
+    except Exception as error:
+        ready.send((0, str(error)))
+        ready.close()
+        return
+    ready.close()
+    try:
+        while not stop.is_set():
+            try:
+                connection, _ = server.accept()
+            except TimeoutError:
+                continue
+            threading.Thread(target=_handle_file_requests, args=(connection, entries, counters), daemon=True).start()
+    finally:
+        server.close()
 
 
 class CachedDataWrapper:
@@ -165,16 +259,19 @@ class TCPCacheServer:
                 if request_payload is None:
                     break
                 request = json.loads(request_payload)
-                value = self.cache._fetch_local_only(
-                    request["dataset_id"], request["sequence"], request["position"]
-                )
-                if value is None:
-                    connection.sendall(b"\x00" + struct.pack("!Q", 0))
+                values = [
+                    self.cache._fetch_local_only(request["dataset_id"], request["sequence"], position)
+                    for position in request["positions"]
+                ]
+                if not values or any(value is None for value in values):
+                    _send_shard(connection, None)
                     continue
-                payload_buffer = io.BytesIO()
-                np.save(payload_buffer, value, allow_pickle=False)
-                payload = payload_buffer.getvalue()
-                connection.sendall(b"\x01" + struct.pack("!Q", len(payload)) + payload)
+                grid = slice(*request["grid"])
+                first = values[0][..., grid]
+                result = np.empty((len(values), *first.shape), dtype=first.dtype)
+                for index, value in enumerate(values):
+                    result[index] = value[..., grid]
+                _send_shard(connection, result)
         except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
             pass
         finally:
@@ -206,23 +303,33 @@ class TCPCacheClient:
         self._sock = socket.create_connection((self.endpoint.host, self.endpoint.port), timeout=self.timeout)
 
     def fetch(self, key: CacheKey):
+        return self.fetch_many(key, [key.position], slice(None))[0]
+
+    def fetch_many(self, key, positions, grid_indices):
         request = json.dumps(
-            {"dataset_id": key.dataset_id, "sequence": key.sequence, "position": key.position}
+            {
+                "dataset_id": key.dataset_id,
+                "sequence": key.sequence,
+                "positions": positions,
+                "grid": [grid_indices.start, grid_indices.stop, grid_indices.step],
+            }
         ).encode()
         for attempt in range(2):
             try:
                 if self._sock is None:
                     self._connect()
                 self._sock.sendall(struct.pack("!I", len(request)) + request)
-                header = _recv_exact(self._sock, 9)
+                header = _recv_exact(self._sock, 13)
                 if header is None:
                     raise ConnectionError("server closed connection")
                 if header[0] == 0:
                     raise RemoteCacheMiss(key)
-                payload = _recv_exact(self._sock, struct.unpack("!Q", header[1:])[0])
+                metadata = _recv_exact(self._sock, struct.unpack("!I", header[1:5])[0])
+                payload = _recv_into(self._sock, struct.unpack("!Q", header[5:])[0])
                 if payload is None:
                     raise ConnectionError("server closed connection")
-                return np.load(io.BytesIO(payload), allow_pickle=False)
+                metadata = json.loads(metadata)
+                return np.frombuffer(payload, dtype=metadata["dtype"]).reshape(metadata["shape"])
             except RemoteCacheMiss:
                 raise
             except (ConnectionResetError, BrokenPipeError, ConnectionError, OSError) as error:
@@ -235,6 +342,42 @@ class TCPCacheClient:
         if self._sock is not None:
             self._sock.close()
             self._sock = None
+
+
+class ProcessTCPCacheServer:
+    def __init__(self, entries, port, counters, affinity=()):
+        self.entries = entries
+        self.port = port
+        self.counters = counters
+        self.affinity = affinity
+
+    def start(self):
+        context = multiprocessing.get_context("spawn")
+        self._stop = context.Event()
+        ready_parent, ready_child = context.Pipe(duplex=False)
+        self._process = context.Process(
+            target=_serve_cache,
+            args=(self.port, self.entries, self._stop, ready_child, self.counters, self.affinity),
+            daemon=True,
+        )
+        self._process.start()
+        ready_child.close()
+        self.port, error = ready_parent.recv()
+        ready_parent.close()
+        if error:
+            raise OSError(error)
+
+    def close(self):
+        self._stop.set()
+        try:
+            with socket.create_connection(("127.0.0.1", self.port), timeout=1):
+                pass
+        except OSError:
+            pass
+        self._process.join(timeout=5)
+        if self._process.is_alive():
+            self._process.terminate()
+            self._process.join(timeout=5)
 
 
 class _ThreadingHTTPServer(socketserver.ThreadingTCPServer):
@@ -400,6 +543,9 @@ class DatasetCache(pl.LightningDataModule):
         self.profile_source_ns = Value("q", 0)
         self.profile_store_ns = Value("q", 0)
         self.profile_fetch_many_ns = Value("q", 0)
+        context = multiprocessing.get_context("spawn")
+        self.remote_server_read_ns = context.Value("q", 0)
+        self.remote_server_send_ns = context.Value("q", 0)
 
     def __getattr__(self, name):
         return getattr(self.ds, name)
@@ -514,14 +660,27 @@ class DatasetCache(pl.LightningDataModule):
 
     def _start_server(self):
         if self.remote_backend == "tcp":
-            self._server = TCPCacheServer(self, self.port)
+            entries = {dataset_id: str(namespace.entries_path) for dataset_id, namespace in self.namespaces.items()}
+            available_cpus = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
+            affinity = available_cpus[: min(_REMOTE_SERVER_CPUS, len(available_cpus) - 1)]
+            self._server = ProcessTCPCacheServer(
+                entries,
+                self.port,
+                (self.remote_server_read_ns, self.remote_server_send_ns),
+                affinity,
+            )
             try:
                 self._server.start()
             except OSError as error:
                 if error.errno != errno.EADDRINUSE or self.port == 0:
                     raise
                 LOGGER.warning("Dataset cache port %s is occupied; selecting a free port", self.port)
-                self._server = TCPCacheServer(self, 0)
+                self._server = ProcessTCPCacheServer(
+                    entries,
+                    0,
+                    (self.remote_server_read_ns, self.remote_server_send_ns),
+                    affinity,
+                )
                 self._server.start()
             self.port = self._server.port
             return
@@ -648,12 +807,67 @@ class DatasetCache(pl.LightningDataModule):
                 sample = namespace.fetch_source(sequence, 0)
                 result = np.empty((0, *sample.shape), dtype=sample.dtype)
             return result if grid_indices is None else result[..., grid_indices]
+        self._load_remote_registry()
+        keys = [CacheKey(dataset_id, int(sequence), position) for position in normalized]
+        remote_nodes = set.intersection(
+            *(self._remote_locations.get(key, set()) - {self.node_id} for key in keys)
+        )
+        if remote_nodes and isinstance(grid_indices, slice):
+            try:
+                result = self._fetch_remote_many(min(remote_nodes), keys[0], normalized, grid_indices)
+            except (RemoteCacheMiss, RemoteCacheUnavailable):
+                pass
+            else:
+                self.total_fetches.value += len(normalized)
+                self.cache_hits_remote.value += len(normalized)
+                if started:
+                    elapsed = perf_counter_ns() - started
+                    self.profile_remote_ns.value += elapsed
+                    self.profile_fetch_many_ns.value += elapsed
+                return result
         values = [self.fetch(dataset_id, sequence, position) for position in normalized]
         if grid_indices is not None:
             values = [value[..., grid_indices] for value in values]
         result = np.stack(values)
         if started:
             self.profile_fetch_many_ns.value += perf_counter_ns() - started
+        return result
+
+    def _fetch_remote_many(self, node_id, key, positions, grid_indices):
+        namespace = self.namespaces[key.dataset_id]
+        reference = namespace.fetch_local(key.sequence, positions[0])
+        if reference is None:
+            reference = namespace.fetch_source(key.sequence, positions[0])
+        start, stop, step = grid_indices.indices(reference.shape[-1])
+        if step != 1:
+            raise RemoteCacheUnavailable("remote grid shard must be contiguous")
+        bytes_per_gridpoint = len(positions) * reference[..., :1].nbytes
+        chunk_size = max(1, _REMOTE_CHUNK_BYTES // bytes_per_gridpoint)
+        chunks = [slice(offset, min(offset + chunk_size, stop)) for offset in range(start, stop, chunk_size)]
+        executor = getattr(self, "_remote_executor", None)
+        if executor is None:
+            executor = self._remote_executor = ThreadPoolExecutor(max_workers=_REMOTE_PIPELINE_DEPTH)
+        indexed = list(enumerate(chunks))
+
+        def fetch_lane(slot):
+            client_key = (os.getpid(), node_id, slot)
+            client = self._tcp_clients.get(client_key)
+            if client is None:
+                client = self._tcp_clients[client_key] = TCPCacheClient(self._endpoint(node_id))
+            return [
+                (index, client.fetch_many(key, positions, chunk))
+                for index, chunk in indexed[slot::_REMOTE_PIPELINE_DEPTH]
+            ]
+
+        futures = [executor.submit(fetch_lane, slot) for slot in range(min(_REMOTE_PIPELINE_DEPTH, len(chunks)))]
+        values = [item for future in futures for item in future.result()]
+        values.sort(key=lambda item: item[0])
+        arrays = [array for _, array in values]
+        result = np.empty((*arrays[0].shape[:-1], stop - start), dtype=arrays[0].dtype)
+        offset = 0
+        for array in arrays:
+            result[..., offset : offset + array.shape[-1]] = array
+            offset += array.shape[-1]
         return result
 
     def _fetch_local_only(self, dataset_id, sequence, position):
@@ -767,9 +981,12 @@ class DatasetCache(pl.LightningDataModule):
         for client in self._tcp_clients.values():
             client.close()
         self._tcp_clients.clear()
+        executor = getattr(self, "_remote_executor", None)
+        if executor is not None:
+            executor.shutdown()
         if getattr(self, "is_node_leader", False):
             server = getattr(self, "_server", None)
-            if isinstance(server, TCPCacheServer):
+            if isinstance(server, (TCPCacheServer, ProcessTCPCacheServer)):
                 server.close()
             elif server is not None:
                 server.shutdown()
