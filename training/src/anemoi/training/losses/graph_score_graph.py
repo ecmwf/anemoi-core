@@ -78,6 +78,7 @@ class GraphScoreGraph(nn.Module):
         *,
         graph_name: str,
         allow_none: bool = False,
+        remove_self_edges: bool = False,
     ) -> "GraphScoreGraph | None":
         """Validate a graph-score definition and build its CSR provider."""
         if graph_definition is None:
@@ -111,6 +112,12 @@ class GraphScoreGraph(nn.Module):
         if src_node_weight_attribute is not None:
             src_weights = graph_data[edges_name[0]][src_node_weight_attribute].reshape(-1)
             edge_weights = edge_weights * src_weights[edge_index[0]]
+
+        edge_mask = None
+        if remove_self_edges:
+            edge_mask = edge_index[0] != edge_index[1]
+            edge_index = edge_index[:, edge_mask]
+            edge_weights = edge_weights[edge_mask]
 
         num_src_nodes = graph_data[edges_name[0]].num_nodes
         num_dst_nodes = graph_data[edges_name[2]].num_nodes
@@ -147,6 +154,7 @@ class GraphScoreGraph(nn.Module):
             edges_name=edges_name,
             edge_weight_attribute=edge_weight_attribute,
             src_node_weight_attribute=src_node_weight_attribute,
+            edge_mask=edge_mask,
             row_normalize=row_normalize,
         )
         LOGGER.info(
