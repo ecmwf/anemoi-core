@@ -493,7 +493,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
 
-        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        if not self.config.training.load_weights_only:
+            self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
+            # Lightning restores the datamodule while the task still has the rollout start
+            # from the config. Now that the checkpoint rollout is restored, update each
+            # dataset to load the required input and target time steps before workers start.
+            # Anemoi also loads modules without a Trainer when converting training
+            # checkpoints for inference, so only synchronize if a datamodule is attached.
+            trainer = getattr(self, "_trainer", None)
+            if trainer is not None and trainer.datamodule is not None:
+                trainer.datamodule.sync_dataset_state()
 
         # Extract variables_metadata for unit compatibility check
         self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(

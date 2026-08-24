@@ -113,7 +113,10 @@ def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tende
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies)),
+        training=SimpleNamespace(
+            load_weights_only=False,
+            update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies),
+        ),
     )
     return module
 
@@ -404,14 +407,21 @@ def test_validate_transfer_learning_remove_dataset() -> None:
 # ── Rollout state persistence across checkpoint save / load ───────────────────
 
 
-def _make_module_with_forecaster_task(rollout_cfg: dict) -> tuple[DummyTrainingModule, Forecaster]:
+def _make_module_with_forecaster_task(
+    rollout_cfg: dict,
+    *,
+    load_weights_only: bool = False,
+) -> tuple[DummyTrainingModule, Forecaster]:
     """Build a minimal DummyTrainingModule whose task is a Forecaster."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
     module.task = task
     module.config = SimpleNamespace(  # type: ignore[assignment]
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
+        training=SimpleNamespace(
+            load_weights_only=load_weights_only,
+            update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
+        ),
     )
     return module, task
 
@@ -443,6 +453,60 @@ def test_on_load_checkpoint_restores_rollout_step() -> None:
 
     assert task.rollout.step == 3
     assert task.rollout._last_increased_epoch == 1
+
+
+def test_on_load_checkpoint_load_weights_only_keeps_configured_rollout_step() -> None:
+    """Loading only model weights must not restore the checkpoint's rollout state."""
+    module, task = _make_module_with_forecaster_task(
+        {"start": 2, "epoch_increment": 0, "maximum": 2},
+        load_weights_only=True,
+    )
+
+    checkpoint = {
+        "task_state": {"rollout": {"step": 1, "last_increased_epoch": -1}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 2
+    assert task.rollout._last_increased_epoch == -1
+
+
+class _RecordingDataModule:
+    """Record the time window selected whenever the dataset is refreshed."""
+
+    def __init__(self, task: Forecaster) -> None:
+        self._task = task
+        self.epoch = 0
+        self.offsets = task.get_offsets("training")
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.sync_dataset_state()
+
+    def sync_dataset_state(self) -> None:
+        self.offsets = self._task.get_offsets("training")
+
+
+def test_on_load_checkpoint_refreshes_dataloader_time_window() -> None:
+    """Datasets are resized for the restored rollout before workers start."""
+    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    datamodule = _RecordingDataModule(task)
+    # Lightning restores the datamodule before calling the module hook.
+    datamodule.set_epoch(2)
+    assert len(datamodule.offsets) == 2
+    module._trainer = SimpleNamespace(datamodule=datamodule)
+
+    checkpoint = {
+        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert len(datamodule.offsets) == 4
+    assert datamodule.epoch == 2
 
 
 def test_rollout_step_not_spuriously_incremented_on_resume() -> None:

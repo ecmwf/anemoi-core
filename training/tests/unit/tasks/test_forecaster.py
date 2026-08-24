@@ -284,6 +284,23 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     assert y["data"].shape[1] == 1  # multistep_output=1
 
 
+def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> None:
+    """A batch sized for an earlier rollout fails before producing an empty slice."""
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
+    )
+    batch = {"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))}
+    assert task.get_targets(batch, rollout_step=0)["data"].shape[1] == 1
+
+    task.rollout.increase(current_epoch=0)
+
+    with pytest.raises(ValueError, match="time steps"):
+        task.get_targets(batch, rollout_step=1)
+
+
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     """Input and target time indices do not overlap for a single-step forecaster."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")

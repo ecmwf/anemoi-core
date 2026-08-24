@@ -142,9 +142,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        self.sync_dataset_state()
 
+    def sync_dataset_state(self) -> None:
+        """Synchronize datasets with the current epoch and task state."""
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
@@ -154,7 +157,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
             dataset.set_epoch(
-                epoch,
+                self.epoch,
                 rollout=len(tuple(self.task.steps(label))),
                 relative_date_indices=compute_relative_date_indices(
                     self.task,

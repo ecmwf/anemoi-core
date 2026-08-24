@@ -123,6 +123,27 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
+    def _assert_time_indices_in_batch(
+        self,
+        time_indices: list[int],
+        batch: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> None:
+        """Raise if the batch does not contain all requested time steps."""
+        if not time_indices:
+            return
+
+        required = max(time_indices) + 1
+        for dataset_name, dataset_batch in batch.items():
+            available = dataset_batch.shape[1]
+            if available < required:
+                msg = (
+                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but step "
+                    f"{kwargs} requires index {required - 1} (indices {time_indices}). The dataloader's "
+                    "time window does not match the task rollout."
+                )
+                raise ValueError(msg)
+
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
@@ -173,6 +194,7 @@ class BaseTask(ABC):
             variable space (all variables including forcings).
         """
         time_indices = self.get_batch_output_indices(**kwargs)
+        self._assert_time_indices_in_batch(time_indices, batch, **kwargs)
         time_indices = normalize_time_indices(time_indices)
 
         y = {}
