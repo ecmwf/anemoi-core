@@ -128,7 +128,7 @@ class CachedDataWrapper:
 
 
 class TCPCacheServer:
-    """Legacy integer-key TCP server retained for compatibility and benchmarks."""
+    """Persistent TCP service for committed canonical cache keys."""
 
     def __init__(self, cache, port, host=""):
         self.cache = cache
@@ -160,12 +160,21 @@ class TCPCacheServer:
                 header = _recv_exact(connection, 4)
                 if header is None:
                     break
-                value = np.asarray(self.cache[struct.unpack("!I", header)[0]])
+                request_payload = _recv_exact(connection, struct.unpack("!I", header)[0])
+                if request_payload is None:
+                    break
+                request = json.loads(request_payload)
+                value = self.cache._fetch_local_only(
+                    request["dataset_id"], request["sequence"], request["position"]
+                )
+                if value is None:
+                    connection.sendall(b"\x00" + struct.pack("!Q", 0))
+                    continue
                 payload_buffer = io.BytesIO()
                 np.save(payload_buffer, value, allow_pickle=False)
                 payload = payload_buffer.getvalue()
-                connection.sendall(struct.pack("!Q", len(payload)) + payload)
-        except (ConnectionResetError, BrokenPipeError, OSError):
+                connection.sendall(b"\x01" + struct.pack("!Q", len(payload)) + payload)
+        except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
             pass
         finally:
             connection.close()
@@ -187,77 +196,13 @@ class TCPCacheServer:
 class TCPCacheClient:
     """Persistent client for :class:`TCPCacheServer`."""
 
-    def __init__(self, host, port, timeout=30.0):
-        self.host = host
-        self.port = port
-        self.timeout = timeout
-        self._sock = None
-
-    def _connect(self):
-        self._sock = socket.create_connection((self.host, self.port), timeout=self.timeout)
-
-    def fetch(self, date):
-        for attempt in range(2):
-            try:
-                if self._sock is None:
-                    self._connect()
-                self._sock.sendall(struct.pack("!I", int(date)))
-                header = _recv_exact(self._sock, 8)
-                if header is None:
-                    raise ConnectionError("server closed connection")
-                payload = _recv_exact(self._sock, struct.unpack("!Q", header)[0])
-                if payload is None:
-                    raise ConnectionError("server closed connection")
-                return np.load(io.BytesIO(payload), allow_pickle=False)
-            except (ConnectionResetError, BrokenPipeError, ConnectionError, OSError):
-                self.close()
-                if attempt:
-                    raise
-        raise RemoteCacheUnavailable(f"Unable to connect to {self.host}:{self.port}")
-
-    def __getitem__(self, date):
-        return self.fetch(date)
-
-    def close(self):
-        if self._sock is not None:
-            self._sock.close()
-            self._sock = None
-
-
-class _KeyedTCPServer(TCPCacheServer):
-    """TCP service for canonical cache keys."""
-
-    def _handle(self, connection):
-        try:
-            while True:
-                header = _recv_exact(connection, 4)
-                if header is None:
-                    break
-                request_payload = _recv_exact(connection, struct.unpack("!I", header)[0])
-                if request_payload is None:
-                    break
-                request = json.loads(request_payload)
-                value = self.cache._fetch_local_only(
-                    request["dataset_id"], request["sequence"], request["position"]
-                )
-                if value is None:
-                    connection.sendall(b"\x00" + struct.pack("!Q", 0))
-                    continue
-                payload_buffer = io.BytesIO()
-                np.save(payload_buffer, value, allow_pickle=False)
-                payload = payload_buffer.getvalue()
-                connection.sendall(b"\x01" + struct.pack("!Q", len(payload)) + payload)
-        except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
-            pass
-        finally:
-            connection.close()
-
-
-class _KeyedTCPClient:
     def __init__(self, endpoint: Endpoint, timeout=30.0):
         self.endpoint = endpoint
         self.timeout = timeout
         self._sock = None
+
+    def _connect(self):
+        self._sock = socket.create_connection((self.endpoint.host, self.endpoint.port), timeout=self.timeout)
 
     def fetch(self, key: CacheKey):
         request = json.dumps(
@@ -266,9 +211,7 @@ class _KeyedTCPClient:
         for attempt in range(2):
             try:
                 if self._sock is None:
-                    self._sock = socket.create_connection(
-                        (self.endpoint.host, self.endpoint.port), timeout=self.timeout
-                    )
+                    self._connect()
                 self._sock.sendall(struct.pack("!I", len(request)) + request)
                 header = _recv_exact(self._sock, 9)
                 if header is None:
@@ -563,14 +506,14 @@ class DatasetCache(pl.LightningDataModule):
 
     def _start_server(self):
         if self.remote_backend == "tcp":
-            self._server = _KeyedTCPServer(self, self.port)
+            self._server = TCPCacheServer(self, self.port)
             try:
                 self._server.start()
             except OSError as error:
                 if error.errno != errno.EADDRINUSE or self.port == 0:
                     raise
                 LOGGER.warning("Dataset cache port %s is occupied; selecting a free port", self.port)
-                self._server = _KeyedTCPServer(self, 0)
+                self._server = TCPCacheServer(self, 0)
                 self._server.start()
             self.port = self._server.port
             return
@@ -684,7 +627,7 @@ class DatasetCache(pl.LightningDataModule):
             client_key = (os.getpid(), node_id)
             client = self._tcp_clients.get(client_key)
             if client is None:
-                client = self._tcp_clients[client_key] = _KeyedTCPClient(endpoint)
+                client = self._tcp_clients[client_key] = TCPCacheClient(endpoint)
             return client.fetch(key)
         namespace = self.namespaces[key.dataset_id]
         remote_host = self._raw_hostnames[self._node_leader_rank[node_id]]
@@ -782,7 +725,7 @@ class DatasetCache(pl.LightningDataModule):
         self._tcp_clients.clear()
         if getattr(self, "is_node_leader", False):
             server = getattr(self, "_server", None)
-            if isinstance(server, _KeyedTCPServer):
+            if isinstance(server, TCPCacheServer):
                 server.close()
             elif server is not None:
                 server.shutdown()

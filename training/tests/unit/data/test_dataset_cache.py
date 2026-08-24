@@ -22,8 +22,11 @@ import torch
 
 from anemoi.training.utils.dataset_cache import (
     CachedDataWrapper,
+    CacheKey,
     DatasetCache,
     DatasetCacheNamespace,
+    Endpoint,
+    RemoteCacheMiss,
     TCPCacheClient,
     TCPCacheServer,
     _recv_exact,
@@ -243,10 +246,12 @@ class TestTCPCacheServerClient:
 
     @pytest.fixture
     def cache_data(self):
-        """Create fake cache data (dict-like indexable by int)."""
+        """Create fake cached entries keyed by dataset, sequence, and position."""
         rng = np.random.default_rng(99)
-        data = {i: rng.standard_normal((3, 5)).astype(np.float32) for i in range(20)}
-        return data
+        return {
+            CacheKey("dataset", 0, index): rng.standard_normal((3, 5)).astype(np.float32)
+            for index in range(20)
+        }
 
     @pytest.fixture
     def server_port(self):
@@ -258,35 +263,43 @@ class TestTCPCacheServerClient:
     @pytest.fixture
     def running_server(self, cache_data, server_port):
         """Start a TCPCacheServer and yield it; shut down after test."""
-        server = TCPCacheServer(cache_data, server_port, host="127.0.0.1")
+        class FakeCache:
+            def _fetch_local_only(self, dataset_id, sequence, position):
+                return cache_data.get(CacheKey(dataset_id, sequence, position))
+
+        server = TCPCacheServer(FakeCache(), server_port, host="127.0.0.1")
         server.start()
         time.sleep(0.1)  # give server thread time to bind
         yield server
-        server._server_socket.close()
+        server.close()
+
+    def endpoint(self, server_port):
+        return Endpoint("127.0.0.1", server_port, 0)
 
     def test_single_fetch(self, cache_data, server_port, running_server):
-        client = TCPCacheClient("127.0.0.1", server_port)
+        client = TCPCacheClient(self.endpoint(server_port))
         try:
-            result = client.fetch(5)
-            np.testing.assert_array_equal(result, cache_data[5])
+            key = CacheKey("dataset", 0, 5)
+            result = client.fetch(key)
+            np.testing.assert_array_equal(result, cache_data[key])
         finally:
             client.close()
 
     def test_multiple_fetches(self, cache_data, server_port, running_server):
-        client = TCPCacheClient("127.0.0.1", server_port)
+        client = TCPCacheClient(self.endpoint(server_port))
         try:
             for idx in [0, 7, 13, 19]:
-                result = client.fetch(idx)
-                np.testing.assert_array_equal(result, cache_data[idx])
+                key = CacheKey("dataset", 0, idx)
+                result = client.fetch(key)
+                np.testing.assert_array_equal(result, cache_data[key])
         finally:
             client.close()
 
-    def test_getitem_interface(self, cache_data, server_port, running_server):
-        """TCPCacheClient supports dict-style indexing."""
-        client = TCPCacheClient("127.0.0.1", server_port)
+    def test_missing_entry(self, server_port, running_server):
+        client = TCPCacheClient(self.endpoint(server_port))
         try:
-            result = client[10]
-            np.testing.assert_array_equal(result, cache_data[10])
+            with pytest.raises(RemoteCacheMiss):
+                client.fetch(CacheKey("dataset", 0, 100))
         finally:
             client.close()
 
@@ -297,8 +310,9 @@ class TestTCPCacheServerClient:
 
         def worker(idx):
             try:
-                c = TCPCacheClient("127.0.0.1", server_port)
-                results[idx] = c.fetch(idx)
+                c = TCPCacheClient(self.endpoint(server_port))
+                key = CacheKey("dataset", 0, idx)
+                results[idx] = c.fetch(key)
                 c.close()
             except Exception as e:
                 errors.append(e)
@@ -311,15 +325,20 @@ class TestTCPCacheServerClient:
 
         assert not errors, f"Errors in concurrent fetch: {errors}"
         for idx in range(5):
-            np.testing.assert_array_equal(results[idx], cache_data[idx])
+            np.testing.assert_array_equal(results[idx], cache_data[CacheKey("dataset", 0, idx)])
 
     def test_ephemeral_port_and_clean_shutdown(self, cache_data):
-        server = TCPCacheServer(cache_data, 0, host="127.0.0.1")
+        class FakeCache:
+            def _fetch_local_only(self, dataset_id, sequence, position):
+                return cache_data.get(CacheKey(dataset_id, sequence, position))
+
+        server = TCPCacheServer(FakeCache(), 0, host="127.0.0.1")
         server.start()
 
         assert server.port > 0
-        client = TCPCacheClient("127.0.0.1", server.port)
-        np.testing.assert_array_equal(client.fetch(3), cache_data[3])
+        client = TCPCacheClient(Endpoint("127.0.0.1", server.port, 0))
+        key = CacheKey("dataset", 0, 3)
+        np.testing.assert_array_equal(client.fetch(key), cache_data[key])
         client.close()
 
         server.close()
