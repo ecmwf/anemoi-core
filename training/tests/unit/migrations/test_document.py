@@ -104,8 +104,24 @@ def test_drop_key(document_from_content: DocumentFromContent) -> None:
 
     document = document_from_content(content)
     document.drop_key("foo.bar.old")
-    bar_node = document["foo"]["bar"]
-    assert "old" not in bar_node
+    expected_output = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+    assert document.to_yaml() == expected_output
+
+
+def test_drop_key_remove_empty(document_from_content: DocumentFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+        old: old value
+    """)
+
+    document = document_from_content(content)
+    document.drop_key("foo.bar.old", remove_empty=True)
     expected_output = dedent("""\
     foo:
       bar:
