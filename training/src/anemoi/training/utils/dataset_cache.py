@@ -73,25 +73,36 @@ def _read_shard(entries, request):
     return result
 
 
+def _serve_worker(context, endpoint, entries):
+    worker = context.socket(zmq.REP)
+    worker.connect(endpoint)
+    while True:
+        request = worker.recv_json()
+        value = _read_shard(entries, request)
+        if value is None:
+            worker.send(b"")
+        else:
+            metadata = json.dumps({"dtype": value.dtype.str, "shape": value.shape}, separators=(",", ":"))
+            worker.send_multipart([metadata.encode(), memoryview(value)], copy=False)
+
+
 def _serve_cache(port, entries, ready):
     context = zmq.Context()
-    server = context.socket(zmq.REP)
+    frontend = context.socket(zmq.ROUTER)
+    backend = context.socket(zmq.DEALER)
     try:
-        port = server.bind_to_random_port("tcp://*") if port == 0 else (server.bind(f"tcp://*:{port}") or port)
+        port = frontend.bind_to_random_port("tcp://*") if port == 0 else (frontend.bind(f"tcp://*:{port}") or port)
+        endpoint = "inproc://workers"
+        backend.bind(endpoint)
+        for _ in range(min(4, os.cpu_count() or 1)):
+            threading.Thread(target=_serve_worker, args=(context, endpoint, entries), daemon=True).start()
         ready.send((port, None))
     except Exception as error:
         ready.send((0, str(error)))
         return
     finally:
         ready.close()
-    while True:
-        request = server.recv_json()
-        value = _read_shard(entries, request)
-        if value is None:
-            server.send(b"")
-        else:
-            metadata = json.dumps({"dtype": value.dtype.str, "shape": value.shape}, separators=(",", ":"))
-            server.send_multipart([metadata.encode(), memoryview(value)], copy=False)
+    zmq.proxy(frontend, backend)
 
 
 class ZMQCacheClient:
