@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from functools import partial
 from multiprocessing import Value
 from pathlib import Path
+from time import perf_counter_ns
 from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
@@ -311,7 +312,7 @@ class DatasetCacheNamespace:
         if not marker.exists():
             return None
         try:
-            return np.load(entry, allow_pickle=False)
+            return np.load(entry, allow_pickle=False, mmap_mode="r")
         except FileNotFoundError:
             return None
 
@@ -393,6 +394,12 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_misses = Value("q", 0)
         self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
+        self.profile_io = os.environ.get("ANEMOI_DATASET_CACHE_PROFILE") == "1"
+        self.profile_local_ns = Value("q", 0)
+        self.profile_remote_ns = Value("q", 0)
+        self.profile_source_ns = Value("q", 0)
+        self.profile_store_ns = Value("q", 0)
+        self.profile_fetch_many_ns = Value("q", 0)
 
     def __getattr__(self, name):
         return getattr(self.ds, name)
@@ -559,7 +566,10 @@ class DatasetCache(pl.LightningDataModule):
         sequence, position = namespace._normalize_position(sequence, position)
         key = CacheKey(dataset_id, sequence, position)
         self.total_fetches.value += 1
+        started = perf_counter_ns() if self.profile_io else 0
         local = namespace.fetch_local(sequence, position)
+        if started:
+            self.profile_local_ns.value += perf_counter_ns() - started
         if local is not None:
             self.cache_hits_local.value += 1
             return local
@@ -567,15 +577,24 @@ class DatasetCache(pl.LightningDataModule):
         self._load_remote_registry()
         for remote_node in sorted(self._remote_locations.get(key, set()) - {self.node_id}):
             try:
+                started = perf_counter_ns() if self.profile_io else 0
                 value = self._fetch_remote(remote_node, key)
+                if started:
+                    self.profile_remote_ns.value += perf_counter_ns() - started
                 self.cache_hits_remote.value += 1
                 return value
             except (RemoteCacheMiss, RemoteCacheUnavailable):
+                if started:
+                    self.profile_remote_ns.value += perf_counter_ns() - started
                 self._remote_locations.get(key, set()).discard(remote_node)
 
         self.cache_misses.value += 1
+        started = perf_counter_ns() if self.profile_io else 0
         value = namespace.fetch_source(sequence, position)
+        if started:
+            self.profile_source_ns.value += perf_counter_ns() - started
         if not self.cache_full.value and not self._admission_disabled_path.exists():
+            started = perf_counter_ns() if self.profile_io else 0
             required_bytes = int(np.asarray(value).nbytes) + self.min_free_bytes
             if shutil.disk_usage(self.cache_path).free < required_bytes:
                 self._disable_admission(
@@ -589,7 +608,21 @@ class DatasetCache(pl.LightningDataModule):
                     if not _is_capacity_error(error):
                         raise
                     self._disable_admission(str(error))
+            if started:
+                self.profile_store_ns.value += perf_counter_ns() - started
         return value
+
+    def profile_snapshot(self):
+        return tuple(
+            counter.value
+            for counter in (
+                self.profile_local_ns,
+                self.profile_remote_ns,
+                self.profile_source_ns,
+                self.profile_store_ns,
+                self.profile_fetch_many_ns,
+            )
+        )
 
     def _disable_admission(self, reason):
         """Disable new writes on this node while preserving cache reads."""
@@ -603,16 +636,25 @@ class DatasetCache(pl.LightningDataModule):
         if was_enabled:
             LOGGER.warning("Node %s dataset cache admission disabled: %s", self.node_id, reason)
 
-    def fetch_many(self, dataset_id, sequence, positions):
+    def fetch_many(self, dataset_id, sequence, positions, grid_indices=None):
+        started = perf_counter_ns() if self.profile_io else 0
         dataset_id = self._resolve_dataset_id(dataset_id)
         namespace = self.namespaces[dataset_id]
         normalized = self._normalize_positions(namespace, sequence, positions)
         if not normalized:
             if namespace.num_sequences == 1:
-                return np.asarray(namespace.reader.data[np.array([], dtype=np.int64)])
-            sample = namespace.fetch_source(sequence, 0)
-            return np.empty((0, *sample.shape), dtype=sample.dtype)
-        return np.stack([self.fetch(dataset_id, sequence, position) for position in normalized])
+                result = np.asarray(namespace.reader.data[np.array([], dtype=np.int64)])
+            else:
+                sample = namespace.fetch_source(sequence, 0)
+                result = np.empty((0, *sample.shape), dtype=sample.dtype)
+            return result if grid_indices is None else result[..., grid_indices]
+        values = [self.fetch(dataset_id, sequence, position) for position in normalized]
+        if grid_indices is not None:
+            values = [value[..., grid_indices] for value in values]
+        result = np.stack(values)
+        if started:
+            self.profile_fetch_many_ns.value += perf_counter_ns() - started
+        return result
 
     def _fetch_local_only(self, dataset_id, sequence, position):
         namespace = self.namespaces.get(dataset_id)

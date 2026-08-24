@@ -24,6 +24,7 @@ import pytest
 import torch
 import torch.distributed as dist
 from omegaconf import DictConfig
+from pytorch_lightning.profilers import SimpleProfiler
 
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.dataset_cache import DatasetCache
@@ -35,8 +36,11 @@ class _EpochTimer(pl.Callback):
     def __init__(self):
         self.durations = []
         self.cache_stats = []
+        self.cache_io_seconds = []
+        self.dataloader_wait_seconds = 0.0
         self._started_at = None
         self._cache_before = None
+        self._cache_io_before = None
 
     @staticmethod
     def _sync():
@@ -57,6 +61,8 @@ class _EpochTimer(pl.Callback):
     def on_train_epoch_start(self, trainer, pl_module):
         self._sync()
         self._cache_before = self._cache_counts(trainer)
+        cache = trainer.datamodule
+        self._cache_io_before = cache.profile_snapshot() if isinstance(cache, DatasetCache) else None
         self._started_at = time.perf_counter()
 
     def on_train_epoch_end(self, trainer, pl_module):
@@ -65,16 +71,23 @@ class _EpochTimer(pl.Callback):
         counts = self._cache_counts(trainer)
         if counts is not None:
             self.cache_stats.append(tuple(after - before for after, before in zip(counts, self._cache_before)))
+            self.cache_io_seconds.append(
+                tuple(
+                    (after - before) / 1e9
+                    for after, before in zip(trainer.datamodule.profile_snapshot(), self._cache_io_before)
+                )
+            )
 
 
 class _BenchmarkTrainer(AnemoiTrainer):
-    def __init__(self, config, timer):
+    def __init__(self, config, timer, profiler):
         self._timer = timer
+        self._profiler = profiler
         super().__init__(config)
 
     @cached_property
     def profiler(self):
-        return None
+        return self._profiler
 
     @cached_property
     def callbacks(self):
@@ -90,9 +103,13 @@ def _run_training(config, cache_root=None):
     config.system.hardware.cache_dir = None if cache_root is None else str(cache_root)
 
     timer = _EpochTimer()
-    trainer = _BenchmarkTrainer(config, timer)
+    profiler = SimpleProfiler()
+    trainer = _BenchmarkTrainer(config, timer, profiler)
     trainer.datamodule.ds_train.shuffle = False
     trainer.train()
+    timer.dataloader_wait_seconds = sum(
+        profiler.recorded_durations.get("[_TrainingEpochLoop].train_dataloader_next", ())
+    )
     return timer
 
 
@@ -110,7 +127,15 @@ def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) ->
     cache_root.mkdir(parents=True, exist_ok=True)
 
     uncached = _run_training(config)
-    cached = _run_training(config, cache_root)
+    previous_profile_setting = os.environ.get("ANEMOI_DATASET_CACHE_PROFILE")
+    os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = "1"
+    try:
+        cached = _run_training(config, cache_root)
+    finally:
+        if previous_profile_setting is None:
+            os.environ.pop("ANEMOI_DATASET_CACHE_PROFILE")
+        else:
+            os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = previous_profile_setting
 
     assert len(uncached.durations) == len(cached.durations) == 3
     assert cached.cache_stats[0][2] > 0, "cold epoch did not populate the cache"
@@ -127,7 +152,9 @@ def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) ->
     if rank == 0:
         LOGGER.info(
             "%s SSD cache benchmark: no_cache=%.3fs cold=%.3fs warm=%.3fs "
-            "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s",
+            "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s "
+            "cache_io_seconds(local,remote,source,store,fetch_many)=%s "
+            "dataloader_wait(no_cache,cached)=%s",
             test_case,
             no_cache_seconds,
             cold_cache_seconds,
@@ -135,6 +162,8 @@ def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) ->
             no_cache_seconds / cold_cache_seconds,
             no_cache_seconds / warm_cache_seconds,
             cached.cache_stats,
+            cached.cache_io_seconds,
+            (uncached.dataloader_wait_seconds, cached.dataloader_wait_seconds),
         )
         shutil.rmtree(cache_root)
     if dist.is_initialized():

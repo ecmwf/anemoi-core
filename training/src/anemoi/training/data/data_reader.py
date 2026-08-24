@@ -302,9 +302,7 @@ class BaseAnemoiReader:
         ignored and ``positions`` index the time axis directly.
         """
         if getattr(self, "_cache", None) is not None:
-            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions)
-            if grid_shard_indices is not None:
-                x = x[..., grid_shard_indices]
+            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions, grid_shard_indices)
         elif isinstance(grid_shard_indices, slice):
             x = self.data[positions, :, :, grid_shard_indices]
         else:
@@ -447,9 +445,7 @@ class TrajectoryDataset(BaseAnemoiReader):
             positions = np.asarray(positions).tolist()
 
         if getattr(self, "_cache", None) is not None:
-            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions)
-            if grid_shard_indices is not None:
-                x = x[..., grid_shard_indices]
+            x = self._cache.fetch_many(self._cache_dataset_id, sequence, positions, grid_shard_indices)
         else:
             # data[sequence] -> (variables, ensembles, steps, cells)
             x = self.data[sequence]
