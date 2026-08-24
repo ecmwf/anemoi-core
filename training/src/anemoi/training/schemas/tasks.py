@@ -66,6 +66,11 @@ class DAForecasterSchema(BaseModel):
     "Number of data-assimilation cycles run before the forecast rollout."
     da_loss_weight: NonNegativeFloat = Field(default=0.0, example=0.1)
     "Weight applied to the loss computed during DA cycles (0 disables the DA loss)."
+    da_flow_dependent_skip: bool = Field(default=False, example=True)
+    (
+        "Use the pre-observation-copy model background as the residual base during DA-fed steps, so the "
+        "additive skip connection stays smooth instead of stamping sparse observations into the output."
+    )
 
 
 class AutoencoderTaskSchema(BaseModel):

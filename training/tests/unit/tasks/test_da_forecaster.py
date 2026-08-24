@@ -112,6 +112,88 @@ def test_da_blend_uses_obs_where_present_pred_where_nan() -> None:
     assert torch.allclose(force, torch.tensor([7.0, 7.0, 7.0]))
 
 
+# ── flow-dependent skip base ──────────────────────────────────────────────
+
+
+def test_build_skip_input_returns_none_when_flag_off() -> None:
+    task = DAForecaster(multistep_input=2, multistep_output=1, timestep="6h", da_cycles=1)
+    x = {"data": torch.zeros((1, 2, 1, 3, 2))}
+
+    assert task.build_skip_input(x) is None
+    assert task.build_skip_input(x, {"data": torch.zeros((1, 1, 1, 3, 1))}, None) is None
+
+
+def test_build_skip_input_inert_without_da_cycles() -> None:
+    # Without DA cycles every step is a plain forecast, so the flag must stay inert --
+    # otherwise step 0 would lose its residual base entirely.
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=0,
+        da_flow_dependent_skip=True,
+    )
+    x = {"data": torch.rand((1, 2, 1, 3, 2))}
+
+    assert task.build_skip_input(x) is None
+    assert task.build_skip_input(x, {"data": torch.zeros((1, 1, 1, 3, 1))}, None) is None
+
+
+def test_build_skip_input_step0_is_zeros() -> None:
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=1,
+        da_flow_dependent_skip=True,
+    )
+    x = {"data": torch.rand((1, 2, 1, 3, 2))}
+
+    skip_input = task.build_skip_input(x)
+
+    # No background exists at step 0, so every position carries the "missing"
+    # sentinel that ClimatologySkipConnection(missing_value=0.0) fills from climatology.
+    assert skip_input["data"].shape == x["data"].shape
+    assert torch.all(skip_input["data"] == 0.0)
+
+
+def test_build_skip_input_uses_pure_background() -> None:
+    # Mirrors test_da_blend_uses_obs_where_present_pred_where_nan with the flag on.
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = _make_index_collection(name_to_index, forcing=["force"])
+    task = DAForecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        da_cycles=1,
+        da_flow_dependent_skip=True,
+    )
+
+    b, e, g = 1, 1, 3
+    v_in = len(data_indices.data.input.full)
+    v_out = len(data_indices.model.output.prognostic)
+
+    x = torch.zeros((b, 2, e, g, v_in))
+    y_pred = torch.full((b, 1, e, g, v_out), 99.0)
+
+    batch = torch.zeros((b, 3, e, g, len(name_to_index)))
+    batch[:, 2, :, 0, 0] = 5.0
+    batch[:, 2, :, 1, 0] = torch.nan
+    batch[:, 2, :, 2, 0] = torch.nan
+    batch[:, 2, :, :, 1] = 7.0
+
+    x_out = task._advance_dataset_input_da(x, y_pred, batch, rollout_step=0, data_indices=data_indices)
+    skip_input = task.build_skip_input({"data": x_out}, {"data": y_pred}, {"data": data_indices})
+
+    # The encoder input is unchanged: observation where present, background where NaN.
+    assert torch.allclose(x_out[0, -1, 0, :, 0], torch.tensor([5.0, 99.0, 99.0]))
+    # The residual base is the pure background everywhere -- the observation copy is undone.
+    assert torch.allclose(skip_input["data"][0, -1, 0, :, 0], torch.tensor([99.0, 99.0, 99.0]))
+    # Forcing columns are carried through untouched in both.
+    assert torch.allclose(skip_input["data"][0, -1, 0, :, 1], torch.tensor([7.0, 7.0, 7.0]))
+    assert torch.allclose(x_out[0, -1, 0, :, 1], torch.tensor([7.0, 7.0, 7.0]))
+
+
 # ── corrector zeroing during forecast rollout ──────────────────────────────
 
 

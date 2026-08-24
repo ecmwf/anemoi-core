@@ -18,3 +18,8 @@ validation_rollout: null
 da_cycles: 0
 # weight applied to the loss computed during DA cycles (0 disables the DA loss)
 da_loss_weight: 0.0
+
+# use the pre-observation-copy model background as the residual base during DA-fed
+# steps, so the additive skip connection stays smooth instead of stamping sparse
+# observations into the output
+da_flow_dependent_skip: False

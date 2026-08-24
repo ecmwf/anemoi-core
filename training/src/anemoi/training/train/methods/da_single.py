@@ -46,6 +46,19 @@ class DASingleTraining(SingleTraining):
         # used to slice targets down to output variables before the loss checkpoint.
         self._model_output_idx_cache: dict[str, torch.Tensor] = {}
 
+        # forward() swallows unknown kwargs, so a model that ignores skip_input would
+        # silently train against the observation-copied residual base instead.
+        if getattr(self.task, "da_flow_dependent_skip", False) and not getattr(
+            self.model.model,
+            "supports_skip_input",
+            False,
+        ):
+            msg = (
+                f"task.da_flow_dependent_skip=True requires a model supporting 'skip_input', "
+                f"but {type(self.model.model).__name__} does not."
+            )
+            raise ValueError(msg)
+
     def _init_correctors(self, graph_data: HeteroData) -> None:
         """Build per-instrument corrector networks for each dataset with corrector variables.
 
@@ -225,6 +238,8 @@ class DASingleTraining(SingleTraining):
         y_preds = []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        # Step 0 has no background yet, so its residual base says "nothing known here".
+        skip_input = self.task.build_skip_input(x)
 
         task_steps = self.task.steps("validation" if validation_mode else "training")
         n_forecast = max(1, sum(1 for step in task_steps if not step.get("is_da", False)))
@@ -236,6 +251,8 @@ class DASingleTraining(SingleTraining):
 
             decoder_forcings = self.task.build_decoder_forcings(batch, data_indices=self.data_indices, **task_kwargs)
             forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
+            if skip_input is not None:
+                forward_kwargs["skip_input"] = skip_input
             y_pred = self(x, **forward_kwargs)
             y = self.task.get_targets(batch, **task_kwargs)
 
@@ -273,6 +290,11 @@ class DASingleTraining(SingleTraining):
                     output_mask=self.output_mask,
                     grid_shard_slice=self.grid_shard_slice,
                 )
+                # A DA blend copied observations into x; hand the model the pre-copy
+                # background as the residual base for the next step. After a forecast
+                # advance x is already a raw prediction, so the default base is
+                # flow-dependent and no override is needed.
+                skip_input = self.task.build_skip_input(x, y_pred, self.data_indices) if is_da else None
 
             y_preds.append(y_pred)
 

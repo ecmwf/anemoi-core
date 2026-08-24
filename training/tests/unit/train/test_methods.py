@@ -2419,3 +2419,70 @@ def test_da_single_training_advance_input_called_between_steps(
         assert kwargs["grid_shard_slice"] is module.grid_shard_slice
     # Every step still contributes a prediction, so callback indexing stays aligned.
     assert len(output.predictions) == len(task_steps)
+
+
+def _run_da_step_recording_forward_kwargs(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    da_flow_dependent_skip: bool,
+) -> list[dict[str, Any]]:
+    """Run one DA _step, returning the kwargs passed to forward at each step."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=2,
+        da_loss_weight=0.5,
+        da_flow_dependent_skip=da_flow_dependent_skip,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": slice(1, 3)}
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(
+        module,
+        "compute_loss_metrics",
+        lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y),
+    )
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    forward_calls: list[dict[str, Any]] = []
+    original_forward = module.forward
+
+    def _recording_forward(x: dict[str, torch.Tensor], **kwargs: Any) -> dict[str, torch.Tensor]:
+        forward_calls.append(kwargs)
+        return original_forward(x, **kwargs)
+
+    monkeypatch.setattr(module, "forward", _recording_forward)
+
+    batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+    module._step(batch, validation_mode=False)
+    return forward_calls
+
+
+def test_da_single_training_skip_input_covers_da_fed_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    """skip_input is supplied for every step whose input came from a DA blend."""
+    forward_calls = _run_da_step_recording_forward_kwargs(monkeypatch, da_flow_dependent_skip=True)
+
+    # da_cycles=2 + rollout=2: steps 0,1 are DA and step 2 is the first forecast step,
+    # whose input is the last DA analysis. Step 3 autoregresses, so it needs no override.
+    assert len(forward_calls) == 4
+    assert [("skip_input" in kwargs) for kwargs in forward_calls] == [True, True, True, False]
+
+    # Step 0 has no background yet, so its base is the all-zero "missing" sentinel.
+    assert torch.all(forward_calls[0]["skip_input"]["data"] == 0.0)
+    # Later steps carry a real background, which is not the zero sentinel.
+    assert not torch.all(forward_calls[1]["skip_input"]["data"] == 0.0)
+
+
+def test_da_single_training_no_skip_input_when_flag_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With the flag off the forward call is byte-for-byte the V1 call."""
+    forward_calls = _run_da_step_recording_forward_kwargs(monkeypatch, da_flow_dependent_skip=False)
+
+    assert len(forward_calls) == 4
+    assert all("skip_input" not in kwargs for kwargs in forward_calls)
