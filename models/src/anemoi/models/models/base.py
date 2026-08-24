@@ -38,6 +38,11 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    # Whether ``forward`` honours a ``skip_input`` tensor as the source of the
+    # additive skip connection. ``forward`` swallows unknown kwargs, so callers
+    # check this rather than passing the tensor into a model that ignores it.
+    supports_skip_input: bool = False
+
     def __init__(
         self,
         *,
