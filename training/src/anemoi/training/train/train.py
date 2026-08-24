@@ -723,9 +723,7 @@ class AnemoiTrainer(ABC):
             self.datamodule = DatasetCache(
                 ds=self.datamodule,
                 cache_root=self.config.system.hardware.cache_dir,
-                dataset_path=f"{self.config.system.input.dataset}",
                 hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
-                num_gpus_per_node=self.config.system.hardware.num_gpus_per_node,
             )
             callbacks.append(CacheSyncCallback(cache=self.datamodule))
 

@@ -12,7 +12,6 @@
 import io
 import errno
 import multiprocessing
-import struct
 import threading
 from pathlib import Path
 
@@ -20,16 +19,12 @@ import numpy as np
 import pytest
 
 from anemoi.training.utils.dataset_cache import (
-    CachedDataWrapper,
-    CacheConfigurationError,
     CacheKey,
-    DatasetCache,
     DatasetCacheNamespace,
     Endpoint,
-    ProcessTCPCacheServer,
+    ProcessZMQCacheServer,
     RemoteCacheMiss,
-    TCPCacheClient,
-    _recv_exact,
+    ZMQCacheClient,
     _is_capacity_error,
 )
 
@@ -39,105 +34,11 @@ from anemoi.training.utils.dataset_cache import (
 # ---------------------------------------------------------------------------
 
 
-class FakeOriginalData:
-    """Minimal stand-in for an array-like dataset (e.g. zarr array)."""
-
-    def __init__(self, data: np.ndarray):
-        self._data = data
-
-    def __getitem__(self, index):
-        return self._data[index]
-
-    def __len__(self):
-        return self._data.shape[0]
-
-    @property
-    def shape(self):
-        return self._data.shape
-
-
-class FakeCacheInstance:
-    """Minimal stand-in for a DatasetCache to be used by CachedDataWrapper."""
-
-    def __init__(self, data: np.ndarray):
-        self._data = data
-
-    def fetch(self, date, verbose=False):
-        return self._data[date]
-
-
 @pytest.fixture
 def sample_data():
     """4D sample data: (time=10, channels=3, levels=2, grid=5)."""
     rng = np.random.default_rng(42)
     return rng.standard_normal((10, 3, 2, 5)).astype(np.float32)
-
-
-@pytest.fixture
-def fake_cache(sample_data):
-    return FakeCacheInstance(sample_data)
-
-
-@pytest.fixture
-def fake_original(sample_data):
-    return FakeOriginalData(sample_data)
-
-
-# ---------------------------------------------------------------------------
-# Tests for _recv_exact
-# ---------------------------------------------------------------------------
-
-
-class TestRecvExact:
-    """Tests for the _recv_exact helper function."""
-
-    def test_receives_full_payload(self):
-        """Receive exactly N bytes split across multiple recv calls."""
-        payload = b"hello world! this is a test payload"
-        # Create a mock socket that delivers chunks
-        chunks = [payload[:5], payload[5:15], payload[15:]]
-
-        class FakeSocket:
-            def __init__(self, chunks):
-                self._chunks = list(chunks)
-
-            def recv(self, nbytes):
-                if not self._chunks:
-                    return b""
-                chunk = self._chunks.pop(0)
-                return chunk[:nbytes]
-
-        sock = FakeSocket(chunks)
-        result = _recv_exact(sock, len(payload))
-        assert result == payload
-
-    def test_returns_none_on_eof(self):
-        """Return None if socket is closed before all bytes arrive."""
-
-        class FakeSocket:
-            def recv(self, nbytes):
-                return b""
-
-        sock = FakeSocket()
-        result = _recv_exact(sock, 10)
-        assert result is None
-
-    def test_partial_eof(self):
-        """Return None if connection closes mid-stream."""
-
-        class FakeSocket:
-            def __init__(self):
-                self._calls = 0
-
-            def recv(self, nbytes):
-                self._calls += 1
-                if self._calls == 1:
-                    return b"abc"
-                return b""
-
-        sock = FakeSocket()
-        result = _recv_exact(sock, 10)
-        assert result is None
 
 
 class TestCapacityErrors:
@@ -157,92 +58,12 @@ class TestCapacityErrors:
 
 
 # ---------------------------------------------------------------------------
-# Tests for CachedDataWrapper
+# Tests for ProcessZMQCacheServer + ZMQCacheClient
 # ---------------------------------------------------------------------------
 
 
-class TestCachedDataWrapper:
-    """Tests for the CachedDataWrapper class."""
-
-    def test_integer_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[3]
-        np.testing.assert_array_equal(result, sample_data[3])
-
-    def test_numpy_integer_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[np.int64(7)]
-        np.testing.assert_array_equal(result, sample_data[7])
-
-    def test_simple_slice(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[2:5]
-        expected = sample_data[2:5]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_slice_with_step(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[0:8:2]
-        expected = sample_data[0:8:2]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_tuple_single_time_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        # Access like data[3, :, 1, :]
-        result = wrapper[3, :, 1, :]
-        expected = sample_data[3][:, 1, :]
-        np.testing.assert_array_equal(result, expected)
-
-    def test_tuple_slice_time_index(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        # Access like data[1:4, :, 0, :]
-        result = wrapper[1:4, :, 0, :]
-        # Each time step is fetched individually and then sub-indexed
-        expected = np.stack([sample_data[i][:, 0, :] for i in range(1, 4)], axis=0)
-        np.testing.assert_array_equal(result, expected)
-
-    @pytest.mark.parametrize("indices", [[1, 4, 7], np.array([1, 4, 7], dtype=np.int64)])
-    def test_integer_sequence(self, indices, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[indices]
-        np.testing.assert_array_equal(result, sample_data[indices])
-
-    @pytest.mark.parametrize("indices", [[1, 4, 7], np.array([1, 4, 7], dtype=np.int64)])
-    def test_tuple_integer_sequence(self, indices, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[indices, :, 1, :]
-        np.testing.assert_array_equal(result, sample_data[indices, :, 1, :])
-
-    def test_empty_integer_sequence(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        result = wrapper[np.array([], dtype=np.int64)]
-        np.testing.assert_array_equal(result, sample_data[np.array([], dtype=np.int64)])
-
-    def test_len(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert len(wrapper) == 10
-
-    def test_attribute_delegation(self, sample_data, fake_cache, fake_original):
-        """Attributes not on wrapper should delegate to original data."""
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert wrapper.shape == sample_data.shape
-
-    def test_access_count_increments(self, sample_data, fake_cache, fake_original):
-        wrapper = CachedDataWrapper(fake_original, fake_cache)
-        assert wrapper._access_count == 0
-        _ = wrapper[0]
-        _ = wrapper[1]
-        _ = wrapper[2]
-        assert wrapper._access_count == 3
-
-
-# ---------------------------------------------------------------------------
-# Tests for ProcessTCPCacheServer + TCPCacheClient
-# ---------------------------------------------------------------------------
-
-
-class TestProcessTCPCacheServerClient:
-    """Integration tests for the TCP cache server and client."""
+class TestProcessZMQCacheServerClient:
+    """Integration tests for the ZeroMQ cache server and client."""
 
     @pytest.fixture
     def cache_data(self):
@@ -262,8 +83,7 @@ class TestProcessTCPCacheServerClient:
             path.parent.mkdir(parents=True, exist_ok=True)
             np.save(path, value)
         context = multiprocessing.get_context("spawn")
-        counters = tuple(context.Value("q", 0) for _ in range(2))
-        server = ProcessTCPCacheServer({key: str(path) for key, path in entries.items()}, 0, counters)
+        server = ProcessZMQCacheServer({key: str(path) for key, path in entries.items()})
         server.start()
         yield server
         server.close()
@@ -272,7 +92,7 @@ class TestProcessTCPCacheServerClient:
         return Endpoint("127.0.0.1", server.port, 0)
 
     def test_single_fetch(self, cache_data, running_server):
-        client = TCPCacheClient(self.endpoint(running_server))
+        client = ZMQCacheClient(self.endpoint(running_server))
         try:
             key = CacheKey("dataset", 0, 5)
             result = client.fetch(key)
@@ -281,7 +101,7 @@ class TestProcessTCPCacheServerClient:
             client.close()
 
     def test_multiple_fetches(self, cache_data, running_server):
-        client = TCPCacheClient(self.endpoint(running_server))
+        client = ZMQCacheClient(self.endpoint(running_server))
         try:
             for idx in [0, 7, 13, 19]:
                 key = CacheKey("dataset", 0, idx)
@@ -297,7 +117,7 @@ class TestProcessTCPCacheServerClient:
         path = Path(running_server.entries[key.dataset_id]) / str(key.sequence) / f"{key.position}.npy"
         path.parent.mkdir(parents=True, exist_ok=True)
         np.save(path, expected)
-        client = TCPCacheClient(self.endpoint(running_server))
+        client = ZMQCacheClient(self.endpoint(running_server))
         try:
             np.testing.assert_array_equal(client.fetch(key), expected)
             np.testing.assert_array_equal(
@@ -308,7 +128,7 @@ class TestProcessTCPCacheServerClient:
             client.close()
 
     def test_missing_entry(self, running_server):
-        client = TCPCacheClient(self.endpoint(running_server))
+        client = ZMQCacheClient(self.endpoint(running_server))
         try:
             with pytest.raises(RemoteCacheMiss):
                 client.fetch(CacheKey("dataset", 0, 100))
@@ -322,7 +142,7 @@ class TestProcessTCPCacheServerClient:
 
         def worker(idx):
             try:
-                c = TCPCacheClient(self.endpoint(running_server))
+                c = ZMQCacheClient(self.endpoint(running_server))
                 key = CacheKey("dataset", 0, idx)
                 results[idx] = c.fetch(key)
                 c.close()
@@ -341,13 +161,13 @@ class TestProcessTCPCacheServerClient:
 
     def test_ephemeral_port_and_clean_shutdown(self, cache_data, running_server):
         assert running_server.port > 0
-        client = TCPCacheClient(self.endpoint(running_server))
+        client = ZMQCacheClient(self.endpoint(running_server))
         key = CacheKey("dataset", 0, 3)
         np.testing.assert_array_equal(client.fetch(key), cache_data[key])
         client.close()
 
         running_server.close()
-        assert not running_server._process.is_alive()
+        assert not running_server.process.is_alive()
 
 
 class TestDatasetCacheNamespace:
@@ -415,13 +235,6 @@ class TestDatasetCacheNamespace:
         assert not entry.exists()
         assert not marker.exists()
 
-    def test_rejects_incompatible_existing_namespace(self, tmp_path, sample_data):
-        DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
-
-        with pytest.raises(CacheConfigurationError, match="metadata mismatch"):
-            DatasetCacheNamespace(
-                tmp_path,
-                "analysis:fingerprint",
-                self.FakeReader(sample_data[:-1]),
-                0,
-            )
+    def test_negative_position(self, tmp_path, sample_data):
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+        np.testing.assert_array_equal(namespace.fetch_source(0, -1), sample_data[-1])

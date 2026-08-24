@@ -232,26 +232,18 @@ def test_benchmark_dataloader(
             LOGGER.info(f"'config.system.hardware.cache_dir' given. Caching dataset under '{cache_dir}'")
             #import pdb
             #breakpoint()
-            dataset_path=f"{cfg.system.input.dataset}"
-            datamodule = DatasetCache(ds=datamodule, cache_root=cache_dir, dataset_path=dataset_path)
+            datamodule = DatasetCache(ds=datamodule, cache_root=cache_dir)
             datamodule.setup()
 
     # Disable shuffle for benchmarking to get consistent batches across epochs
     datamodule.ds_train.shuffle = False
     LOGGER.info("Disabled shuffle in ds_train for consistent benchmarking across epochs")
     
-    # Verify cache wrapper is still in place if cache is enabled
-    if cache_dir is not None:
-        from anemoi.training.utils.dataset_cache import CachedDataWrapper
-        for dataset_name, dataset in datamodule.ds_train.datasets.items():
-            is_wrapped = isinstance(dataset.data, CachedDataWrapper)
-            LOGGER.info(f"Dataset '{dataset_name}' data is {'WRAPPED' if is_wrapped else 'NOT WRAPPED'} (type: {type(dataset.data).__name__})")
-    
     # Benchmark batch sampling speed
     num_batches_to_test = 100
     LOGGER.info("Testing %d batches per epoch, %d epochs from MultiDataset", num_batches_to_test, 2)
 
-    if cache_dir is not None and not datamodule.is_initalised:
+    if cache_dir is not None and not datamodule.initialized:
          raise ValueError(f"DatasetCache was not properly initialized with cache_dir '{cache_dir}'")
 
     rank = dist.get_rank()
@@ -311,8 +303,6 @@ def test_benchmark_dataloader(
             cached_data = datamodule.ds_train.datasets[primary_dataset_name].data
             
         for idx in indices_to_access:
-            # Access the cached data directly by index
-            # This calls CachedDataWrapper.__getitem__ -> cache.fetch()
             data = cached_data[idx]
             batch_count += 1
 
