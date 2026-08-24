@@ -53,7 +53,7 @@ reference it in the config as follows:
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            _target_: anemoi.training.losses.WeightedMSELoss
             # loss function kwargs here
 
 ******************************
@@ -73,6 +73,15 @@ The following probabilistic loss functions are available by default:
      materialization of the full pairwise tensor.
    - ``stable``: materializes pairwise tensors and uses the numerically
      stable all-pairs formulation.
+-  ``EnergyScoreLoss``: Energy score with a configurable joint outcome.
+   Set ``norm_over`` to ``spatial`` for one spatial score per variable,
+   ``variables`` for one joint variable score per grid node, or
+   ``spatial_and_variables`` for one score over the complete field.
+   Scalers on dimensions included in ``norm_over`` define the weighted norm
+   ``sqrt(sum(weight * difference**2))``. Other scalers multiply the completed
+   score directly, so the same scaler can have a different effective strength
+   when ``norm_over`` changes. In ``variables`` mode, node weights are applied
+   after the norm and should normally sum to one, as for pointwise losses.
 -  ``WeightedMSELoss`` : is the MSELoss used for the diffussion model to
    handle noise weights
 
@@ -88,6 +97,188 @@ deterministic:
             # loss class to initialise
             _target_: anemoi.training.losses.CRPS
             # loss function kwargs here
+
+Neighbour graph for graph scores
+--------------------------------
+
+For score definitions, see https://arxiv.org/html/2607.19161v1.
+
+Graph scores use edges from the model graph; they do not construct a separate
+graph. Add a ``data``-to-``data`` edge set to the graph configuration alongside
+the edges used by the model. For example:
+
+.. code-block:: yaml
+
+   graph:
+     edges:
+       # Keep the encoder, processor, and decoder edges used by the model.
+
+       - source_name: data
+         target_name: data
+         edge_builders:
+           - _target_: anemoi.graphs.edges.KNNEdges
+             num_nearest_neighbours: 9
+         attributes: {}
+
+     post_processors:
+       # Keep any post-processors used by the model graph.
+
+       - _target_: anemoi.graphs.processors.RemoveSelfEdges
+         source_name: data
+         target_name: data
+
+KNN includes the data point itself. Requesting nine nearest points and removing
+that edge leaves eight neighbouring points. The number of neighbours can be
+adjusted for the forecast grid.
+
+The graph scores use an edge weight of 1 for every edge. Therefore, the edge
+set above has an empty edge-attribute mapping, and the corresponding loss
+configuration does not request an edge-weight attribute or row normalization.
+Omitting both options gives the intended unnormalized unit weights. Their sum
+at a node is consequently the number of incoming edges rather than 1. The graph
+is selected in a loss with:
+
+.. code-block:: yaml
+
+   loss_graph:
+     edges_name: [data, to, data]
+
+The examples below use this unweighted neighbourhood graph.
+
+Combining ensemble scores
+-------------------------
+
+``CombinedLoss`` applies ``loss_weights`` to its children. The weights below
+are examples and should be tuned for the scales of the scores and the purpose
+of the additional term.
+
+Graph energy with a weak full-field anchor
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This combines neighbourhood structure from the graph energy score with a
+smaller energy score over the complete spatial and variable field:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         data:
+           _target_: anemoi.training.losses.combined.CombinedLoss
+           loss_weights: [1.0, 0.05]
+           losses:
+             - _target_: anemoi.training.losses.GraphEnergyScoreLoss
+               fair: true
+               scalers: [node_weights]
+               loss_graph:
+                 edges_name: [data, to, data]
+             - _target_: anemoi.training.losses.EnergyScoreLoss
+               fair: true
+               norm_over: spatial_and_variables
+               scalers: [node_weights]
+
+Here, ``norm_over: spatial_and_variables`` gives one energy score over space
+and all selected variables. Use ``spatial`` to calculate a separate spatial
+score for each variable, or ``variables`` to calculate a joint variable score
+at each grid node.
+
+Energy score at multiple scales
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Any ensemble score accepted as ``per_scale_loss`` can be evaluated on the
+successive spatial fields produced by ``MultiscaleLossWrapper``:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         data:
+           _target_: anemoi.training.losses.MultiscaleLossWrapper
+           weights: [0.5, 0.3, 0.15, 0.05]
+           multiscale_config:
+             num_scales: 3
+             base_num_nearest_neighbours: 4
+             base_sigma: 0.1
+             scale_factor: 2
+           per_scale_loss:
+             _target_: anemoi.training.losses.EnergyScoreLoss
+             fair: true
+             norm_over: spatial_and_variables
+             scalers: [node_weights]
+
+Multiscale CRPS with an edge CRPS for one variable
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Variable selection belongs to the inner score. In this example, the first
+term evaluates CRPS for all output variables, while the second evaluates edge
+CRPS only for ``tp``:
+
+.. code-block:: yaml
+
+   training:
+     training_loss:
+       datasets:
+         data:
+           _target_: anemoi.training.losses.combined.CombinedLoss
+           loss_weights: [1.0, 0.1]
+           losses:
+             - _target_: anemoi.training.losses.MultiscaleLossWrapper
+               weights: [0.5, 0.3, 0.15, 0.05]
+               multiscale_config:
+                 num_scales: 3
+                 base_num_nearest_neighbours: 4
+                 base_sigma: 0.1
+                 scale_factor: 2
+               per_scale_loss:
+                 _target_: anemoi.training.losses.CRPS
+                 alpha: 0.95
+                 scalers: [node_weights]
+             - _target_: anemoi.training.losses.MultiscaleLossWrapper
+               weights: [0.5, 0.3, 0.15, 0.05]
+               multiscale_config:
+                 num_scales: 3
+                 base_num_nearest_neighbours: 4
+                 base_sigma: 0.1
+                 scale_factor: 2
+               per_scale_loss:
+                 _target_: anemoi.training.losses.GraphEdgeCRPSLoss
+                 alpha: 1.0
+                 scalers: [node_weights]
+                 predicted_variables: [tp]
+                 target_variables: [tp]
+                 loss_graph:
+                   edges_name: [data, to, data]
+
+.. _compiling-graph-scores:
+
+Compiling graph scores
+^^^^^^^^^^^^^^^^^^^^^^
+
+Graph scores can be selected through ``model.compile``. Each graph score keeps
+the model-parallel communication in eager mode and compiles its local score
+calculation. Module selection uses the concrete class, so list every graph
+score class used by the training loss:
+
+.. code-block:: yaml
+
+   model:
+     compile:
+       - module: anemoi.training.losses.GraphEnergyScoreLoss
+         options:
+           dynamic: false
+       - module: anemoi.training.losses.GraphVariogramScoreLoss
+         options:
+           dynamic: false
+       - module: anemoi.training.losses.GraphEdgeCRPSLoss
+         options:
+           dynamic: false
+       - module: anemoi.training.losses.GraphEdgeEnergyScoreLoss
+         options:
+           dynamic: false
+
+Only classes present in the configured loss need to be listed. The global
+energy score remains eager.
 
 .. _multiscale-loss-functions:
 
@@ -373,6 +564,10 @@ Conceptually, it applies a spectral transform to both forecast ensemble and targ
 then evaluates a kernel-CRPS over the resulting spectral representation (typically
 interpreted as scale-dependent coefficients).
 
+By default, complex coefficients are compared directly. Set
+``coefficient_magnitude: true`` to compare their moduli instead, so that the
+score depends on coefficient amplitude but not phase.
+
 This loss is intended for *ensemble* training (``ensemble > 1``). For deterministic
 training, consider spectral distance losses instead.
 
@@ -392,6 +587,7 @@ Use this for limited-area or other regular 2D fields that can be reshaped to
          transform: fft2d
          x_dim: 256
          y_dim: 128
+         coefficient_magnitude: true
 
 Example configuration (reduced Gaussian grid SHT)
 -------------------------------------------------
@@ -472,7 +668,7 @@ Spectral losses can be combined with standard grid-point losses through
        your_dataset_name:
          _target_: anemoi.training.losses.combined.CombinedLoss
          losses:
-           - _target_: anemoi.training.losses.mse.WeightedMSELoss
+           - _target_: anemoi.training.losses.WeightedMSELoss
            - _target_: anemoi.training.losses.spectral.SpectralCRPSLoss
              transform: fft2d
              x_dim: 256
@@ -496,7 +692,7 @@ define whether to include them in the loss function by setting
       datasets:
          your_dataset_name:
             # loss class to initialise
-            _target_: anemoi.training.losses.mse.WeightedMSELoss
+            _target_: anemoi.training.losses.WeightedMSELoss
             scalers: ['scaler1', 'scaler2']
 
 Scalers can be added as options for the loss functions using the
@@ -783,8 +979,8 @@ losses above.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-               - __target__: anemoi.training.losses.mse.WeightedMSELoss
-               - __target__: anemoi.training.losses.mae.WeightedMAELoss
+               - _target_: anemoi.training.losses.WeightedMSELoss
+               - _target_: anemoi.training.losses.MAELoss
             scalers: ['variable']
             loss_weights: [1.0,0.5]
 
@@ -807,10 +1003,10 @@ individual loss config.
          your_dataset_name:
             _target_: anemoi.training.losses.combined.CombinedLoss
             losses:
-                  - _target_: anemoi.training.losses.mse.WeightedMSELoss
-                  scalers: ['variable']
-                  - _target_: anemoi.training.losses.mae.WeightedMAELoss
-                  scalers: ['loss_weights_mask']
+               - _target_: anemoi.training.losses.WeightedMSELoss
+                 scalers: ['variable']
+               - _target_: anemoi.training.losses.MAELoss
+                 scalers: ['loss_weights_mask']
             loss_weights: [1.0, 1.0]
             scalers: ['*']
 
