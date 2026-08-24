@@ -11,8 +11,10 @@
 
 import io
 import errno
+import multiprocessing
 import struct
 import threading
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -24,9 +26,9 @@ from anemoi.training.utils.dataset_cache import (
     DatasetCache,
     DatasetCacheNamespace,
     Endpoint,
+    ProcessTCPCacheServer,
     RemoteCacheMiss,
     TCPCacheClient,
-    TCPCacheServer,
     _recv_exact,
     _is_capacity_error,
 )
@@ -235,11 +237,11 @@ class TestCachedDataWrapper:
 
 
 # ---------------------------------------------------------------------------
-# Tests for TCPCacheServer + TCPCacheClient
+# Tests for ProcessTCPCacheServer + TCPCacheClient
 # ---------------------------------------------------------------------------
 
 
-class TestTCPCacheServerClient:
+class TestProcessTCPCacheServerClient:
     """Integration tests for the TCP cache server and client."""
 
     @pytest.fixture
@@ -252,13 +254,16 @@ class TestTCPCacheServerClient:
         }
 
     @pytest.fixture
-    def running_server(self, cache_data):
-        """Start a TCPCacheServer and yield it; shut down after test."""
-        class FakeCache:
-            def _fetch_local_only(self, dataset_id, sequence, position):
-                return cache_data.get(CacheKey(dataset_id, sequence, position))
-
-        server = TCPCacheServer(FakeCache(), 0, host="127.0.0.1")
+    def running_server(self, cache_data, tmp_path):
+        """Start the production process server and yield it."""
+        entries = {dataset_id: tmp_path / dataset_id for dataset_id in ("dataset", "other-dataset")}
+        for key, value in cache_data.items():
+            path = entries[key.dataset_id] / str(key.sequence) / f"{key.position}.npy"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            np.save(path, value)
+        context = multiprocessing.get_context("spawn")
+        counters = tuple(context.Value("q", 0) for _ in range(2))
+        server = ProcessTCPCacheServer({key: str(path) for key, path in entries.items()}, 0, counters)
         server.start()
         yield server
         server.close()
@@ -289,6 +294,9 @@ class TestTCPCacheServerClient:
         key = CacheKey("other-dataset", 0, 5)
         expected = np.full((3, 5), 17, dtype=np.float32)
         cache_data[key] = expected
+        path = Path(running_server.entries[key.dataset_id]) / str(key.sequence) / f"{key.position}.npy"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        np.save(path, expected)
         client = TCPCacheClient(self.endpoint(running_server))
         try:
             np.testing.assert_array_equal(client.fetch(key), expected)
@@ -331,22 +339,15 @@ class TestTCPCacheServerClient:
         for idx in range(5):
             np.testing.assert_array_equal(results[idx], cache_data[CacheKey("dataset", 0, idx)])
 
-    def test_ephemeral_port_and_clean_shutdown(self, cache_data):
-        class FakeCache:
-            def _fetch_local_only(self, dataset_id, sequence, position):
-                return cache_data.get(CacheKey(dataset_id, sequence, position))
-
-        server = TCPCacheServer(FakeCache(), 0, host="127.0.0.1")
-        server.start()
-
-        assert server.port > 0
-        client = TCPCacheClient(Endpoint("127.0.0.1", server.port, 0))
+    def test_ephemeral_port_and_clean_shutdown(self, cache_data, running_server):
+        assert running_server.port > 0
+        client = TCPCacheClient(self.endpoint(running_server))
         key = CacheKey("dataset", 0, 3)
         np.testing.assert_array_equal(client.fetch(key), cache_data[key])
         client.close()
 
-        server.close()
-        assert not server._thread.is_alive()
+        running_server.close()
+        assert not running_server._process.is_alive()
 
 
 class TestDatasetCacheNamespace:

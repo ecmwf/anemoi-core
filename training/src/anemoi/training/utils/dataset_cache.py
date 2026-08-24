@@ -40,7 +40,6 @@ _CAPACITY_ERROR_MESSAGES = (
 )
 _REMOTE_CHUNK_BYTES = 48 << 20
 _REMOTE_PIPELINE_DEPTH = 3
-_REMOTE_SERVER_CPUS = 4
 
 
 def _is_capacity_error(error: OSError) -> bool:
@@ -156,10 +155,8 @@ def _handle_file_requests(connection, entries, counters):
         connection.close()
 
 
-def _serve_cache(port, entries, stop, ready, counters, affinity):
+def _serve_cache(port, entries, stop, ready, counters):
     try:
-        if affinity and hasattr(os, "sched_setaffinity"):
-            os.sched_setaffinity(0, affinity)
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         server.bind(("", port))
@@ -222,77 +219,8 @@ class CachedDataWrapper:
         return getattr(self.original_data, name)
 
 
-class TCPCacheServer:
-    """Persistent TCP service for committed canonical cache keys."""
-
-    def __init__(self, cache, port, host=""):
-        self.cache = cache
-        self.port = port
-        self.host = host
-        self._server_socket = None
-
-    def start(self):
-        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        server.bind((self.host, self.port))
-        server.listen(64)
-        self.port = server.getsockname()[1]
-        self._server_socket = server
-        self._thread = threading.Thread(target=self._accept_loop, daemon=True)
-        self._thread.start()
-
-    def _accept_loop(self):
-        while self._server_socket is not None:
-            try:
-                connection, _ = self._server_socket.accept()
-            except OSError:
-                break
-            threading.Thread(target=self._handle, args=(connection,), daemon=True).start()
-
-    def _handle(self, connection):
-        try:
-            while True:
-                header = _recv_exact(connection, 4)
-                if header is None:
-                    break
-                request_payload = _recv_exact(connection, struct.unpack("!I", header)[0])
-                if request_payload is None:
-                    break
-                request = json.loads(request_payload)
-                values = [
-                    self.cache._fetch_local_only(request["dataset_id"], request["sequence"], position)
-                    for position in request["positions"]
-                ]
-                if not values or any(value is None for value in values):
-                    _send_shard(connection, None)
-                    continue
-                grid = slice(*request["grid"])
-                first = values[0][..., grid]
-                result = np.empty((len(values), *first.shape), dtype=first.dtype)
-                for index, value in enumerate(values):
-                    result[index] = value[..., grid]
-                _send_shard(connection, result)
-        except (ConnectionResetError, BrokenPipeError, OSError, ValueError, KeyError):
-            pass
-        finally:
-            connection.close()
-
-    def close(self):
-        server = self._server_socket
-        self._server_socket = None
-        if server is not None:
-            try:
-                server.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            server.close()
-        thread = getattr(self, "_thread", None)
-        if thread is not None and thread is not threading.current_thread():
-            thread.join(timeout=5)
-
-
 class TCPCacheClient:
-    """Persistent client for :class:`TCPCacheServer`."""
+    """Persistent client for a process cache server."""
 
     def __init__(self, endpoint: Endpoint, timeout=30.0):
         self.endpoint = endpoint
@@ -345,11 +273,10 @@ class TCPCacheClient:
 
 
 class ProcessTCPCacheServer:
-    def __init__(self, entries, port, counters, affinity=()):
+    def __init__(self, entries, port, counters):
         self.entries = entries
         self.port = port
         self.counters = counters
-        self.affinity = affinity
 
     def start(self):
         context = multiprocessing.get_context("spawn")
@@ -357,7 +284,7 @@ class ProcessTCPCacheServer:
         ready_parent, ready_child = context.Pipe(duplex=False)
         self._process = context.Process(
             target=_serve_cache,
-            args=(self.port, self.entries, self._stop, ready_child, self.counters, self.affinity),
+            args=(self.port, self.entries, self._stop, ready_child, self.counters),
             daemon=True,
         )
         self._process.start()
@@ -661,13 +588,10 @@ class DatasetCache(pl.LightningDataModule):
     def _start_server(self):
         if self.remote_backend == "tcp":
             entries = {dataset_id: str(namespace.entries_path) for dataset_id, namespace in self.namespaces.items()}
-            available_cpus = sorted(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else []
-            affinity = available_cpus[: min(_REMOTE_SERVER_CPUS, len(available_cpus) - 1)]
             self._server = ProcessTCPCacheServer(
                 entries,
                 self.port,
                 (self.remote_server_read_ns, self.remote_server_send_ns),
-                affinity,
             )
             try:
                 self._server.start()
@@ -679,7 +603,6 @@ class DatasetCache(pl.LightningDataModule):
                     entries,
                     0,
                     (self.remote_server_read_ns, self.remote_server_send_ns),
-                    affinity,
                 )
                 self._server.start()
             self.port = self._server.port
@@ -986,7 +909,7 @@ class DatasetCache(pl.LightningDataModule):
             executor.shutdown()
         if getattr(self, "is_node_leader", False):
             server = getattr(self, "_server", None)
-            if isinstance(server, (TCPCacheServer, ProcessTCPCacheServer)):
+            if isinstance(server, ProcessTCPCacheServer):
                 server.close()
             elif server is not None:
                 server.shutdown()
