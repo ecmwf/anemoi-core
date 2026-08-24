@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from collections.abc import Generator
+from functools import cached_property
 from os import PathLike
 from pathlib import Path
 from typing import Any
@@ -23,12 +23,17 @@ class Config:
         self._interpolations = InterpolationReferences()
         self._ops: list[tuple[Ops, tuple[Any, ...]]] = []
 
-    def documents(self) -> Generator[Document, None, None]:
+    @cached_property
+    def documents(self) -> dict[str, Document]:
+        documents: dict[str, Document] = {}
         for path in self._path.glob("**/*.yaml"):
-            yield Document(path, path.relative_to(self._path).parts[:-1])
+            parts = path.relative_to(self._path).parts
+            name = "/".join(parts)
+            documents[name] = Document(path, parts[:-1])
+        return documents
 
     def parse_interpolations(self) -> None:
-        for document in self.documents():
+        for document in self.documents.values():
             self._interpolations.parse_document(document)
 
     def drop_key(self, keys: str) -> None:
@@ -41,6 +46,6 @@ class Config:
         self._ops.append((Ops.RENAME, (start, end)))
 
     def exec_ops(self) -> None:
-        for document in self.documents():
+        for document in self.documents.values():
             document.exec_ops(self._ops)
         self._ops = []

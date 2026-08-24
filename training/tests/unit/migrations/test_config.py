@@ -18,7 +18,45 @@ def test_config(config_from_contents: ConfigFromContents):
               bar:
                 baz: value
             """)})
-    next(config.documents())
+    _docs = config.documents
+
+
+def test_exec_ops(config_from_contents: ConfigFromContents):
+    config = config_from_contents(
+        {
+            "config.yaml": dedent("""\
+            key: val
+            foo:
+              bar:
+                baz: value baz
+            prefix:
+              foo:
+                value: 1
+            """),
+            "prefix/config.yaml": dedent("""\
+            foo:
+              bar: value bar
+            other: other value
+            """),
+        }
+    )
+
+    config.drop_key("prefix.foo")
+    config.exec_ops()
+    expected_outputs = {
+        "config.yaml": dedent("""\
+        key: val
+        foo:
+          bar:
+            baz: value baz
+        prefix: {}
+        """),
+        "prefix/config.yaml": dedent("""\
+        other: other value
+        """),
+    }
+    for doc_path, expected_output in expected_outputs.items():
+        assert config.documents[doc_path].to_yaml() == expected_output
 
 
 def test_interpolations(config_from_contents: ConfigFromContents):
