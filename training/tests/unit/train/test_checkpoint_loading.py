@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
@@ -440,7 +441,7 @@ def test_on_save_checkpoint_persists_rollout_step() -> None:
     assert checkpoint["task_state"]["rollout"]["last_increased_epoch"] == 1
 
 
-def test_on_load_checkpoint_restores_rollout_step() -> None:
+def test_on_load_checkpoint_restores_rollout_step(caplog: pytest.LogCaptureFixture) -> None:
     """on_load_checkpoint recovers rollout.step so resume continues from the right value."""
     module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
 
@@ -449,10 +450,22 @@ def test_on_load_checkpoint_restores_rollout_step() -> None:
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
+    caplog.set_level(logging.INFO)
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     assert task.rollout.step == 3
     assert task.rollout._last_increased_epoch == 1
+    assert "Restored rollout step from checkpoint: 3 (task was initialized at step 1)." in caplog.messages
+
+
+def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFixture) -> None:
+    """Training startup reports the final task rollout step."""
+    module, _ = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 0, "maximum": 2})
+    caplog.set_level(logging.INFO)
+
+    BaseTrainingModule.on_train_start(module)
+
+    assert caplog.messages == ["Effective task rollout step: 2."]
 
 
 def test_on_load_checkpoint_load_weights_only_keeps_configured_rollout_step() -> None:

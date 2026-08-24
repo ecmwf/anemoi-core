@@ -241,6 +241,10 @@ class Forecaster(BaseTask):
             sync_dist=False,
         )
 
+    def log_training_state(self) -> None:
+        """Log the effective rollout state at the start of training."""
+        LOGGER.info("Effective task rollout step: %d.", self.rollout.step)
+
     def training_runtime_state_dict(self) -> dict:
         """Return training runtime state to be persisted in the training checkpoint.
 
@@ -253,7 +257,13 @@ class Forecaster(BaseTask):
     def load_training_runtime_state_dict(self, state: dict) -> None:
         """Restore training runtime state from a training checkpoint."""
         if "rollout" in state:
+            initialized_step = self.rollout.step
             self.rollout.load_state_dict(state["rollout"])
+            LOGGER.info(
+                "Restored rollout step from checkpoint: %d (task was initialized at step %d).",
+                self.rollout.step,
+                initialized_step,
+            )
 
     def on_train_epoch_end(self, current_epoch: int) -> None:
         if self.rollout.should_increase(current_epoch):

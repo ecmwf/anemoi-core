@@ -592,11 +592,10 @@ specific timesteps.
 Restarting rollout training
 ===========================
 
-When restarting an interrupted rollout run, the rollout state
-(the current ``rollout.step`` and the last epoch that triggered an
-increment) and dataloader epoch are automatically saved in every Lightning
-checkpoint and restored on resume. No manual adjustment of ``rollout.start``
-is needed.
+Every Forecaster checkpoint stores the task rollout state: the current
+``rollout.step`` and the last epoch that triggered an increment. This also
+applies when the rollout step is 1 or the rollout is fixed. The dataloader epoch
+is also stored.
 
 When using rollout training with ``rollout.epoch_increment > 0``, extra
 care is required when restarting an interrupted run.
@@ -632,10 +631,14 @@ used.
 
 .. note::
 
-   When fully resuming training (``training.load_weights_only: false``), the
-   rollout step saved in the checkpoint overrides ``rollout.start``. With
-   ``training.load_weights_only: true``, Anemoi restores only the model weights
-   and starts training with ``rollout.start`` from the current configuration.
+   Fully resuming a training run restores the optimiser and scheduler state,
+   current rollout step, and dataloader epoch from the checkpoint. The saved
+   ``rollout.step`` overrides ``rollout.start`` from the current configuration.
+   Resetting the rollout step while restoring optimiser and scheduler state is
+   not currently supported. To start from ``rollout.start`` in the current
+   configuration, set ``training.load_weights_only: true``; this restores the
+   model weights but initializes new optimiser and scheduler state from the
+   current configuration.
 
 *******************
  Transfer Learning

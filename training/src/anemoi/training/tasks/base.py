@@ -198,6 +198,9 @@ class BaseTask(ABC):
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
+    def log_training_state(self) -> None:  # noqa: B027
+        """Log the effective task state at the start of training."""
+
     def training_runtime_state_dict(self) -> dict:
         """Return training runtime state to be persisted in the training checkpoint.
 
