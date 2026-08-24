@@ -632,7 +632,8 @@ The recommended restart recipe is:
 1. Restart from a checkpoint saved at the end of an epoch.
 2. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
    **unchanged** in your configuration.
-3. Set ``dataloader.persistent_workers`` to ``false``.
+3. Use non-persistent dataloader workers. Anemoi applies this automatically
+   when ``rollout.epoch_increment > 0``.
 4. Reuse the original ``ANEMOI_BASE_SEED``, dataloader configuration, and
    distributed configuration.
 5. Ensure that ``training.run_id`` is set to the run ID of the interrupted

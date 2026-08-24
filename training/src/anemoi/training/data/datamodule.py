@@ -174,15 +174,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Restore the dataloader epoch before Lightning starts worker processes."""
         self.set_epoch(state_dict["epoch"])
 
-    def _persistent_workers(self) -> bool:
-        """Return whether workers persist, disabling persistence for a changing rollout."""
-        persistent_workers = self.config.dataloader.persistent_workers
+    @cached_property
+    def _use_persistent_workers(self) -> bool:
+        """Return the effective worker persistence setting."""
+        persistent_workers = self.config.dataloader.get("persistent_workers", True)
         rollout = getattr(self.task, "rollout", None)
         if persistent_workers and rollout is not None and rollout.epoch_increment > 0:
-            LOGGER.warning(
-                "Setting dataloader.persistent_workers to false because the rollout changes between epochs.",
+            LOGGER.info(
+                "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
             )
-            self.config.dataloader.persistent_workers = False
             return False
         return persistent_workers
 
@@ -207,7 +207,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._persistent_workers(),
+            persistent_workers=self._use_persistent_workers,
             **extra,
         )
 

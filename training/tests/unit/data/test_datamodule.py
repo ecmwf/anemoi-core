@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 from collections.abc import Iterator
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -109,6 +110,22 @@ def test_persistent_workers_follow_dataloader_config(persistent_workers: bool) -
     assert [loader.persistent_workers for loader in loaders] == [persistent_workers] * len(loaders)
 
 
+def test_persistent_workers_default_to_true_when_config_is_unvalidated() -> None:
+    """The documented default applies when validation does not populate the field."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
+    )
+    datamodule = _make_datamodule(task)
+    del datamodule.config.dataloader.persistent_workers
+
+    loader = datamodule._get_dataloader(TinyIterableDataset(), "training")
+
+    assert loader.persistent_workers is True
+
+
 @pytest.mark.parametrize(
     "rollout",
     [
@@ -121,6 +138,7 @@ def test_persistent_workers_are_disabled_for_rollout_schedule(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """An epoch increment disables persistence even after rollout reaches its maximum."""
+    caplog.set_level(logging.INFO)
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
@@ -132,9 +150,9 @@ def test_persistent_workers_are_disabled_for_rollout_schedule(
     loaders = [datamodule._get_dataloader(TinyIterableDataset(), stage) for stage in ("training", "validation", "test")]
 
     assert [loader.persistent_workers for loader in loaders] == [False] * len(loaders)
-    assert datamodule.config.dataloader.persistent_workers is False
+    assert datamodule.config.dataloader.persistent_workers is True
     assert caplog.messages == [
-        "Setting dataloader.persistent_workers to false because the rollout changes between epochs.",
+        "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
     ]
 
 

@@ -127,7 +127,7 @@ class BaseTask(ABC):
         self,
         time_indices: list[int],
         batch: dict[str, torch.Tensor],
-        **kwargs,
+        **_kwargs,
     ) -> None:
         """Raise if the batch does not contain all requested time steps."""
         if not time_indices:
@@ -138,8 +138,8 @@ class BaseTask(ABC):
             available = dataset_batch.shape[1]
             if available < required:
                 msg = (
-                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but step "
-                    f"{kwargs} requires index {required - 1} (indices {time_indices}). The dataloader's "
+                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but requires "
+                    f"index {required - 1} (indices {time_indices}). The dataloader's "
                     "time window does not match the task rollout."
                 )
                 raise ValueError(msg)

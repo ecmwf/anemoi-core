@@ -316,8 +316,13 @@ def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> No
 
     task.rollout.increase(current_epoch=0)
 
-    with pytest.raises(ValueError, match="time steps"):
+    with pytest.raises(ValueError, match="requires index 3") as exc_info:
         task.get_targets(batch, rollout_step=1)
+
+    assert str(exc_info.value) == (
+        "Batch for dataset 'data' contains 3 time steps, but requires index 3 (indices [3]). "
+        "The dataloader's time window does not match the task rollout."
+    )
 
 
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
