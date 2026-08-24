@@ -124,6 +124,12 @@ Consequently, when ``persistent_workers`` is ``true``, a restarted job does not
 continue the same shuffle sequence as an uninterrupted run, even when it uses the
 same base seed.
 
+With ``persistent_workers`` set to ``true``, repeating a training run split
+across multiple jobs produces the same shuffle sequence if the jobs restart from
+checkpoints saved at the end of the same epochs and use the same base seed, data,
+dataloader configuration, and distributed configuration. However, this sequence
+differs from running the same number of epochs in one uninterrupted job.
+
 Anemoi does not store a dataloader's position within an epoch. A checkpoint
 written during an epoch therefore cannot resume the exact data sequence at the
 next batch and may repeat or skip samples. Use checkpoints saved at the end of an

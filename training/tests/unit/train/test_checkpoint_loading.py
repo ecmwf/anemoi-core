@@ -441,21 +441,21 @@ def test_on_save_checkpoint_persists_rollout_step() -> None:
     assert checkpoint["task_state"]["rollout"]["last_increased_epoch"] == 1
 
 
-def test_on_load_checkpoint_restores_rollout_step(caplog: pytest.LogCaptureFixture) -> None:
-    """on_load_checkpoint recovers rollout.step so resume continues from the right value."""
-    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+def test_on_load_checkpoint_overrides_configured_rollout_start(caplog: pytest.LogCaptureFixture) -> None:
+    """A full resume uses the checkpoint rollout state instead of rollout.start."""
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 2, "maximum": 5})
 
     checkpoint = {
-        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
+        "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
     caplog.set_level(logging.INFO)
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
-    assert task.rollout.step == 3
-    assert task.rollout._last_increased_epoch == 1
-    assert "Restored rollout step from checkpoint: 3 (task was initialized at step 1)." in caplog.messages
+    assert task.rollout.step == 4
+    assert task.rollout._last_increased_epoch == 3
+    assert "Restored rollout step from checkpoint: 4 (task was initialized at step 2)." in caplog.messages
 
 
 def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFixture) -> None:
@@ -468,15 +468,15 @@ def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFix
     assert caplog.messages == ["Effective task rollout step: 2."]
 
 
-def test_on_load_checkpoint_load_weights_only_keeps_configured_rollout_step() -> None:
-    """Loading only model weights must not restore the checkpoint's rollout state."""
+def test_on_load_checkpoint_load_weights_only_starts_rollout_schedule_from_config() -> None:
+    """Loading only weights starts the rollout schedule at rollout.start."""
     module, task = _make_module_with_forecaster_task(
-        {"start": 2, "epoch_increment": 0, "maximum": 2},
+        {"start": 2, "epoch_increment": 2, "maximum": 5},
         load_weights_only=True,
     )
 
     checkpoint = {
-        "task_state": {"rollout": {"step": 1, "last_increased_epoch": -1}},
+        "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
         "state_dict": {},
     }
@@ -484,6 +484,14 @@ def test_on_load_checkpoint_load_weights_only_keeps_configured_rollout_step() ->
 
     assert task.rollout.step == 2
     assert task.rollout._last_increased_epoch == -1
+
+    task.on_train_epoch_end(0)
+    assert task.rollout.step == 2
+    assert task.rollout._last_increased_epoch == -1
+
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+    assert task.rollout._last_increased_epoch == 1
 
 
 class _RecordingDataModule:
