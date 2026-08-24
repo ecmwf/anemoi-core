@@ -211,6 +211,9 @@ class Document(NodeBase):
     def to_yaml(self) -> str:
         return self.yaml.to_yaml().decode()
 
+    def _strip_prefix(self, keys: str) -> str:
+        return keys.removeprefix(".".join(self._prefix) + ".")
+
     def select(self, parts: Sequence[str], create_missing: bool = False) -> NodeBase:
         node = self
         for part in parts:
@@ -219,31 +222,33 @@ class Document(NodeBase):
             node = node[part]
         return node
 
-    def drop_key(self, keys: str) -> None:
-        parents, key = parse_key(keys)
+    def drop_key(self, keys: str, remove_empty: bool = False) -> None:
+        parents, key = parse_key(self._strip_prefix(keys))
         parent_node = self.select(parents)
-        del parent_node[key]
+
+        if not remove_empty:
+            del parent_node[key]
+            return
+
+        parts = keys.split(".")
+        head_key_k = len(parts) - 1
+        while isinstance(parent_node.cfg, (ListConfig, DictConfig)) and len(parent_node.value) == 1:
+            parent_node = parent_node.parent
+            head_key_k -= 1
+        del parent_node[parts[head_key_k]]
 
     def add_key(self, keys: str, value: Any) -> None:
-        parents, key = parse_key(keys)
+        parents, key = parse_key(self._strip_prefix(keys))
         parent_node = self.select(parents, create_missing=True)
         parent_node[key] = value
 
     def rename_key(self, start: str, end: str, remove_empty: bool = False) -> None:
+        start, end = self._strip_prefix(start), self._strip_prefix(end)
         parts = start.split(".")
         start_node = self.select(parts)
         value = start_node.value
         self.add_key(end, value)
-
-        if not remove_empty:
-            self.drop_key(start)
-            return
-
-        head_key_k = len(parts) - 1
-        while isinstance(start_node.parent.cfg, (ListConfig, DictConfig)) and len(start_node.parent.value) == 1:
-            start_node = start_node.parent
-            head_key_k -= 1
-        del start_node.parent[parts[head_key_k]]
+        self.drop_key(start, remove_empty)
 
     def exec_ops(self, ops: Iterable[tuple[Ops, tuple[Any, ...]]]) -> None:
         for op, op_args in ops:
