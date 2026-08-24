@@ -64,7 +64,7 @@ def ensure_sharded(
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup, gather_in_backward: bool = True
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
 ) -> Tensor:
     """Shard tensor.
 
@@ -77,9 +77,15 @@ def shard_tensor(
     dim : int
         dimension along which to shard.
     sizes : ShardSizes
+<<<<<<< HEAD
         Per-rank shard sizes.
     mgroup : ProcessGroup
         model communication group.
+=======
+        Per-rank shard sizes
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+>>>>>>> fb3411b91 (models: update docstrings and type annotations in graph comm. wrappers)
     gather_in_backward : bool
         perform gather in backward, default True.
 
@@ -91,7 +97,7 @@ def shard_tensor(
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -103,9 +109,15 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     dim : int
         dimension along which to gather.
     sizes : ShardSizes
+<<<<<<< HEAD
         Per-rank shard sizes.
     mgroup : ProcessGroup
         model communication group.
+=======
+        Per-rank shard sizes
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+>>>>>>> fb3411b91 (models: update docstrings and type annotations in graph comm. wrappers)
 
     Returns
     -------
@@ -115,7 +127,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
 
-def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
+def reduce_tensor(input_: Tensor, mgroup: ProcessGroup | None) -> Tensor:
     """Reduce tensor.
 
     Reduces tensor across ranks.
@@ -123,9 +135,15 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     Parameters
     ----------
     input_ : Tensor
+<<<<<<< HEAD
         Input.
     mgroup : ProcessGroup
         model communication group.
+=======
+        Input
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+>>>>>>> fb3411b91 (models: update docstrings and type annotations in graph comm. wrappers)
 
     Returns
     -------
@@ -139,7 +157,7 @@ def sync_tensor(
     input_: Tensor,
     dim: int,
     sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
     gather_in_fwd: bool = True,
 ) -> Tensor:
     """Sync tensor.
@@ -153,9 +171,9 @@ def sync_tensor(
     dim : int
         dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes.
-    mgroup : ProcessGroup
-        model communication group.
+        Per-rank shard sizes
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
     gather_in_fwd : bool, optional
         If True, gather the shards in the forward pass and split the gradient
         again in the backward pass. If False, pass the input through unchanged
@@ -169,7 +187,7 @@ def sync_tensor(
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -182,8 +200,8 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         dimension along which to gather.
     sizes : ShardSizes
         Per-rank shard sizes.
-    mgroup : ProcessGroup
-        model communication group.
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
 
     Returns
     -------
@@ -199,7 +217,7 @@ def all_to_all_transpose(
     split_sizes: ShardSizes,
     dim_concat: int,
     concat_sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
 ) -> Tensor:
     """All-to-all transpose.
 
@@ -217,8 +235,8 @@ def all_to_all_transpose(
         Dimension along which to concatenate the transposed tensors.
     concat_sizes : ShardSizes
         Shapes of the concatenated tensors.
-    mgroup : ProcessGroup
-        Model communication group.
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
 
     Returns
     -------
