@@ -18,6 +18,7 @@ from copy import deepcopy
 from functools import cached_property
 from pathlib import Path
 from statistics import median
+from unittest import mock
 
 import pytorch_lightning as pl
 import pytest
@@ -27,17 +28,23 @@ from omegaconf import DictConfig
 from pytorch_lightning.profilers import SimpleProfiler
 
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils import dataset_cache as dataset_cache_module
 from anemoi.training.utils.dataset_cache import DatasetCache
 
 LOGGER = logging.getLogger(__name__)
 
+_DATASET_CACHE_SETUP = DatasetCache.setup
+_DATASET_CACHE_FETCH = DatasetCache.fetch
+_HOSTNAME_SUFFIX = "-ab-gpil-ib"
+
 
 class _EpochTimer(pl.Callback):
-    def __init__(self):
+    def __init__(self, remote_ready_paths=None):
         self.durations = []
         self.cache_stats = []
         self.cache_io_seconds = []
         self.dataloader_wait_seconds = 0.0
+        self.remote_ready_paths = remote_ready_paths
         self._started_at = None
         self._cache_before = None
         self._cache_io_before = None
@@ -77,6 +84,9 @@ class _EpochTimer(pl.Callback):
                     for after, before in zip(trainer.datamodule.profile_snapshot(), self._cache_io_before)
                 )
             )
+        if self.remote_ready_paths is not None and trainer.current_epoch == 0:
+            cache = trainer.datamodule
+            self.remote_ready_paths[cache.node_id].touch()
 
 
 class _BenchmarkTrainer(AnemoiTrainer):
@@ -94,7 +104,7 @@ class _BenchmarkTrainer(AnemoiTrainer):
         return [*super().callbacks, self._timer]
 
 
-def _run_training(config, cache_root=None):
+def _run_training(config, cache_root=None, remote_ready_paths=None):
     config = deepcopy(config)
     config.training.max_epochs = 3
     config.dataloader.limit_batches.validation = 0
@@ -102,7 +112,7 @@ def _run_training(config, cache_root=None):
     config.diagnostics.log.mlflow.enabled = False
     config.system.hardware.cache_dir = None if cache_root is None else str(cache_root)
 
-    timer = _EpochTimer()
+    timer = _EpochTimer(remote_ready_paths)
     profiler = SimpleProfiler()
     trainer = _BenchmarkTrainer(config, timer, profiler)
     trainer.datamodule.ds_train.shuffle = False
@@ -113,39 +123,115 @@ def _run_training(config, cache_root=None):
     return timer
 
 
+def _setup_process_cache(self, stage=None):
+    rank = dist.get_rank(self.initial_proc_group)
+    host = dataset_cache_module.socket.gethostname()
+    self.hostname_suffix = _HOSTNAME_SUFFIX
+    with mock.patch.object(dataset_cache_module.socket, "gethostname", return_value=f"local-rank-{rank}"):
+        result = _DATASET_CACHE_SETUP(self, stage)
+    self.hostnames = [host + self.hostname_suffix] * self.world_size
+    LOGGER.info(
+        "Rank %s synthetic cache node %s using TCP endpoint %s:%s",
+        rank,
+        self.node_id,
+        self._endpoint(self.node_id).host,
+        self.port,
+    )
+    return result
+
+
+def _remote_marker(self, node_id, key):
+    remote_host = self._raw_hostnames[self._node_leader_rank[node_id]]
+    cache_dir = f"cache-{dataset_cache_module.hashlib.sha256(remote_host.encode()).hexdigest()[:12]}"
+    namespace = self.namespaces[key.dataset_id]
+    return self.cache_root / cache_dir / namespace.token / "committed" / str(key.sequence) / str(key.position)
+
+
+def _fetch_remote_first(self, dataset_id, sequence=None, position=None, verbose=False):
+    if position is None:
+        return _DATASET_CACHE_FETCH(self, dataset_id, sequence, position, verbose)
+    if not all(path.exists() for path in self._benchmark_remote_ready_paths):
+        return _DATASET_CACHE_FETCH(self, dataset_id, sequence, position, verbose)
+    dataset_id = self._resolve_dataset_id(dataset_id)
+    namespace = self.namespaces[dataset_id]
+    sequence, position = namespace._normalize_position(sequence, position)
+    key = dataset_cache_module.CacheKey(dataset_id, sequence, position)
+    remote_node = (self.node_id + 1) % self.num_nodes
+    if _remote_marker(self, remote_node, key).exists():
+        started = time.perf_counter_ns() if self.profile_io else 0
+        try:
+            value = self._fetch_remote(remote_node, key)
+        except (dataset_cache_module.RemoteCacheMiss, dataset_cache_module.RemoteCacheUnavailable):
+            pass
+        else:
+            if started:
+                self.profile_remote_ns.value += time.perf_counter_ns() - started
+            self.total_fetches.value += 1
+            self.cache_hits_remote.value += 1
+            return value
+        if started:
+            self.profile_remote_ns.value += time.perf_counter_ns() - started
+    return _DATASET_CACHE_FETCH(self, dataset_id, sequence, position, verbose)
+
+
+def _run_remote_training(config, cache_root, monkeypatch):
+    remote_ready_paths = tuple(
+        cache_root / f".remote-ready-{node_id}"
+        for node_id in range(int(config.system.hardware.num_gpus_per_node))
+    )
+    for path in remote_ready_paths:
+        path.unlink(missing_ok=True)
+    with monkeypatch.context() as patch:
+        patch.setattr(DatasetCache, "setup", _setup_process_cache)
+        patch.setattr(DatasetCache, "fetch", _fetch_remote_first)
+        patch.setattr(DatasetCache, "_benchmark_remote_ready_paths", remote_ready_paths, raising=False)
+        return _run_training(config, cache_root, remote_ready_paths)
+
+
 @pytest.mark.multigpu
 @pytest.mark.slow
-def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) -> None:
-    """Compare full GraphTransformer training epochs with and without SSD caching."""
+def test_ssd_cache_training_runtime(
+    benchmark_config: tuple[DictConfig, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Compare uncached, local SSD cache, and local TCP cache training."""
     config, test_case = benchmark_config
     required_gpus = int(config.system.hardware.num_gpus_per_node)
     if torch.cuda.device_count() < required_gpus:
         pytest.skip(f"benchmark requires {required_gpus} GPUs, found {torch.cuda.device_count()}")
-    cache_root = Path(os.environ.get("TMPDIR", tempfile.gettempdir())) / (
-        f"anemoi-cache-benchmark-{os.environ.get('SLURM_JOB_ID', 'local')}"
-    )
-    cache_root.mkdir(parents=True, exist_ok=True)
+    cache_root = Path(os.environ.get("TMPDIR", tempfile.gettempdir()))
+    run_id = os.environ.get("SLURM_JOB_ID", "local")
+    local_cache_root = cache_root / f"anemoi-cache-benchmark-local-{run_id}"
+    remote_cache_root = cache_root / f"anemoi-cache-benchmark-remote-{run_id}"
+    local_cache_root.mkdir(parents=True, exist_ok=True)
+    remote_cache_root.mkdir(parents=True, exist_ok=True)
 
     uncached = _run_training(config)
     previous_profile_setting = os.environ.get("ANEMOI_DATASET_CACHE_PROFILE")
     os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = "1"
     try:
-        cached = _run_training(config, cache_root)
+        cached = _run_training(config, local_cache_root)
+        remote = _run_remote_training(config, remote_cache_root, monkeypatch)
     finally:
         if previous_profile_setting is None:
             os.environ.pop("ANEMOI_DATASET_CACHE_PROFILE")
         else:
             os.environ["ANEMOI_DATASET_CACHE_PROFILE"] = previous_profile_setting
 
-    assert len(uncached.durations) == len(cached.durations) == 3
+    assert len(uncached.durations) == len(cached.durations) == len(remote.durations) == 3
     assert cached.cache_stats[0][2] > 0, "cold epoch did not populate the cache"
     assert all(local + remote > 0 and misses == 0 for local, remote, misses in cached.cache_stats[1:]), (
         f"cache was not warm after epoch 0: {cached.cache_stats}"
+    )
+    assert remote.cache_stats[0][2] > 0, "cold remote epoch did not populate the process caches"
+    assert all(remote_hits > local_hits for local_hits, remote_hits, _ in remote.cache_stats[1:]), (
+        f"TCP cache was not used after epoch 0: {remote.cache_stats}"
     )
 
     no_cache_seconds = median(uncached.durations)
     cold_cache_seconds = cached.durations[0]
     warm_cache_seconds = median(cached.durations[1:])
+    cold_remote_seconds = remote.durations[0]
+    warm_remote_seconds = median(remote.durations[1:])
     rank = dist.get_rank() if dist.is_initialized() else int(os.environ.get("LOCAL_RANK", 0))
     if dist.is_initialized():
         dist.barrier()
@@ -154,7 +240,9 @@ def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) ->
             "%s SSD cache benchmark: no_cache=%.3fs cold=%.3fs warm=%.3fs "
             "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s "
             "cache_io_seconds(local,remote,source,store,fetch_many)=%s "
-            "dataloader_wait(no_cache,cached)=%s",
+            "dataloader_wait(no_cache,cached)=%s TCP: cold=%.3fs warm=%.3fs "
+            "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s "
+            "cache_io_seconds(local,remote,source,store,fetch_many)=%s dataloader_wait=%.3fs",
             test_case,
             no_cache_seconds,
             cold_cache_seconds,
@@ -164,7 +252,15 @@ def test_ssd_cache_training_runtime(benchmark_config: tuple[DictConfig, str]) ->
             cached.cache_stats,
             cached.cache_io_seconds,
             (uncached.dataloader_wait_seconds, cached.dataloader_wait_seconds),
+            cold_remote_seconds,
+            warm_remote_seconds,
+            no_cache_seconds / cold_remote_seconds,
+            no_cache_seconds / warm_remote_seconds,
+            remote.cache_stats,
+            remote.cache_io_seconds,
+            remote.dataloader_wait_seconds,
         )
-        shutil.rmtree(cache_root)
+        shutil.rmtree(local_cache_root)
+        shutil.rmtree(remote_cache_root)
     if dist.is_initialized():
         dist.barrier()
