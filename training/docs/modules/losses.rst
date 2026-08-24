@@ -195,7 +195,7 @@ following aggregations are supported:
 The wrapper accumulates the specified loss function evaluated on each aggregation in
 turn and returns the average. The ``time_steps`` scaler is
 intentionally excluded from the inner ``loss_fn`` (temporal aggregation
-collapses the time dimension), only spatial and variable scalers should
+collapses the time dimension) and only spatial and variable scalers should
 be listed there.
 
 .. note::
