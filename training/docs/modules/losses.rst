@@ -129,11 +129,21 @@ scalers.
  Selecting and Pairing Variables
 ********************************
 
-``LossVariableMapper`` selects which forecast and target variables are passed
-to a loss. It is added
-automatically when a loss is created from the training configuration, so it
-should not be configured as the ``_target_`` directly. Instead, add
-``predicted_variables`` and, when needed, ``target_variables`` to the loss:
+``LossVariableMapper`` pairs each predicted variable with the reference
+variable used to compute the loss.
+
+In the forward pass, the model outputs a set of variables, referred to as
+``predicted_variables``. By default, each predicted variable is compared
+against a reference of the same name. For example, if the training data
+contains a total precipitation variable (``tp``) defined as diagnostic, the
+model outputs a ``tp`` prediction and the loss is computed against the
+reference ``tp`` data.
+
+You only need to set ``predicted_variables`` and ``target_variables`` when the
+loss reference differs from the predicted variable name. A single predicted
+variable can also be paired with multiple targets. The example below adds an
+extra loss term that computes the ``MAELoss`` on ``tp`` against ``imerg``, a
+global precipitation product:
 
 .. code-block:: yaml
 
@@ -145,13 +155,12 @@ should not be configured as the ``_target_`` directly. Instead, add
          predicted_variables: [tp]
          target_variables: [imerg]
 
-The lists define pairs in the same order and must have the same length. Omit
-``target_variables`` to use the same variable names as
-``predicted_variables``. The wrapper also filters variable-dependent scalers
-to the selected predictions.
+The two lists define pairs in the same order and must have equal length. Omit
+``target_variables`` to reuse the ``predicted_variables`` names. The wrapper
+also filters variable-dependent scalers to the selected predictions.
 
 For a ``CombinedLoss``, configure the variables on the child loss to which the
-selection applies. For ``MultiscaleLossWrapper``, configure them on its
+selection applies. For a ``MultiscaleLossWrapper``, configure them on its
 ``per_scale_loss``. Pairing differently named variables also enables the
 compatibility checks described in :ref:`variable-compatibility-checks`.
 
