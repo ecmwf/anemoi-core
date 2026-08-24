@@ -317,15 +317,16 @@ class DatasetCacheNamespace:
 
     def fetch_source(self, sequence, position):
         sequence, position = self._normalize_position(sequence, position)
-        if self.num_sequences == 1:
+        if len(self.reader.data.shape) == 4:
             return np.asarray(self.reader.data[position])
         return np.asarray(self.reader.data[sequence][:, :, position, :])
 
     def store(self, sequence, position, value):
         entry, marker, lock = self._paths(sequence, position)
         with self._entry_lock(lock):
-            if marker.exists():
+            if marker.exists() and entry.exists():
                 return False
+            marker.unlink(missing_ok=True)
             entry.parent.mkdir(parents=True, exist_ok=True)
             marker.parent.mkdir(parents=True, exist_ok=True)
             temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
@@ -648,11 +649,12 @@ class DatasetCache(pl.LightningDataModule):
 
     def update_global_view(self):
         local_entries = []
-        for dataset_id, namespace in self.namespaces.items():
-            local_entries.extend(
-                (dataset_id, sequence, position, self.node_id)
-                for sequence, position in namespace.committed_positions()
-            )
+        if self.is_node_leader:
+            for dataset_id, namespace in self.namespaces.items():
+                local_entries.extend(
+                    (dataset_id, sequence, position, self.node_id)
+                    for sequence, position in namespace.committed_positions()
+                )
         gathered = [None] * self.world_size
         dist.all_gather_object(gathered, local_entries, group=self.proc_group)
         locations = {}
@@ -736,49 +738,6 @@ class DatasetCache(pl.LightningDataModule):
         self.ds.teardown(stage)
 
     close = teardown
-
-    def priority_reduce(self, stacked, cache_registry, node_id):
-        valid = stacked != -1
-        local = stacked == node_id
-        has_local = local.any(dim=0)
-        result = torch.full_like(cache_registry, -1)
-        result[has_local] = node_id
-        fallback = stacked.clone()
-        fallback[~valid] = -1
-        remaining = ~has_local
-        result[remaining] = fallback.max(dim=0).values[remaining]
-        return result
-
-    def check_cache(self, date):
-        cached_node = self.cache_registry[date].item()
-        return [] if cached_node == -1 else [cached_node]
-
-    def _normalize_date_index(self, date):
-        date = int(date)
-        if date < 0:
-            date += len(self.cache_registry)
-        if date < 0 or date >= len(self.cache_registry):
-            raise IndexError(f"cache index {date} is out of range for {len(self.cache_registry)} entries")
-        return date
-
-    @contextmanager
-    def _chunk_write_lock(self, date):
-        chunk_index = date // int(self.cache.chunks[0])
-        lock_path = self._chunk_lock_dir / f"{chunk_index}.lock"
-        with lock_path.open("a") as lock_file:
-            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
-
-    def _write_cache_entry(self, date, data):
-        marker = self._cache_entry_dir / str(date)
-        with self._chunk_write_lock(date):
-            if not marker.exists():
-                self.cache[date] = data
-                marker.touch()
-            self.cache_registry[date] = self.node_id
 
 
 class TCPDatasetCache(DatasetCache):

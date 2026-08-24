@@ -11,17 +11,15 @@
 
 import io
 import errno
-import socket
 import struct
 import threading
-import time
 
 import numpy as np
 import pytest
-import torch
 
 from anemoi.training.utils.dataset_cache import (
     CachedDataWrapper,
+    CacheConfigurationError,
     CacheKey,
     DatasetCache,
     DatasetCacheNamespace,
@@ -254,30 +252,22 @@ class TestTCPCacheServerClient:
         }
 
     @pytest.fixture
-    def server_port(self):
-        """Find a free port for the test server."""
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind(("", 0))
-            return s.getsockname()[1]
-
-    @pytest.fixture
-    def running_server(self, cache_data, server_port):
+    def running_server(self, cache_data):
         """Start a TCPCacheServer and yield it; shut down after test."""
         class FakeCache:
             def _fetch_local_only(self, dataset_id, sequence, position):
                 return cache_data.get(CacheKey(dataset_id, sequence, position))
 
-        server = TCPCacheServer(FakeCache(), server_port, host="127.0.0.1")
+        server = TCPCacheServer(FakeCache(), 0, host="127.0.0.1")
         server.start()
-        time.sleep(0.1)  # give server thread time to bind
         yield server
         server.close()
 
-    def endpoint(self, server_port):
-        return Endpoint("127.0.0.1", server_port, 0)
+    def endpoint(self, server):
+        return Endpoint("127.0.0.1", server.port, 0)
 
-    def test_single_fetch(self, cache_data, server_port, running_server):
-        client = TCPCacheClient(self.endpoint(server_port))
+    def test_single_fetch(self, cache_data, running_server):
+        client = TCPCacheClient(self.endpoint(running_server))
         try:
             key = CacheKey("dataset", 0, 5)
             result = client.fetch(key)
@@ -285,8 +275,8 @@ class TestTCPCacheServerClient:
         finally:
             client.close()
 
-    def test_multiple_fetches(self, cache_data, server_port, running_server):
-        client = TCPCacheClient(self.endpoint(server_port))
+    def test_multiple_fetches(self, cache_data, running_server):
+        client = TCPCacheClient(self.endpoint(running_server))
         try:
             for idx in [0, 7, 13, 19]:
                 key = CacheKey("dataset", 0, idx)
@@ -295,22 +285,36 @@ class TestTCPCacheServerClient:
         finally:
             client.close()
 
-    def test_missing_entry(self, server_port, running_server):
-        client = TCPCacheClient(self.endpoint(server_port))
+    def test_dataset_id_is_part_of_remote_key(self, cache_data, running_server):
+        key = CacheKey("other-dataset", 0, 5)
+        expected = np.full((3, 5), 17, dtype=np.float32)
+        cache_data[key] = expected
+        client = TCPCacheClient(self.endpoint(running_server))
+        try:
+            np.testing.assert_array_equal(client.fetch(key), expected)
+            np.testing.assert_array_equal(
+                client.fetch(CacheKey("dataset", 0, 5)),
+                cache_data[CacheKey("dataset", 0, 5)],
+            )
+        finally:
+            client.close()
+
+    def test_missing_entry(self, running_server):
+        client = TCPCacheClient(self.endpoint(running_server))
         try:
             with pytest.raises(RemoteCacheMiss):
                 client.fetch(CacheKey("dataset", 0, 100))
         finally:
             client.close()
 
-    def test_concurrent_clients(self, cache_data, server_port, running_server):
+    def test_concurrent_clients(self, cache_data, running_server):
         """Multiple clients can connect simultaneously."""
         results = {}
         errors = []
 
         def worker(idx):
             try:
-                c = TCPCacheClient(self.endpoint(server_port))
+                c = TCPCacheClient(self.endpoint(running_server))
                 key = CacheKey("dataset", 0, idx)
                 results[idx] = c.fetch(key)
                 c.close()
@@ -345,155 +349,6 @@ class TestTCPCacheServerClient:
         assert not server._thread.is_alive()
 
 
-# ---------------------------------------------------------------------------
-# Tests for DatasetCache.priority_reduce (static-like method)
-# ---------------------------------------------------------------------------
-
-
-class TestPriorityReduce:
-    """Tests for the priority_reduce method of DatasetCache."""
-
-    def _make_cache_obj(self):
-        """Create a minimal object with the priority_reduce method bound."""
-        # priority_reduce is an instance method but doesn't use self beyond
-        # the arguments it receives, so we can call it via the unbound version.
-        return DatasetCache.__new__(DatasetCache)
-
-    def test_prefers_local_node(self):
-        """If the local node has cached a date, prefer it."""
-        cache = self._make_cache_obj()
-        # 2 nodes (node 0 and node 1), 5 dates
-        # Node 0's view: dates 0,1 cached on node 0
-        # Node 1's view: dates 1,2 cached on node 1
-        node0_reg = torch.tensor([0, 0, -1, -1, -1], dtype=torch.int32)
-        node1_reg = torch.tensor([-1, 1, 1, -1, -1], dtype=torch.int32)
-        stacked = torch.stack([node0_reg, node1_reg])
-
-        local_reg = node0_reg.clone()
-        result = cache.priority_reduce(stacked, local_reg, node_id=0)
-
-        # date 0: only on node 0 -> 0
-        # date 1: on both -> prefer local (node 0)
-        # date 2: only on node 1 -> 1
-        # date 3,4: nowhere -> -1
-        expected = torch.tensor([0, 0, 1, -1, -1], dtype=torch.int32)
-        assert torch.equal(result, expected)
-
-    def test_falls_back_to_remote(self):
-        """If local node doesn't have it but remote does, use remote."""
-        cache = self._make_cache_obj()
-        node0_reg = torch.tensor([-1, -1, -1], dtype=torch.int32)
-        node1_reg = torch.tensor([1, -1, 1], dtype=torch.int32)
-        stacked = torch.stack([node0_reg, node1_reg])
-
-        local_reg = node0_reg.clone()
-        result = cache.priority_reduce(stacked, local_reg, node_id=0)
-
-        expected = torch.tensor([1, -1, 1], dtype=torch.int32)
-        assert torch.equal(result, expected)
-
-    def test_all_uncached(self):
-        """If nothing is cached anywhere, result is all -1."""
-        cache = self._make_cache_obj()
-        reg = torch.full((4,), -1, dtype=torch.int32)
-        stacked = torch.stack([reg.clone(), reg.clone()])
-
-        result = cache.priority_reduce(stacked, reg.clone(), node_id=0)
-        expected = torch.full((4,), -1, dtype=torch.int32)
-        assert torch.equal(result, expected)
-
-    def test_multiple_remote_nodes(self):
-        """With 3 nodes, pick highest node_id as fallback (max-based)."""
-        cache = self._make_cache_obj()
-        # 3 nodes, 4 dates
-        node0_reg = torch.tensor([-1, -1, -1, 0], dtype=torch.int32)
-        node1_reg = torch.tensor([1, -1, 1, -1], dtype=torch.int32)
-        node2_reg = torch.tensor([2, 2, -1, -1], dtype=torch.int32)
-        stacked = torch.stack([node0_reg, node1_reg, node2_reg])
-
-        local_reg = node0_reg.clone()
-        result = cache.priority_reduce(stacked, local_reg, node_id=0)
-
-        # date 0: node 1 and 2 have it, no local -> fallback max = 2
-        # date 1: only node 2 -> 2
-        # date 2: only node 1 -> 1
-        # date 3: local (node 0) -> 0
-        expected = torch.tensor([2, 2, 1, 0], dtype=torch.int32)
-        assert torch.equal(result, expected)
-
-
-# ---------------------------------------------------------------------------
-# Tests for DatasetCache.check_cache
-# ---------------------------------------------------------------------------
-
-
-class TestCheckCache:
-    """Tests for the check_cache method."""
-
-    def _make_cache_with_registry(self, registry_values):
-        cache = DatasetCache.__new__(DatasetCache)
-        cache.cache_registry = torch.tensor(registry_values, dtype=torch.int32)
-        return cache
-
-    def test_miss(self):
-        cache = self._make_cache_with_registry([-1, -1, -1])
-        assert cache.check_cache(0) == []
-        assert cache.check_cache(2) == []
-
-    def test_hit(self):
-        cache = self._make_cache_with_registry([0, 1, -1, 2])
-        assert cache.check_cache(0) == [0]
-        assert cache.check_cache(1) == [1]
-        assert cache.check_cache(3) == [2]
-
-    def test_boundary_index(self):
-        cache = self._make_cache_with_registry([3, -1, -1, -1, 0])
-        assert cache.check_cache(0) == [3]
-        assert cache.check_cache(4) == [0]
-
-
-class TestCacheWrites:
-    """Tests for first-axis indexing and chunk-protected writes."""
-
-    class FakeZarr:
-        chunks = (4, 2)
-
-        def __init__(self):
-            self.data = {}
-            self.write_count = 0
-
-        def __setitem__(self, index, value):
-            self.data[index] = value
-            self.write_count += 1
-
-    def _make_cache(self, tmp_path):
-        cache = DatasetCache.__new__(DatasetCache)
-        cache.cache = self.FakeZarr()
-        cache.cache_registry = torch.full((10,), -1, dtype=torch.int32)
-        cache.node_id = 2
-        cache._chunk_lock_dir = tmp_path / "locks"
-        cache._cache_entry_dir = tmp_path / "entries"
-        cache._chunk_lock_dir.mkdir()
-        cache._cache_entry_dir.mkdir()
-        return cache
-
-    def test_normalizes_negative_first_axis_index(self, tmp_path):
-        cache = self._make_cache(tmp_path)
-        assert cache._normalize_date_index(-1) == 9
-        with pytest.raises(IndexError):
-            cache._normalize_date_index(10)
-
-    def test_entry_is_written_only_once(self, tmp_path):
-        cache = self._make_cache(tmp_path)
-        cache._write_cache_entry(3, np.array([1]))
-        cache._write_cache_entry(3, np.array([2]))
-
-        assert cache.cache.write_count == 1
-        np.testing.assert_array_equal(cache.cache.data[3], np.array([1]))
-        assert cache.cache_registry[3].item() == cache.node_id
-        assert (cache._chunk_lock_dir / "0.lock").exists()
-
-
 class TestDatasetCacheNamespace:
     class FakeReader:
         def __init__(self, data):
@@ -516,6 +371,16 @@ class TestDatasetCacheNamespace:
         np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
         assert list(namespace.committed_positions()) == [(0, 3)]
 
+    def test_stale_marker_is_repaired(self, tmp_path, sample_data):
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+        entry, marker, _ = namespace._paths(0, 3)
+        marker.parent.mkdir(parents=True)
+        marker.touch()
+
+        assert namespace.fetch_local(0, 3) is None
+        assert namespace.store(0, 3, sample_data[3])
+        np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
+
     def test_trajectory_sequences_do_not_collide(self, tmp_path):
         data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
         namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
@@ -527,6 +392,12 @@ class TestDatasetCacheNamespace:
 
         np.testing.assert_array_equal(namespace.fetch_local(0, 2), data[0, :, :, 2, :])
         np.testing.assert_array_equal(namespace.fetch_local(1, 2), data[1, :, :, 2, :])
+
+    def test_single_trajectory_sequence_uses_trajectory_layout(self, tmp_path):
+        data = np.arange(1 * 3 * 1 * 4 * 5).reshape(1, 3, 1, 4, 5)
+        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
+
+        np.testing.assert_array_equal(namespace.fetch_source(0, 2), data[0, :, :, 2, :])
 
     def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
@@ -542,3 +413,14 @@ class TestDatasetCacheNamespace:
         entry, marker, _ = namespace._paths(0, 3)
         assert not entry.exists()
         assert not marker.exists()
+
+    def test_rejects_incompatible_existing_namespace(self, tmp_path, sample_data):
+        DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+
+        with pytest.raises(CacheConfigurationError, match="metadata mismatch"):
+            DatasetCacheNamespace(
+                tmp_path,
+                "analysis:fingerprint",
+                self.FakeReader(sample_data[:-1]),
+                0,
+            )
