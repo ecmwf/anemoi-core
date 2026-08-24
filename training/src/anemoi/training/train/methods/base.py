@@ -496,11 +496,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if not self.config.training.load_weights_only:
             self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-            # Lightning restores the datamodule while the task still has the rollout start
-            # from the config. Now that the checkpoint rollout is restored, update each
-            # dataset to load the required input and target time steps before workers start.
-            # Anemoi also loads modules without a Trainer when converting training
-            # checkpoints for inference, so only synchronize if a datamodule is attached.
+            # Anemoi constructs the task and datasets from the config before Lightning
+            # restores their checkpoint state. Now that the checkpoint rollout is restored,
+            # update any constructed datasets so workers load the required input and target
+            # time steps. Checkpoint conversion loads the module without creating a Trainer
+            # or datamodule, so only synchronize if a datamodule is attached.
             trainer = getattr(self, "_trainer", None)
             if trainer is not None and trainer.datamodule is not None:
                 trainer.datamodule.sync_dataset_state()

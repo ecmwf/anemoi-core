@@ -654,9 +654,10 @@ used.
 
 .. note::
 
-   When resuming from a checkpoint that contains saved rollout state,
-   ``rollout.start`` is ignored entirely — the rollout step is always
-   restored unconditionally from the checkpoint.
+   When fully resuming training (``training.load_weights_only: false``), the
+   rollout step saved in the checkpoint overrides ``rollout.start``. With
+   ``training.load_weights_only: true``, Anemoi restores only the model weights
+   and starts training with ``rollout.start`` from the current configuration.
 
 *******************
  Transfer Learning

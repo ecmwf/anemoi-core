@@ -161,6 +161,25 @@ def test_forecaster_rollout_increases_on_epoch_end() -> None:
     assert task.rollout.step == 3
 
 
+def test_forecaster_rollout_increases_after_configured_number_of_epochs() -> None:
+    """epoch_increment counts completed epochs before increasing the rollout."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 2, "maximum": 3},
+    )
+
+    task.on_train_epoch_end(0)
+    assert task.rollout.step == 1
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(2)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(3)
+    assert task.rollout.step == 3
+
+
 def test_forecaster_rollout_does_not_exceed_maximum() -> None:
     """rollout.step is capped at maximum even when on_train_epoch_end is called repeatedly."""
     task = Forecaster(

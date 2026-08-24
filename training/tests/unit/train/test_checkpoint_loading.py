@@ -489,11 +489,11 @@ class _RecordingDataModule:
         self.offsets = self._task.get_offsets("training")
 
 
-def test_on_load_checkpoint_refreshes_dataloader_time_window() -> None:
+def test_on_load_checkpoint_synchronizes_dataloader_time_window() -> None:
     """Datasets are resized for the restored rollout before workers start."""
     module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
     datamodule = _RecordingDataModule(task)
-    # Lightning restores the datamodule before calling the module hook.
+    # Simulate a dataset synchronized while the task still has rollout.start.
     datamodule.set_epoch(2)
     assert len(datamodule.offsets) == 2
     module._trainer = SimpleNamespace(datamodule=datamodule)
@@ -537,6 +537,31 @@ def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
     assert resumed_task.rollout.step == 4
     resumed_task.on_train_epoch_end(3)
     assert resumed_task.rollout.step == 5
+
+
+def test_rollout_schedule_continues_at_configured_interval_after_resume() -> None:
+    """A restored rollout still waits for the configured number of completed epochs."""
+    rollout_cfg = {"start": 1, "epoch_increment": 2, "maximum": 5}
+    module, task = _make_module_with_forecaster_task(rollout_cfg)
+
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 2
+
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["state_dict"] = {}
+
+    resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
+    BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
+
+    resumed_task.on_train_epoch_end(1)
+    assert resumed_task.rollout.step == 2
+    resumed_task.on_train_epoch_end(2)
+    assert resumed_task.rollout.step == 2
+    resumed_task.on_train_epoch_end(3)
+    assert resumed_task.rollout.step == 3
 
 
 def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:

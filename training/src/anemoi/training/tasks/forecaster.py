@@ -39,7 +39,7 @@ class RolloutConfig:
         """Check if rollout should be increased at the end of the current epoch."""
         return (
             self.epoch_increment > 0
-            and current_epoch % self.epoch_increment == 0
+            and (current_epoch + 1) % self.epoch_increment == 0
             and self.step < self.maximum
             and current_epoch != self._last_increased_epoch
         )
