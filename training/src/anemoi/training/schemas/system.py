@@ -35,6 +35,8 @@ class HardwareSchema(BaseModel):
     "Number of GPUs per model."
     num_gpus_per_ensemble: NonNegativeInt = 1
     "Number of GPUs per ensemble."
+    cache_dir: Path | None = None
+    "Directory for the node-local dataset cache."
 
 
 class InputSchema(PydanticBaseModel):
