@@ -42,7 +42,7 @@ Key features:
 
 For the training-side CRPS setup, including loss, truncation, and
 ensemble-specific configuration changes, see
-:doc:`anemoi-training:user-guide/kcrps-set-up`.
+:ref:`anemoi-training:ensemble-crps-training`.
 
 **********************************************
  Hierarchical Encoder-Processor-Decoder Model

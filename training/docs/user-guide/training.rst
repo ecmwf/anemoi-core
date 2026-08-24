@@ -209,23 +209,6 @@ will be classed as a prognostic variable.
             diagnostics:
                - total_precipitation
 
-**************
- Data Modules
-**************
-
-Anemoi Training provides different data modules to handle various model
-tasks:
-
--  **AnemoiDatasetDataModule**: Standard data module for deterministic
-   training
-
--  **AnemoiEnsDatasetsDataModule**: Specialized data module for ensemble
-   training. It also allows for training with perturbed initial
-   conditions.
-
-The choice of data module depends on your training task and input data
-requirements.
-
 ************
  Dataloader
 ************
@@ -425,16 +408,9 @@ tasks and easily allows for custom loss functions to be added.
 The choice of loss function depends on the model task and the desired
 properties of the forecast and is configured for each dataset separately.
 
-For ensemble training, the following loss functions are available:
-
--  **CRPS**: Kernel Continuous Ranked Probability Score for ensemble
-   predictions. ``alpha=0`` gives standard CRPS, ``alpha=1`` gives fair
-   CRPS, and values between 0 and 1 give the almost fair CRPS formulation.
-   The default ``alpha: 0.95`` combines 5% standard CRPS with 95% fair
-   CRPS. The ``naive`` backend uses a simple loop over unordered
-   ensemble-member pairs and avoids materializing the full pairwise tensor.
-   The ``stable`` backend materializes pairwise tensors and uses the
-   numerically stable all-pairs formulation.
+For ensemble training, use :class:`anemoi.training.losses.CRPS`. See
+:ref:`ensemble-crps-training` for the complete setup and :ref:`Losses`
+for the available loss options.
 
 .. _loss-function-scaling:
 
@@ -475,10 +451,11 @@ level has a weighting less than 0.2), defined in class
                cp: 0.0025
 
 .. code:: yaml
+
    datasets:
       your_dataset_name:
          pressure_level:
-            # Variable level scaler to be used
+            # Variable level scaler to be used
             _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
             group: pl
             y_intercept: 0.2
@@ -522,9 +499,9 @@ is set to 0, the learning rate will start at the maximum learning rate.
 If no warmup period is defined, a default warmup period of 1000
 iterations is used.
 
-***************
-Restarting a training run
-***************
+**************************
+ Restarting a training run
+**************************
 
 It may be necessary at certain points to restart the model training,
 i.e. because the training has exceeded the time limit on an HPC system
