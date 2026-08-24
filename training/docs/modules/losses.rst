@@ -164,7 +164,7 @@ i.e. output sequences that are internally coherent over
 time.
 
 :class:`~anemoi.training.losses.aggregate.TimeAggregateLossWrapper`
-addresses this by applying a base loss function to *time-aggregated*
+applies a base loss function to *time-aggregated*
 versions of the prediction and target. The
 following aggregations are supported:
 
