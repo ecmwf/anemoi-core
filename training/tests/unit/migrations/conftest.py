@@ -11,15 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.training.migrations.testing import ConfigFromContents
-from anemoi.training.migrations.testing import DocumentFromContent
+from anemoi.training.migrations.testing import ConfigFromContent
 
 
 @pytest.fixture
-def document_from_content(tmp_path: Path) -> DocumentFromContent:
-    return DocumentFromContent(tmp_path / "document.yaml")
-
-
-@pytest.fixture
-def config_from_contents(tmp_path: Path) -> ConfigFromContents:
-    return ConfigFromContents(tmp_path)
+def config_from_content(tmp_path: Path) -> ConfigFromContent:
+    return ConfigFromContent(tmp_path / "document.yaml")
