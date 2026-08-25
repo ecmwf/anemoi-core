@@ -184,12 +184,16 @@ class CombinedLoss(BaseLoss):
             Combined loss
         """
         loss = None
+        # Weighted per-term contributions from the most recent forward, for logging.
+        term_contributions: dict[str, torch.Tensor] = {}
         for i, loss_fn in enumerate(self.losses):
             loss_kwargs = self._forward_kwargs_for_loss(loss_fn, kwargs)
-            if loss is not None:
-                loss += self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
-            else:
-                loss = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
+            weighted_term = self.loss_weights[i] * loss_fn(pred, target, **loss_kwargs)
+            term_name = getattr(loss_fn, "name", None) or f"loss{i}"
+            term_contributions[term_name] = weighted_term.detach()
+            loss = weighted_term if loss is None else loss + weighted_term
+        term_contributions["combined_total"] = loss.detach()
+        self.latest_term_contributions = term_contributions
         return loss
 
     @functools.wraps(ScaleTensor.add_scaler, assigned=("__doc__", "__annotations__"))

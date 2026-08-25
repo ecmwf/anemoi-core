@@ -73,6 +73,21 @@ class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     "The anemoi-datasets variable to use."
 
 
+class ThresholdVariableWeightsSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.ThresholdVariableWeights"] = Field(..., alias="_target_")
+    "Implementation of two constant weights by thresholding a dataset variable from anemoi.graphs.nodes.attributes."
+    variable: str
+    "The anemoi-datasets variable to threshold (e.g. lsm)."
+    above_weight: float = Field(default=1.0)
+    "Weight assigned where the variable is >= threshold."
+    below_weight: float = Field(default=0.2)
+    "Weight assigned where the variable is < threshold."
+    threshold: float = Field(default=0.5)
+    "Threshold applied to the variable values."
+    norm: ImplementedNormalisationSchema | None = Field(default=None)
+    "Normalisation of the weights."
+
+
 SingleAttributeSchema = (
     PlanarAreaWeightSchema
     | MaskedPlanarAreaWeightsSchema
@@ -80,6 +95,7 @@ SingleAttributeSchema = (
     | CutOutMaskSchema
     | GridsMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
+    | ThresholdVariableWeightsSchema
 )
 
 

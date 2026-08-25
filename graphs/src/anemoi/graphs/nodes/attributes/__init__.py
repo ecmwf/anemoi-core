@@ -10,6 +10,7 @@
 from .area_weights import AnemoiDatasetVariableWeights
 from .area_weights import CosineLatWeightedAttribute
 from .area_weights import IsolatitudeAreaWeights
+from .area_weights import ThresholdVariableWeights
 from .area_weights import MaskedPlanarAreaWeights
 from .area_weights import PlanarAreaWeights
 from .area_weights import SphericalAreaWeights
@@ -39,4 +40,5 @@ __all__ = [
     "CosineLatWeightedAttribute",
     "IsolatitudeAreaWeights",
     "AnemoiDatasetVariableWeights",
+    "ThresholdVariableWeights",
 ]

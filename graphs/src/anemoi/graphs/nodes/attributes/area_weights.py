@@ -500,3 +500,44 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
         ], f"{self.__class__.__name__} can only be used with AnemoiDatasetNodes."
         data = torch.from_numpy(self._read_data(nodes))
         return self.post_process(data)
+
+
+class ThresholdVariableWeights(AnemoiDatasetVariableWeights):
+    """Assign two constant weights by thresholding a dataset variable.
+
+    Reads a variable from the dataset (e.g. the land-sea mask ``lsm``) and returns
+    ``above_weight`` where the value is >= ``threshold`` and ``below_weight`` elsewhere.
+    Unlike ``AnemoiDatasetVariableWeights`` it does not use the raw variable values, so
+    it can weight the loss differently over land and sea (e.g. 1.0 over land, 0.2 over sea).
+
+    Attributes
+    ----------
+    variable : str
+        Name of the variable to threshold (e.g. ``lsm``).
+    above_weight : float
+        Weight assigned where the variable is >= threshold (e.g. land).
+    below_weight : float
+        Weight assigned where the variable is < threshold (e.g. sea).
+    threshold : float
+        Threshold applied to the variable values.
+    norm : str, optional
+        Method to use to normalise the weights.
+    """
+
+    def __init__(
+        self,
+        variable: str,
+        above_weight: float = 1.0,
+        below_weight: float = 0.2,
+        threshold: float = 0.5,
+        norm: str | None = None,
+        dtype: str = "float32",
+    ) -> None:
+        super().__init__(variable=variable, norm=norm, dtype=dtype)
+        self.above_weight = above_weight
+        self.below_weight = below_weight
+        self.threshold = threshold
+
+    def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
+        values = super()._read_data(nodes, **kwargs)
+        return np.where(values >= self.threshold, self.above_weight, self.below_weight)

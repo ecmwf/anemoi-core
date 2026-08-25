@@ -1119,6 +1119,23 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             sync_dist=True,
         )
 
+        # Per-term contributions (e.g. CombinedLoss tp land/sea term vs total), from the last rollout step.
+        for dataset_name, loss_obj in self.loss.items():
+            term_contributions = getattr(loss_obj, "latest_term_contributions", None)
+            if not term_contributions:
+                continue
+            for term_name, term_value in term_contributions.items():
+                self.log(
+                    f"train_{dataset_name}_{term_name}",
+                    term_value,
+                    on_epoch=True,
+                    on_step=True,
+                    prog_bar=True,
+                    logger=self.logger_enabled,
+                    batch_size=batch_size,
+                    sync_dist=True,
+                )
+
         self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
 
         return train_loss
