@@ -33,7 +33,7 @@ class Ops(enum.Enum):
 class NodeBase(ABC):
     @property
     @abstractmethod
-    def prefix(self) -> Sequence[str]: ...
+    def prefix(self) -> str: ...
 
     @property
     @abstractmethod
@@ -118,17 +118,17 @@ class Node(NodeBase):
         yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
         cfg_parent: DictConfig,
         key: Any,
-        prefix: Sequence[str] = (),
+        prefix: str | None = None,
     ):
         self._parent = parent
         self.yaml_parent = yr_parent
         self.cfg_parent = cfg_parent
         self.key = key
-        self._prefix = prefix
+        self._prefix = prefix or ""
 
     @property
     def prefix(self) -> Sequence[str]:
-        return (*self._prefix, self.key)
+        return f"{self._prefix}.{self.key}".removeprefix(".")
 
     @property
     def yaml(self) -> yamlrocks.YAMLRocksDocumentView:
@@ -150,8 +150,7 @@ class Node(NodeBase):
         return key in self.cfg
 
     def __repr__(self) -> str:
-        key = ".".join(self.prefix)
-        return f"NodeDict({key})"
+        return f"NodeDict({self.prefix})"
 
 
 class NodeList(Node):
@@ -168,8 +167,7 @@ class NodeList(Node):
         return super().__getitem__(int(key))
 
     def __repr__(self) -> str:
-        key = ".".join(self.prefix)
-        return f"NodeList({key})"
+        return f"NodeList({self.prefix})"
 
 
 def parse_key(key: str) -> tuple[list[str], str]:
@@ -178,13 +176,13 @@ def parse_key(key: str) -> tuple[list[str], str]:
 
 
 class Document(NodeBase):
-    def __init__(self, path: Path | str, prefix: Sequence[str] = ()) -> None:
+    def __init__(self, path: Path | str, prefix: str | None = None) -> None:
         self._path = Path(path)
-        self._prefix = prefix
+        self._prefix = prefix or ""
         self._cfg = OmegaConf.load(self._path)
 
     @property
-    def prefix(self) -> Sequence[str]:
+    def prefix(self) -> str:
         return self._prefix
 
     @cached_property
@@ -212,7 +210,7 @@ class Document(NodeBase):
         return self.yaml.to_yaml().decode()
 
     def _strip_prefix(self, keys: str) -> str:
-        return keys.removeprefix(".".join(self._prefix) + ".")
+        return keys.removeprefix(f"{self._prefix}.")
 
     def select(self, parts: Sequence[str], create_missing: bool = False) -> NodeBase:
         node = self

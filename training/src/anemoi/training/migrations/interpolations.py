@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
-from collections.abc import Sequence
 from typing import TYPE_CHECKING
 from typing import NamedTuple
 
@@ -52,7 +51,7 @@ def replace_interpolation(value: str, interpo: str, replace: str) -> str:
 
 
 class InterpolationReference(NamedTuple):
-    prefix: Sequence[str]
+    prefix: str
     document_name: str
     key: str
 
@@ -66,7 +65,7 @@ class InterpolationReferences:
     def parse_document(
         self,
         document: Document,
-        prefix: Sequence[str] = (),
+        prefix: str | None = None,
     ) -> None:
         self._parse_document_impl(document, document.cfg, prefix)
 
@@ -74,8 +73,9 @@ class InterpolationReferences:
         self,
         document: Document,
         cfg: DictConfig | ListConfig,
-        prefix: Sequence[str] = (),
+        prefix: str | None = None,
     ) -> None:
+        prefix = prefix or ""
         raw_cfg = OmegaConf.to_container(cfg, resolve=False)
         if raw_cfg is None:
             return
@@ -87,7 +87,7 @@ class InterpolationReferences:
             # Check that cfg[k] is not a str before resolving it to avoid interpolation errors
             # as we only load the config file by file.
             if not isinstance(raw_cfg[k], str) and isinstance(cfg[k], (DictConfig, ListConfig)):
-                self._parse_document_impl(document, cfg[k], [*prefix, str(k)])
+                self._parse_document_impl(document, cfg[k], f"{prefix}.{k}")
             if not isinstance(k, (int, str)):
                 continue
             elif OmegaConf.is_interpolation(cfg, k):
@@ -95,5 +95,5 @@ class InterpolationReferences:
                 # as it comes from the enumerate branch above.
                 for interpo in get_interpolations(raw_cfg[k]):  # ty: ignore[invalid-argument-type]
                     self.references[interpo].add(
-                        InterpolationReference(document.prefix, document._path.name, ".".join([*prefix, str(k)]))
+                        InterpolationReference(document.prefix, document._path.name, f"{prefix}.{k}".removeprefix("."))
                     )
