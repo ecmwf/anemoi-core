@@ -11,18 +11,18 @@ from textwrap import dedent
 
 import pytest
 
-from anemoi.training.migrations.document import Node
-from anemoi.training.migrations.document import NodeList
-from anemoi.training.migrations.testing import DocumentFromContent
+from anemoi.training.migrations.config import Node
+from anemoi.training.migrations.config import NodeList
+from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_node(document_from_content: DocumentFromContent):
+def test_node(config_from_content: ConfigFromContent):
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
-    node = document_from_content(content)["foo"]
+    node = config_from_content(content)["foo"]
     assert node.yaml_node.value == {"bar": {"baz": "value"}}
     baz_node = node["bar"]["baz"]
     assert isinstance(baz_node, Node)
@@ -30,39 +30,39 @@ def test_node(document_from_content: DocumentFromContent):
     assert baz_node.cfg == "value"
 
 
-def test_node_add_item(document_from_content: DocumentFromContent):
+def test_node_add_item(config_from_content: ConfigFromContent):
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
-    node = document_from_content(content)["foo"]
+    node = config_from_content(content)["foo"]
     node["new"] = "new value"
     assert node["new"].yaml_node.value == "new value"
     assert node["new"].cfg == "new value"
 
 
-def test_node_del_item(document_from_content: DocumentFromContent):
+def test_node_del_item(config_from_content: ConfigFromContent):
     content = dedent("""\
     foo:
       bar:
         baz: value
         old: old value
     """)
-    node = document_from_content(content)["foo"]["bar"]
+    node = config_from_content(content)["foo"]["bar"]
     del node["old"]
     with pytest.raises(ValueError):
         _old_val = node["old"]
 
 
-def test_node_list(document_from_content: DocumentFromContent):
+def test_node_list(config_from_content: ConfigFromContent):
     content = dedent("""\
     foo:
       bar:
         - baz: value 1
         - baz: value 2
     """)
-    node = document_from_content(content)["foo"]["bar"]
+    node = config_from_content(content)["foo"]["bar"]
     assert isinstance(node, NodeList)
     assert node[0].yaml_node.value == {"baz": "value 1"}
     assert node[1].yaml_node.value == {"baz": "value 2"}
