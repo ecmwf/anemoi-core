@@ -9,8 +9,8 @@
 
 """Unit tests for anemoi.training.utils.dataset_cache."""
 
-import io
 import errno
+import io
 import multiprocessing
 import threading
 from pathlib import Path

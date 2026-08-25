@@ -146,7 +146,6 @@ def _read_records_remote(self, dataset_id, sequence, positions, grid_indices=Non
         _remote_marker(self, remote_node, dataset_cache_module.CacheKey(dataset_id, sequence, position)).exists()
         for position in normalized
     ):
-        self._load_registry()
         self._locations.update(
             {
                 dataset_cache_module.CacheKey(dataset_id, sequence, position): {remote_node}

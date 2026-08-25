@@ -1,4 +1,4 @@
-"""Trainer-safe synchronization for distributed dataset cache registries."""
+"""Trainer-safe synchronization for the distributed dataset cache view."""
 
 import logging
 
@@ -7,7 +7,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class CacheSyncCallback(pl.Callback):
-    """Synchronize cache registries before validation and checkpointing."""
+    """Synchronize the cache view before validation and checkpointing."""
 
     def __init__(self, cache=None, sync_every_n_epochs: int = 1):
         super().__init__()
@@ -18,7 +18,7 @@ class CacheSyncCallback(pl.Callback):
         self._last_synced_epoch = None
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Exchange registries before rank-zero checkpoint I/O can separate ranks."""
+        """Exchange cache locations before rank-zero checkpoint I/O can separate ranks."""
         if trainer.sanity_checking or "fit" not in str(trainer.state.fn).lower():
             return
         if (trainer.current_epoch + 1) % self.sync_every_n_epochs:
@@ -31,7 +31,7 @@ class CacheSyncCallback(pl.Callback):
     def _sync(self, trainer: pl.Trainer) -> None:
         cache = self.cache or trainer.datamodule
         if hasattr(cache, "update_global_view"):
-            LOGGER.info("Rank %s synchronizing distributed cache registry", trainer.global_rank)
+            LOGGER.info("Rank %s synchronizing distributed cache view", trainer.global_rank)
             cache.update_global_view()
 
     def state_dict(self) -> dict:

@@ -273,7 +273,6 @@ class DatasetCache(pl.LightningDataModule):
         self.namespaces = {}
         self._datasets = set()
         self._locations = {}
-        self._registry_mtime = None
         self._clients = {}
         self.cache_hits_local = Value("q", 0)
         self.cache_hits_remote = Value("q", 0)
@@ -334,7 +333,6 @@ class DatasetCache(pl.LightningDataModule):
         self.is_node_leader = self.global_rank == self._leaders[self.node_id]
         self.hostnames = [name + self.hostname_suffix for name in hosts]
         self.cache_path = self.cache_root / f"cache-{hashlib.sha256(host.encode()).hexdigest()[:12]}"
-        self._registry_path = self.cache_path / ".remote-registry.json"
         if self.is_node_leader:
             shutil.rmtree(self.cache_path, ignore_errors=True)
             self.cache_path.mkdir(parents=True)
@@ -419,7 +417,6 @@ class DatasetCache(pl.LightningDataModule):
         if not positions:
             sample = namespace.source(sequence, 0)
             return np.empty((0, *sample[..., grid_indices].shape), dtype=sample.dtype)
-        self._load_registry()
         keys = [CacheKey(dataset_id, int(sequence), position) for position in positions]
         nodes = set.intersection(*(self._locations.get(key, set()) - {self.node_id} for key in keys))
         if nodes and isinstance(grid_indices, slice):
@@ -436,10 +433,7 @@ class DatasetCache(pl.LightningDataModule):
         return np.stack(values)
 
     def update_global_view(self):
-        """ Update the global view of which nodes have which records in their local cache. 
-        
-        process 0 on each node collects the local cache state and writes it to a shared file.
-        All processes then read the file to update their view of the global cache state."""
+        """Update which nodes have each cached record."""
         # rank 0 on each node collects the local cache state
         local = []
         if self.is_node_leader:
@@ -454,26 +448,6 @@ class DatasetCache(pl.LightningDataModule):
             for dataset_id, sequence, position, node in entries:
                 locations.setdefault(CacheKey(dataset_id, sequence, position), set()).add(node)
         self._locations = locations
-        # rank 0 on each node writes the global cache state to a shared file in the cache
-        # This ensures dataloader processes also have an updated view of the global cache state
-        if self.is_node_leader:
-            payload = [[key.dataset_id, key.sequence, key.position, sorted(nodes)] for key, nodes in locations.items()]
-            temporary = self._registry_path.with_suffix(f".{os.getpid()}.tmp")
-            temporary.write_text(json.dumps(payload, separators=(",", ":")))
-            os.replace(temporary, self._registry_path)
-        dist.barrier(group=self.proc_group)
-
-    def _load_registry(self, force=False):
-        try:
-            mtime = self._registry_path.stat().st_mtime_ns
-        except FileNotFoundError:
-            return
-        if force or mtime != self._registry_mtime:
-            self._locations = {
-                CacheKey(dataset_id, sequence, position): set(nodes)
-                for dataset_id, sequence, position, nodes in json.loads(self._registry_path.read_text())
-            }
-            self._registry_mtime = mtime
 
     def teardown(self, stage=None):
         for client in self._clients.values():
