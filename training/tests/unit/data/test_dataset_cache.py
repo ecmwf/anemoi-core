@@ -20,6 +20,7 @@ import pytest
 
 from anemoi.training.utils.dataset_cache import (
     CacheKey,
+    DatasetCache,
     DatasetCacheNamespace,
     Endpoint,
     ProcessZMQCacheServer,
@@ -79,7 +80,7 @@ class TestProcessZMQCacheServerClient:
         """Start the production process server and yield it."""
         entries = {dataset_id: tmp_path / dataset_id for dataset_id in ("dataset", "other-dataset")}
         for key, value in cache_data.items():
-            path = entries[key.dataset_id] / str(key.sequence) / f"{key.position}.npy"
+            path = entries[key.dataset_id] / key.grid_id / str(key.sequence) / f"{key.position}.npy"
             path.parent.mkdir(parents=True, exist_ok=True)
             np.save(path, value)
         context = multiprocessing.get_context("spawn")
@@ -114,7 +115,7 @@ class TestProcessZMQCacheServerClient:
         key = CacheKey("other-dataset", 0, 5)
         expected = np.full((3, 5), 17, dtype=np.float32)
         cache_data[key] = expected
-        path = Path(running_server.entries[key.dataset_id]) / str(key.sequence) / f"{key.position}.npy"
+        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy"
         path.parent.mkdir(parents=True, exist_ok=True)
         np.save(path, expected)
         client = ZMQCacheClient(self.endpoint(running_server))
@@ -185,12 +186,12 @@ class TestDatasetCacheNamespace:
     def test_analysis_entry_is_committed_once(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
 
-        first = namespace.fetch_source(0, 3)
+        first = sample_data[3]
         assert namespace.store(0, 3, first)
         assert not namespace.store(0, 3, np.zeros_like(first))
 
         np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
-        assert list(namespace.committed_positions()) == [(0, 3)]
+        assert list(namespace.committed_positions()) == [("all", 0, 3)]
 
     def test_stale_marker_is_repaired(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
@@ -206,19 +207,13 @@ class TestDatasetCacheNamespace:
         data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
         namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
 
-        value_0 = namespace.fetch_source(0, 2)
-        value_1 = namespace.fetch_source(1, 2)
+        value_0 = data[0, :, :, 2, :]
+        value_1 = data[1, :, :, 2, :]
         namespace.store(0, 2, value_0)
         namespace.store(1, 2, value_1)
 
         np.testing.assert_array_equal(namespace.fetch_local(0, 2), data[0, :, :, 2, :])
         np.testing.assert_array_equal(namespace.fetch_local(1, 2), data[1, :, :, 2, :])
-
-    def test_single_trajectory_sequence_uses_trajectory_layout(self, tmp_path):
-        data = np.arange(1 * 3 * 1 * 4 * 5).reshape(1, 3, 1, 4, 5)
-        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
-
-        np.testing.assert_array_equal(namespace.fetch_source(0, 2), data[0, :, :, 2, :])
 
     def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
@@ -237,4 +232,45 @@ class TestDatasetCacheNamespace:
 
     def test_negative_position(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
-        np.testing.assert_array_equal(namespace.fetch_source(0, -1), sample_data[-1])
+        namespace.store(0, -1, sample_data[-1])
+        np.testing.assert_array_equal(namespace.fetch_local(0, -1), sample_data[-1])
+
+
+def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace.store(0, 3, sample_data[3])
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    cache._locations = {CacheKey(namespace.dataset_id, 0, 3): {1}}
+    monkeypatch.setattr(cache, "_remote_cache", lambda node: pytest.fail("remote cache was checked"))
+
+    hit, value = cache.check_cache(namespace.dataset_id, 0, [3])
+
+    assert hit
+    np.testing.assert_array_equal(value, sample_data[[3]])
+
+
+def test_check_cache_returns_miss_without_reading_source(tmp_path, sample_data):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+
+    assert cache.check_cache(namespace.dataset_id, 0, [3]) == (False, None)
+
+
+def test_grid_shards_are_cached_separately(tmp_path, sample_data):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.cache_path = tmp_path
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    positions = [3]
+
+    cache.store_records(namespace.dataset_id, 0, positions, sample_data[positions, ..., :2], slice(0, 2))
+
+    hit, value = cache.check_cache(namespace.dataset_id, 0, positions, slice(0, 2))
+    assert hit
+    np.testing.assert_array_equal(value, sample_data[positions, ..., :2])
+    assert cache.check_cache(namespace.dataset_id, 0, positions, slice(2, 4)) == (False, None)

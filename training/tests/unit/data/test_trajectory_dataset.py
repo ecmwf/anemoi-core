@@ -234,11 +234,14 @@ class TestTrajectoryDatasetGetSample:
         ds = _make_trajectory_dataset(num_inits=3, variables=3, ensemble=2, steps=6, gridpoints=10)
 
         class FakeCache:
-            def read_records(self, dataset_id, sequence, positions, grid_indices=None):
+            def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
                 assert dataset_id == "forecast"
                 raw = ds.data[sequence][:, :, positions, :]
                 result = np.transpose(raw, (2, 0, 1, 3))
-                return result if grid_indices is None else result[..., grid_indices]
+                return True, result if grid_indices is None else result[..., grid_indices]
+
+            def store_records(self, dataset_id, sequence, positions, values):
+                raise AssertionError("cache hit should not be stored")
 
         ds.set_cache(FakeCache(), "forecast")
         sample = ds.get_sample(sequence=2, positions=[1, 3], grid_shard_indices=slice(0, 4))

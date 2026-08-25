@@ -48,6 +48,7 @@ class CacheKey:
     dataset_id: str
     sequence: int
     position: int
+    grid_id: str = "all"
 
 
 @dataclass(frozen=True)
@@ -60,17 +61,16 @@ class Endpoint:
 def _read_shard(entries, request):
     """ """
     paths = [
-        Path(entries[request["dataset_id"]]) / str(request["sequence"]) / f"{position}.npy"
+        Path(entries[request["dataset_id"]]) / request["grid_id"] / str(request["sequence"]) / f"{position}.npy"
         for position in request["positions"]
     ]
     if not paths or not all(path.exists() for path in paths):
         return None
-    grid = slice(*request["grid"])
-    first = np.load(paths[0], allow_pickle=False, mmap_mode="r")[..., grid]
+    first = np.load(paths[0], allow_pickle=False, mmap_mode="r")
     result = np.empty((len(paths), *first.shape), dtype=first.dtype)
     result[0] = first
     for index, path in enumerate(paths[1:], 1):
-        result[index] = np.load(path, allow_pickle=False, mmap_mode="r")[..., grid]
+        result[index] = np.load(path, allow_pickle=False, mmap_mode="r")
     return result
 
 
@@ -117,32 +117,30 @@ class ZMQCacheClient:
         self.socket.setsockopt(zmq.RCVTIMEO, 30_000)
         self.socket.connect(f"tcp://{self.endpoint.host}:{self.endpoint.port}")
 
-    def request_shard(self, key, positions, grid):
+    def request_shard(self, key, positions):
         request = {
             "dataset_id": key.dataset_id,
             "sequence": key.sequence,
             "positions": positions,
-            "grid": [grid.start, grid.stop, grid.step],
+            "grid_id": key.grid_id,
         }
-        for attempt in range(2):
-            try:
-                if self.socket is None:
-                    self._connect()
-                self.socket.send_json(request)
-                response = self.socket.recv_multipart()
-                if len(response) == 1:
-                    raise RemoteCacheMiss(key)
-                metadata = json.loads(response[0])
-                return np.frombuffer(response[1], dtype=metadata["dtype"]).reshape(metadata["shape"])
-            except RemoteCacheMiss:
-                raise
-            except zmq.ZMQError as error:
-                self.close()
-                if attempt:
-                    raise RemoteCacheUnavailable(str(error)) from error
+        try:
+            if self.socket is None:
+                self._connect()
+            self.socket.send_json(request)
+            response = self.socket.recv_multipart()
+            if len(response) == 1:
+                raise RemoteCacheMiss(key)
+            metadata = json.loads(response[0])
+            return np.frombuffer(response[1], dtype=metadata["dtype"]).reshape(metadata["shape"])
+        except RemoteCacheMiss:
+            raise
+        except zmq.ZMQError as error:
+            self.close()
+            raise RemoteCacheUnavailable(str(error)) from error
 
     def fetch(self, key):
-        return self.request_shard(key, [key.position], slice(None))[0]
+        return self.request_shard(key, [key.position])[0]
 
     def close(self):
         if self.socket is not None:
@@ -198,12 +196,12 @@ class DatasetCacheNamespace:
             raise IndexError(position)
         return sequence, position
 
-    def paths(self, sequence, position):
+    def paths(self, sequence, position, grid_id="all"):
         sequence, position = self.normalize(sequence, position)
         return (
-            self.entries_path / str(sequence) / f"{position}.npy",
-            self.markers_path / str(sequence) / str(position),
-            self.locks_path / str(sequence) / f"{position}.lock",
+            self.entries_path / grid_id / str(sequence) / f"{position}.npy",
+            self.markers_path / grid_id / str(sequence) / str(position),
+            self.locks_path / grid_id / str(sequence) / f"{position}.lock",
         )
 
     @contextmanager
@@ -214,17 +212,12 @@ class DatasetCacheNamespace:
             yield
             fcntl.flock(lock, fcntl.LOCK_UN)
 
-    def local(self, sequence, position):
-        entry, marker, _ = self.paths(sequence, position)
+    def local(self, sequence, position, grid_id="all"):
+        entry, marker, _ = self.paths(sequence, position, grid_id)
         return np.load(entry, allow_pickle=False, mmap_mode="r") if marker.exists() and entry.exists() else None
 
-    def source(self, sequence, position):
-        sequence, position = self.normalize(sequence, position)
-        data = self.reader.data
-        return np.asarray(data[position] if len(data.shape) == 4 else data[sequence][:, :, position, :])
-
-    def store(self, sequence, position, value):
-        entry, marker, lock = self.paths(sequence, position)
+    def store(self, sequence, position, value, grid_id="all"):
+        entry, marker, lock = self.paths(sequence, position, grid_id)
         with self.lock(lock):
             if marker.exists() and entry.exists():
                 return False
@@ -247,8 +240,10 @@ class DatasetCacheNamespace:
 
     def committed(self):
         return (
-            (int(sequence.name), int(marker.name))
-            for sequence in self.markers_path.iterdir()
+            (grid.name, int(sequence.name), int(marker.name))
+            for grid in self.markers_path.iterdir()
+            if grid.is_dir()
+            for sequence in grid.iterdir()
             if sequence.is_dir()
             for marker in sequence.iterdir()
             if marker.name.isdigit()
@@ -256,7 +251,6 @@ class DatasetCacheNamespace:
 
     _paths = paths
     fetch_local = local
-    fetch_source = source
     committed_positions = committed
 
 
@@ -273,7 +267,7 @@ class DatasetCache(pl.LightningDataModule):
         self.namespaces = {}
         self._datasets = set()
         self._locations = {}
-        self._clients = {}
+        self._connections = {}
         self.cache_hits_local = Value("q", 0)
         self.cache_hits_remote = Value("q", 0)
         self.cache_misses = Value("q", 0)
@@ -365,72 +359,73 @@ class DatasetCache(pl.LightningDataModule):
         values = np.asarray(positions)
         return [int(values)] if values.ndim == 0 else [int(value) for value in values]
 
+    def _grid_id(self, grid_indices):
+        if grid_indices is None:
+            return "all"
+        if isinstance(grid_indices, slice):
+            if grid_indices == slice(None):
+                return "all"
+            value = (grid_indices.start, grid_indices.stop, grid_indices.step)
+        else:
+            indices = np.asarray(grid_indices)
+            value = (indices.dtype.str, indices.shape, indices.tolist())
+        return hashlib.sha256(json.dumps(value).encode()).hexdigest()[:16]
+
     def _endpoint(self, node):
         rank = self._leaders[node]
         return Endpoint(self.hostnames[rank], self._ports[node], node)
 
-    def _client(self, node):
+    def _remote_cache(self, node):
         key = (os.getpid(), node)
-        if key not in self._clients:
-            self._clients[key] = ZMQCacheClient(self._endpoint(node))
-        return self._clients[key]
+        if key not in self._connections:
+            self._connections[key] = ZMQCacheClient(self._endpoint(node))
+        return self._connections[key]
 
-    def _cache_or_source_read(self, namespace, sequence, position):
-        """ Access a single record from the local cache, remote cache, or source dataset. """
-        # generate the cache key
-        key = CacheKey(namespace.dataset_id, int(sequence), position)
-        self.total_fetches.value += 1
-        # try to fetch the value from the local cache
-        value = namespace.local(sequence, position)
-        if value is not None:
-            self.cache_hits_local.value += 1
-            return value
-        # try to fetch the value from a remote cache
-        for node in self._locations.get(key, set()) - {self.node_id}:
-            try:
-                value = self._client(node).request_shard(key, [position], slice(None))[0]
-                self.cache_hits_remote.value += 1
-                return value
-            except (RemoteCacheMiss, RemoteCacheUnavailable):
-                pass
-        self.cache_misses.value += 1
-        # at this point, the value is not in a remote or local cache.
-
-        # fetch the value from the source dataset
-        value = namespace.source(sequence, position)
-        # store the value in the local cache if there is enough space
-        if not self.cache_full.value:
-            try:
-                if shutil.disk_usage(self.cache_path).free < value.nbytes + (1 << 30):
-                    raise OSError(errno.ENOSPC, "not enough free space")
-                namespace.store(sequence, position, value)
-            except OSError as error:
-                if not _is_capacity_error(error):
-                    raise
-                self.cache_full.value = True
-                LOGGER.warning("Dataset cache is full on node %s", self.node_id)
-        return value
-
-    def read_records(self, dataset_id, sequence, positions, grid_indices=None):
+    def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
         if not positions:
-            sample = namespace.source(sequence, 0)
-            return np.empty((0, *sample[..., grid_indices].shape), dtype=sample.dtype)
-        keys = [CacheKey(dataset_id, int(sequence), position) for position in positions]
-        nodes = set.intersection(*(self._locations.get(key, set()) - {self.node_id} for key in keys))
-        if nodes and isinstance(grid_indices, slice):
+            return False, None
+
+        grid_id = self._grid_id(grid_indices)
+        keys = [CacheKey(dataset_id, int(sequence), position, grid_id) for position in positions]
+        values = [namespace.local(sequence, position, grid_id) for position in positions]
+        missing = [index for index, value in enumerate(values) if value is None]
+        self.total_fetches.value += len(positions)
+        self.cache_hits_local.value += len(positions) - len(missing)
+
+        if missing:
+            nodes = set.intersection(*(self._locations.get(keys[index], set()) - {self.node_id} for index in missing))
             try:
-                result = self._client(min(nodes)).request_shard(keys[0], positions, grid_indices)
-                self.total_fetches.value += len(positions)
-                self.cache_hits_remote.value += len(positions)
-                return result
+                if not nodes:
+                    raise RemoteCacheMiss(keys[missing[0]])
+                remote_positions = [positions[index] for index in missing]
+                remote = self._remote_cache(min(nodes)).request_shard(keys[missing[0]], remote_positions)
+                for index, value in zip(missing, remote):
+                    values[index] = value
+                self.cache_hits_remote.value += len(missing)
             except (RemoteCacheMiss, RemoteCacheUnavailable):
-                pass
-        values = [self._cache_or_source_read(namespace, sequence, position) for position in positions]
-        if grid_indices is not None:
-            values = [value[..., grid_indices] for value in values]
-        return np.stack(values)
+                self.cache_misses.value += len(missing)
+                return False, None
+
+        return True, np.stack(values)
+
+    def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+        if self.cache_full.value:
+            return
+        namespace = self.namespaces[dataset_id]
+        positions = self._positions(namespace, sequence, positions)
+        grid_id = self._grid_id(grid_indices)
+        try:
+            for position, value in zip(positions, values):
+                if shutil.disk_usage(self.cache_path).free < value.nbytes + (1 << 30):
+                    raise OSError(errno.ENOSPC, "not enough free space")
+                namespace.store(sequence, position, value, grid_id)
+        except OSError as error:
+            if not _is_capacity_error(error):
+                raise
+            self.cache_full.value = True
+            LOGGER.warning("Dataset cache is full on node %s", self.node_id)
 
     def update_global_view(self):
         """Update which nodes have each cached record."""
@@ -438,19 +433,22 @@ class DatasetCache(pl.LightningDataModule):
         local = []
         if self.is_node_leader:
             for dataset_id, namespace in self.namespaces.items():
-                local.extend((dataset_id, sequence, position, self.node_id) for sequence, position in namespace.committed())
+                local.extend(
+                    (dataset_id, sequence, position, grid_id, self.node_id)
+                    for grid_id, sequence, position in namespace.committed()
+                )
         # each process gathers the local cache state from all nodes
         gathered = [None] * self.world_size
         dist.all_gather_object(gathered, local, group=self.proc_group)
         locations = {}
         # each process updates its view of the global cache state
         for entries in gathered:
-            for dataset_id, sequence, position, node in entries:
-                locations.setdefault(CacheKey(dataset_id, sequence, position), set()).add(node)
+            for dataset_id, sequence, position, grid_id, node in entries:
+                locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
         self._locations = locations
 
     def teardown(self, stage=None):
-        for client in self._clients.values():
+        for client in self._connections.values():
             client.close()
         if self.is_node_leader:
             self.server.close()

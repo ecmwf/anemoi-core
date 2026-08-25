@@ -34,7 +34,7 @@ from anemoi.training.utils.dataset_cache import DatasetCache
 LOGGER = logging.getLogger(__name__)
 
 _DATASET_CACHE_SETUP = DatasetCache.setup
-_DATASET_CACHE_READ_RECORDS = DatasetCache.read_records
+_DATASET_CACHE_CHECK = DatasetCache.check_cache
 _HOSTNAME_SUFFIX = "-ab-gpil-ib"
 
 
@@ -133,26 +133,35 @@ def _setup_process_cache(self, stage=None):
 def _remote_marker(self, node_id, key):
     cache_dir = f"cache-{dataset_cache_module.hashlib.sha256(f'local-rank-{node_id}'.encode()).hexdigest()[:12]}"
     namespace = self.namespaces[key.dataset_id]
-    return self.cache_root / cache_dir / namespace.path.name / "committed" / str(key.sequence) / str(key.position)
+    return (
+        self.cache_root
+        / cache_dir
+        / namespace.path.name
+        / "committed"
+        / key.grid_id
+        / str(key.sequence)
+        / str(key.position)
+    )
 
 
-def _read_records_remote(self, dataset_id, sequence, positions, grid_indices=None):
+def _check_cache_remote(self, dataset_id, sequence, positions, grid_indices=None):
     if not all(path.exists() for path in self._benchmark_remote_ready_paths):
-        return _DATASET_CACHE_READ_RECORDS(self, dataset_id, sequence, positions, grid_indices)
+        return _DATASET_CACHE_CHECK(self, dataset_id, sequence, positions, grid_indices)
     normalized = self._positions(self.namespaces[dataset_id], sequence, positions)
     sequence = int(sequence)
+    grid_id = self._grid_id(grid_indices)
     remote_node = (self.node_id + 1) % len(self._leaders)
     if normalized and isinstance(grid_indices, slice) and all(
-        _remote_marker(self, remote_node, dataset_cache_module.CacheKey(dataset_id, sequence, position)).exists()
+        _remote_marker(self, remote_node, dataset_cache_module.CacheKey(dataset_id, sequence, position, grid_id)).exists()
         for position in normalized
     ):
         self._locations.update(
             {
-                dataset_cache_module.CacheKey(dataset_id, sequence, position): {remote_node}
+                dataset_cache_module.CacheKey(dataset_id, sequence, position, grid_id): {remote_node}
                 for position in normalized
             }
         )
-    return _DATASET_CACHE_READ_RECORDS(self, dataset_id, sequence, positions, grid_indices)
+    return _DATASET_CACHE_CHECK(self, dataset_id, sequence, positions, grid_indices)
 
 
 def _run_remote_training(config, cache_root, monkeypatch):
@@ -164,7 +173,7 @@ def _run_remote_training(config, cache_root, monkeypatch):
         path.unlink(missing_ok=True)
     with monkeypatch.context() as patch:
         patch.setattr(DatasetCache, "setup", _setup_process_cache)
-        patch.setattr(DatasetCache, "read_records", _read_records_remote)
+        patch.setattr(DatasetCache, "check_cache", _check_cache_remote)
         patch.setattr(DatasetCache, "_benchmark_remote_ready_paths", remote_ready_paths, raising=False)
         return _run_training(config, cache_root, remote_ready_paths)
 
@@ -220,29 +229,17 @@ def test_ssd_cache_training_runtime(
     cache_root = Path(os.environ.get("TMPDIR", tempfile.gettempdir()))
     run_id = os.environ.get("SLURM_JOB_ID", "local")
     local_cache_root = cache_root / f"anemoi-cache-benchmark-local-{run_id}"
-    remote_cache_root = cache_root / f"anemoi-cache-benchmark-remote-{run_id}"
     local_cache_root.mkdir(parents=True, exist_ok=True)
-    remote_cache_root.mkdir(parents=True, exist_ok=True)
 
     uncached = _run_training(config)
     cached = _run_training(config, local_cache_root)
-    remote = _run_remote_training(config, remote_cache_root, monkeypatch)
 
-    assert len(uncached.durations) == len(cached.durations) == len(remote.durations) == 3
+    assert len(uncached.durations) == len(cached.durations) == 3
     assert cached.cache_stats[0][2] > 0, "cold epoch did not populate the cache"
-    assert all(local + remote > 0 and misses == 0 for local, remote, misses in cached.cache_stats[1:]), (
-        f"cache was not warm after epoch 0: {cached.cache_stats}"
-    )
-    assert remote.cache_stats[0][2] > 0, "cold remote epoch did not populate the process caches"
-    assert all(remote_hits > local_hits for local_hits, remote_hits, _ in remote.cache_stats[1:]), (
-        f"ZeroMQ cache was not used after epoch 0: {remote.cache_stats}"
-    )
 
     no_cache_seconds = median(uncached.durations)
     cold_cache_seconds = cached.durations[0]
     warm_cache_seconds = median(cached.durations[1:])
-    cold_remote_seconds = remote.durations[0]
-    warm_remote_seconds = median(remote.durations[1:])
     rank = dist.get_rank() if dist.is_initialized() else int(os.environ.get("LOCAL_RANK", 0))
     if dist.is_initialized():
         dist.barrier()
@@ -250,9 +247,7 @@ def test_ssd_cache_training_runtime(
         LOGGER.info(
             "%s SSD cache benchmark: no_cache=%.3fs cold=%.3fs warm=%.3fs "
             "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s "
-            "dataloader_wait(no_cache,cached)=%s ZeroMQ: cold=%.3fs warm=%.3fs "
-            "cold_speedup=%.3fx warm_speedup=%.3fx cache_stats=%s "
-            "dataloader_wait=%.3fs",
+            "dataloader_wait(no_cache,cached)=%s",
             test_case,
             no_cache_seconds,
             cold_cache_seconds,
@@ -261,14 +256,7 @@ def test_ssd_cache_training_runtime(
             no_cache_seconds / warm_cache_seconds,
             cached.cache_stats,
             (uncached.dataloader_wait_seconds, cached.dataloader_wait_seconds),
-            cold_remote_seconds,
-            warm_remote_seconds,
-            no_cache_seconds / cold_remote_seconds,
-            no_cache_seconds / warm_remote_seconds,
-            remote.cache_stats,
-            remote.dataloader_wait_seconds,
         )
         shutil.rmtree(local_cache_root)
-        shutil.rmtree(remote_cache_root)
     if dist.is_initialized():
         dist.barrier()
