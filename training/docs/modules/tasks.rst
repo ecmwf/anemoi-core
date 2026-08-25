@@ -46,7 +46,7 @@ Key properties and methods:
   respectively. Used by the datamodule.
 
 .. automodule:: anemoi.training.tasks.base
-   :members:
+   :members: BaseTask, BaseSingleStepTask
    :no-undoc-members:
    :show-inheritance:
 
@@ -56,7 +56,7 @@ Key properties and methods:
 
 :class:`~anemoi.training.tasks.base.BaseSingleStepTask` is a convenience
 subclass for tasks with a single training step (no rollout). Both
-:class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`
+:class:`~anemoi.training.tasks.temporal_downscaler.TemporalDownscaler`
 and :class:`~anemoi.training.tasks.timeless.BaseTimelessTask` inherit
 from it.
 
@@ -64,7 +64,7 @@ from it.
  Forecaster
 ************
 
-:class:`~anemoi.training.tasks.forecasting.Forecaster` implements
+:class:`~anemoi.training.tasks.forecaster.Forecaster` implements
 autoregressive rollout training. It is constructed with:
 
 - ``multistep_input`` — number of input time steps (e.g. ``2`` for
@@ -74,14 +74,14 @@ autoregressive rollout training. It is constructed with:
 - ``timestep`` — the model timestep as a frequency string (e.g.
   ``"6H"``).
 - ``rollout`` — optional dict configuring the rollout schedule (see
-  :class:`~anemoi.training.tasks.forecasting.RolloutConfig`).
+  :class:`~anemoi.training.tasks.forecaster.RolloutConfig`).
 - ``validation_rollout`` — number of rollout steps used during
   validation (default ``1``).
 
 RolloutConfig
 =============
 
-:class:`~anemoi.training.tasks.forecasting.RolloutConfig` encapsulates
+:class:`~anemoi.training.tasks.forecaster.RolloutConfig` encapsulates
 the progressive rollout schedule:
 
 - ``start`` — initial number of rollout steps at epoch 0.
@@ -93,8 +93,8 @@ The current step count is stored in ``rollout.step`` and is increased
 by calling ``rollout.increase()``, which is triggered by the trainer at
 the end of each epoch via ``on_train_epoch_end``.
 
-.. automodule:: anemoi.training.tasks.forecasting
-   :members:
+.. automodule:: anemoi.training.tasks.forecaster
+   :members: RolloutConfig, Forecaster
    :no-undoc-members:
    :show-inheritance:
 
@@ -216,7 +216,7 @@ For example, with a single input and outputs ``["2H", "3H"]`` both ``2H`` and
  TemporalDownscaler
 *********************
 
-:class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`
+:class:`~anemoi.training.tasks.temporal_downscaler.TemporalDownscaler`
 downscales to higher temporal resolution by generating intermediate time steps between two input
 times. It is constructed with:
 
@@ -235,8 +235,8 @@ Example: ``input_timestep="6H"``, ``output_timestep="3H"``,
 The default is to use the time aggregate loss when training any
 temporal downscaler.
 
-.. automodule:: anemoi.training.tasks.temporal_downscaling
-   :members:
+.. automodule:: anemoi.training.tasks.temporal_downscaler
+   :members: TemporalDownscaler
    :no-undoc-members:
    :show-inheritance:
 
@@ -250,6 +250,6 @@ both input and output are a single snapshot at ``t=0``. It inherits from
 inherits from :class:`~anemoi.training.tasks.base.BaseSingleStepTask`.
 
 .. automodule:: anemoi.training.tasks.timeless
-   :members:
+   :members: BaseTimelessTask, Autoencoder
    :no-undoc-members:
    :show-inheritance:

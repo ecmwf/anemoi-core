@@ -102,8 +102,8 @@ The temporal layout is:
 * **Output:** :math:`t = -\Delta t` (the step immediately before the input states).
 
 
- **Step 1** — Implement the task class
-===================================
+**Step 1** — Implement the task class
+=====================================
 
 Create a new file
 ``src/anemoi/training/tasks/backward_forecaster.py``:
@@ -155,8 +155,8 @@ Key points:
   time steps to load per sample.
 
 
- **Step 2** — Add a Hydra configuration file
-==========================================
+**Step 2** — Add a Hydra configuration file
+===========================================
 
 Create ``src/anemoi/training/config/task/backward_forecaster.yaml``:
 
@@ -170,8 +170,8 @@ on the command line or in a recipe YAML with ``task: backward_forecaster``
 (Hydra resolves the file name without the ``.yaml`` extension).
 
 
- **Step 3** — Add a Pydantic validation schema
-=================================================
+**Step 3** — Add a Pydantic validation schema
+=============================================
 
 Open ``src/anemoi/training/schemas/tasks.py`` and add:
 
@@ -204,8 +204,8 @@ For more details on how Pydantic schemas and Hydra instantiation work
 together in Anemoi Training, see :doc:`../contributing`.
 
 
- **Step 4** — Register the task in the package
-=================================================
+**Step 4** — Register the task in the package
+=============================================
 
 Open ``src/anemoi/training/tasks/__init__.py`` and add the new task:
 
@@ -226,8 +226,8 @@ Open ``src/anemoi/training/tasks/__init__.py`` and add the new task:
 This is only needed to import it directly from ``anemoi.training.tasks``.
 
 
- **Step 5** — Use the new task
-============================
+**Step 5** — Use the new task
+=============================
 
 Override the task in your training command:
 

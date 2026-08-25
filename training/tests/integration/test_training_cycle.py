@@ -13,6 +13,7 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
@@ -500,6 +501,7 @@ def test_restart_training_with_rollout(
 ) -> None:
     cfg, url = gnn_config_with_rollout
     get_test_archive(url)
+    weights_only_cfg = deepcopy(cfg)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
@@ -511,6 +513,28 @@ def test_restart_training_with_rollout(
     # Resume training from the checkpoint and verify the rollout counter is restored
     # correctly and continues to increment on further epochs.
     checkpoint_dir = get_single_checkpoint_dir(cfg)
+    checkpoint_path = sorted(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))[-1]
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["AnemoiDatasetsDataModule"]["epoch"] == 1
+
+    # Start a new training run from the model weights. The configured rollout
+    # must determine both the task steps and the dataset time window.
+    last_checkpoint_path = checkpoint_dir / "last.ckpt"
+    weights_only_cfg.system.input.warm_start = last_checkpoint_path
+    weights_only_cfg.training.load_weights_only = True
+    weights_only_cfg.training.max_epochs = 1
+    weights_only_cfg.task.rollout = {
+        "start": 4,
+        "epoch_increment": 0,
+        "maximum": 4,
+    }
+    weights_only_cfg.diagnostics.enable_checkpointing = False
+    weights_only_cfg.dataloader.limit_batches.validation = 0
+    weights_only_trainer = AnemoiTrainer(weights_only_cfg)
+    weights_only_trainer.train()
+
+    assert weights_only_trainer.task.rollout.step == 4
+    assert weights_only_trainer.datamodule.ds_train.rollout == 4
 
     cfg.training.run_id = checkpoint_dir.name
     cfg.training.max_epochs = 4
