@@ -31,7 +31,7 @@ class AnemoiEvaluator(AnemoiTrainer):
 
     - :meth:`pl.Trainer.validate` is called instead of :meth:`pl.Trainer.fit`.
     - A checkpoint **must** be specified via ``training.checkpoint.source`` (a
-      ``RunSource`` for resume/fork, or a ``LocalSource`` for an explicit file);
+      ``RunIdSource`` for resume/fork, or a ``LocalSource`` for an explicit file);
       omitting it raises a :exc:`RuntimeError` immediately rather than silently
       evaluating a randomly-initialised model.
     - Checkpointing and weight-averaging callbacks are disabled regardless of
@@ -58,7 +58,7 @@ class AnemoiEvaluator(AnemoiTrainer):
         if not self.start_from_checkpoint:
             msg = (
                 "No checkpoint specified for evaluation. Set 'training.checkpoint.source' to a "
-                "RunSource (run_id) or LocalSource (path) pointing to a trained checkpoint."
+                "RunIdSource (run_id) or LocalSource (path) pointing to a trained checkpoint."
             )
             raise RuntimeError(msg)
 

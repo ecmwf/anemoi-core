@@ -9,7 +9,7 @@
 
 """Run-lineage checkpoint source.
 
-``RunSource`` is the acquisition-layer source for *resume* and *fork* by run id.
+``RunIdSource`` is the acquisition-layer source for *resume* and *fork* by run id.
 It resolves the checkpoint path from a run id —
 ``<system.output.checkpoints.root>.parent/<id>/last.ckpt`` — and delegates the
 actual load to :class:`~anemoi.training.checkpoint.sources.local.LocalSource`,
@@ -28,7 +28,7 @@ behaviour match the legacy run-lineage resolution this source replaces.
 
 Example
 -------
->>> source = RunSource(run_id="abc123")        # resume
+>>> source = RunIdSource(run_id="abc123")        # resume
 >>> context = CheckpointContext(config=cfg)
 >>> result = await source.process(context)
 >>> result.checkpoint_path  # <checkpoints.root.parent>/abc123/last.ckpt
@@ -57,7 +57,7 @@ LOGGER = logging.getLogger(__name__)
 _RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
-class RunSource(CheckpointSource):
+class RunIdSource(CheckpointSource):
     """Acquire a checkpoint from a run's lineage directory.
 
     Parameters
@@ -114,7 +114,7 @@ class RunSource(CheckpointSource):
             from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
             msg = (
-                "RunSource requires system.output.checkpoints.root to resolve a run "
+                "RunIdSource requires system.output.checkpoints.root to resolve a run "
                 "checkpoint path, but it is not set in the config."
             )
             raise CheckpointConfigError(msg)
@@ -130,7 +130,7 @@ class RunSource(CheckpointSource):
         pass-through) on other ranks — mirroring the legacy resolver.
         """
         if self.run_id is None:
-            LOGGER.debug("RunSource: no run_id set; pass-through.")
+            LOGGER.debug("RunIdSource: no run_id set; pass-through.")
             return context
 
         path = self.resolve_path(
@@ -145,7 +145,7 @@ class RunSource(CheckpointSource):
             if _is_rank_zero():
                 msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
                 raise RuntimeError(msg)
-            LOGGER.warning("RunSource: checkpoint not found at %s; deferring the error to rank 0.", path)
+            LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
             return context
 
         # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
@@ -155,11 +155,11 @@ class RunSource(CheckpointSource):
             if _is_rank_zero():
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
                 raise RuntimeError(msg)
-            LOGGER.warning("RunSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
+            LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
             return context
 
         resolution = "fork" if self.fork else "resume"
-        LOGGER.info("RunSource: resolved checkpoint path (%s): %s", resolution, path)
+        LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, path)
         context.checkpoint_path = path
         context.update_metadata(resolved_checkpoint_path=str(path), lineage_resolution=resolution)
 
@@ -171,7 +171,7 @@ class RunSource(CheckpointSource):
 def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:
     """Resolve ``(run_id, fork_run_id)`` from a configured ``training.checkpoint.source``.
 
-    ``RunSource`` is the single source of truth for run lineage: ``fork=False``
+    ``RunIdSource`` is the single source of truth for run lineage: ``fork=False``
     resumes ``run_id`` (so ``run_id`` is set, ``fork_run_id`` None); ``fork=True``
     forks from it (so ``fork_run_id`` is set and ``run_id`` stays None, letting a
     fresh MLflow id be minted). Any other source — or no source — carries no run
@@ -195,7 +195,7 @@ def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None
     if source is None:
         return None, None
     target = OmegaConf.select(source, "_target_", default="") or ""
-    if not target.endswith("RunSource"):
+    if not target.endswith("RunIdSource"):
         return None, None
     run_id = OmegaConf.select(source, "run_id", default=None)
     if run_id is None:

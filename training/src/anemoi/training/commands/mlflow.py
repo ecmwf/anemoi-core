@@ -60,13 +60,13 @@ def prepare_mlflow_run_id(
     )
 
     # Parse configuration. An existing run to attach to is now expressed as a
-    # resume RunSource under training.checkpoint.source (fork mints a fresh run,
+    # resume RunIdSource under training.checkpoint.source (fork mints a fresh run,
     # so it falls through to creating one below).
     existing_run_id = None
     source = OmegaConf.select(config, "training.checkpoint.source", default=None)
     if (
         source is not None
-        and (OmegaConf.select(source, "_target_", default="") or "").endswith("RunSource")
+        and (OmegaConf.select(source, "_target_", default="") or "").endswith("RunIdSource")
         and not bool(OmegaConf.select(source, "fork", default=False))
     ):
         existing_run_id = OmegaConf.select(source, "run_id", default=None)

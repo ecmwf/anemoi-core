@@ -292,12 +292,12 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
     # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
-    # key was removed): a RunSource (fork=false) resolves the run's last.ckpt and a
+    # key was removed): a RunIdSource (fork=false) resolves the run's last.ckpt and a
     # WarmStartLoader restores it so Lightning's ckpt_path continues the global step.
     with open_dict(cfg):
         cfg.training.checkpoint = {
             "source": {
-                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                 "run_id": checkpoint_dir.name,
                 "fork": False,
             },
@@ -352,13 +352,13 @@ def test_restart_training_ddp(
     assert len(run_dirs) == 1, f"Expected exactly one run_id directory, found {[d.name for d in run_dirs]}"
     checkpoint_dir = run_dirs[0]
 
-    # Resume across ranks via the checkpoint pipeline surface (RunSource resolves the
+    # Resume across ranks via the checkpoint pipeline surface (RunIdSource resolves the
     # same last.ckpt on every rank; WarmStartLoader hands its path to Lightning's
     # ckpt_path so all ranks restore optimizer/loop state and the global step continues).
     with open_dict(cfg):
         cfg.training.checkpoint = {
             "source": {
-                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                 "run_id": checkpoint_dir.name,
                 "fork": False,
             },
@@ -386,7 +386,7 @@ def test_restart_training_architectures(
 
     ``test_restart_training`` covers GNN only; these exercise the non-GNN paths — including
     the multi-dataset metadata handling — through the same resume cycle: train, then
-    ``RunSource(fork=false)`` + ``WarmStartLoader``, and assert the global step continues.
+    ``RunIdSource(fork=false)`` + ``WarmStartLoader``, and assert the global step continues.
     A strict warm-start load that does not round-trip an architecture's state dict fails
     here — this is how the tendency-processor regression was caught.
     """
@@ -409,7 +409,7 @@ def test_restart_training_architectures(
     with open_dict(cfg):
         cfg.training.checkpoint = {
             "source": {
-                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                 "run_id": checkpoint_dir.name,
                 "fork": False,
             },
@@ -713,7 +713,7 @@ def test_evaluator(
 
     cfg.training.checkpoint = {
         "source": {
-            "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+            "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
             "run_id": checkpoint_dir.name,
         },
         "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},

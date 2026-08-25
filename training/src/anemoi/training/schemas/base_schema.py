@@ -201,12 +201,12 @@ def _find_deprecated_target(data: Any, deprecated: dict[str, str]) -> tuple[str,
 _DEPRECATED_KEYS: dict[str, str] = {
     "training.run_id": (
         "training.run_id has been removed. To resume a run, set training.checkpoint.source to "
-        "{_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>, fork: false} "
+        "{_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>, fork: false} "
         "(config group: training/checkpoint/source=run +training.checkpoint.source.run_id=<id>)."
     ),
     "training.fork_run_id": (
         "training.fork_run_id has been removed. To fork a new run from an existing run, set "
-        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.run.RunSource, "
+        "training.checkpoint.source to {_target_: anemoi.training.checkpoint.sources.run.RunIdSource, "
         "run_id: <id>, fork: true}."
     ),
     "system.input.warm_start": (
@@ -216,7 +216,7 @@ _DEPRECATED_KEYS: dict[str, str] = {
     ),
     "training.load_weights_only": (
         "training.load_weights_only has been removed. Set training.checkpoint.source to the run or file to "
-        "load ({_target_: anemoi.training.checkpoint.sources.run.RunSource, run_id: <id>} or "
+        "load ({_target_: anemoi.training.checkpoint.sources.run.RunIdSource, run_id: <id>} or "
         "{_target_: anemoi.training.checkpoint.sources.local.LocalSource, path: <path>}) and "
         "training.checkpoint.loading to "
         "{_target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader}."

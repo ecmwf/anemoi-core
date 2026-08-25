@@ -618,12 +618,12 @@ def global_config_with_checkpoint(
     torch.save(new_ckpt, checkpoint_dir / "last.ckpt")
 
     # Resume the staged run via the checkpoint pipeline surface (the legacy
-    # ``training.run_id`` key was removed): a RunSource (fork=false) resolves the
+    # ``training.run_id`` key was removed): a RunIdSource (fork=false) resolves the
     # run's last.ckpt and a WarmStartLoader restores it.
     with open_dict(cfg):
         cfg.training.checkpoint = {
             "source": {
-                "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                 "run_id": "dummy_id",
                 "fork": False,
             },

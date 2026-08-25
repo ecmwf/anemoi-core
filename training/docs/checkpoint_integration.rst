@@ -182,7 +182,7 @@ The builder reads ``training.checkpoint.{source,loading,modifiers}`` and emits
 stages in the fixed order source → loading → modifiers. Absent blocks
 contribute nothing; an empty config yields a no-op pipeline. The builder also
 accepts ``parent_run_server2server`` / ``fork_run_server2server`` keyword
-arguments, which it merges **only** onto a ``RunSource`` config — this is how
+arguments, which it merges **only** onto a ``RunIdSource`` config — this is how
 the trainer injects cross-server resume/fork lineage that cannot be written
 statically in YAML.
 
@@ -214,7 +214,7 @@ optimizer + epoch; if ``False``, ``ckpt_path`` is suppressed and training starts
 with a fresh optimizer at epoch 0 (the weights are already loaded).
 
 Because Lightning's restore needs a real file, warm start is restricted to
-``LocalSource`` / ``RunSource``. ``_reject_unsupported_warm_start`` raises a
+``LocalSource`` / ``RunIdSource``. ``_reject_unsupported_warm_start`` raises a
 clear :class:`CheckpointConfigError` if warm start is paired with a remote
 source, rather than silently dropping optimizer/epoch state.
 

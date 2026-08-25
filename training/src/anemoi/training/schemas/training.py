@@ -683,7 +683,7 @@ class CheckpointPipelineSchema(BaseModel):
     """
 
     source: GenericSchema | None = Field(default=None)
-    "Acquisition source stage (LocalSource / RunSource / S3Source / HTTPSource)."
+    "Acquisition source stage (LocalSource / RunIdSource / S3Source / HTTPSource)."
     loading: GenericSchema | None = Field(default=None)
     "Loading strategy stage (WeightsOnlyLoader / TransferLearningLoader / WarmStartLoader / ColdStartLoader)."
     modifiers: list[GenericSchema] | None = Field(default=None)

@@ -15,7 +15,7 @@
 training:
   checkpoint:
     source:
-      _target_: anemoi.training.checkpoint.sources.run.RunSource
+      _target_: anemoi.training.checkpoint.sources.run.RunIdSource
       run_id: ???             # run_id of the completed training run
     loading:
       # weights-only load: skips a redundant second load by Lightning and

@@ -47,7 +47,7 @@ from anemoi.training.train.methods.base import BaseTrainingModule
 if TYPE_CHECKING:
     from pathlib import Path
 
-_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
 _WEIGHTS_ONLY = "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"
 _TRANSFER_LEARNING = "anemoi.training.checkpoint.loading.strategies.TransferLearningLoader"
@@ -318,7 +318,7 @@ _PRESETS = ["config", "lam", "multi", "stretched", "ensemble_crps"]
 
 @pytest.mark.parametrize("preset", _PRESETS)
 def test_preset_composes_with_checkpoint_source_overlay(preset: str) -> None:
-    """Adding a RunSource overlay to each preset composes cleanly and yields a valid pipeline.
+    """Adding a RunIdSource overlay to each preset composes cleanly and yields a valid pipeline.
 
     This exercises the composed ``training.checkpoint`` surface per preset (no defaults
     conflict from the ``training/checkpoint/source`` group) and validates it with the
@@ -337,5 +337,5 @@ def test_preset_composes_with_checkpoint_source_overlay(preset: str) -> None:
     CheckpointPipelineSchema(**checkpoint_block)
 
     pipeline = build_checkpoint_pipeline(cfg)
-    assert type(pipeline.stages[0]).__name__ == "RunSource"
+    assert type(pipeline.stages[0]).__name__ == "RunIdSource"
     assert pipeline.stages[0].run_id == "abc123"

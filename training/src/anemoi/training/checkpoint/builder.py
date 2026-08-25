@@ -54,17 +54,17 @@ def _inject_run_lineage(
     parent_run_server2server: str | None,
     fork_run_server2server: str | None,
 ) -> Any:
-    """Merge runtime server-to-server lineage onto a ``RunSource`` config.
+    """Merge runtime server-to-server lineage onto a ``RunIdSource`` config.
 
     The lineage ids are logger-derived at runtime and cannot be expressed in the
     static Hydra config, so the trainer passes them to the builder. Only a
-    ``RunSource`` target accepts them, and only non-``None`` values are merged, so
+    ``RunIdSource`` target accepts them, and only non-``None`` values are merged, so
     an explicitly-configured value is never clobbered and other source types are
     left untouched (which would otherwise fail instantiation with an unknown
     keyword argument).
     """
     target = OmegaConf.select(source, "_target_", default="") or ""
-    if not target.endswith("RunSource"):
+    if not target.endswith("RunIdSource"):
         return source
     overrides = {
         key: value
@@ -84,7 +84,7 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
 
     Warm start restores optimizer and epoch state through Lightning's ``ckpt_path``,
     which needs a checkpoint reachable as a local file. Only ``LocalSource`` (an explicit
-    path) and ``RunSource`` (a resolved ``last.ckpt`` on a shared filesystem) provide one.
+    path) and ``RunIdSource`` (a resolved ``last.ckpt`` on a shared filesystem) provide one.
     With an ``S3Source`` / ``HTTPSource`` — or no source at all — the pipeline would still
     load the weights, but there is no local path for Lightning to resume the optimizer /
     epoch state, so it would silently start from step 0. Fail loudly here instead of
@@ -106,7 +106,7 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
 
     source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
     source_target = (OmegaConf.select(source, "_target_", default="") or "") if source is not None else ""
-    if source_target.endswith(("LocalSource", "RunSource")):
+    if source_target.endswith(("LocalSource", "RunIdSource")):
         return
 
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
@@ -116,7 +116,7 @@ def reject_unsupported_warm_start(cfg: DictConfig) -> None:
         "Warm start restores optimizer and epoch state via Lightning's ckpt_path, "
         "which requires a checkpoint reachable as a local file. The configured "
         f"training.checkpoint.source ({described}) does not provide one, so the optimizer "
-        "and epoch state would be silently dropped. Use a LocalSource or RunSource for "
+        "and epoch state would be silently dropped. Use a LocalSource or RunIdSource for "
         "warm start, or switch training.checkpoint.loading to WeightsOnlyLoader / "
         "TransferLearningLoader if you only need the weights."
     )
@@ -147,11 +147,11 @@ def build_checkpoint_pipeline(
         Any of these blocks may be absent; an absent block contributes no stage.
     parent_run_server2server : str, optional
         Runtime server-to-server resume lineage id. When set and the source is a
-        ``RunSource``, it is merged into the source config before instantiation so
+        ``RunIdSource``, it is merged into the source config before instantiation so
         a cross-server resume resolves the same path the trainer would. Ignored
         for other source types.
     fork_run_server2server : str, optional
-        Runtime server-to-server fork lineage id, merged into a ``RunSource``
+        Runtime server-to-server fork lineage id, merged into a ``RunIdSource``
         source config as above for the fork path.
 
     Returns

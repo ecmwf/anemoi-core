@@ -18,7 +18,7 @@ identically. No optimizer state is created and no gradients are computed.
 .. warning::
 
    A checkpoint **must** be specified via ``training.checkpoint.source`` (a
-   ``RunSource`` by ``run_id``, or a ``LocalSource`` by ``path``). Evaluating a
+   ``RunIdSource`` by ``run_id``, or a ``LocalSource`` by ``path``). Evaluating a
    randomly-initialised model is almost certainly a user error.
 
 ***********************
@@ -48,7 +48,7 @@ strategy), but replaces the final ``trainer.fit()`` call with
 A checkpoint source must be configured on ``training.checkpoint.source``
 before evaluation starts:
 
-1. **``RunSource``** (``training/checkpoint/source=run`` with a ``run_id``) —
+1. **``RunIdSource``** (``training/checkpoint/source=run`` with a ``run_id``) —
    resolve the last checkpoint of a run as
    ``<checkpoints.root>/<run_id>/last.ckpt``. Raises :exc:`RuntimeError` on
    rank 0 if the file is not found.

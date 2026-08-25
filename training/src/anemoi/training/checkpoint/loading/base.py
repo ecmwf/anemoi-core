@@ -476,7 +476,7 @@ def apply_checkpoint_format_migrations(
     ``Migrator.sync`` runs every migration the checkpoint is missing — all of the
     ones anemoi-models ships, not only the two this module can name by hand. That
     needs the checkpoint's file, so it applies to on-disk sources (``LocalSource``,
-    ``RunSource``). Sources that keep no file behind — ``HTTPSource`` and
+    ``RunIdSource``). Sources that keep no file behind — ``HTTPSource`` and
     ``S3Source`` delete their download before returning — fall back to the
     in-memory ``chunking_fix`` call, screened for applicability first.
 

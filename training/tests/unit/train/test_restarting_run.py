@@ -18,7 +18,7 @@ from omegaconf import OmegaConf
 
 from anemoi.training.train.train import AnemoiTrainer
 
-_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
+_RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
 
 
@@ -56,7 +56,7 @@ def build_mock_config(
 ) -> DictConfig:
     """Build a minimal trainer config on the ``training.checkpoint.source`` surface.
 
-    ``source`` is the ``training.checkpoint.source`` block (a ``RunSource`` or
+    ``source`` is the ``training.checkpoint.source`` block (a ``RunIdSource`` or
     ``LocalSource`` ``_target_`` dict), or ``None`` for a fresh run with nothing
     to resume.
     """
@@ -119,7 +119,7 @@ def trainer_factory() -> AnemoiTrainer:
 # These tests cover the trainer-level run-lineage wiring at construction time
 # (``start_from_checkpoint`` detection and ``run_id`` derivation). The checkpoint
 # *path resolution* itself now lives in the acquisition layer and is exercised
-# there (``sources/test_run.py`` for RunSource resolve_path / resume / fork /
+# there (``sources/test_run.py`` for RunIdSource resolve_path / resume / fork /
 # missing-checkpoint, ``sources/test_local.py`` for the explicit-file path and
 # CheckpointNotFoundError); the trainer reads the resolved path back from the
 # executed pipeline context (``AnemoiTrainer.last_checkpoint``, covered in
@@ -127,7 +127,7 @@ def trainer_factory() -> AnemoiTrainer:
 
 
 def test_resume_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
-    """RunSource (fork=False) resumes the same run: start_from_checkpoint set, run_id preserved."""
+    """RunIdSource (fork=False) resumes the same run: start_from_checkpoint set, run_id preserved."""
     run_id = "run-id-123"
     _, checkpoints_path = tmp_checkpoint_factory(rid=run_id, ckpt_path_name="mock_checkpoints")
     config = build_mock_config(source=_run_source(run_id), checkpoints_path=checkpoints_path)
@@ -139,7 +139,7 @@ def test_resume_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factor
 
 
 def test_fork_run_source(trainer_factory: AnemoiTrainer, tmp_checkpoint_factory: pytest.TempPathFactory) -> None:
-    """RunSource (fork=True) starts from a parent run but mints a new run id."""
+    """RunIdSource (fork=True) starts from a parent run but mints a new run id."""
     parent_run_id = "fork-id-456"
     _, checkpoints_path = tmp_checkpoint_factory(rid=parent_run_id, ckpt_path_name="mock_checkpoints")
     config = build_mock_config(source=_run_source(parent_run_id, fork=True), checkpoints_path=checkpoints_path)

@@ -66,7 +66,7 @@ run.
    :width: 500
    :align: center
 
-When forking a run (a ``RunSource`` with ``fork: true``; see
+When forking a run (a ``RunIdSource`` with ``fork: true``; see
 :ref:`training <restart target>`), the forked run will appear as a new entry on
 the UI table. It is possible to see it is a forked run because it will have a
 tag called ``forkedRun:True`` and its lineage will match the 'mlflow run_id' of

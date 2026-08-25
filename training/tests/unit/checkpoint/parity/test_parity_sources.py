@@ -13,7 +13,7 @@ These tests close verification gaps in the source layer that no other suite
 exercises: LocalSource path precedence / tilde-expansion / symlink resolution,
 the ``CheckpointNotFoundError`` suggestion branches, the torch.load error-type
 wrapping into ``CheckpointLoadError``, the ``weights_only=False`` guarantee,
-RunSource rank-detection fall-throughs (LOCAL_RANK / SLURM_PROCID /
+RunIdSource rank-detection fall-throughs (LOCAL_RANK / SLURM_PROCID /
 JSM_NAMESPACE_RANK / malformed / negative), the auxiliary-key Lightning branch
 in ``detect_format_from_data``, HTTPSource construction/validation and checksum
 handling, and the S3 URL-parsing / ``supports`` / URL-resolution pure logic.
@@ -46,7 +46,7 @@ from anemoi.training.checkpoint.formats import detect_format_from_data
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.http import HTTPSource
 from anemoi.training.checkpoint.sources.local import LocalSource
-from anemoi.training.checkpoint.sources.run import RunSource
+from anemoi.training.checkpoint.sources.run import RunIdSource
 from anemoi.training.checkpoint.sources.s3 import S3Source
 from anemoi.training.checkpoint.utils import calculate_checksum
 
@@ -256,7 +256,7 @@ def test_checkpoint_not_found_error_is_deterministic(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# RunSource rank detection fall-through
+# RunIdSource rank detection fall-through
 # ---------------------------------------------------------------------------
 
 
@@ -271,7 +271,7 @@ async def test_run_source_defers_on_nonzero_rank_from_fallback_var(
     monkeypatch.setenv(rank_var, "1")
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = await RunSource(run_id="run_missing").process(context)
+    result = await RunIdSource(run_id="run_missing").process(context)
 
     assert result.checkpoint_path is None
     assert result.checkpoint_data is None
@@ -287,7 +287,7 @@ async def test_run_source_rank_precedence_rank_over_local_rank(
     monkeypatch.setenv("LOCAL_RANK", "0")
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
-    result = await RunSource(run_id="run_missing").process(context)
+    result = await RunIdSource(run_id="run_missing").process(context)
 
     assert result.checkpoint_path is None
 
@@ -304,7 +304,7 @@ async def test_run_source_invalid_rank_treated_as_rank_zero(
 
     context = CheckpointContext(config=_run_config(tmp_path / "job" / "checkpoints"))
     with pytest.raises(RuntimeError, match="run_missing"):
-        await RunSource(run_id="run_missing").process(context)
+        await RunIdSource(run_id="run_missing").process(context)
 
 
 async def test_run_source_sets_resolved_checkpoint_path_metadata(
@@ -317,7 +317,7 @@ async def test_run_source_sets_resolved_checkpoint_path_metadata(
     resolved = _write_state_dict_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
 
     context = CheckpointContext(config=_run_config(root))
-    result = await RunSource(run_id="run_A").process(context)
+    result = await RunIdSource(run_id="run_A").process(context)
 
     assert isinstance(result.metadata["resolved_checkpoint_path"], str)
     assert result.metadata["resolved_checkpoint_path"] == str(resolved)
@@ -388,12 +388,12 @@ def test_load_and_populate_mutates_context_in_place() -> None:
 
 
 def test_all_sources_subclass_checkpoint_source() -> None:
-    for source_cls in (LocalSource, RunSource, HTTPSource, S3Source):
+    for source_cls in (LocalSource, RunIdSource, HTTPSource, S3Source):
         assert issubclass(source_cls, CheckpointSource)
 
 
 def test_all_sources_process_is_async() -> None:
-    for source_cls in (LocalSource, RunSource, HTTPSource, S3Source):
+    for source_cls in (LocalSource, RunIdSource, HTTPSource, S3Source):
         assert inspect.iscoroutinefunction(source_cls.process)
 
 

@@ -496,7 +496,7 @@ i.e. because the training has exceeded the time limit on an HPC system
 or because the user wants to fine-tune the model from a specific point
 in the training.
 
-This is done by setting ``training.checkpoint.source`` to a ``RunSource``
+This is done by setting ``training.checkpoint.source`` to a ``RunIdSource``
 with the *run_id* of the run to restart. ``fork`` defaults to ``false``
 (resume), so it can be omitted; a resume keeps the new checkpoints in the same
 folder as the old ones:
@@ -506,7 +506,7 @@ folder as the old ones:
    training:
      checkpoint:
        source:
-         _target_: anemoi.training.checkpoint.sources.run.RunSource
+         _target_: anemoi.training.checkpoint.sources.run.RunIdSource
          run_id: <run_id>
          # fork: false   # optional; false is the default (resume), set true to fork
 
@@ -564,7 +564,7 @@ up until ``rollout.max``.
 
 This two stage approach requires the model training to be restarted
 after stage one, see :ref:`restart target` below. The user should
-configure ``training.checkpoint.source`` as a ``RunSource`` with the
+configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
 ``run_id`` of the first stage of training (and ``fork: false`` to resume it).
 
 Note, for many purposes, it may make sense for the rollout stage (stage
@@ -593,7 +593,7 @@ The recommended restart recipe is:
 1. Restart from an *end-of-epoch checkpoint*.
 2. Keep ``rollout.start``, ``epoch_increment``, and ``max``
    **unchanged** in your configuration.
-3. Configure ``training.checkpoint.source`` as a ``RunSource`` with the
+3. Configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
    ``run_id`` of the interrupted job (and ``fork: false`` to resume it).
 
 On resume, Anemoi reads the saved rollout state from the checkpoint and
@@ -632,7 +632,7 @@ or configure it inline under ``training.checkpoint.loading``:
       checkpoint:
         # the checkpoint to transfer-learn from (a run, or a LocalSource path)
         source:
-          _target_: anemoi.training.checkpoint.sources.run.RunSource
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
           run_id: <run_id>
           fork: true
         loading:
@@ -653,7 +653,7 @@ appropriately. Set ``skip_mismatched: false`` to raise
    ``training.checkpoint.loading`` to a ``WeightsOnlyLoader`` (or a
    ``TransferLearningLoader`` with ``skip_mismatched: true``), as shown above.
    The removed run-lineage keys ``training.run_id`` / ``training.fork_run_id``
-   are likewise expressed as a ``RunSource`` under ``training.checkpoint.source``.
+   are likewise expressed as a ``RunIdSource`` under ``training.checkpoint.source``.
 
 For example, transfer learning might be used to adapt a weather
 forecasting model trained on one geographic region to another region
@@ -743,7 +743,7 @@ decoder.
       checkpoint:
         # the checkpoint to start from (a run, or a LocalSource path)
         source:
-          _target_: anemoi.training.checkpoint.sources.run.RunSource
+          _target_: anemoi.training.checkpoint.sources.run.RunIdSource
           run_id: <run_id>
           fork: true
         loading:

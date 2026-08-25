@@ -119,7 +119,7 @@ seamlessly. Use the run's id:
    training:
      checkpoint:
        source:
-         _target_: anemoi.training.checkpoint.sources.run.RunSource
+         _target_: anemoi.training.checkpoint.sources.run.RunIdSource
          run_id: a1b2c3d4-...        # the run you want to resume
          fork: false                 # false = resume the SAME run
        loading:
@@ -188,7 +188,7 @@ https://…`` to download over HTTP(S).
 .. note::
 
    **Warm start (resume) needs a local file.** ``WarmStartLoader`` can only be
-   paired with ``LocalSource`` or ``RunSource``, because resuming the optimizer
+   paired with ``LocalSource`` or ``RunIdSource``, because resuming the optimizer
    and epoch state is handled by PyTorch Lightning, which needs the checkpoint
    as a file on disk. Pairing warm start with ``S3Source``/``HTTPSource`` is
    rejected with a clear error (see :ref:`cp_warmstart_ownership`). To use a
@@ -323,7 +323,7 @@ A source fetches the checkpoint and hands it to the next station. Configure
       -  the checkpoint is a file on disk you can point to
       -  ``path`` (the file path)
 
-   -  -  ``RunSource``
+   -  -  ``RunIdSource``
       -  you want to resume or fork a previous **run** by its id
       -  ``run_id``, ``fork``
 
@@ -359,13 +359,13 @@ the file is not there you get a clear ``CheckpointNotFoundError``.
 .. tip::
 
    ``path`` is optional. If you omit it, ``LocalSource`` uses a path that an
-   earlier step put on the pipeline (this is how :class:`RunSource` works
+   earlier step put on the pipeline (this is how :class:`RunIdSource` works
    internally). For everyday "load this file" use, **set** ``path``.
 
 Previous runs (resume or fork)
 ==============================
 
-``RunSource`` finds the checkpoint belonging to a previous run and loads it.
+``RunIdSource`` finds the checkpoint belonging to a previous run and loads it.
 The single ``fork`` flag chooses what kind of continuation you want:
 
 .. code:: yaml
@@ -373,7 +373,7 @@ The single ``fork`` flag chooses what kind of continuation you want:
    training:
      checkpoint:
        source:
-         _target_: anemoi.training.checkpoint.sources.run.RunSource
+         _target_: anemoi.training.checkpoint.sources.run.RunIdSource
          run_id: a1b2c3d4-...
          fork: false   # false = resume the SAME run; true = start a NEW run from these weights
 
@@ -570,7 +570,7 @@ Two consequences for you:
    strategies start with a fresh optimizer and epoch 0. (Internally each loader
    declares this via a ``restores_training_state`` flag that the trainer reads.)
 -  **Warm start needs a local file.** Lightning's restore reads the checkpoint
-   from disk, so warm start only works with ``LocalSource`` or ``RunSource``.
+   from disk, so warm start only works with ``LocalSource`` or ``RunIdSource``.
    Configuring it with ``S3Source`` or ``HTTPSource`` is rejected up front with
    an explanatory error, rather than silently dropping your optimizer and epoch
    state.
@@ -657,18 +657,18 @@ which makes the intent explicit:
       -  Loading
 
    -  -  Continue the same run seamlessly
-      -  ``RunSource`` with ``fork: false``
+      -  ``RunIdSource`` with ``fork: false``
       -  ``WarmStartLoader``
 
    -  -  Branch a new run from an old one's weights, fresh optimizer
-      -  ``RunSource`` with ``fork: true``
+      -  ``RunIdSource`` with ``fork: true``
       -  ``ColdStartLoader`` (or ``WeightsOnlyLoader``)
 
    -  -  Start from a specific checkpoint file
       -  ``LocalSource`` with ``path``
       -  any loading strategy
 
-Behind the scenes, choosing ``RunSource`` also sets the run identity the
+Behind the scenes, choosing ``RunIdSource`` also sets the run identity the
 experiment tracker and output paths expect (resume keeps the run id; fork mints
 a new one), so the behaviour matches the old ``run_id`` / ``fork_run_id`` flow
 exactly — you just express it in one consistent place now.
@@ -853,11 +853,11 @@ disabled config validation). Here is the mapping:
       -  Modern replacement
 
    -  -  ``training.run_id``
-      -  ``training.checkpoint.source`` = ``RunSource`` with ``run_id`` and
+      -  ``training.checkpoint.source`` = ``RunIdSource`` with ``run_id`` and
          ``fork: false``
 
    -  -  ``training.fork_run_id``
-      -  ``training.checkpoint.source`` = ``RunSource`` with ``run_id`` and
+      -  ``training.checkpoint.source`` = ``RunIdSource`` with ``run_id`` and
          ``fork: true``
 
    -  -  ``system.input.warm_start``

@@ -562,7 +562,7 @@ def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
 def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
     """The opt-in pipeline path resolves the run checkpoint and fills the model in place.
 
-    Exercises the trainer-side wiring end to end: the RunSource resolves ``run_id``
+    Exercises the trainer-side wiring end to end: the RunIdSource resolves ``run_id``
     into ``<root.parent>/<run_id>/last.ckpt`` and loads it, and the WeightsOnlyLoader
     fills the existing model's parameter slots (fill-model semantics — same object,
     no re-instantiation).
@@ -581,7 +581,7 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
             "training": {
                 "checkpoint": {
                     "source": {
-                        "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                         "run_id": run_id,
                     },
                     "loading": {
@@ -653,7 +653,7 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
             "training": {
                 "checkpoint": {
                     "source": {
-                        "_target_": "anemoi.training.checkpoint.sources.run.RunSource",
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
                         "run_id": run_id,
                     },
                     "loading": {
@@ -782,7 +782,7 @@ def test_skip_lightning_restore_matches_loading_strategy(
 
 # --- Run-lineage source: training.checkpoint.source -> internal run identity ---
 
-_RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunSource"
+_RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
 
 
@@ -793,7 +793,7 @@ _LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
         ({"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}, "abc", None),
         # fork -> fork_run_id only, run_id None (fresh MLflow id via fork-solo branch)
         ({"_target_": _RUNSOURCE, "run_id": "base999", "fork": True}, None, "base999"),
-        # RunSource with no run id -> no-op
+        # RunIdSource with no run id -> no-op
         ({"_target_": _RUNSOURCE, "run_id": None, "fork": False}, None, None),
         # explicit path carries no run identity (fresh run loading an explicit ckpt)
         ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
@@ -804,7 +804,7 @@ def test_run_identity_from_config_maps_source(
     expected_run_id: str | None,
     expected_fork_run_id: str | None,
 ) -> None:
-    """The RunSource surface resolves to the (run_id, fork_run_id) run identity."""
+    """The RunIdSource surface resolves to the (run_id, fork_run_id) run identity."""
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
     config = OmegaConf.create({"training": {"checkpoint": {"source": source}}})
@@ -819,7 +819,7 @@ def test_run_identity_from_config_noop_without_checkpoint_source() -> None:
 
 
 def test_last_checkpoint_resolves_runsource_path(tmp_path: Path) -> None:
-    """last_checkpoint resolves a RunSource path directly from config, without building the model."""
+    """last_checkpoint resolves a RunIdSource path directly from config, without building the model."""
     # The root already carries the lineage append (as after _update_paths); resolve_path
     # undoes it via .parent, so the path is <root.parent>/<run_id>/last.ckpt.
     root = tmp_path / "ckpts" / "abc"
@@ -906,7 +906,7 @@ def test_warm_start_rejects_missing_source() -> None:
 
 @pytest.mark.parametrize("source_target", [_LOCALSOURCE, _RUNSOURCE])
 def test_warm_start_allows_local_and_run_sources(source_target: str) -> None:
-    """LocalSource and RunSource resolve to a local ckpt_path, so warm start is allowed."""
+    """LocalSource and RunIdSource resolve to a local ckpt_path, so warm start is allowed."""
     reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))  # must not raise
 
 

@@ -38,7 +38,7 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.sources.http import HTTPSource
-from anemoi.training.checkpoint.sources.run import RunSource
+from anemoi.training.checkpoint.sources.run import RunIdSource
 from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.seeding import get_base_seed
@@ -361,7 +361,7 @@ def test_rank_env_priority_rank_beats_local_rank(tmp_path: Path, monkeypatch: py
 
     # RANK is read first and stops the search: rank 0 -> missing checkpoint raises.
     with pytest.raises(RuntimeError, match="run_missing"):
-        asyncio.run(RunSource(run_id="run_missing").process(context))
+        asyncio.run(RunIdSource(run_id="run_missing").process(context))
 
 
 def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -369,7 +369,7 @@ def test_rank_env_priority_slurm_procid_defers_when_only_set(tmp_path: Path, mon
     monkeypatch.setenv("SLURM_PROCID", "1")
     context = _missing_run_context(tmp_path)
 
-    result = asyncio.run(RunSource(run_id="run_missing").process(context))
+    result = asyncio.run(RunIdSource(run_id="run_missing").process(context))
     assert result.checkpoint_path is None
 
 
@@ -384,7 +384,7 @@ def test_malformed_or_negative_rank_treated_as_rank_zero(
     context = _missing_run_context(tmp_path)
 
     with pytest.raises(RuntimeError, match="run_missing"):
-        asyncio.run(RunSource(run_id="run_missing").process(context))
+        asyncio.run(RunIdSource(run_id="run_missing").process(context))
 
 
 def test_resolve_path_invariant_to_dataset_count() -> None:
@@ -401,8 +401,8 @@ def test_resolve_path_invariant_to_dataset_count() -> None:
         },
     )
 
-    single_path = RunSource.resolve_path(single, "run_A", fork=False)
-    multi_path = RunSource.resolve_path(multi, "run_A", fork=False)
+    single_path = RunIdSource.resolve_path(single, "run_A", fork=False)
+    multi_path = RunIdSource.resolve_path(multi, "run_A", fork=False)
 
     assert single_path == multi_path
     assert single_path == Path("/base", "run_A", "last.ckpt")
@@ -419,7 +419,7 @@ def test_resolve_path_invariant_to_dataset_count() -> None:
 def test_run_identity_noop_then_uuid_fallthrough() -> None:
     from anemoi.training.checkpoint.sources.run import run_identity_from_config
 
-    # No RunSource configured -> no run identity, and run_id falls through to uuid4.
+    # No RunIdSource configured -> no run identity, and run_id falls through to uuid4.
     assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
 
     ns = SimpleNamespace(_run_identity=(None, None), logger=None)

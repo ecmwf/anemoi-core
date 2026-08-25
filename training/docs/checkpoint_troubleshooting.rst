@@ -124,7 +124,7 @@ Anemoi refuses rather than silently dropping your optimizer/epoch state.
 
 **How to fix it:** either
 
--  use ``LocalSource`` (an explicit ``path``) or ``RunSource`` (a run id) for
+-  use ``LocalSource`` (an explicit ``path``) or ``RunIdSource`` (a run id) for
    warm start, or
 -  download the remote checkpoint to a local file first and point ``LocalSource``
    at it, or

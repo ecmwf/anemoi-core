@@ -64,7 +64,7 @@ def _write_run_identity(config: DictConfig, run_id: str | None, fork_run_id: str
     ``training.run_id`` / ``training.fork_run_id`` were removed from the schema. Internal
     consumers (the MLflow logger, the ``run_id`` resolution, ``_update_paths`` and the
     dry-run gate) read :attr:`AnemoiTrainer._run_identity` — resolved from the
-    ``training.checkpoint.source`` RunSource — not these keys. This write exists solely so
+    ``training.checkpoint.source`` RunIdSource — not these keys. This write exists solely so
     the flattened config hyperparameters carry ``config.training.run_id`` /
     ``config.training.fork_run_id``, which ``MlFlowSync`` indexes by literal key when
     rewriting offline->online runs. The write runs under a temporary struct unlock so the
@@ -124,7 +124,7 @@ class AnemoiTrainer(ABC):
 
         # A configured ``training.checkpoint.source`` is the single trigger. The
         # removed ``run_id`` / ``fork_run_id`` / ``system.input.warm_start`` keys
-        # are now expressed as a ``RunSource`` (resume/fork) or ``LocalSource``
+        # are now expressed as a ``RunIdSource`` (resume/fork) or ``LocalSource``
         # (explicit file) under that block.
         self.start_from_checkpoint = (
             OmegaConf.select(self.config, "training.checkpoint.source", default=None) is not None
@@ -138,7 +138,7 @@ class AnemoiTrainer(ABC):
         # ``config.training.fork_run_id`` by literal key when rewriting offline->online
         # runs. Internal consumers (the logger, output paths, dry-run gate and the
         # :attr:`run_id` resolution) read :attr:`_run_identity` — resolved from the
-        # ``training.checkpoint.source`` RunSource — never these written-back keys.
+        # ``training.checkpoint.source`` RunIdSource — never these written-back keys.
         _write_run_identity(self.config, run_id=self.run_id, fork_run_id=self._run_identity[1])
         LOGGER.info("Run id: %s", self.config.training.run_id)
 
@@ -445,7 +445,7 @@ class AnemoiTrainer(ABC):
         Runs the configured ``training.checkpoint`` ``source`` -> ``loading`` ->
         ``modifiers`` stages. This is the single checkpoint load path.
         :attr:`last_checkpoint` resolves the ckpt_path independently from the source
-        config (via :meth:`RunSource.resolve_path`), so it is not cached here.
+        config (via :meth:`RunIdSource.resolve_path`), so it is not cached here.
 
         Parameters
         ----------
@@ -465,9 +465,9 @@ class AnemoiTrainer(ABC):
         has_loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None) is not None
 
         context = CheckpointContext(model=model, config=self.config)
-        # Runtime, logger-derived server-to-server lineage cannot reach a RunSource
+        # Runtime, logger-derived server-to-server lineage cannot reach a RunIdSource
         # through Hydra; the builder injects it into the source config before
-        # instantiation (a no-op for non-RunSource sources).
+        # instantiation (a no-op for non-RunIdSource sources).
         pipeline = build_checkpoint_pipeline(
             self.config,
             parent_run_server2server=getattr(self, "parent_run_server2server", None),
@@ -490,7 +490,7 @@ class AnemoiTrainer(ABC):
     def _run_identity(self) -> tuple[str | None, str | None]:
         """Resolved ``(run_id, fork_run_id)`` from the configured checkpoint source.
 
-        The ``training.checkpoint.source`` RunSource is the single source of truth for
+        The ``training.checkpoint.source`` RunIdSource is the single source of truth for
         run lineage (resume vs fork); this reads it via
         :func:`~anemoi.training.checkpoint.sources.run.run_identity_from_config`. Every
         run-identity consumer — the MLflow logger (:attr:`_logger_kwargs`), the
@@ -526,8 +526,8 @@ class AnemoiTrainer(ABC):
         """Path to the checkpoint to resume from, for Lightning's ``ckpt_path``.
 
         Resolved directly from the configured ``training.checkpoint.source`` — no need
-        to build the model. A ``RunSource`` yields
-        ``<checkpoints.root.parent>/<id>/last.ckpt`` via :meth:`RunSource.resolve_path`
+        to build the model. A ``RunIdSource`` yields
+        ``<checkpoints.root.parent>/<id>/last.ckpt`` via :meth:`RunIdSource.resolve_path`
         (shared with the source stage so the two cannot drift); a ``LocalSource`` yields
         its explicit file. Remote sources (S3/HTTP) record no local path (``None``),
         which is why warm start is restricted to Local/Run sources (enforced by
@@ -544,13 +544,13 @@ class AnemoiTrainer(ABC):
         source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
         target = OmegaConf.select(source, "_target_", default="") or ""
 
-        if target.endswith("RunSource"):
-            from anemoi.training.checkpoint.sources.run import RunSource
+        if target.endswith("RunIdSource"):
+            from anemoi.training.checkpoint.sources.run import RunIdSource
 
             run_id = OmegaConf.select(source, "run_id", default=None)
             if run_id is None:
                 return None
-            return RunSource.resolve_path(
+            return RunIdSource.resolve_path(
                 self.config,
                 run_id,
                 bool(OmegaConf.select(source, "fork", default=False)),
