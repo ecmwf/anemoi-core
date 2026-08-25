@@ -106,7 +106,7 @@ def _serve_cache(port, entries, ready):
     zmq.proxy(frontend, backend)
 
 
-class ZMQCacheClient:
+class CacheClient:
     def __init__(self, endpoint: Endpoint):
         self.endpoint = endpoint
         self.socket = None
@@ -148,7 +148,7 @@ class ZMQCacheClient:
             self.socket = None
 
 
-class ProcessZMQCacheServer:
+class CacheServer:
     def __init__(self, entries, port=0):
         self.entries = entries
         self.port = port
@@ -335,7 +335,7 @@ class DatasetCache(pl.LightningDataModule):
         self._dataset(self.ds.ds_train)
         if self.is_node_leader:
             entries = {name: str(namespace.entries_path) for name, namespace in self.namespaces.items()}
-            self.server = ProcessZMQCacheServer(entries)
+            self.server = CacheServer(entries)
             self.server.start()
         ports = [None] * self.world_size
         dist.all_gather_object(ports, self.server.port if self.is_node_leader else None, group=self.proc_group)
@@ -378,7 +378,7 @@ class DatasetCache(pl.LightningDataModule):
     def _remote_cache(self, node):
         key = (os.getpid(), node)
         if key not in self._connections:
-            self._connections[key] = ZMQCacheClient(self._endpoint(node))
+            self._connections[key] = CacheClient(self._endpoint(node))
         return self._connections[key]
 
     def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
@@ -448,8 +448,8 @@ class DatasetCache(pl.LightningDataModule):
         self._locations = locations
 
     def teardown(self, stage=None):
-        for client in self._connections.values():
-            client.close()
+        for connection in self._connections.values():
+            connection.close()
         if self.is_node_leader:
             self.server.close()
         self.ds.teardown(stage)
