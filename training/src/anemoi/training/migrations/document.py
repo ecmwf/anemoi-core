@@ -9,10 +9,8 @@
 
 from __future__ import annotations
 
-import enum
 from abc import ABC
 from abc import abstractmethod
-from collections.abc import Iterable
 from collections.abc import Sequence
 from functools import cached_property
 from pathlib import Path
@@ -22,12 +20,6 @@ import yamlrocks
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
-
-
-class Ops(enum.Enum):
-    ADD = enum.auto()
-    RENAME = enum.auto()
-    DROP = enum.auto()
 
 
 class NodeBase(ABC):
@@ -209,9 +201,6 @@ class Document(NodeBase):
     def to_yaml(self) -> str:
         return self.yaml.to_yaml().decode()
 
-    def _strip_prefix(self, keys: str) -> str:
-        return keys.removeprefix(f"{self._prefix}.")
-
     def select(self, parts: Sequence[str], create_missing: bool = False) -> NodeBase:
         node = self
         for part in parts:
@@ -221,7 +210,7 @@ class Document(NodeBase):
         return node
 
     def drop_key(self, keys: str, remove_empty: bool = False) -> None:
-        parents, key = parse_key(self._strip_prefix(keys))
+        parents, key = parse_key(keys)
         parent_node = self.select(parents)
 
         if not remove_empty:
@@ -236,27 +225,16 @@ class Document(NodeBase):
         del parent_node[parts[head_key_k]]
 
     def add_key(self, keys: str, value: Any) -> None:
-        parents, key = parse_key(self._strip_prefix(keys))
+        parents, key = parse_key(keys)
         parent_node = self.select(parents, create_missing=True)
         parent_node[key] = value
 
     def rename_key(self, start: str, end: str, remove_empty: bool = False) -> None:
-        start, end = self._strip_prefix(start), self._strip_prefix(end)
         parts = start.split(".")
         start_node = self.select(parts)
         value = start_node.value
         self.add_key(end, value)
         self.drop_key(start, remove_empty)
-
-    def exec_ops(self, ops: Iterable[tuple[Ops, tuple[Any, ...]]]) -> None:
-        for op, op_args in ops:
-            match op:
-                case Ops.ADD:
-                    self.add_key(*op_args)
-                case Ops.RENAME:
-                    self.rename_key(*op_args)
-                case Ops.DROP:
-                    self.drop_key(*op_args)
 
     def __repr__(self) -> str:
         return f"Document({self._path}, {self.prefix})"
