@@ -22,7 +22,7 @@ from omegaconf.grammar_parser import parse
 from omegaconf.grammar_visitor import GrammarVisitor
 
 if TYPE_CHECKING:
-    from anemoi.training.migrations.document import Document
+    from anemoi.training.migrations.config import Config
 
 INTERPOLATION_PATTERN = re.compile(r"\$\{([^}]*)\}", flags=re.ASCII)
 
@@ -52,7 +52,7 @@ def replace_interpolation(value: str, interpo: str, replace: str) -> str:
 
 class InterpolationReference(NamedTuple):
     prefix: str
-    document_name: str
+    config_name: str
     key: str
 
 
@@ -62,16 +62,16 @@ class InterpolationReferences:
     def __init__(self) -> None:
         self.references: dict[str, set[InterpolationReference]] = defaultdict(set)
 
-    def parse_document(
+    def parse_config(
         self,
-        document: Document,
+        config: Config,
         prefix: str | None = None,
     ) -> None:
-        self._parse_document_impl(document, document.cfg, prefix)
+        self._parse_config_impl(config, config.cfg, prefix)
 
-    def _parse_document_impl(
+    def _parse_config_impl(
         self,
-        document: Document,
+        config: Config,
         cfg: DictConfig | ListConfig,
         prefix: str | None = None,
     ) -> None:
@@ -87,7 +87,7 @@ class InterpolationReferences:
             # Check that cfg[k] is not a str before resolving it to avoid interpolation errors
             # as we only load the config file by file.
             if not isinstance(raw_cfg[k], str) and isinstance(cfg[k], (DictConfig, ListConfig)):
-                self._parse_document_impl(document, cfg[k], f"{prefix}.{k}")
+                self._parse_config_impl(config, cfg[k], f"{prefix}.{k}")
             if not isinstance(k, (int, str)):
                 continue
             elif OmegaConf.is_interpolation(cfg, k):
@@ -95,5 +95,5 @@ class InterpolationReferences:
                 # as it comes from the enumerate branch above.
                 for interpo in get_interpolations(raw_cfg[k]):  # ty: ignore[invalid-argument-type]
                     self.references[interpo].add(
-                        InterpolationReference(document.prefix, document._path.name, f"{prefix}.{k}".removeprefix("."))
+                        InterpolationReference(config.prefix, config._path.name, f"{prefix}.{k}".removeprefix("."))
                     )

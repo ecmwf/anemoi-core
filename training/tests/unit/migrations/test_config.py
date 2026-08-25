@@ -9,79 +9,235 @@
 
 from textwrap import dedent
 
-from anemoi.training.migrations.testing import ConfigFromContents
+from anemoi.training.migrations.config import Node
+from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_config(config_from_contents: ConfigFromContents):
-    config = config_from_contents({"config.yaml": dedent("""\
-            foo:
-              bar:
-                baz: value
-            """)})
-    _docs = config.documents
+def test_config(config_from_content: ConfigFromContent):
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    foo_node = config["foo"]
+    assert isinstance(foo_node, Node)
+    assert config["foo"]["bar"]["baz"].value == "value"
 
 
-def test_drop_key(config_from_contents: ConfigFromContents):
-    config = config_from_contents(
-        {
-            "config.yaml": dedent("""\
-            key: val
-            foo:
-              bar:
-                baz: value baz
-            prefix:
-              foo:
-                value: 1
-            """),
-            "prefix/config.yaml": dedent("""\
-            foo:
-              bar: value bar
-            other: other value
-            """),
-        }
-    )
+def test_add_comment_around(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
 
-    config.drop_key("prefix.foo")
-    expected_outputs = {
-        "config.yaml": dedent("""\
-        key: val
-        foo:
-          bar:
-            baz: value baz
-        prefix: {}
-        """),
-        "prefix/config.yaml": dedent("""\
-        other: other value
-        """),
-    }
-    for doc_path, expected_output in expected_outputs.items():
-        assert config.documents[doc_path].to_yaml() == expected_output
+    config = config_from_content(content)
+    config["foo"]["bar"].set_comments(before="<<<", after=">>>")
+
+    expected_output = dedent("""\
+    foo:
+      # <<<
+      bar:
+        baz: value
+        # >>>
+    """)
+
+    assert config.to_yaml() == expected_output
 
 
-def test_interpolations(config_from_contents: ConfigFromContents):
-    config = config_from_contents(
-        {
-            "config.yaml": dedent("""\
-            key: val
-            foo:
-              bar:
-                baz: ${key}
-            prefix:
-              foo:
-                value: 1
-            """),
-            "prefix/config.yaml": dedent("""\
-            foo:
-              bar: ${key}
-            other: ${prefix.foo.value}
-            """),
-        }
-    )
-    config.parse_interpolations()
-    assert config._interpolations.references["key"] == {
-        ("", "config.yaml", "foo.bar.baz"),
-        ("prefix", "config.yaml", "foo.bar"),
-    }
-    assert config._interpolations.references["prefix.foo.value"] == {
-        ("prefix", "config.yaml", "other"),
-    }
+def test_select(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    node = config.select(("foo", "bar"))
+    assert node.yaml_node.value == {"baz": "value"}
+
+
+def test_select_missing(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    node = config.select(("foo", "bar2"), create_missing=True)
+    assert node.yaml_node.value == {}
+
+
+def test_set_comment(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.set_comments(before="Hello!", after="End!")
+
+    expected_output = dedent("""\
+    # Hello!
+    foo:
+      bar:
+        baz: value
+    # End!
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_drop_key(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+        old: old value
+    """)
+
+    config = config_from_content(content)
+    config.drop_key("foo.bar.old")
+    expected_output = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_drop_key_remove_empty(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+        old: old value
+    """)
+
+    config = config_from_content(content)
+    config.drop_key("foo.bar.old", remove_empty=True)
+    expected_output = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_add_key(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.add_key("foo.bar.new", "new value")
+    bar_node = config["foo"]["bar"]
+    assert "new" in bar_node
+    expected_output = dedent("""\
+    foo:
+      bar:
+        baz: value
+        new: new value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_add_key_nested_commented(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.add_key("foo.bar2.baz", "value 2")
+    bar_node = config["foo"]["bar2"]
+    assert "baz" in bar_node
+    bar_node["baz"].set_comments(inline="hello!")
+    expected_output = dedent("""\
+    foo:
+      bar:
+        baz: value
+      bar2:
+        baz: value 2 # hello!
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_rename_key(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.rename_key("foo.bar.baz", "foo.bar.new")
+    bar_node = config["foo"]["bar"]
+    assert "baz" not in bar_node
+    assert "new" in bar_node
+    expected_output = dedent("""\
+    foo:
+      bar:
+        new: value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_rename_no_cleanup(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.rename_key("foo.bar.baz", "foo.new")
+    bar_node = config["foo"]["bar"]
+    assert "baz" not in bar_node
+    assert "new" in config["foo"]
+    expected_output = dedent("""\
+    foo:
+      bar: {}
+      new: value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_rename_cleanup(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = config_from_content(content)
+    config.rename_key("foo.bar.baz", "foo.new", remove_empty=True)
+    assert "new" in config["foo"]
+    expected_output = dedent("""\
+    foo:
+      new: value
+    """)
+    assert config.to_yaml() == expected_output
+
+
+def test_rename_cleanup_list(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        - baz: value
+    """)
+
+    config = config_from_content(content)
+    config.rename_key("foo.bar.0.baz", "foo.new", remove_empty=True)
+    assert "new" in config["foo"]
+    expected_output = dedent("""\
+    foo:
+      new: value
+    """)
+    assert config.to_yaml() == expected_output
