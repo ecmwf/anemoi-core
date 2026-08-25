@@ -58,6 +58,7 @@ class Endpoint:
 
 
 def _read_shard(entries, request):
+    """ """
     paths = [
         Path(entries[request["dataset_id"]]) / str(request["sequence"]) / f"{position}.npy"
         for position in request["positions"]
@@ -116,7 +117,7 @@ class ZMQCacheClient:
         self.socket.setsockopt(zmq.RCVTIMEO, 30_000)
         self.socket.connect(f"tcp://{self.endpoint.host}:{self.endpoint.port}")
 
-    def fetch_many(self, key, positions, grid):
+    def request_shard(self, key, positions, grid):
         request = {
             "dataset_id": key.dataset_id,
             "sequence": key.sequence,
@@ -141,7 +142,7 @@ class ZMQCacheClient:
                     raise RemoteCacheUnavailable(str(error)) from error
 
     def fetch(self, key):
-        return self.fetch_many(key, [key.position], slice(None))[0]
+        return self.request_shard(key, [key.position], slice(None))[0]
 
     def close(self):
         if self.socket is not None:
@@ -376,22 +377,30 @@ class DatasetCache(pl.LightningDataModule):
             self._clients[key] = ZMQCacheClient(self._endpoint(node))
         return self._clients[key]
 
-    def _local_or_source(self, namespace, sequence, position):
+    def _cache_or_source_read(self, namespace, sequence, position):
+        """ Access a single record from the local cache, remote cache, or source dataset. """
+        # generate the cache key
         key = CacheKey(namespace.dataset_id, int(sequence), position)
         self.total_fetches.value += 1
+        # try to fetch the value from the local cache
         value = namespace.local(sequence, position)
         if value is not None:
             self.cache_hits_local.value += 1
             return value
+        # try to fetch the value from a remote cache
         for node in self._locations.get(key, set()) - {self.node_id}:
             try:
-                value = self._client(node).fetch_many(key, [position], slice(None))[0]
+                value = self._client(node).request_shard(key, [position], slice(None))[0]
                 self.cache_hits_remote.value += 1
                 return value
             except (RemoteCacheMiss, RemoteCacheUnavailable):
                 pass
         self.cache_misses.value += 1
+        # at this point, the value is not in a remote or local cache.
+
+        # fetch the value from the source dataset
         value = namespace.source(sequence, position)
+        # store the value in the local cache if there is enough space
         if not self.cache_full.value:
             try:
                 if shutil.disk_usage(self.cache_path).free < value.nbytes + (1 << 30):
@@ -404,7 +413,7 @@ class DatasetCache(pl.LightningDataModule):
                 LOGGER.warning("Dataset cache is full on node %s", self.node_id)
         return value
 
-    def fetch_many(self, dataset_id, sequence, positions, grid_indices=None):
+    def read_records(self, dataset_id, sequence, positions, grid_indices=None):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
         if not positions:
@@ -415,36 +424,44 @@ class DatasetCache(pl.LightningDataModule):
         nodes = set.intersection(*(self._locations.get(key, set()) - {self.node_id} for key in keys))
         if nodes and isinstance(grid_indices, slice):
             try:
-                result = self._client(min(nodes)).fetch_many(keys[0], positions, grid_indices)
+                result = self._client(min(nodes)).request_shard(keys[0], positions, grid_indices)
                 self.total_fetches.value += len(positions)
                 self.cache_hits_remote.value += len(positions)
                 return result
             except (RemoteCacheMiss, RemoteCacheUnavailable):
                 pass
-        values = [self._local_or_source(namespace, sequence, position) for position in positions]
+        values = [self._cache_or_source_read(namespace, sequence, position) for position in positions]
         if grid_indices is not None:
             values = [value[..., grid_indices] for value in values]
         return np.stack(values)
 
     def update_global_view(self):
+        """ Update the global view of which nodes have which records in their local cache. 
+        
+        process 0 on each node collects the local cache state and writes it to a shared file.
+        All processes then read the file to update their view of the global cache state."""
+        # rank 0 on each node collects the local cache state
         local = []
         if self.is_node_leader:
             for dataset_id, namespace in self.namespaces.items():
                 local.extend((dataset_id, sequence, position, self.node_id) for sequence, position in namespace.committed())
+        # each process gathers the local cache state from all nodes
         gathered = [None] * self.world_size
         dist.all_gather_object(gathered, local, group=self.proc_group)
         locations = {}
+        # each process updates its view of the global cache state
         for entries in gathered:
             for dataset_id, sequence, position, node in entries:
                 locations.setdefault(CacheKey(dataset_id, sequence, position), set()).add(node)
         self._locations = locations
+        # rank 0 on each node writes the global cache state to a shared file in the cache
+        # This ensures dataloader processes also have an updated view of the global cache state
         if self.is_node_leader:
             payload = [[key.dataset_id, key.sequence, key.position, sorted(nodes)] for key, nodes in locations.items()]
             temporary = self._registry_path.with_suffix(f".{os.getpid()}.tmp")
             temporary.write_text(json.dumps(payload, separators=(",", ":")))
             os.replace(temporary, self._registry_path)
         dist.barrier(group=self.proc_group)
-        self._load_registry(True)
 
     def _load_registry(self, force=False):
         try:

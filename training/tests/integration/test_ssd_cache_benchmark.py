@@ -34,7 +34,7 @@ from anemoi.training.utils.dataset_cache import DatasetCache
 LOGGER = logging.getLogger(__name__)
 
 _DATASET_CACHE_SETUP = DatasetCache.setup
-_DATASET_CACHE_FETCH_MANY = DatasetCache.fetch_many
+_DATASET_CACHE_READ_RECORDS = DatasetCache.read_records
 _HOSTNAME_SUFFIX = "-ab-gpil-ib"
 
 
@@ -136,9 +136,9 @@ def _remote_marker(self, node_id, key):
     return self.cache_root / cache_dir / namespace.path.name / "committed" / str(key.sequence) / str(key.position)
 
 
-def _fetch_many_remote(self, dataset_id, sequence, positions, grid_indices=None):
+def _read_records_remote(self, dataset_id, sequence, positions, grid_indices=None):
     if not all(path.exists() for path in self._benchmark_remote_ready_paths):
-        return _DATASET_CACHE_FETCH_MANY(self, dataset_id, sequence, positions, grid_indices)
+        return _DATASET_CACHE_READ_RECORDS(self, dataset_id, sequence, positions, grid_indices)
     normalized = self._positions(self.namespaces[dataset_id], sequence, positions)
     sequence = int(sequence)
     remote_node = (self.node_id + 1) % len(self._leaders)
@@ -153,7 +153,7 @@ def _fetch_many_remote(self, dataset_id, sequence, positions, grid_indices=None)
                 for position in normalized
             }
         )
-    return _DATASET_CACHE_FETCH_MANY(self, dataset_id, sequence, positions, grid_indices)
+    return _DATASET_CACHE_READ_RECORDS(self, dataset_id, sequence, positions, grid_indices)
 
 
 def _run_remote_training(config, cache_root, monkeypatch):
@@ -165,7 +165,7 @@ def _run_remote_training(config, cache_root, monkeypatch):
         path.unlink(missing_ok=True)
     with monkeypatch.context() as patch:
         patch.setattr(DatasetCache, "setup", _setup_process_cache)
-        patch.setattr(DatasetCache, "fetch_many", _fetch_many_remote)
+        patch.setattr(DatasetCache, "read_records", _read_records_remote)
         patch.setattr(DatasetCache, "_benchmark_remote_ready_paths", remote_ready_paths, raising=False)
         return _run_training(config, cache_root, remote_ready_paths)
 

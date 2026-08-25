@@ -234,7 +234,7 @@ class TestTrajectoryDatasetGetSample:
         ds = _make_trajectory_dataset(num_inits=3, variables=3, ensemble=2, steps=6, gridpoints=10)
 
         class FakeCache:
-            def fetch_many(self, dataset_id, sequence, positions, grid_indices=None):
+            def read_records(self, dataset_id, sequence, positions, grid_indices=None):
                 assert dataset_id == "forecast"
                 raw = ds.data[sequence][:, :, positions, :]
                 result = np.transpose(raw, (2, 0, 1, 3))
