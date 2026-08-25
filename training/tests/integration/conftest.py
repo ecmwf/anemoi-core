@@ -129,6 +129,17 @@ def gnn_config_mlflow(
     return cfg
 
 
+@pytest.fixture
+def gnn_config_with_rollout(gnn_config: tuple[DictConfig, str, str]) -> tuple[DictConfig, str, str]:
+    cfg, url_dataset = gnn_config
+    cfg.task.rollout = {
+        "start": 1,
+        "epoch_increment": 1,
+        "maximum": 4,
+    }
+    return cfg, url_dataset
+
+
 def build_global_config(
     overrides: list[str],
     testing_modifications: DictConfig,
