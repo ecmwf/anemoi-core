@@ -21,7 +21,7 @@ def test_config(config_from_contents: ConfigFromContents):
     _docs = config.documents
 
 
-def test_exec_ops(config_from_contents: ConfigFromContents):
+def test_drop_key(config_from_contents: ConfigFromContents):
     config = config_from_contents(
         {
             "config.yaml": dedent("""\
@@ -42,7 +42,6 @@ def test_exec_ops(config_from_contents: ConfigFromContents):
     )
 
     config.drop_key("prefix.foo")
-    config.exec_ops()
     expected_outputs = {
         "config.yaml": dedent("""\
         key: val
