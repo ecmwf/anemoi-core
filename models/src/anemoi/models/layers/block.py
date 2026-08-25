@@ -136,7 +136,7 @@ class TransformerProcessorBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -212,7 +212,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):

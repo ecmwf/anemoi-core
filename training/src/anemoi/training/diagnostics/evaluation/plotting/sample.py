@@ -29,11 +29,14 @@ from anemoi.training.diagnostics.evaluation.plotting.settings import _hide_axes_
 def _scale_precip_fields(
     vname: str,
     precip_fields: list,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray | None, np.ndarray]:
-    """Convert precipitation fields from m to mm."""
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray]:
+    """Convert precipitation fields from m to mm.
+
+    ``input_`` is None for diagnostic-only variables, which have no model input.
+    """
     if vname not in precip_fields:
         return input_, truth, pred
 
@@ -42,7 +45,7 @@ def _scale_precip_fields(
 
     pred = pred * 1000.0
 
-    if np.nansum(input_) != 0:
+    if input_ is not None and np.nansum(input_) != 0:
         input_ = input_ * 1000.0
 
     return input_, truth, pred
@@ -64,7 +67,7 @@ def _compute_main_norm(
     vname: str,
     precip_fields: list,
     clevels: float,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
 ) -> Normalize:
@@ -72,11 +75,108 @@ def _compute_main_norm(
     if vname in precip_fields:
         return BoundaryNorm(clevels, len(clevels) + 1)
 
-    combined = np.concatenate((input_, pred)) if truth is None else np.concatenate((input_, truth, pred))
+    combined = np.concatenate([field for field in (input_, truth, pred) if field is not None])
 
     return Normalize(
         vmin=np.nanmin(combined),
         vmax=np.nanmax(combined),
+    )
+
+
+# Datashader canvas sizing. The cell budget scales with the point count; the aspect then reshapes
+# that budget to the panel extent at constant cell count.
+_CANVAS_POINTS_SCALE = 0.004
+_CANVAS_MIN = 25
+_CANVAS_MAX = 500
+
+
+def _source_extent(
+    lon: np.ndarray,
+    lat: np.ndarray,
+) -> tuple[tuple[float, float] | None, tuple[float, float] | None]:
+    """Return the finite bounding box of a panel's coordinates.
+
+    Parameters
+    ----------
+    lon : np.ndarray
+        Longitude (or projected x) coordinates, before any non-finite data filter.
+    lat : np.ndarray
+        Latitude (or projected y) coordinates, before any non-finite data filter.
+
+    Returns
+    -------
+    tuple[tuple[float, float] | None, tuple[float, float] | None]
+        ``(x_range, y_range)``, or ``(None, None)`` when the extent is empty or degenerate
+        (a single point, or all points on one meridian / parallel).
+    """
+    finite = np.isfinite(lon) & np.isfinite(lat)
+    if not finite.any():
+        return None, None
+    x = lon[finite]
+    y = lat[finite]
+    x_range = (float(x.min()), float(x.max()))
+    y_range = (float(y.min()), float(y.max()))
+    if x_range[1] <= x_range[0] or y_range[1] <= y_range[0]:
+        return None, None
+    return x_range, y_range
+
+
+def _datashader_canvas(
+    n_points: int,
+    x_range: tuple[float, float] | None = None,
+    y_range: tuple[float, float] | None = None,
+) -> tuple[int, int]:
+    """Choose the datashader canvas size, in cells, for one panel.
+
+    The budget scales with the number of points offered to the panel, not the number that survive
+    a non-finite filter, so every variable plotted from the same rows is binned at the same
+    resolution (sizing from the surviving count can make panels of sparsely reported variables markedly
+    coarser than well-reported ones in the same figure).
+
+    The budget is then reshaped to the panel extent so cells are square in plotted coordinates,
+    rather than inheriting the domain aspect (2:1 for a global lon/lat map). Cell count is preserved
+    by the reshape except where a clamp binds, in which case the aspect is kept and the count gives
+    way.
+
+    Parameters
+    ----------
+    n_points : int
+        Number of points offered to the panel.
+    x_range : tuple[float, float] | None
+        Horizontal panel extent. None, or a degenerate extent, yields a square canvas.
+    y_range : tuple[float, float] | None
+        Vertical panel extent. None, or a degenerate extent, yields a square canvas.
+
+    Returns
+    -------
+    tuple[int, int]
+        ``(plot_width, plot_height)`` in cells.
+    """
+    side = max(min(int(np.floor(n_points * _CANVAS_POINTS_SCALE)), _CANVAS_MAX), _CANVAS_MIN)
+
+    if x_range is None or y_range is None:
+        return side, side
+
+    dx = x_range[1] - x_range[0]
+    dy = y_range[1] - y_range[0]
+    if not (np.isfinite(dx) and np.isfinite(dy)) or dx <= 0 or dy <= 0:
+        return side, side
+
+    scale = float(np.sqrt(dx / dy))
+    width = side * scale
+    height = side / scale
+
+    # Fit the bounds by scaling both axes together
+    smallest = min(width, height)
+    if smallest < _CANVAS_MIN:
+        width, height = width * (_CANVAS_MIN / smallest), height * (_CANVAS_MIN / smallest)
+    largest = max(width, height)
+    if largest > _CANVAS_MAX:
+        width, height = width * (_CANVAS_MAX / largest), height * (_CANVAS_MAX / largest)
+
+    return (
+        max(min(round(width), _CANVAS_MAX), _CANVAS_MIN),
+        max(min(round(height), _CANVAS_MAX), _CANVAS_MIN),
     )
 
 
@@ -162,7 +262,9 @@ def single_plot(
         using a non-equirectangular axes projection), by default None
     marker_size : float, optional
         Scatter marker area in points squared, by default 1. Sparse observation panels
-        use a larger value so scattered points remain visible.
+        use a larger value so scattered points remain visible. Applies to the scatter branch
+        only. When ``datashader`` is True the points are aggregated into a canvas and this is
+        ignored; set ``datashader: false`` in the plot settings if per-marker rendering is wanted.
 
     Returns
     -------
@@ -179,6 +281,9 @@ def single_plot(
     lat = np.asarray(lat)
     source_lon = lon
     source_lat = lat
+    # Sized from the offered count, before the filter below, so that two panels differing only in
+    # data availability are still binned identically. See _datashader_canvas.
+    n_offered = int(data.size)
     finite = np.isfinite(data)
     if not finite.all():
         data = data[finite]
@@ -195,19 +300,23 @@ def single_plot(
         psc = ax.scatter(lon, lat, **scatter_kwargs)
     else:
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
-        lower_limit = 25
-        upper_limit = 500
-        n_pixels = max(min(int(np.floor(data.shape[0] * 0.004)), upper_limit), lower_limit)
+        # Pin the mapped extent to the source coordinates as well as the cell count: dsshow would
+        # otherwise infer the range from the surviving points, so panels could share a canvas size
+        # and still disagree on degrees per cell.
+        x_range, y_range = _source_extent(source_lon, source_lat)
+        plot_width, plot_height = _datashader_canvas(n_offered, x_range, y_range)
+        range_kwargs = {} if x_range is None or y_range is None else {"x_range": x_range, "y_range": y_range}
         psc = dsshow(
             df,
             dsh.Point("x", "y"),
             dsh.mean("val"),
             cmap=cmap,
-            plot_width=n_pixels,
-            plot_height=n_pixels,
+            plot_width=plot_width,
+            plot_height=plot_height,
             norm=norm,
             aspect="auto",
             ax=ax,
+            **range_kwargs,
         )
 
     ymin, ymax, xmin, xmax = lat.min(), lat.max(), lon.min(), lon.max()
@@ -268,7 +377,7 @@ def get_scatter_frame(
 
 def _build_flat_sample_data(
     ax: plt.Axes,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
     auxiliary: np.ndarray | None,
@@ -301,7 +410,7 @@ def plot_flat_sample(
     ax: plt.Axes,
     lon: np.ndarray,
     lat: np.ndarray,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
     vname: str,
@@ -331,8 +440,9 @@ def plot_flat_sample(
         longitude coordinates array, shape (lon,)
     lat : np.ndarray
         latitude coordinates array, shape (lat,)
-    input_ : np.ndarray
-        Input data of shape (lat*lon,)
+    input_ : np.ndarray or None
+        Input data of shape (lat*lon,). None for diagnostic-only variables, which have no model
+        input; the input panel is then omitted and does not distort the colour scale.
     truth : np.ndarray or None
         Expected data of shape (lat*lon,). If None, only input and pred (and pred-input) are plotted.
     pred : np.ndarray
@@ -436,7 +546,7 @@ def plot_flat_sample(
 
 def _build_flat_sparse_sample_data(
     ax: plt.Axes,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
     auxiliary: np.ndarray | None,
@@ -480,7 +590,7 @@ def plot_flat_sparse_sample(
     input_lat: np.ndarray,
     output_lon: np.ndarray,
     output_lat: np.ndarray,
-    input_: np.ndarray,
+    input_: np.ndarray | None,
     truth: np.ndarray | None,
     pred: np.ndarray,
     vname: str,
@@ -514,8 +624,9 @@ def plot_flat_sparse_sample(
         Projected coordinates of the input observations.
     output_lon, output_lat : np.ndarray
         Projected coordinates of the target / prediction observations.
-    input_ : np.ndarray
-        Input observation field of shape (n_in,).
+    input_ : np.ndarray or None
+        Input observation field of shape (n_in,). None for diagnostic-only variables, which have no
+        model input; the input panel is then omitted and does not contribute to the colour scale.
     truth : np.ndarray or None
         Target observation field of shape (n_out,). If None, only input and pred are plotted.
     pred : np.ndarray
@@ -708,7 +819,10 @@ def plot_predicted_multilevel_flat_sample(
         colormaps = {}
 
     for plot_idx, (variable_idx, (variable_name, diagnostic_only)) in enumerate(parameters.items()):
-        xt = (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1) * (0 if diagnostic_only else 1)
+        # Diagnostic-only variables have no model input, so there is nothing to plot in the input panel
+        # we pass None rather than a zeroed array: a placeholder of zeros would stretch the target/prediction
+        # normalisation down to zero.
+        xt = None if diagnostic_only else (x if x.ndim == 1 else x[..., variable_idx]).reshape(-1)
         yt = (
             (y_true.reshape(-1) if y_true.ndim == 1 else y_true[..., variable_idx].reshape(-1))
             if y_true is not None

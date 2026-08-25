@@ -74,6 +74,27 @@ def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLa
     return scaler.view(new_shape)
 
 
+def as_dimension_tuple(dimensions: int | str | Sequence[int | str]) -> tuple[int | str, ...]:
+    """Normalise a dimension selector to a tuple of dimension identifiers.
+
+    A single dimension may be given as a bare axis number or as a bare `TensorDim`. 
+    Wrapping both scalar forms keeps name-based and axis-based selection behaving the same.
+
+    Parameters
+    ----------
+    dimensions : int | str | Sequence[int | str]
+        One dimension, or a sequence of them.
+
+    Returns
+    -------
+    tuple[int | str, ...]
+        The dimensions as a tuple.
+    """
+    if isinstance(dimensions, (int, str)):
+        return (dimensions,)
+    return tuple(dimensions)
+
+
 TENSOR_SPEC = tuple[int | tuple[int, ...], torch.Tensor]
 """Scale Tensor specification type.
 
@@ -277,7 +298,10 @@ class ScaleTensor(nn.Module):
             not scaler.requires_grad
         ), f"Scaler tensors must not require gradients. Got requires_grad=True for scaler {name!r}."
 
-        if isinstance(dimension, int):
+        if isinstance(dimension, str):
+            # A bare `TensorDim` names one dimension; `tuple()` of it would yield its characters.
+            dimension = (dimension,)
+        elif isinstance(dimension, int):
             if len(scaler.shape) == 1:
                 dimension = (dimension,)
             else:
@@ -466,15 +490,15 @@ class ScaleTensor(nn.Module):
             scalers = [scalers]
         return ScaleTensor(**{name: self.tensors[name] for name in scalers})
 
-    def subset_by_dim(self, dimensions: int | Sequence[int]) -> Self:
+    def subset_by_dim(self, dimensions: int | str | Sequence[int | str]) -> Self:
         """Get subset of the scalers, filtering by dimension.
 
         See `.subset` for subsetting by name.
 
         Parameters
         ----------
-        dimensions : int | Sequence[int]
-            Dimensions to get scalers of
+        dimensions : int | str | Sequence[int | str]
+            Dimensions to get scalers of, as axis numbers or `TensorDim` names
 
         Returns
         -------
@@ -483,8 +507,7 @@ class ScaleTensor(nn.Module):
         """
         subset_scalers: dict[str, TENSOR_SPEC] = {}
 
-        if isinstance(dimensions, int):
-            dimensions = (dimensions,)
+        dimensions = as_dimension_tuple(dimensions)
 
         for name, (dim, scaler) in self.tensors.items():
             if isinstance(dim, int):
@@ -530,13 +553,13 @@ class ScaleTensor(nn.Module):
             scalers = [scalers]
         return ScaleTensor(**{name: tensor for name, tensor in self.tensors.items() if name not in scalers})
 
-    def without_by_dim(self, dimensions: int | Sequence[int]) -> Self:
+    def without_by_dim(self, dimensions: int | str | Sequence[int | str]) -> Self:
         """Get subset of the scalers, filtering out by dimension.
 
         Parameters
         ----------
-        dimensions : int | Sequence[int]
-            Dimensions to exclude scalers of
+        dimensions : int | str | Sequence[int | str]
+            Dimensions to exclude scalers of, as axis numbers or `TensorDim` names
 
         Returns
         -------
@@ -545,8 +568,7 @@ class ScaleTensor(nn.Module):
         """
         subset_scalers: dict[str, TENSOR_SPEC] = {}
 
-        if isinstance(dimensions, int):
-            dimensions = (dimensions,)
+        dimensions = as_dimension_tuple(dimensions)
 
         for name, (dim, scaler) in self.tensors.items():
             if isinstance(dim, int):
