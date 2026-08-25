@@ -80,9 +80,9 @@ def test_interpolations(config_from_contents: ConfigFromContents):
     )
     config.parse_interpolations()
     assert config._interpolations.references["key"] == {
-        ((), "config.yaml", "foo.bar.baz"),
-        (("prefix",), "config.yaml", "foo.bar"),
+        ("", "config.yaml", "foo.bar.baz"),
+        ("prefix", "config.yaml", "foo.bar"),
     }
     assert config._interpolations.references["prefix.foo.value"] == {
-        (("prefix",), "config.yaml", "other"),
+        ("prefix", "config.yaml", "other"),
     }

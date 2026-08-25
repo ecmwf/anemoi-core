@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from collections.abc import Generator
 from functools import cached_property
 from os import PathLike
 from pathlib import Path
@@ -29,12 +30,15 @@ class Config:
         for path in self._path.glob("**/*.yaml"):
             parts = path.relative_to(self._path).parts
             name = "/".join(parts)
-            documents[name] = Document(path, parts[:-1])
+            documents[name] = Document(path, ".".join(parts[:-1]))
         return documents
 
     def parse_interpolations(self) -> None:
         for document in self.documents.values():
             self._interpolations.parse_document(document)
+
+    def selected_documents(self) -> Generator[Document, None, None]:
+        yield from self.documents.values()
 
     def drop_key(self, keys: str) -> None:
         self._ops.append((Ops.DROP, (keys,)))
