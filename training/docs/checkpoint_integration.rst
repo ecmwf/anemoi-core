@@ -214,9 +214,11 @@ optimizer + epoch; if ``False``, ``ckpt_path`` is suppressed and training starts
 with a fresh optimizer at epoch 0 (the weights are already loaded).
 
 Because Lightning's restore needs a real file, warm start is restricted to
-``LocalSource`` / ``RunIdSource``. ``_reject_unsupported_warm_start`` raises a
-clear :class:`CheckpointConfigError` if warm start is paired with a remote
-source, rather than silently dropping optimizer/epoch state.
+``LocalSource`` / ``RunIdSource``.
+:func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`, called
+from ``build_checkpoint_pipeline``, raises a clear
+:class:`CheckpointConfigError` if warm start is paired with a remote source,
+rather than silently dropping optimizer/epoch state.
 
 ``WarmStartLoader`` also extracts the checkpoint's training progress into a small
 :class:`~anemoi.training.checkpoint.loading.state.TrainingState` and records it

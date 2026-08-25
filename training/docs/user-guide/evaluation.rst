@@ -58,8 +58,9 @@ before evaluation starts:
    :exc:`~anemoi.training.checkpoint.exceptions.CheckpointNotFoundError` if the
    file does not exist.
 
-Evaluation expects a source to be configured; without one the model is left at
-its initial weights (unlike training, where a fresh start is valid).
+Evaluation requires a source. Without one it raises :exc:`RuntimeError` rather
+than evaluating randomly-initialised weights — unlike training, where a fresh
+start is valid.
 
 The loading strategy on ``training.checkpoint.loading`` controls how the
 resolved checkpoint is applied:
@@ -103,6 +104,12 @@ a config file and any Hydra overrides as positional arguments:
        --config-name evaluate_ana_short \
        training/checkpoint/source=run \
        +training.checkpoint.source.run_id=<run_id>
+
+Both overrides are needed. ``training.checkpoint.source`` is an optional config
+group that defaults to unset, so ``training/checkpoint/source=run`` is what
+selects it and supplies the ``_target_`` (and ``fork: false``); the ``run_id``
+override then fills in the one value you have to provide. Setting ``run_id``
+alone leaves the source without a ``_target_`` and fails config validation.
 
 You can also override individual keys without a dedicated config file:
 

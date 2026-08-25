@@ -497,9 +497,11 @@ or because the user wants to fine-tune the model from a specific point
 in the training.
 
 This is done by setting ``training.checkpoint.source`` to a ``RunIdSource``
-with the *run_id* of the run to restart. ``fork`` defaults to ``false``
-(resume), so it can be omitted; a resume keeps the new checkpoints in the same
-folder as the old ones:
+with the *run_id* of the run to restart. ``RunIdSource`` resolves that id to
+``<system.output.checkpoints.root>/../<run_id>/last.ckpt`` on the filesystem —
+it reads the run's checkpoint directory directly and does not fetch anything
+from MLflow. ``fork`` defaults to ``false`` (resume), so it can be omitted; a
+resume keeps the new checkpoints in the same folder as the old ones:
 
 .. code:: yaml
 
@@ -616,7 +618,7 @@ trained checkpoint. This is particularly useful when the new task is
 related to the old one, enabling faster convergence and often improving
 model performance.
 
-The recommended way to configure transfer learning is through the
+To configure transfer learning through the config, use the
 ``training.checkpoint`` pipeline. Select the ``transfer_learning`` loading
 strategy via its Hydra group:
 
@@ -719,10 +721,9 @@ model are excluded from training. This is useful when certain parts of
 the model have been sufficiently trained or should remain unchanged for
 the current task.
 
-The recommended way to freeze submodules is through the
-``training.checkpoint`` pipeline, which applies freezing as a modifier
-stage after the model weights have been loaded. Select the ``freezing``
-modifier group via Hydra:
+To freeze submodules through the config, use the ``training.checkpoint``
+pipeline, which applies freezing as a modifier stage after the model weights
+have been loaded. Select the ``freezing`` modifier group via Hydra:
 
 .. code:: bash
 
