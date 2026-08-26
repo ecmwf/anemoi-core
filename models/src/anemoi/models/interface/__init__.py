@@ -240,6 +240,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
+            "gather_out": gather_out,
         }
 
         # Add tendency processors if they exist
