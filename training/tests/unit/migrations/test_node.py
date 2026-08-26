@@ -11,8 +11,9 @@ from textwrap import dedent
 
 import pytest
 
-from anemoi.training.migrations.config import Node
-from anemoi.training.migrations.config import NodeList
+from anemoi.training.migrations.nodes import Node
+from anemoi.training.migrations.nodes import NodeContainer
+from anemoi.training.migrations.nodes import NodeList
 from anemoi.training.migrations.testing import ConfigFromContent
 
 
@@ -23,7 +24,9 @@ def test_node(config_from_content: ConfigFromContent):
         baz: value
     """)
     node = config_from_content(content)["foo"]
+    assert isinstance(node, NodeContainer)
     assert node.yaml_node.value == {"bar": {"baz": "value"}}
+    assert isinstance(node["bar"], NodeContainer)
     baz_node = node["bar"]["baz"]
     assert isinstance(baz_node, Node)
     assert baz_node.yaml_node.value == "value"
@@ -37,6 +40,7 @@ def test_node_add_item(config_from_content: ConfigFromContent):
         baz: value
     """)
     node = config_from_content(content)["foo"]
+    assert isinstance(node, NodeContainer)
     node["new"] = "new value"
     assert node["new"].yaml_node.value == "new value"
     assert node["new"].cfg == "new value"
@@ -49,10 +53,13 @@ def test_node_del_item(config_from_content: ConfigFromContent):
         baz: value
         old: old value
     """)
-    node = config_from_content(content)["foo"]["bar"]
-    del node["old"]
+    node = config_from_content(content)["foo"]
+    assert isinstance(node, NodeContainer)
+    bar_node = node["bar"]
+    assert isinstance(bar_node, NodeContainer)
+    del bar_node["old"]
     with pytest.raises(ValueError):
-        _old_val = node["old"]
+        _old_val = bar_node["old"]
 
 
 def test_node_list(config_from_content: ConfigFromContent):
@@ -62,11 +69,13 @@ def test_node_list(config_from_content: ConfigFromContent):
         - baz: value 1
         - baz: value 2
     """)
-    node = config_from_content(content)["foo"]["bar"]
-    assert isinstance(node, NodeList)
-    assert node[0].yaml_node.value == {"baz": "value 1"}
-    assert node[1].yaml_node.value == {"baz": "value 2"}
+    node = config_from_content(content)["foo"]
+    assert isinstance(node, NodeContainer)
+    bar_node = node["bar"]
+    assert isinstance(bar_node, NodeList)
+    assert bar_node[0].yaml_node.value == {"baz": "value 1"}
+    assert bar_node[1].yaml_node.value == {"baz": "value 2"}
     with pytest.raises(ValueError):
-        _extra_node = node[2]
-    node.append({"baz": "value 3"})
-    assert node[2].yaml_node.value == {"baz": "value 3"}
+        _extra_bar_node = bar_node[2]
+    bar_node.append({"baz": "value 3"})
+    assert bar_node[2].yaml_node.value == {"baz": "value 3"}
