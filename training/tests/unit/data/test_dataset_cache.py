@@ -20,12 +20,12 @@ import pytest
 
 from anemoi.training.utils.dataset_cache import (
     CacheKey,
+    CacheClient,
+    CacheServer,
     DatasetCache,
     DatasetCacheNamespace,
     Endpoint,
-    ProcessZMQCacheServer,
     RemoteCacheMiss,
-    ZMQCacheClient,
     _is_capacity_error,
 )
 
@@ -84,7 +84,7 @@ class TestProcessZMQCacheServerClient:
             path.parent.mkdir(parents=True, exist_ok=True)
             np.save(path, value)
         context = multiprocessing.get_context("spawn")
-        server = ProcessZMQCacheServer({key: str(path) for key, path in entries.items()})
+        server = CacheServer({key: str(path) for key, path in entries.items()})
         server.start()
         yield server
         server.close()
@@ -93,7 +93,7 @@ class TestProcessZMQCacheServerClient:
         return Endpoint("127.0.0.1", server.port, 0)
 
     def test_single_fetch(self, cache_data, running_server):
-        client = ZMQCacheClient(self.endpoint(running_server))
+        client = CacheClient(self.endpoint(running_server))
         try:
             key = CacheKey("dataset", 0, 5)
             result = client.fetch(key)
@@ -102,7 +102,7 @@ class TestProcessZMQCacheServerClient:
             client.close()
 
     def test_multiple_fetches(self, cache_data, running_server):
-        client = ZMQCacheClient(self.endpoint(running_server))
+        client = CacheClient(self.endpoint(running_server))
         try:
             for idx in [0, 7, 13, 19]:
                 key = CacheKey("dataset", 0, idx)
@@ -118,7 +118,7 @@ class TestProcessZMQCacheServerClient:
         path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy"
         path.parent.mkdir(parents=True, exist_ok=True)
         np.save(path, expected)
-        client = ZMQCacheClient(self.endpoint(running_server))
+        client = CacheClient(self.endpoint(running_server))
         try:
             np.testing.assert_array_equal(client.fetch(key), expected)
             np.testing.assert_array_equal(
@@ -129,7 +129,7 @@ class TestProcessZMQCacheServerClient:
             client.close()
 
     def test_missing_entry(self, running_server):
-        client = ZMQCacheClient(self.endpoint(running_server))
+        client = CacheClient(self.endpoint(running_server))
         try:
             with pytest.raises(RemoteCacheMiss):
                 client.fetch(CacheKey("dataset", 0, 100))
@@ -143,7 +143,7 @@ class TestProcessZMQCacheServerClient:
 
         def worker(idx):
             try:
-                c = ZMQCacheClient(self.endpoint(running_server))
+                c = CacheClient(self.endpoint(running_server))
                 key = CacheKey("dataset", 0, idx)
                 results[idx] = c.fetch(key)
                 c.close()
@@ -162,7 +162,7 @@ class TestProcessZMQCacheServerClient:
 
     def test_ephemeral_port_and_clean_shutdown(self, cache_data, running_server):
         assert running_server.port > 0
-        client = ZMQCacheClient(self.endpoint(running_server))
+        client = CacheClient(self.endpoint(running_server))
         key = CacheKey("dataset", 0, 3)
         np.testing.assert_array_equal(client.fetch(key), cache_data[key])
         client.close()
@@ -184,39 +184,39 @@ class TestDatasetCacheNamespace:
             return self.data.shape[0] if self.data.ndim == 4 else self.data.shape[-2]
 
     def test_analysis_entry_is_committed_once(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
 
         first = sample_data[3]
         assert namespace.store(0, 3, first)
         assert not namespace.store(0, 3, np.zeros_like(first))
 
-        np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
-        assert list(namespace.committed_positions()) == [("all", 0, 3)]
+        np.testing.assert_array_equal(namespace.local(0, 3), sample_data[3])
+        assert list(namespace.committed()) == [("all", 0, 3)]
 
     def test_stale_marker_is_repaired(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
-        entry, marker, _ = namespace._paths(0, 3)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
+        entry, marker, _ = namespace.paths(0, 3)
         marker.parent.mkdir(parents=True)
         marker.touch()
 
-        assert namespace.fetch_local(0, 3) is None
+        assert namespace.local(0, 3) is None
         assert namespace.store(0, 3, sample_data[3])
-        np.testing.assert_array_equal(namespace.fetch_local(0, 3), sample_data[3])
+        np.testing.assert_array_equal(namespace.local(0, 3), sample_data[3])
 
     def test_trajectory_sequences_do_not_collide(self, tmp_path):
         data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
-        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data), 0)
+        namespace = DatasetCacheNamespace(tmp_path, "trajectory:fingerprint", self.FakeReader(data))
 
         value_0 = data[0, :, :, 2, :]
         value_1 = data[1, :, :, 2, :]
         namespace.store(0, 2, value_0)
         namespace.store(1, 2, value_1)
 
-        np.testing.assert_array_equal(namespace.fetch_local(0, 2), data[0, :, :, 2, :])
-        np.testing.assert_array_equal(namespace.fetch_local(1, 2), data[1, :, :, 2, :])
+        np.testing.assert_array_equal(namespace.local(0, 2), data[0, :, :, 2, :])
+        np.testing.assert_array_equal(namespace.local(1, 2), data[1, :, :, 2, :])
 
     def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
 
         def fail_save(file, value, allow_pickle):
             file.write(b"partial")
@@ -226,14 +226,14 @@ class TestDatasetCacheNamespace:
         with pytest.raises(OSError, match="Not enough free space"):
             namespace.store(0, 3, sample_data[3])
 
-        entry, marker, _ = namespace._paths(0, 3)
+        entry, marker, _ = namespace.paths(0, 3)
         assert not entry.exists()
         assert not marker.exists()
 
     def test_negative_position(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data), 0)
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
         namespace.store(0, -1, sample_data[-1])
-        np.testing.assert_array_equal(namespace.fetch_local(0, -1), sample_data[-1])
+        np.testing.assert_array_equal(namespace.local(0, -1), sample_data[-1])
 
 
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):

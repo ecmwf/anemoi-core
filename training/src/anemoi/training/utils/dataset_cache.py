@@ -1,27 +1,23 @@
 """Node-local dataset cache with cross-node reads over ZeroMQ."""
-
-from __future__ import annotations
-
 import errno
 import fcntl
 import hashlib
 import json
 import logging
-import multiprocessing
 import os
 import shutil
 import socket
 import threading
 from contextlib import contextmanager
-from dataclasses import dataclass
 from multiprocessing import Value
 from pathlib import Path
 
 import numpy as np
 import pytorch_lightning as pl
 import torch.distributed as dist
-import zmq
 
+from anemoi.training.utils.cache_transport import CacheClient, CacheKey, CacheServer, Endpoint, RemoteCacheMiss
+from anemoi.training.utils.cache_transport import RemoteCacheUnavailable
 LOGGER = logging.getLogger(__name__)
 
 
@@ -31,148 +27,10 @@ def _is_capacity_error(error: OSError) -> bool:
     return error.errno in errnos or any(message in str(error).lower() for message in messages)
 
 
-class CacheConfigurationError(RuntimeError):
-    pass
-
-
-class RemoteCacheMiss(KeyError):
-    pass
-
-
-class RemoteCacheUnavailable(ConnectionError):
-    pass
-
-
-@dataclass(frozen=True)
-class CacheKey:
-    dataset_id: str
-    sequence: int
-    position: int
-    grid_id: str = "all"
-
-
-@dataclass(frozen=True)
-class Endpoint:
-    host: str
-    port: int
-    node_id: int
-
-
-def _read_shard(entries, request):
-    """ """
-    paths = [
-        Path(entries[request["dataset_id"]]) / request["grid_id"] / str(request["sequence"]) / f"{position}.npy"
-        for position in request["positions"]
-    ]
-    if not paths or not all(path.exists() for path in paths):
-        return None
-    first = np.load(paths[0], allow_pickle=False, mmap_mode="r")
-    result = np.empty((len(paths), *first.shape), dtype=first.dtype)
-    result[0] = first
-    for index, path in enumerate(paths[1:], 1):
-        result[index] = np.load(path, allow_pickle=False, mmap_mode="r")
-    return result
-
-
-def _serve_worker(context, endpoint, entries):
-    worker = context.socket(zmq.REP)
-    worker.connect(endpoint)
-    while True:
-        request = worker.recv_json()
-        value = _read_shard(entries, request)
-        if value is None:
-            worker.send(b"")
-        else:
-            metadata = json.dumps({"dtype": value.dtype.str, "shape": value.shape}, separators=(",", ":"))
-            worker.send_multipart([metadata.encode(), memoryview(value)], copy=False)
-
-
-def _serve_cache(port, entries, ready):
-    context = zmq.Context()
-    frontend = context.socket(zmq.ROUTER)
-    backend = context.socket(zmq.DEALER)
-    try:
-        port = frontend.bind_to_random_port("tcp://*") if port == 0 else (frontend.bind(f"tcp://*:{port}") or port)
-        endpoint = "inproc://workers"
-        backend.bind(endpoint)
-        for _ in range(min(4, os.cpu_count() or 1)):
-            threading.Thread(target=_serve_worker, args=(context, endpoint, entries), daemon=True).start()
-        ready.send((port, None))
-    except Exception as error:
-        ready.send((0, str(error)))
-        return
-    finally:
-        ready.close()
-    zmq.proxy(frontend, backend)
-
-
-class CacheClient:
-    def __init__(self, endpoint: Endpoint):
-        self.endpoint = endpoint
-        self.socket = None
-
-    def _connect(self):
-        self.socket = zmq.Context.instance().socket(zmq.REQ)
-        self.socket.setsockopt(zmq.LINGER, 0)
-        self.socket.setsockopt(zmq.RCVTIMEO, 30_000)
-        self.socket.connect(f"tcp://{self.endpoint.host}:{self.endpoint.port}")
-
-    def request_shard(self, key, positions):
-        request = {
-            "dataset_id": key.dataset_id,
-            "sequence": key.sequence,
-            "positions": positions,
-            "grid_id": key.grid_id,
-        }
-        try:
-            if self.socket is None:
-                self._connect()
-            self.socket.send_json(request)
-            response = self.socket.recv_multipart()
-            if len(response) == 1:
-                raise RemoteCacheMiss(key)
-            metadata = json.loads(response[0])
-            return np.frombuffer(response[1], dtype=metadata["dtype"]).reshape(metadata["shape"])
-        except RemoteCacheMiss:
-            raise
-        except zmq.ZMQError as error:
-            self.close()
-            raise RemoteCacheUnavailable(str(error)) from error
-
-    def fetch(self, key):
-        return self.request_shard(key, [key.position])[0]
-
-    def close(self):
-        if self.socket is not None:
-            self.socket.close(linger=0)
-            self.socket = None
-
-
-class CacheServer:
-    def __init__(self, entries, port=0):
-        self.entries = entries
-        self.port = port
-
-    def start(self):
-        context = multiprocessing.get_context("spawn")
-        parent, child = context.Pipe(duplex=False)
-        self.process = context.Process(target=_serve_cache, args=(self.port, self.entries, child), daemon=True)
-        self.process.start()
-        child.close()
-        self.port, error = parent.recv()
-        parent.close()
-        if error:
-            raise OSError(error)
-
-    def close(self):
-        self.process.terminate()
-        self.process.join()
-
-
 class DatasetCacheNamespace:
     """Atomic file-per-record cache for one dataset reader."""
 
-    def __init__(self, root: Path, dataset_id: str, reader, _node_id=None):
+    def __init__(self, root: Path, dataset_id: str, reader):
         self.dataset_id = dataset_id
         self.reader = reader
         self.num_sequences = int(reader.num_sequences)
@@ -249,11 +107,6 @@ class DatasetCacheNamespace:
             if marker.name.isdigit()
         )
 
-    _paths = paths
-    fetch_local = local
-    committed_positions = committed
-
-
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
@@ -264,14 +117,10 @@ class DatasetCache(pl.LightningDataModule):
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
         self.initialized = False
-        self.namespaces = {}
+        self.namespaces, self._locations, self._connections = {}, {}, {}
         self._datasets = set()
-        self._locations = {}
-        self._connections = {}
-        self.cache_hits_local = Value("q", 0)
-        self.cache_hits_remote = Value("q", 0)
-        self.cache_misses = Value("q", 0)
-        self.total_fetches = Value("q", 0)
+        counters = (Value("q", 0) for _ in range(4))
+        self.cache_hits_local, self.cache_hits_remote, self.cache_misses, self.total_fetches = counters
         self.cache_full = Value("b", False)
 
     def __getattr__(self, name):
@@ -314,7 +163,7 @@ class DatasetCache(pl.LightningDataModule):
             return
         self.ds.setup(stage)
         if not dist.is_initialized():
-            raise CacheConfigurationError("Torch distributed must be initialized before dataset caching")
+            raise RuntimeError("Torch distributed must be initialized before dataset caching")
         self.global_rank = dist.get_rank(self.initial_proc_group)
         self.world_size = dist.get_world_size(self.initial_proc_group)
         self.proc_group = dist.new_group(backend="gloo")
@@ -349,9 +198,6 @@ class DatasetCache(pl.LightningDataModule):
 
     def test_dataloader(self):
         return self.ds._get_dataloader(self.ds_test, "test")
-
-    def set_epoch(self, epoch):
-        self.ds.set_epoch(epoch)
 
     def _positions(self, namespace, sequence, positions):
         if isinstance(positions, slice):
@@ -453,5 +299,3 @@ class DatasetCache(pl.LightningDataModule):
         if self.is_node_leader:
             self.server.close()
         self.ds.teardown(stage)
-
-    close = teardown
