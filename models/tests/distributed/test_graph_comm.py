@@ -12,22 +12,17 @@
 Each tensor communication wrapper covered here is verified against its
 contract: the forward layout transformation, the backward gradient rule, and
 the ``mgroup=None`` identity fallback. Expected values are computed inline
-from plain PyTorch operations. Low-level collective behavior (backend paths,
-uneven shards, memory formats) is covered by
-``test_communication_primitives.py``. Graph-topology communication such as
-``halo_exchange`` belongs with the graph-sharding tests and their ``HaloInfo``
-fixtures.
+from plain PyTorch operations.
 
 Backward tests build ``loss = (output * grad_output).sum()``, so the output's
-incoming gradient is exactly ``grad_output``. It is rank-scaled and
-position-varying, so mis-routed slices and missing or spurious cross-rank
-reductions produce distinct gradients, and integer-valued, so all expectations
-are exact in float32.
+incoming gradient is exactly ``grad_output``. The tensors used for testing
+are rank-scaled, position-varying, and integer-valued, thus resulting
+expected values are exact in float32.
 
-Distributed cases are gated behind the ``distributed`` marker and run via::
+These tests are skipped by default. Pass ``--distributed`` to run them. Use
+``--distributed-backend`` and ``--distributed-world-size`` to select the backend
+and rank count.
 
-    pytest models/tests/distributed/test_graph_comm.py \\
-        --distributed --distributed-backend={gloo,nccl,all} --distributed-world-size=N
 """
 
 from __future__ import annotations
@@ -357,6 +352,7 @@ def _test_shard_tensor_no_backward_gather_rank(
     grad_output_local = torch.split(grad_output_full, shard_sizes, dim=dim)[rank].contiguous()
     loss = (sharded * grad_output_local).sum()  # d(loss)/d(sharded) == grad_output_local
 
+    # Verify that gather is not called in backward pass
     with patch(
         "anemoi.models.distributed.graph._gather",
         side_effect=AssertionError("backward must not gather"),
@@ -597,7 +593,7 @@ def _test_reduce_tensor_rank(
 
 
 @pytest.mark.distributed
-def test_reduce_tensor_backward_is_identity(
+def test_reduce_tensor(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
