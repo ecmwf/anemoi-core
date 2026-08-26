@@ -69,10 +69,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
         # Latent aggregator: combines encoder outputs before the processor
-        self.latent_aggregator = instantiate(
-            model_config.latent_aggregator,
-            num_channels=self._get_latent_aggregator_channels(),
-        )
+        self._build_latent_aggregator(model_config.latent_aggregator)
 
         # self.hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {
@@ -243,17 +240,19 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs : Any
+            Additional model arguments.
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
 

@@ -286,22 +286,22 @@ class SDPAAttentionWrapper(nn.Module):
         Parameters
         ----------
         B : int
-            Batch size
+            Batch size.
         H : int
-            Number of heads
+            Number of heads.
         Q_LEN : int
-            Query sequence length
+            Query sequence length.
         KV_LEN : int
-            Key/value sequence length
+            Key/value sequence length.
         window_size : tuple
             Tuple of (left_window, right_window). Use -1 for unlimited.
         device : str
-            Device for the mask tensor
+            Device for the mask tensor.
 
         Returns
         -------
         Tensor
-            2D attention mask
+            2D attention mask.
         """
         window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
         window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
@@ -462,6 +462,9 @@ class FlashAttentionWrapper(nn.Module):
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
     ):
+        if dropout_p > 0 and (self.use_flash_attn_v3 or self.use_flash_attn_v4):
+            raise NotImplementedError("Attention dropout is not supported by Flash Attention v3 or v4.")
+
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
@@ -672,12 +675,12 @@ def get_alibi_slopes(num_heads: int) -> Tensor:
     Parameters
     ----------
     num_heads : int
-        number of attention heads
+        Number of attention heads.
 
     Returns
     -------
     Tensor
-        aLiBi slopes
+        aLiBi slopes.
     """
     n = 2 ** math.floor(math.log2(num_heads))
     slope_0 = 2 ** (-8 / n)

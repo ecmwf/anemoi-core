@@ -73,11 +73,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         # Latent aggregator: combines encoder outputs before the processor
-        self.latent_aggregator = instantiate(
-            model_config.latent_aggregator,
-            input_channels=self.input_dim_latent,
-            source_channels=self._get_latent_aggregator_channels(),
-        )
+        self._build_latent_aggregator(model_config.latent_aggregator)
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
@@ -142,6 +138,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
+    def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
+        """Build the latent aggregator."""
+        self.latent_aggregator = instantiate(
+            aggregator_config,
+            _recursive_=False,
+            input_channels=self.input_dim_latent,
+            source_channels=self._get_latent_aggregator_channels(),
+        )
+
     def _assemble_input(
         self,
         x: torch.Tensor,
@@ -154,6 +159,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
         the per-node attributes on the feature dimension, and computes the residual skip tensor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Dataset input tensor.
+        batch_size : int
+            Batch size.
+        grid_shard_sizes : DatasetShardSizes or None
+            Per-dataset grid shard sizes.
+        model_comm_group : ProcessGroup or None, optional
+            Model communication group.
+        dataset_name : str or None, optional
+            Dataset being assembled.
 
         Returns
         -------
@@ -199,6 +217,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Concatenates the feature blocks listed in ``decoders_target_input`` for this dataset's
         decoder into the per-node vector fed to the decoder as ``x_dst``.
+
+        Parameters
+        ----------
+        x_input_data : Tensor
+            Dataset input tensor.
+        x_encoded_data : Tensor or None
+            Encoded dataset tensor.
+        batch_size : int
+            Batch size.
+        grid_shard_sizes : DatasetShardSizes or None, optional
+            Per-dataset grid shard sizes.
+        model_comm_group : ProcessGroup or None, optional
+            Model communication group.
+        dataset_name : str or None, optional
+            Dataset being assembled.
 
         Returns
         -------
@@ -295,17 +328,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs : Any
+            Additional model arguments.
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
 
