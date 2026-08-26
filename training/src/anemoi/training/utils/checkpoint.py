@@ -23,7 +23,6 @@ from pytorch_lightning import Trainer
 
 from anemoi.models.migrations import Migrator
 from anemoi.models.preprocessing.imputer import BaseImputer
-from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 from anemoi.utils.checkpoints import save_metadata
 
@@ -70,6 +69,8 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
         pytorch model, metadata
 
     """
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
     module = BaseTrainingModule.load_from_checkpoint(lightning_checkpoint_path, weights_only=False)
     model = module.model
 

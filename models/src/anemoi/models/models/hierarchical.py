@@ -32,27 +32,47 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
     def _build_networks(self, model_config):
         """Builds the model components."""
-        # note that this is called by the super class init
-
         # Encoder data -> hidden
-        self.encoder_graph_provider = nn.ModuleDict()
-        self.encoder = torch.nn.ModuleDict()
+        self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.input_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
+                )
+                continue
+
+            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
+
+            # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
-                edge_attributes=model_config.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-                trainable_size=model_config.encoder.get("trainable_size", 0),
+                trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
 
-            self.encoder[dataset_name] = instantiate(
-                model_config.encoder,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.input_dim[dataset_name],
-                in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
+        self.encoder = torch.nn.ModuleDict()
+        for encoder_name, encoder_config in model_config.encoders.items():
+            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
+            assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
+                f"All datasets for encoder {encoder_name} must have the same input dimension, "
+                f"but got {encoder_in_channels_src}."
             )
+
+            self.encoder[encoder_name] = instantiate(
+                encoder_config.mapper,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels_src=encoder_in_channels_src[0],
+                in_channels_dst=self.input_dim_latent,
+                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+            )
+
+        # Latent aggregator: combines encoder outputs before the processor
+        self.latent_aggregator = instantiate(
+            model_config.latent_aggregator,
+            num_channels=self._get_latent_aggregator_channels(),
+        )
 
         # self.hidden_dims is the dimentionality of features at each depth
         self.hidden_dims = {
@@ -142,7 +162,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
-                hidden_dim=self.hidden_dims[dst_nodes_name],
+                num_channels=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
 
@@ -166,31 +186,49 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
-                hidden_dim=self.hidden_dims[src_nodes_name],
+                num_channels=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
             )
 
         # Decoder hidden -> data
-        self.decoder_graph_provider = nn.ModuleDict()
-        self.decoder = torch.nn.ModuleDict()
+        self.decoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.target_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
+                )
+                continue
+
+            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
-                edge_attributes=model_config.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.decoder.get("trainable_size", 0),
+                trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
 
-            self.decoder[dataset_name] = instantiate(
-                model_config.decoder,
+        self.decoder = torch.nn.ModuleDict()
+        for decoder_name, decoder_config in model_config.decoders.items():
+            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same target dimension, "
+                f"but got {decoder_in_channels_dst}."
+            )
+            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same output dimension, "
+                f"but got {decoder_output_channels_dst}."
+            )
+
+            self.decoder[decoder_name] = instantiate(
+                decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
-                in_channels_dst=self.input_dim[dataset_name],
-                hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
-                out_channels_dst=self.output_dim[dataset_name],
-                edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                in_channels_src=self.processor.num_channels,
+                in_channels_dst=decoder_in_channels_dst[0],
+                out_channels_dst=decoder_output_channels_dst[0],
+                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
     def forward(
@@ -379,7 +417,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_latent = x_latent_proc
 
         ## Downscale
-        for i in range(self.num_hidden - 1, 0, -1):
+        for i in reversed(range(0, self.num_hidden - 1)):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i - 1]
 

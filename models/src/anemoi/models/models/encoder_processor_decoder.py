@@ -24,6 +24,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
 from anemoi.utils.config import DotDict
 
@@ -93,7 +94,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             edge_dim=self.processor_graph_provider.edge_dim,
         )
 
-        assert self.processor.num_channels == self.latent_aggregator.hidden_dim, (
+        assert (
+            isinstance(self.processor, NoOpProcessor)
+            or self.processor.num_channels == self.latent_aggregator.hidden_dim
+        ), (
             f"Processor number of channels ({self.processor.num_channels}) must match latent aggregator output channels"
             f" ({self.latent_aggregator.hidden_dim})."
         )
@@ -132,7 +136,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.processor.num_channels,
+                in_channels_src=self.latent_aggregator.hidden_dim,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
