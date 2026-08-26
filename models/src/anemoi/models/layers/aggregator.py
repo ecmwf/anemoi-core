@@ -23,7 +23,7 @@ from anemoi.utils.config import DotDict
 
 
 class BaseLatentAggregator(nn.Module, ABC):
-    """Combine named dataset latents into the latent consumed by the processor."""
+    """Combine named dataset latents for the processor."""
 
     def __init__(
         self,
@@ -94,11 +94,11 @@ class BaseLatentAggregator(nn.Module, ABC):
         source_names: Sequence[str],
         source_latents: Sequence[Tensor],
     ) -> Tensor:
-        """Aggregate validated dataset latents."""
+        """Aggregate dataset latents."""
 
 
 class SumAggregator(BaseLatentAggregator):
-    """Sum latent representations elementwise."""
+    """Sum latents elementwise."""
 
     def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
         super().__init__(input_channels=input_channels, source_channels=source_channels)
@@ -125,7 +125,7 @@ class SumAggregator(BaseLatentAggregator):
 
 
 class MeanAggregator(SumAggregator):
-    """Average latent representations elementwise."""
+    """Average latents elementwise."""
 
     def _forward(
         self,
@@ -139,7 +139,7 @@ class MeanAggregator(SumAggregator):
 
 
 class ConcatAggregator(BaseLatentAggregator):
-    """Concatenate every configured dataset latent in configured source order."""
+    """Concatenate dataset latents in source order."""
 
     @property
     def hidden_dim(self) -> int:
@@ -161,7 +161,7 @@ class ConcatAggregator(BaseLatentAggregator):
 
 
 class CrossAttentionAggregator(BaseLatentAggregator):
-    """Fuse dataset latents with pointwise cross-attention over named sources."""
+    """Fuse dataset latents with pointwise cross-attention over sources."""
 
     def __init__(
         self,
