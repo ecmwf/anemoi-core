@@ -59,10 +59,16 @@ class SaveSignatureBackend:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="cuda")
+    parser.add_argument(
+        "--fix",
+        choices=("disable-lru", "mark-dynamic"),
+        default="disable-lru",
+        help="mitigation to demonstrate after reproducing the error",
+    )
     return parser.parse_args()
 
 
-def run_case(*, use_lru: bool, device: str) -> None:
+def run_case(*, use_lru: bool, mark_dynamic: bool, device: str) -> None:
     torch._dynamo.reset()
     torch._C._dynamo.eval_frame._set_lru_cache(use_lru)
 
@@ -71,6 +77,8 @@ def run_case(*, use_lru: bool, device: str) -> None:
 
     def forward(batch_size: int) -> torch.Tensor:
         inputs = torch.randn(batch_size, 4, device=device, requires_grad=True)
+        if mark_dynamic:
+            torch._dynamo.mark_dynamic(inputs, 0)
         return checkpoint(block, inputs, use_reentrant=False).sum()
 
     static_loss = forward(3)
@@ -78,23 +86,27 @@ def run_case(*, use_lru: bool, device: str) -> None:
 
     entries = torch._dynamo.eval_frame._debug_get_cache_entry_list(Block.forward)
     compile_ids = [str(entry.compile_id) for entry in entries]
-    print(f"LRU {'enabled ' if use_lru else 'disabled'}: cache order {compile_ids}")
-    assert backend.compile_count == 2, "Expected one static and one automatic-dynamic graph"
+    mode = "mark_dynamic" if mark_dynamic else f"LRU {'enabled' if use_lru else 'disabled'}"
+    print(f"{mode}: cache order {compile_ids}")
+    expected_compile_count = 1 if mark_dynamic else 2
+    assert backend.compile_count == expected_compile_count, (
+        f"Expected {expected_compile_count} compiled graph(s), got {backend.compile_count}"
+    )
 
     try:
         static_loss.backward()
     except CheckpointError as error:
-        if not use_lru:
-            raise AssertionError("Disabling LRU should preserve the static graph") from error
+        if not use_lru or mark_dynamic:
+            raise AssertionError(f"{mode} should avoid the graph-selection mismatch") from error
         print("LRU enabled : reproduced CheckpointError")
         print(error)
     else:
-        if use_lru:
+        if use_lru and not mark_dynamic:
             raise AssertionError("LRU should select the incompatible automatic-dynamic graph")
-        print("LRU disabled: static backward passed")
+        print(f"{mode}: static backward passed")
 
     dynamic_loss.backward()
-    print(f"LRU {'enabled ' if use_lru else 'disabled'}: dynamic backward passed")
+    print(f"{mode}: dynamic backward passed")
 
 
 def main() -> None:
@@ -103,8 +115,12 @@ def main() -> None:
         raise RuntimeError("CUDA is not available; pass --device cpu to run on CPU")
 
     try:
-        run_case(use_lru=True, device=args.device)
-        run_case(use_lru=False, device=args.device)
+        run_case(use_lru=True, mark_dynamic=False, device=args.device)
+        run_case(
+            use_lru=args.fix != "disable-lru",
+            mark_dynamic=args.fix == "mark-dynamic",
+            device=args.device,
+        )
     finally:
         torch._C._dynamo.eval_frame._set_lru_cache(True)
 
