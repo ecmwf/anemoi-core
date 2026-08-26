@@ -1,8 +1,9 @@
-"""Reproduce a checkpoint mismatch after a torch.compile global-state recompile.
+"""Reproduce the activation-checkpointing Dynamo LRU bug from pytorch#166926.
 
-This intentionally makes the compiled computation depend on ``num_threads``.
-The original graph's GLOBAL_STATE guard therefore fails after the state change,
-so disabling LRU ordering cannot make that graph eligible for recomputation.
+The first call compiles a static graph. A different input shape then creates an
+automatic-dynamic graph whose guards also accept the first shape. The diagnostic
+backend gives those otherwise equivalent graphs different autograd save
+signatures, making cache-entry selection observable and deterministic.
 """
 
 from __future__ import annotations
@@ -16,25 +17,84 @@ import torch
 from torch.utils.checkpoint import CheckpointError
 from torch.utils.checkpoint import checkpoint
 
-INITIAL_NUM_THREADS = torch.get_num_threads()
+
+class SaveIdentity(torch.autograd.Function):
+    """Identity whose backward causes one additional tensor to be saved."""
+
+    @staticmethod
+    def forward(ctx, x: torch.Tensor) -> torch.Tensor:
+        ctx.save_for_backward(x)
+        return x
+
+    @staticmethod
+    def backward(ctx, grad: torch.Tensor) -> torch.Tensor:
+        return grad
 
 
-class ThreadSpecializedBlock(torch.nn.Module):
-    """Make the graph selected by the ATen thread state save one extra tensor."""
-
+class Block(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        output = x.sin()
-        if torch.get_num_threads() == INITIAL_NUM_THREADS:
-            output = output.cos()
-        return output * x
+        return x.sin() * x
+
+
+class SaveSignatureBackend:
+    """Give the first compiled graph one extra saved tensor without changing its result."""
+
+    def __init__(self) -> None:
+        self.compile_count = 0
+
+    def __call__(self, graph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
+        del example_inputs
+        graph_index = self.compile_count
+        self.compile_count += 1
+
+        def compiled(*args):
+            outputs = graph(*args)
+            if graph_index == 0:
+                outputs = (SaveIdentity.apply(outputs[0]), *outputs[1:])
+            return outputs
+
+        return compiled
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--device", default="cuda")
-    parser.add_argument("--full-debug", action="store_true", help="print checkpoint's operator-by-operator trace")
-    parser.add_argument("--use-lru", action="store_true", help="enable Dynamo's default LRU cache ordering")
     return parser.parse_args()
+
+
+def run_case(*, use_lru: bool, device: str) -> None:
+    torch._dynamo.reset()
+    torch._C._dynamo.eval_frame._set_lru_cache(use_lru)
+
+    backend = SaveSignatureBackend()
+    block = torch.compile(Block().to(device), backend=backend)
+
+    def forward(batch_size: int) -> torch.Tensor:
+        inputs = torch.randn(batch_size, 4, device=device, requires_grad=True)
+        return checkpoint(block, inputs, use_reentrant=False).sum()
+
+    static_loss = forward(3)
+    dynamic_loss = forward(5)
+
+    entries = torch._dynamo.eval_frame._debug_get_cache_entry_list(Block.forward)
+    compile_ids = [str(entry.compile_id) for entry in entries]
+    print(f"LRU {'enabled ' if use_lru else 'disabled'}: cache order {compile_ids}")
+    assert backend.compile_count == 2, "Expected one static and one automatic-dynamic graph"
+
+    try:
+        static_loss.backward()
+    except CheckpointError as error:
+        if not use_lru:
+            raise AssertionError("Disabling LRU should preserve the static graph") from error
+        print("LRU enabled : reproduced CheckpointError")
+        print(error)
+    else:
+        if use_lru:
+            raise AssertionError("LRU should select the incompatible automatic-dynamic graph")
+        print("LRU disabled: static backward passed")
+
+    dynamic_loss.backward()
+    print(f"LRU {'enabled ' if use_lru else 'disabled'}: dynamic backward passed")
 
 
 def main() -> None:
@@ -42,40 +102,11 @@ def main() -> None:
     if args.device == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA is not available; pass --device cpu to run on CPU")
 
-    torch._dynamo.reset()
-    torch._C._dynamo.eval_frame._set_lru_cache(args.use_lru)
-    initial_num_threads = INITIAL_NUM_THREADS
-    changed_num_threads = 2 if initial_num_threads == 1 else initial_num_threads - 1
-    block = torch.compile(ThreadSpecializedBlock().to(args.device))
-
-    def forward(batch_size: int) -> torch.Tensor:
-        inputs = torch.randn(batch_size, 16, device=args.device, requires_grad=True)
-        return checkpoint(block, inputs, use_reentrant=False, debug=True).sum()
-
     try:
-        losses = [forward(3)]
-        torch.set_num_threads(changed_num_threads)
-        losses.extend(forward(batch_size) for batch_size in (5, 3, 5))
-        print(
-            f"Completed 4 forwards; num_threads changed {initial_num_threads} -> {changed_num_threads}; "
-            f"LRU ordering {'enabled' if args.use_lru else 'disabled'}"
-        )
-
-        try:
-            losses[0].backward()
-        except CheckpointError as error:
-            print("REPRODUCED: the original graph's GLOBAL_STATE guard is invalid during recomputation")
-            if args.full_debug:
-                raise
-            print(error.__cause__ or error)
-        else:
-            raise RuntimeError("CheckpointError was not reproduced")
-
-        for index in (1, 2, 3):
-            losses[index].backward()
-            print(f"Backward {index} completed")
+        run_case(use_lru=True, device=args.device)
+        run_case(use_lru=False, device=args.device)
     finally:
-        torch.set_num_threads(initial_num_threads)
+        torch._C._dynamo.eval_frame._set_lru_cache(True)
 
 
 if __name__ == "__main__":
