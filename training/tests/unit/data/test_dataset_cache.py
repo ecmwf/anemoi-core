@@ -245,19 +245,78 @@ def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
     cache._locations = {CacheKey(namespace.dataset_id, 0, 3): {1}}
     monkeypatch.setattr(cache, "_remote_cache", lambda node: pytest.fail("remote cache was checked"))
 
-    hit, value = cache.check_cache(namespace.dataset_id, 0, [3])
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
 
-    assert hit
-    np.testing.assert_array_equal(value, sample_data[[3]])
+    assert missing == []
+    np.testing.assert_array_equal(np.stack(values), sample_data[[3]])
 
 
-def test_check_cache_returns_miss_without_reading_source(tmp_path, sample_data):
+def test_check_cache_returns_partial_values_and_missing_indices(tmp_path, sample_data):
     namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    namespace.store(0, 3, sample_data[3])
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
     cache.node_id = 0
 
-    assert cache.check_cache(namespace.dataset_id, 0, [3]) == (False, None)
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
+
+    np.testing.assert_array_equal(values[0], sample_data[3])
+    assert values[1] is None
+    assert missing == [1]
+
+
+def test_check_cache_reads_missing_records_from_multiple_nodes(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    cache._locations = {
+        CacheKey(namespace.dataset_id, 0, 3): {1},
+        CacheKey(namespace.dataset_id, 0, 4): {2},
+    }
+
+    class Remote:
+        def __init__(self, node):
+            self.node = node
+
+        def request_shard(self, key, positions):
+            assert positions == ([3] if self.node == 1 else [4])
+            return sample_data[positions]
+
+    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote(node))
+
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
+
+    assert missing == []
+    np.testing.assert_array_equal(np.stack(values), sample_data[[3, 4]])
+
+
+def test_check_cache_recovers_partial_remote_batch(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    cache._locations = {
+        CacheKey(namespace.dataset_id, 0, 3): {1},
+        CacheKey(namespace.dataset_id, 0, 4): {1},
+    }
+
+    class Remote:
+        def request_shard(self, key, positions):
+            raise RemoteCacheMiss(key)
+
+        def fetch(self, key):
+            if key.position == 4:
+                raise RemoteCacheMiss(key)
+            return sample_data[key.position]
+
+    monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote())
+
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
+
+    np.testing.assert_array_equal(values[0], sample_data[3])
+    assert values[1] is None
+    assert missing == [1]
 
 
 def test_grid_shards_are_cached_separately(tmp_path, sample_data):
@@ -270,7 +329,9 @@ def test_grid_shards_are_cached_separately(tmp_path, sample_data):
 
     cache.store_records(namespace.dataset_id, 0, positions, sample_data[positions, ..., :2], slice(0, 2))
 
-    hit, value = cache.check_cache(namespace.dataset_id, 0, positions, slice(0, 2))
-    assert hit
-    np.testing.assert_array_equal(value, sample_data[positions, ..., :2])
-    assert cache.check_cache(namespace.dataset_id, 0, positions, slice(2, 4)) == (False, None)
+    values, missing = cache.check_cache(namespace.dataset_id, 0, positions, slice(0, 2))
+    assert missing == []
+    np.testing.assert_array_equal(np.stack(values), sample_data[positions, ..., :2])
+    values, missing = cache.check_cache(namespace.dataset_id, 0, positions, slice(2, 4))
+    assert values == [None]
+    assert missing == [0]

@@ -238,9 +238,10 @@ class TestTrajectoryDatasetGetSample:
                 assert dataset_id == "forecast"
                 raw = ds.data[sequence][:, :, positions, :]
                 result = np.transpose(raw, (2, 0, 1, 3))
-                return True, result if grid_indices is None else result[..., grid_indices]
+                result = result if grid_indices is None else result[..., grid_indices]
+                return list(result), []
 
-            def store_records(self, dataset_id, sequence, positions, values):
+            def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
                 raise AssertionError("cache hit should not be stored")
 
         ds.set_cache(FakeCache(), "forecast")
@@ -249,6 +250,31 @@ class TestTrajectoryDatasetGetSample:
         raw = ds.data[2][:, :, [1, 3], :4]
         expected = np.transpose(raw, (2, 1, 3, 0))
         np.testing.assert_array_equal(sample.numpy(), expected)
+
+    def test_get_sample_reads_and_stores_only_cache_misses(self) -> None:
+        ds = _make_trajectory_dataset(num_inits=3, variables=3, ensemble=2, steps=6, gridpoints=10)
+        stored = {}
+
+        class FakeCache:
+            def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+                raw = ds.data[sequence][:, :, [positions[0]], :]
+                cached = np.transpose(raw, (2, 0, 1, 3))[0, ..., grid_indices]
+                return [cached, None], [1]
+
+            def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+                stored["positions"] = positions
+                stored["values"] = values
+                stored["grid_indices"] = grid_indices
+
+        ds.set_cache(FakeCache(), "forecast")
+        sample = ds.get_sample(sequence=2, positions=[1, 3], grid_shard_indices=slice(0, 4))
+
+        raw = ds.data[2][:, :, [1, 3], :4]
+        expected = np.transpose(raw, (2, 1, 3, 0))
+        np.testing.assert_array_equal(sample.numpy(), expected)
+        assert stored["positions"] == [3]
+        assert stored["grid_indices"] == slice(0, 4)
+        np.testing.assert_array_equal(stored["values"], np.transpose(raw[..., 1:2, :], (2, 0, 1, 3)))
 
 
 # ---------------------------------------------------------------------------

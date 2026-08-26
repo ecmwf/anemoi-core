@@ -149,6 +149,32 @@ class TestNativeGridDataset:
         assert sample.shape[2] == 4  # 4 selected gridpoints
 
 
+def test_native_grid_dataset_reads_and_stores_only_cache_misses() -> None:
+    data = np.arange(5 * 3 * 2 * 6).reshape(5, 3, 2, 6)
+    dataset = NativeGridDataset.__new__(NativeGridDataset)
+    dataset.data = data
+    dataset._cache_dataset_id = "analysis"
+    stored = {}
+
+    class FakeCache:
+        def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+            return [data[positions[0], ..., grid_indices], None], [1]
+
+        def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+            stored["positions"] = positions
+            stored["values"] = values
+            stored["grid_indices"] = grid_indices
+
+    dataset._cache = FakeCache()
+    sample = dataset.get_sample(sequence=0, positions=[1, 3], grid_shard_indices=slice(0, 4))
+
+    expected = np.transpose(data[[1, 3], ..., :4], (0, 2, 3, 1))
+    np.testing.assert_array_equal(sample.numpy(), expected)
+    assert stored["positions"] == [3]
+    assert stored["grid_indices"] == slice(0, 4)
+    np.testing.assert_array_equal(stored["values"], data[[3], ..., :4])
+
+
 @skip_if_offline
 def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> None:
     original = NativeGridDataset(dataset=dataset_path)

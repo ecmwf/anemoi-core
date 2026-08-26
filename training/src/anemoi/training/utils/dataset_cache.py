@@ -231,7 +231,7 @@ class DatasetCache(pl.LightningDataModule):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
         if not positions:
-            return False, None
+            return [], []
 
         grid_id = self._grid_id(grid_indices)
         keys = [CacheKey(dataset_id, int(sequence), position, grid_id) for position in positions]
@@ -240,21 +240,41 @@ class DatasetCache(pl.LightningDataModule):
         self.total_fetches.value += len(positions)
         self.cache_hits_local.value += len(positions) - len(missing)
 
-        if missing:
-            nodes = set.intersection(*(self._locations.get(keys[index], set()) - {self.node_id} for index in missing))
+        unresolved = set(missing)
+        candidates = {
+            index: set(self._locations.get(keys[index], set())) - {self.node_id}
+            for index in missing
+        }
+        while any(candidates[index] for index in unresolved):
+            nodes = set().union(*(candidates[index] for index in unresolved))
+            node = min(
+                nodes,
+                key=lambda candidate: (-sum(candidate in candidates[index] for index in unresolved), candidate),
+            )
+            batch = [index for index in sorted(unresolved) if node in candidates[index]]
             try:
-                if not nodes:
-                    raise RemoteCacheMiss(keys[missing[0]])
-                remote_positions = [positions[index] for index in missing]
-                remote = self._remote_cache(min(nodes)).request_shard(keys[missing[0]], remote_positions)
-                for index, value in zip(missing, remote):
+                remote_positions = [positions[index] for index in batch]
+                connection = self._remote_cache(node)
+                remote = connection.request_shard(keys[batch[0]], remote_positions)
+                for index, value in zip(batch, remote):
                     values[index] = value
-                self.cache_hits_remote.value += len(missing)
-            except (RemoteCacheMiss, RemoteCacheUnavailable):
-                self.cache_misses.value += len(missing)
-                return False, None
+                unresolved.difference_update(batch)
+                self.cache_hits_remote.value += len(batch)
+            except RemoteCacheMiss:
+                for index in batch:
+                    try:
+                        values[index] = connection.fetch(keys[index])
+                        unresolved.remove(index)
+                        self.cache_hits_remote.value += 1
+                    except (RemoteCacheMiss, RemoteCacheUnavailable):
+                        candidates[index].discard(node)
+            except RemoteCacheUnavailable:
+                for index in batch:
+                    candidates[index].discard(node)
 
-        return True, np.stack(values)
+        missing = sorted(unresolved)
+        self.cache_misses.value += len(missing)
+        return values, missing
 
     def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
         if self.cache_full.value:

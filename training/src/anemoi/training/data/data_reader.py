@@ -9,7 +9,7 @@
 
 import datetime
 import logging
-from functools import cached_property
+from functools import cached_property, wraps
 
 import numpy as np
 import torch
@@ -23,6 +23,41 @@ from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
+
+
+def cache_sample(get_sample):
+    """Read cached records and ask the reader only for unresolved positions."""
+
+    @wraps(get_sample)
+    def wrapper(self, sequence, positions, grid_shard_indices=None):
+        cache = getattr(self, "_cache", None)
+        if cache is None:
+            return get_sample(self, sequence, positions, grid_shard_indices)
+
+        cached, missing = cache.check_cache(self._cache_dataset_id, sequence, positions, grid_shard_indices)
+        if missing:
+            requested = (
+                list(range(*positions.indices(self.sequence_length(sequence))))
+                if isinstance(positions, slice)
+                else np.atleast_1d(positions).tolist()
+            )
+            source_positions = [requested[index] for index in missing]
+            source = get_sample(self, sequence, source_positions, grid_shard_indices)
+            source = rearrange(
+                source.numpy(),
+                "dates ensemble gridpoints variables -> dates variables ensemble gridpoints",
+            )
+            for index, value in zip(missing, source):
+                cached[index] = value
+            cache.store_records(self._cache_dataset_id, sequence, source_positions, source, grid_shard_indices)
+
+        values = rearrange(
+            np.stack(cached),
+            "dates variables ensemble gridpoints -> dates ensemble gridpoints variables",
+        )
+        return torch.from_numpy(values)
+
+    return wrapper
 
 
 def _as_dict(value: str | dict | DictConfig) -> str | dict:
@@ -290,6 +325,7 @@ class BaseAnemoiReader:
     # Sample loading
     # ------------------------------------------------------------------
 
+    @cache_sample
     def get_sample(
         self,
         sequence: int,
@@ -301,20 +337,12 @@ class BaseAnemoiReader:
         For analysis datasets there is a single sequence, so ``sequence`` is
         ignored and ``positions`` index the time axis directly.
         """
-        cache = getattr(self, "_cache", None)
-        if cache is not None:
-            hit, x = cache.check_cache(self._cache_dataset_id, sequence, positions, grid_shard_indices)
+        if isinstance(grid_shard_indices, slice):
+            x = self.data[positions, :, :, grid_shard_indices]
         else:
-            hit = False
-        if not hit:
-            if isinstance(grid_shard_indices, slice):
-                x = self.data[positions, :, :, grid_shard_indices]
-            else:
-                x = self.data[positions, :, :, :]
-                if grid_shard_indices is not None:
-                    x = x[..., grid_shard_indices]
-            if cache is not None:
-                cache.store_records(self._cache_dataset_id, sequence, positions, x, grid_shard_indices)
+            x = self.data[positions, :, :, :]
+            if grid_shard_indices is not None:
+                x = x[..., grid_shard_indices]
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
@@ -438,6 +466,7 @@ class TrajectoryDataset(BaseAnemoiReader):
         )
         raise ValueError(msg)
 
+    @cache_sample
     def get_sample(
         self,
         sequence: int,
@@ -448,20 +477,14 @@ class TrajectoryDataset(BaseAnemoiReader):
         if isinstance(positions, slice):
             positions = list(range(*positions.indices(self.sequence_length(sequence))))
         else:
-            positions = np.asarray(positions).tolist()
+            positions = np.atleast_1d(positions).tolist()
 
-        cache = getattr(self, "_cache", None)
-        if cache is not None:
-            hit, x = cache.check_cache(self._cache_dataset_id, sequence, positions, grid_shard_indices)
-        if cache is None or not hit:
-            # data[sequence] -> (variables, ensembles, steps, cells)
-            x = self.data[sequence]
-            x = x[:, :, positions, :]
-            x = rearrange(x, "variables ensemble steps gridpoints -> steps variables ensemble gridpoints")
-            if grid_shard_indices is not None:
-                x = x[..., grid_shard_indices]
-            if cache is not None:
-                cache.store_records(self._cache_dataset_id, sequence, positions, x, grid_shard_indices)
+        # data[sequence] -> (variables, ensembles, steps, cells)
+        x = self.data[sequence]
+        x = x[:, :, positions, :]
+        x = rearrange(x, "variables ensemble steps gridpoints -> steps variables ensemble gridpoints")
+        if grid_shard_indices is not None:
+            x = x[..., grid_shard_indices]
 
         x = rearrange(x, "steps variables ensemble gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
