@@ -103,7 +103,6 @@ def prepare_compilation(
     training_config: DictConfig,
 ) -> torch.nn.Module:
     """Reads model_config and marks the matching submodules in model for compilation."""
-
     # disable LRU cache, this is a fix for https://github.com/pytorch/pytorch/issues/166926
     # The runtime impact of this should be marginal
     if version.parse(torch.__version__) >= version.parse("2.10.0"):
@@ -114,7 +113,7 @@ def prepare_compilation(
             "This may result in runtime errors when using torch.compile() alongside activation checkpointing. "
             "If you encounter errors, consider upgrading to torch >= 2.10.0, disabling torch.compile() (model.compile=[]) "
             "or disabling activation checkpointing (e.g. model.processor.gradient_checkpointing=False).",
-            "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'"
+            "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'",
         )
 
     if hasattr(model_config, "compile"):
