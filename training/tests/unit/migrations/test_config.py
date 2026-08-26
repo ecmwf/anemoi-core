@@ -9,7 +9,7 @@
 
 from textwrap import dedent
 
-from anemoi.training.migrations.config import Node
+from anemoi.training.migrations.nodes import NodeContainer
 from anemoi.training.migrations.testing import ConfigFromContent
 
 
@@ -22,8 +22,9 @@ def test_config(config_from_content: ConfigFromContent):
 
     config = config_from_content(content)
     foo_node = config["foo"]
-    assert isinstance(foo_node, Node)
-    assert config["foo"]["bar"]["baz"].value == "value"
+    assert isinstance(foo_node, NodeContainer)
+    assert isinstance(foo_node["bar"], NodeContainer)
+    assert foo_node["bar"]["baz"].value == "value"
 
 
 def test_add_comment_around(config_from_content: ConfigFromContent) -> None:
@@ -34,6 +35,7 @@ def test_add_comment_around(config_from_content: ConfigFromContent) -> None:
     """)
 
     config = config_from_content(content)
+    assert isinstance(config["foo"], NodeContainer)
     config["foo"]["bar"].set_comments(before="<<<", after=">>>")
 
     expected_output = dedent("""\
@@ -136,7 +138,9 @@ def test_add_key(config_from_content: ConfigFromContent) -> None:
 
     config = config_from_content(content)
     config.add_key("foo.bar.new", "new value")
+    assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
+    assert isinstance(bar_node, NodeContainer)
     assert "new" in bar_node
     expected_output = dedent("""\
     foo:
@@ -156,7 +160,9 @@ def test_add_key_nested_commented(config_from_content: ConfigFromContent) -> Non
 
     config = config_from_content(content)
     config.add_key("foo.bar2.baz", "value 2")
+    assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar2"]
+    assert isinstance(bar_node, NodeContainer)
     assert "baz" in bar_node
     bar_node["baz"].set_comments(inline="hello!")
     expected_output = dedent("""\
@@ -178,7 +184,9 @@ def test_rename_key(config_from_content: ConfigFromContent) -> None:
 
     config = config_from_content(content)
     config.rename_key("foo.bar.baz", "foo.bar.new")
+    assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
+    assert isinstance(bar_node, NodeContainer)
     assert "baz" not in bar_node
     assert "new" in bar_node
     expected_output = dedent("""\
@@ -198,7 +206,9 @@ def test_rename_no_cleanup(config_from_content: ConfigFromContent) -> None:
 
     config = config_from_content(content)
     config.rename_key("foo.bar.baz", "foo.new")
+    assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
+    assert isinstance(bar_node, NodeContainer)
     assert "baz" not in bar_node
     assert "new" in config["foo"]
     expected_output = dedent("""\
@@ -218,6 +228,7 @@ def test_rename_cleanup(config_from_content: ConfigFromContent) -> None:
 
     config = config_from_content(content)
     config.rename_key("foo.bar.baz", "foo.new", remove_empty=True)
+    assert isinstance(config["foo"], NodeContainer)
     assert "new" in config["foo"]
     expected_output = dedent("""\
     foo:
@@ -235,6 +246,7 @@ def test_rename_cleanup_list(config_from_content: ConfigFromContent) -> None:
 
     config = config_from_content(content)
     config.rename_key("foo.bar.0.baz", "foo.new", remove_empty=True)
+    assert isinstance(config["foo"], NodeContainer)
     assert "new" in config["foo"]
     expected_output = dedent("""\
     foo:
