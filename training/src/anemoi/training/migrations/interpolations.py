@@ -9,20 +9,22 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from collections import defaultdict
-from typing import TYPE_CHECKING
-from typing import NamedTuple
+from collections.abc import Sequence
+from typing import Any
 
-from omegaconf import DictConfig
-from omegaconf import ListConfig
-from omegaconf import Node
-from omegaconf import OmegaConf
+from omegaconf import Node as OGNode
 from omegaconf.grammar_parser import parse
 from omegaconf.grammar_visitor import GrammarVisitor
 
-if TYPE_CHECKING:
-    from anemoi.training.migrations.config import Config
+from anemoi.training.migrations.nodes import Node
+from anemoi.training.migrations.nodes import NodeContainer
+from anemoi.training.migrations.nodes import NodeDict
+from anemoi.training.migrations.nodes import NodeList
+
+LOGGER = logging.getLogger(__name__)
 
 INTERPOLATION_PATTERN = re.compile(r"\$\{([^}]*)\}", flags=re.ASCII)
 
@@ -30,7 +32,7 @@ INTERPOLATION_PATTERN = re.compile(r"\$\{([^}]*)\}", flags=re.ASCII)
 def get_interpolations(value: str) -> list[str]:
     interpolations: list[str] = []
 
-    def node_interpolation_callback(inter_key: str, _) -> Node | None:
+    def node_interpolation_callback(inter_key: str, _) -> OGNode | None:
         interpolations.append(inter_key)
 
     def resolver_interpolation_callback(*_args, **_kwargs) -> None:
@@ -50,50 +52,42 @@ def replace_interpolation(value: str, interpo: str, replace: str) -> str:
     return value
 
 
-class InterpolationReference(NamedTuple):
-    prefix: str
-    config_name: str
-    key: str
-
-
 class InterpolationReferences:
     """Stores all interpolation references to easily update interpolations."""
 
     def __init__(self) -> None:
-        self.references: dict[str, set[InterpolationReference]] = defaultdict(set)
+        self.references: dict[str, set[Sequence[Any]]] = defaultdict(set)
 
-    def parse_config(
+    def parse_node(
         self,
-        config: Config,
-        prefix: str | None = None,
+        node: NodeContainer,
     ) -> None:
-        self._parse_config_impl(config, config.cfg, prefix)
+        self._parse_node_impl(node, node, node.prefix)
 
-    def _parse_config_impl(
+    def _parse_node_impl(
         self,
-        config: Config,
-        cfg: DictConfig | ListConfig,
-        prefix: str | None = None,
+        ref_node: NodeContainer,
+        node: Node,
+        prefix: Sequence[Any],
     ) -> None:
-        prefix = prefix or ""
-        raw_cfg = OmegaConf.to_container(cfg, resolve=False)
-        if raw_cfg is None:
+        if not isinstance(node, NodeContainer):
             return
-        if isinstance(cfg, DictConfig):
-            iterator = cfg.keys()
-        else:
-            iterator = range(len(raw_cfg))
+
+        if isinstance(node, NodeDict):
+            iterator = node
+        elif isinstance(node, NodeList):
+            iterator = range(len(node))
+
         for k in iterator:
-            # Check that cfg[k] is not a str before resolving it to avoid interpolation errors
-            # as we only load the config file by file.
-            if not isinstance(raw_cfg[k], str) and isinstance(cfg[k], (DictConfig, ListConfig)):
-                self._parse_config_impl(config, cfg[k], f"{prefix}.{k}")
-            if not isinstance(k, (int, str)):
-                continue
-            elif OmegaConf.is_interpolation(cfg, k):
-                # This should be safe because in case raw_cfg is a list, k is an int
-                # as it comes from the enumerate branch above.
-                for interpo in get_interpolations(raw_cfg[k]):  # ty: ignore[invalid-argument-type]
-                    self.references[interpo].add(
-                        InterpolationReference(config.prefix, config._path.name, f"{prefix}.{k}".removeprefix("."))
-                    )
+            new_prefix = (*prefix, k)
+            if node.is_interpolation(k):
+                for interpo in get_interpolations(node.value[k]):
+                    interpo_parts = interpo.split(".")
+                    if interpo_parts[: len(ref_node.prefix)] != list(ref_node.prefix) or not ref_node.has_key(
+                        interpo_parts[len(ref_node.prefix) :]
+                    ):
+                        LOGGER.warning("%s uses missing interpolation %s.", ".".join(map(str, new_prefix)), interpo)
+                        continue
+                    self.references[interpo].add(new_prefix)
+            elif isinstance(node[k], NodeContainer):
+                self._parse_node_impl(ref_node, node[k], new_prefix)
