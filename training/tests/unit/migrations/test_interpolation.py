@@ -9,8 +9,6 @@
 
 from textwrap import dedent
 
-from anemoi.training.migrations.interpolations import InterpolationReferences
-from anemoi.training.migrations.nodes import NodeContainer
 from anemoi.training.migrations.testing import ConfigFromContent
 
 
@@ -23,9 +21,13 @@ def test_interpolation(config_from_content: ConfigFromContent) -> None:
     nested: ${other}
     """)
     node = config_from_content(content)
-    interpolations = InterpolationReferences()
-    interpolations.parse_node(node)
-    assert interpolations.references == {"baz": {("foo", "bar"), ("other",)}, "other": {("nested",)}}
+    interpolations = node._interpolation_handler
+    assert interpolations.references == {("baz",): {("foo", "bar"), ("other",)}, ("other",): {("nested",)}}
+    assert interpolations.reverse_refs == {
+        ("foo", "bar"): {("baz",)},
+        ("other",): {("baz",)},
+        ("nested",): {("other",)},
+    }
 
 
 def test_unknown_interpolation(config_from_content: ConfigFromContent) -> None:
@@ -35,9 +37,9 @@ def test_unknown_interpolation(config_from_content: ConfigFromContent) -> None:
       bar: ${unknown}
     """)
     node = config_from_content(content)
-    interpolations = InterpolationReferences()
-    interpolations.parse_node(node)
+    interpolations = node._interpolation_handler
     assert len(interpolations.references) == 0
+    assert len(interpolations.reverse_refs) == 0
 
 
 def test_multiple_interpolation(config_from_content: ConfigFromContent) -> None:
@@ -48,9 +50,9 @@ def test_multiple_interpolation(config_from_content: ConfigFromContent) -> None:
       bar: this is ${baz} and ${other}
     """)
     node = config_from_content(content)
-    interpolations = InterpolationReferences()
-    interpolations.parse_node(node)
-    assert interpolations.references == {"baz": {("foo", "bar")}, "other": {("foo", "bar")}}
+    interpolations = node._interpolation_handler
+    assert interpolations.references == {("baz",): {("foo", "bar")}, ("other",): {("foo", "bar")}}
+    assert interpolations.reverse_refs == {("foo", "bar"): {("baz",), ("other",)}}
 
 
 def test_list_interpolation(config_from_content: ConfigFromContent) -> None:
@@ -63,22 +65,37 @@ def test_list_interpolation(config_from_content: ConfigFromContent) -> None:
         - this is ${other}
     """)
     node = config_from_content(content)
-    interpolations = InterpolationReferences()
-    interpolations.parse_node(node)
-    assert interpolations.references == {"baz": {("foo", "bar", 0)}, "other": {("foo", "bar", 1)}}
+    interpolations = node._interpolation_handler
+    assert interpolations.references == {("baz",): {("foo", "bar", 0)}, ("other",): {("foo", "bar", 1)}}
+    assert interpolations.reverse_refs == {
+        ("foo", "bar", 0): {("baz",)},
+        ("foo", "bar", 1): {("other",)},
+    }
 
 
-def test_interpolation_not_root_node(config_from_content: ConfigFromContent) -> None:
+def test_update_interpolation(config_from_content: ConfigFromContent) -> None:
     content = dedent("""\
+    baz: value
     foo:
-      other: test
-      bar:
-        baz: ${foo.other}
-    other: value
-    inter: ${other}
+      bar: ${baz}
+    other: ${baz}
+    nested: ${other}
     """)
     node = config_from_content(content)
-    interpolations = InterpolationReferences()
-    assert isinstance(node["foo"], NodeContainer)
-    interpolations.parse_node(node["foo"])
-    assert interpolations.references == {"foo.other": {("foo", "bar", "baz")}}
+    interpolations = node._interpolation_handler
+    assert interpolations.references == {("baz",): {("foo", "bar"), ("other",)}, ("other",): {("nested",)}}
+    assert interpolations.reverse_refs == {
+        ("foo", "bar"): {("baz",)},
+        ("other",): {("baz",)},
+        ("nested",): {("other",)},
+    }
+    node["foo"].set("bar", "normal str")
+    node["nested"] = "${baz}"
+    assert interpolations.references == {("baz",): {("other",), ("nested",)}, ("other",): set()}
+    assert interpolations.reverse_refs == {
+        ("other",): {("baz",)},
+        ("nested",): {("baz",)},
+    }
+    del node["baz"]
+    assert interpolations.references == {("baz",): set(), ("other",): set()}
+    assert len(interpolations.reverse_refs) == 0
