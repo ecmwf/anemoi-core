@@ -18,7 +18,6 @@ from copy import deepcopy
 from functools import cached_property
 from pathlib import Path
 from statistics import median
-from unittest import mock
 
 import pytorch_lightning as pl
 import pytest
@@ -28,22 +27,16 @@ from omegaconf import DictConfig
 from pytorch_lightning.profilers import SimpleProfiler
 
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.utils import dataset_cache as dataset_cache_module
 from anemoi.training.utils.dataset_cache import DatasetCache
 
 LOGGER = logging.getLogger(__name__)
 
-_DATASET_CACHE_SETUP = DatasetCache.setup
-_DATASET_CACHE_CHECK = DatasetCache.check_cache
-_HOSTNAME_SUFFIX = "-ab-gpil-ib"
-
 
 class _EpochTimer(pl.Callback):
-    def __init__(self, remote_ready_paths=None):
+    def __init__(self):
         self.durations = []
         self.cache_stats = []
         self.dataloader_wait_seconds = 0.0
-        self.remote_ready_paths = remote_ready_paths
         self._started_at = None
         self._cache_before = None
 
@@ -60,7 +53,7 @@ class _EpochTimer(pl.Callback):
             return None
         return tuple(
             counter.value
-            for counter in (cache.cache_hits_local, cache.cache_hits_remote, cache.cache_misses)
+            for counter in (cache.cache_hits_local, cache.cache_misses)
         )
 
     def on_train_epoch_start(self, trainer, pl_module):
@@ -74,9 +67,6 @@ class _EpochTimer(pl.Callback):
         counts = self._cache_counts(trainer)
         if counts is not None:
             self.cache_stats.append(tuple(after - before for after, before in zip(counts, self._cache_before)))
-        if self.remote_ready_paths is not None and trainer.current_epoch == 0:
-            cache = trainer.datamodule
-            self.remote_ready_paths[cache.node_id].touch()
 
 
 class _BenchmarkTrainer(AnemoiTrainer):
@@ -94,7 +84,7 @@ class _BenchmarkTrainer(AnemoiTrainer):
         return [*super().callbacks, self._timer]
 
 
-def _run_training(config, cache_root=None, remote_ready_paths=None):
+def _run_training(config, cache_root=None):
     config = deepcopy(config)
     config.training.max_epochs = 3
     config.dataloader.limit_batches.validation = 0
@@ -102,7 +92,7 @@ def _run_training(config, cache_root=None, remote_ready_paths=None):
     config.diagnostics.log.mlflow.enabled = False
     config.system.hardware.cache_dir = None if cache_root is None else str(cache_root)
 
-    timer = _EpochTimer(remote_ready_paths)
+    timer = _EpochTimer()
     profiler = SimpleProfiler()
     trainer = _BenchmarkTrainer(config, timer, profiler)
     trainer.datamodule.ds_train.shuffle = False
@@ -113,75 +103,10 @@ def _run_training(config, cache_root=None, remote_ready_paths=None):
     return timer
 
 
-def _setup_process_cache(self, stage=None):
-    rank = dist.get_rank(self.initial_proc_group)
-    host = dataset_cache_module.socket.gethostname()
-    self.hostname_suffix = _HOSTNAME_SUFFIX
-    with mock.patch.object(dataset_cache_module.socket, "gethostname", return_value=f"local-rank-{rank}"):
-        result = _DATASET_CACHE_SETUP(self, stage)
-    self.hostnames = [host + self.hostname_suffix] * self.world_size
-    LOGGER.info(
-        "Rank %s synthetic cache node %s using ZeroMQ endpoint %s:%s",
-        rank,
-        self.node_id,
-        self._endpoint(self.node_id).host,
-        self.server.port,
-    )
-    return result
-
-
-def _remote_marker(self, node_id, key):
-    cache_dir = f"cache-{dataset_cache_module.hashlib.sha256(f'local-rank-{node_id}'.encode()).hexdigest()[:12]}"
-    namespace = self.namespaces[key.dataset_id]
-    return (
-        self.cache_root
-        / cache_dir
-        / namespace.path.name
-        / "committed"
-        / key.grid_id
-        / str(key.sequence)
-        / str(key.position)
-    )
-
-
-def _check_cache_remote(self, dataset_id, sequence, positions, grid_indices=None):
-    if not all(path.exists() for path in self._benchmark_remote_ready_paths):
-        return _DATASET_CACHE_CHECK(self, dataset_id, sequence, positions, grid_indices)
-    normalized = self._positions(self.namespaces[dataset_id], sequence, positions)
-    sequence = int(sequence)
-    grid_id = self._grid_id(grid_indices)
-    remote_node = (self.node_id + 1) % len(self._leaders)
-    if normalized and isinstance(grid_indices, slice) and all(
-        _remote_marker(self, remote_node, dataset_cache_module.CacheKey(dataset_id, sequence, position, grid_id)).exists()
-        for position in normalized
-    ):
-        self._locations.update(
-            {
-                dataset_cache_module.CacheKey(dataset_id, sequence, position, grid_id): {remote_node}
-                for position in normalized
-            }
-        )
-    return _DATASET_CACHE_CHECK(self, dataset_id, sequence, positions, grid_indices)
-
-
-def _run_remote_training(config, cache_root, monkeypatch):
-    remote_ready_paths = tuple(
-        cache_root / f".remote-ready-{node_id}"
-        for node_id in range(int(config.system.hardware.num_gpus_per_node))
-    )
-    for path in remote_ready_paths:
-        path.unlink(missing_ok=True)
-    with monkeypatch.context() as patch:
-        patch.setattr(DatasetCache, "setup", _setup_process_cache)
-        patch.setattr(DatasetCache, "check_cache", _check_cache_remote)
-        patch.setattr(DatasetCache, "_benchmark_remote_ready_paths", remote_ready_paths, raising=False)
-        return _run_training(config, cache_root, remote_ready_paths)
-
-
 @pytest.mark.multigpu
 @pytest.mark.slow
 def test_ssd_cache_training_runtime(
-    benchmark_config: tuple[DictConfig, str], monkeypatch: pytest.MonkeyPatch
+    benchmark_config: tuple[DictConfig, str],
 ) -> None:
     """Compare uncached, local SSD cache, and local ZeroMQ cache training."""
     config, test_case = benchmark_config
@@ -197,7 +122,7 @@ def test_ssd_cache_training_runtime(
     cached = _run_training(config, local_cache_root)
 
     assert len(uncached.durations) == len(cached.durations) == 3
-    assert cached.cache_stats[0][2] > 0, "cold epoch did not populate the cache"
+    assert cached.cache_stats[0][1] > 0, "cold epoch did not populate the cache"
 
     no_cache_seconds = median(uncached.durations)
     cold_cache_seconds = cached.durations[0]
