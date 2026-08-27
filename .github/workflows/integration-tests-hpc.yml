@@ -15,6 +15,7 @@ on:
           - test_benchmark
           - test_training_cycle
           - test_accuracy
+          - test_metadata
       accuracy_reference_id:
         description: "MLflow run ID to compare test_accuracy against (empty: hard-coded reference)"
         type: string
@@ -86,7 +87,7 @@ jobs:
             cd "$REPO_NAME"
             git show -s --format=oneline
             TORCH_MINOR="${{ github.event.inputs.torch_version }}"
-            pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests] ${TORCH_MINOR:+"torch==${TORCH_MINOR}.*"}
+            pip install --no-cache-dir -e ./training[all,tests,profile] -e ./models[all,tests] -e ./graphs[all,tests] -e ./metadata[all,tests] ${TORCH_MINOR:+"torch==${TORCH_MINOR}.*"}
             # PyG 2.8+ uses pyg-lib for accelerated graph construction.
             TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
             pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
@@ -161,11 +162,27 @@ jobs:
         #SBATCH --mem=64G
     secrets: inherit
 
+  test_metadata:
+    needs: build-env
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_metadata' }}
+    uses: ./.github/workflows/run-integration-test-hpc.yml
+    with:
+      pytest_cmd: python3 -m pytest -n 0 -v training/tests/integration -m metadata
+      timeout_minutes: 60
+      sbatch_options: |
+        #SBATCH --job-name=anemoi_core_pytest_metadata
+        #SBATCH --time=00:30:00
+        #SBATCH --qos=ng
+        #SBATCH --gpus=1
+        #SBATCH --gres=gpu:1
+        #SBATCH --mem=64G
+    secrets: inherit
+
   cleanup-env:
     name: cleanup-env
     runs-on: hpc
     timeout-minutes: 30
-    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
+    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy, test_metadata]
     # Keep the env on failure so "Re-run failed jobs" (same run_id) can reuse it.
     # Skipped tests (single-test workflow_dispatch) still allow cleanup.
     if: >-
@@ -211,7 +228,7 @@ jobs:
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
   notify-team:
-    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
+    needs: [build-env, test_benchmark, test_training_cycle, test_accuracy, test_metadata]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     steps:
