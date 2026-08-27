@@ -18,6 +18,7 @@ import torch.distributed as dist
 
 from anemoi.training.utils.cache_transport import CacheClient, CacheKey, CacheServer, Endpoint, RemoteCacheMiss
 from anemoi.training.utils.cache_transport import RemoteCacheUnavailable
+from anemoi.training.utils.cache_transport import load_cache_array, save_cache_array
 LOGGER = logging.getLogger(__name__)
 
 
@@ -30,9 +31,12 @@ def _is_capacity_error(error: OSError) -> bool:
 class DatasetCacheNamespace:
     """Atomic file-per-record cache for one dataset reader."""
 
-    def __init__(self, root: Path, dataset_id: str, reader):
+    def __init__(self, root: Path, dataset_id: str, reader, compression=None):
+        if compression not in (None, "blosc"):
+            raise ValueError(f"Unsupported dataset cache compression: {compression}")
         self.dataset_id = dataset_id
         self.reader = reader
+        self.compression = compression
         self.num_sequences = int(reader.num_sequences)
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
@@ -56,8 +60,9 @@ class DatasetCacheNamespace:
 
     def paths(self, sequence, position, grid_id="all"):
         sequence, position = self.normalize(sequence, position)
+        suffix = ".npy.blosc" if self.compression == "blosc" else ".npy"
         return (
-            self.entries_path / grid_id / str(sequence) / f"{position}.npy",
+            self.entries_path / grid_id / str(sequence) / f"{position}{suffix}",
             self.markers_path / grid_id / str(sequence) / str(position),
             self.locks_path / grid_id / str(sequence) / f"{position}.lock",
         )
@@ -72,7 +77,7 @@ class DatasetCacheNamespace:
 
     def local(self, sequence, position, grid_id="all"):
         entry, marker, _ = self.paths(sequence, position, grid_id)
-        return np.load(entry, allow_pickle=False, mmap_mode="r") if marker.exists() and entry.exists() else None
+        return load_cache_array(entry) if marker.exists() and entry.exists() else None
 
     def store(self, sequence, position, value, grid_id="all"):
         entry, marker, lock = self.paths(sequence, position, grid_id)
@@ -85,7 +90,7 @@ class DatasetCacheNamespace:
             temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
                 with temporary.open("wb") as target:
-                    np.save(target, value, allow_pickle=False)
+                    save_cache_array(target, value, self.compression)
                     target.flush()
                     os.fsync(target.fileno())
                 os.replace(temporary, entry)
@@ -110,10 +115,13 @@ class DatasetCacheNamespace:
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
-    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None):
+    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None, compression=None):
         super().__init__()
+        if compression not in (None, "blosc"):
+            raise ValueError(f"Unsupported dataset cache compression: {compression}")
         self.ds = ds
         self.cache_root = Path(cache_root)
+        self.compression = compression
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
         self.initialized = False
@@ -141,7 +149,12 @@ class DatasetCache(pl.LightningDataModule):
             }
             digest = hashlib.sha256(json.dumps(identity, sort_keys=True, default=str).encode()).hexdigest()[:16]
             dataset_id = f"{name}:{digest}"
-            self.namespaces[dataset_id] = DatasetCacheNamespace(self.cache_path, dataset_id, reader)
+            self.namespaces[dataset_id] = DatasetCacheNamespace(
+                self.cache_path,
+                dataset_id,
+                reader,
+                compression=self.compression,
+            )
             reader.set_cache(self, dataset_id)
         self._datasets.add(id(dataset))
         return dataset

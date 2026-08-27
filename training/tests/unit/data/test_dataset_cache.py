@@ -28,6 +28,7 @@ from anemoi.training.utils.dataset_cache import (
     RemoteCacheMiss,
     _is_capacity_error,
 )
+from anemoi.training.utils.cache_transport import save_cache_array
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +137,20 @@ class TestProcessZMQCacheServerClient:
         finally:
             client.close()
 
+    def test_compressed_fetch(self, running_server):
+        key = CacheKey("other-dataset", 0, 5)
+        expected = np.zeros((100, 100), dtype=np.float32)
+        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("wb") as target:
+            save_cache_array(target, expected, "blosc")
+
+        client = CacheClient(self.endpoint(running_server))
+        try:
+            np.testing.assert_array_equal(client.fetch(key), expected)
+        finally:
+            client.close()
+
     def test_concurrent_clients(self, cache_data, running_server):
         """Multiple clients can connect simultaneously."""
         results = {}
@@ -234,6 +249,20 @@ class TestDatasetCacheNamespace:
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
         namespace.store(0, -1, sample_data[-1])
         np.testing.assert_array_equal(namespace.local(0, -1), sample_data[-1])
+
+    def test_blosc_compression(self, tmp_path):
+        data = np.zeros((10, 3, 2, 500), dtype=np.float32)
+        compressed = DatasetCacheNamespace(tmp_path / "compressed", "analysis:fingerprint", self.FakeReader(data), "blosc")
+        uncompressed = DatasetCacheNamespace(tmp_path / "uncompressed", "analysis:fingerprint", self.FakeReader(data))
+
+        assert compressed.store(0, 3, data[3])
+        assert uncompressed.store(0, 3, data[3])
+        np.testing.assert_array_equal(compressed.local(0, 3), data[3])
+
+        compressed_entry, _, _ = compressed.paths(0, 3)
+        uncompressed_entry, _, _ = uncompressed.paths(0, 3)
+        assert compressed_entry.suffixes[-2:] == [".npy", ".blosc"]
+        assert compressed_entry.stat().st_size < uncompressed_entry.stat().st_size / 2
 
 
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):
