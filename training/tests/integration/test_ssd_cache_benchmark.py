@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Benchmark model training with uncached, cold, and warm dataset reads."""
+"""Benchmark model training with uncached and local SSD cache dataset reads."""
 
 import logging
 import os
@@ -108,7 +108,7 @@ def _run_training(config, cache_root=None):
 def test_ssd_cache_training_runtime(
     benchmark_config: tuple[DictConfig, str],
 ) -> None:
-    """Compare uncached, local SSD cache, and local ZeroMQ cache training."""
+    """Compare uncached and local SSD cache training."""
     config, test_case = benchmark_config
     required_gpus = int(config.system.hardware.num_gpus_per_node)
     if torch.cuda.device_count() < required_gpus:

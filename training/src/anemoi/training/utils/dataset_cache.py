@@ -2,6 +2,7 @@
 import errno
 import fcntl
 import hashlib
+import io
 import json
 import logging
 import os
@@ -15,11 +16,35 @@ from pathlib import Path
 import numpy as np
 import pytorch_lightning as pl
 import torch.distributed as dist
+from numcodecs import Blosc
 
-from anemoi.training.utils.cache_transport import CacheClient, CacheKey, CacheServer, Endpoint, RemoteCacheMiss
-from anemoi.training.utils.cache_transport import RemoteCacheUnavailable
-from anemoi.training.utils.cache_transport import load_cache_array, save_cache_array
+from anemoi.training.utils.cache_transport import (
+    CacheClient,
+    CacheKey,
+    CacheServer,
+    Endpoint,
+    RemoteCacheMiss,
+    RemoteCacheUnavailable,
+)
+
 LOGGER = logging.getLogger(__name__)
+
+_BLOSC = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+
+
+def load_cache_array(path):
+    if path.suffix == ".blosc":
+        return np.load(io.BytesIO(_BLOSC.decode(path.read_bytes())), allow_pickle=False)
+    return np.load(path, allow_pickle=False, mmap_mode="r")
+
+
+def save_cache_array(target, value, compression):
+    if compression is None:
+        np.save(target, value, allow_pickle=False)
+        return
+    buffer = io.BytesIO()
+    np.save(buffer, value, allow_pickle=False)
+    target.write(_BLOSC.encode(buffer.getbuffer()))
 
 
 def _is_capacity_error(error: OSError) -> bool:
@@ -32,8 +57,6 @@ class DatasetCacheNamespace:
     """Atomic file-per-record cache for one dataset reader."""
 
     def __init__(self, root: Path, dataset_id: str, reader, compression=None):
-        if compression not in (None, "blosc"):
-            raise ValueError(f"Unsupported dataset cache compression: {compression}")
         self.dataset_id = dataset_id
         self.reader = reader
         self.compression = compression
@@ -119,7 +142,7 @@ class DatasetCache(pl.LightningDataModule):
         super().__init__()
         if compression not in (None, "blosc"):
             raise ValueError(f"Unsupported dataset cache compression: {compression}")
-        self.ds = ds
+        self.ds = ds  # must be set before any attribute access can reach __getattr__
         self.cache_root = Path(cache_root)
         self.compression = compression
         self.hostname_suffix = hostname_suffix or ""
@@ -127,11 +150,15 @@ class DatasetCache(pl.LightningDataModule):
         self.initialized = False
         self.namespaces, self._locations, self._connections = {}, {}, {}
         self._datasets = set()
-        counters = (Value("q", 0) for _ in range(4))
-        self.cache_hits_local, self.cache_hits_remote, self.cache_misses, self.total_fetches = counters
+        self.cache_hits_local = Value("q", 0)
+        self.cache_hits_remote = Value("q", 0)
+        self.cache_misses = Value("q", 0)
+        self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
 
     def __getattr__(self, name):
+        if name == "ds":
+            raise AttributeError(name)
         return getattr(self.ds, name)
 
     def _dataset(self, dataset):
@@ -297,8 +324,6 @@ class DatasetCache(pl.LightningDataModule):
         grid_id = self._grid_id(grid_indices)
         try:
             for position, value in zip(positions, values):
-                if shutil.disk_usage(self.cache_path).free < value.nbytes + (1 << 30):
-                    raise OSError(errno.ENOSPC, "not enough free space")
                 namespace.store(sequence, position, value, grid_id)
         except OSError as error:
             if not _is_capacity_error(error):

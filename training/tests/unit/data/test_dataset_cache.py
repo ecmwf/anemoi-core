@@ -27,8 +27,8 @@ from anemoi.training.utils.dataset_cache import (
     Endpoint,
     RemoteCacheMiss,
     _is_capacity_error,
+    save_cache_array,
 )
-from anemoi.training.utils.cache_transport import save_cache_array
 
 
 # ---------------------------------------------------------------------------
