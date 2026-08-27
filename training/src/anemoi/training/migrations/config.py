@@ -16,6 +16,7 @@ from typing import Any
 import yamlrocks
 from omegaconf import OmegaConf
 
+from anemoi.training.migrations.interpolations import InterpolationHandler
 from anemoi.training.migrations.nodes import NodeDict
 
 
@@ -23,6 +24,8 @@ class Config(NodeDict):
     def __init__(self, path: Path | str) -> None:
         self._path = Path(path)
         self._cfg = OmegaConf.load(self._path)
+        self._interpolation_handler = InterpolationHandler(self)
+        self._interpolation_handler.parse_config()
 
     @property
     def prefix(self) -> tuple[()]:
@@ -45,9 +48,6 @@ class Config(NodeDict):
     @property
     def parent(self) -> NodeDict:
         return self
-
-    def _is_key_valid(self, key: Any) -> bool:
-        return key in self.cfg
 
     def to_yaml(self) -> str:
         return self.yaml.to_yaml().decode()

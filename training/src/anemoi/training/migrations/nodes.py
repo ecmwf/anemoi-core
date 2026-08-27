@@ -9,10 +9,13 @@
 
 from __future__ import annotations
 
+import logging
 from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterable
 from collections.abc import Sequence
+from functools import cached_property
+from typing import TYPE_CHECKING
 from typing import Any
 
 import yamlrocks
@@ -20,11 +23,20 @@ from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
+if TYPE_CHECKING:
+    from anemoi.training.migrations.interpolations import InterpolationHandler
+
+LOGGER = logging.getLogger(__name__)
+
 
 class NodeBase(ABC):
     @property
     @abstractmethod
-    def prefix(self) -> Sequence[Any]: ...
+    def prefix(self) -> Sequence[str | int]: ...
+
+    @property
+    @abstractmethod
+    def prefix_str(self) -> str: ...
 
     @property
     @abstractmethod
@@ -77,8 +89,9 @@ class Node(NodeBase):
         parent: NodeContainer,
         yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
         cfg_parent: DictConfig,
+        interpolation_handler: InterpolationHandler,
         key: Any,
-        prefix: Sequence[Any] = (),
+        prefix: Sequence[str | int] = (),
     ):
         self._parent = parent
         self.yaml_parent = yr_parent
@@ -86,9 +99,15 @@ class Node(NodeBase):
         self.key = key
         self._prefix = prefix
 
-    @property
-    def prefix(self) -> Sequence[Any]:
+        self._interpolation_handler = interpolation_handler
+
+    @cached_property
+    def prefix(self) -> Sequence[str | int]:
         return (*self._prefix, self.key)
+
+    @cached_property
+    def prefix_str(self) -> str:
+        return ".".join(map(str, self.prefix))
 
     @property
     def yaml(self) -> yamlrocks.YAMLRocksDocumentView:
@@ -106,8 +125,54 @@ class Node(NodeBase):
     def parent(self) -> NodeContainer:
         return self._parent
 
+    def get(self, key: str | int) -> Node:
+        """Gets the key while asserting that this node is a NodeContainer.
+        If it isnt't, raises a TypeError at runtime.
+
+        Parameters
+        ----------
+        key : str | int
+            Key to get.
+
+        Returns
+        -------
+        Node
+            The requeted node.
+        """
+        if not isinstance(self, NodeContainer):
+            raise TypeError("This node is not a NodeContainer.")
+        return self[key]
+
+    def set(self, key: str | int, value: Any) -> None:
+        """Sets the key while asserting that this node is a NodeContainer.
+        If it isnt't, raises a TypeError at runtime.
+
+        Parameters
+        ----------
+        key : str | int
+            Key to set.
+        value : Any
+            New value to set.
+        """
+        if not isinstance(self, NodeContainer):
+            raise TypeError("This node is not a NodeContainer.")
+        self[key] = value
+
+    def delete(self, key: str | int) -> None:
+        """Deletes the key while asserting that this node is a NodeContainer.
+        If it isnt't, raises a TypeError at runtime.
+
+        Parameters
+        ----------
+        key : str | int
+            Key to delete.
+        """
+        if not isinstance(self, NodeContainer):
+            raise TypeError("This node is not a NodeContainer.")
+        del self[key]
+
     def __repr__(self) -> str:
-        return f"Node({'.'.join(self.prefix)})"
+        return f"Node({self.prefix_str})"
 
 
 def parse_key(key: str) -> tuple[list[str], str]:
@@ -121,28 +186,30 @@ class NodeContainer(Node, ABC):
         parent: NodeContainer,
         yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
         cfg_parent: DictConfig,
+        interpolation_handler: InterpolationHandler,
         key: Any,
-        prefix: Sequence[Any] = (),
+        prefix: Sequence[str | int] = (),
     ):
         self._parent = parent
         self.yaml_parent = yr_parent
         self.cfg_parent = cfg_parent
+        self._interpolation_handler = interpolation_handler
         self.key = key
         self._prefix = prefix
 
     @abstractmethod
-    def _is_key_valid(self, key: Any) -> bool: ...
+    def _is_key_valid(self, key: str | int) -> bool: ...
 
-    def is_interpolation(self, key: Any) -> bool:
+    def is_interpolation(self, key: str | int) -> bool:
         return OmegaConf.is_interpolation(self.cfg, key)
 
-    def __contains__(self, key: Any) -> bool:
+    def __contains__(self, key: str | int) -> bool:
         return self._is_key_valid(key)
 
     def __len__(self) -> int:
         return len(self.value)
 
-    def __getitem__(self, key: Any) -> Node:
+    def __getitem__(self, key: str | int) -> Node:
         if not self._is_key_valid(key):
             raise ValueError(f"key {key} not in Node.")
 
@@ -157,26 +224,29 @@ class NodeContainer(Node, ABC):
             self,
             self.yaml,
             self.cfg,
+            self._interpolation_handler,
             key,
             self.prefix,
         )
 
-    def __setitem__(self, key: Any, value: Any) -> None:
+    def __setitem__(self, key: str | int, value: Any) -> None:
         self.yaml[key] = value
         self.cfg[key] = value
+        self._interpolation_handler.update(self)
 
-    def __delitem__(self, key: str) -> None:
+    def __delitem__(self, key: str | int) -> None:
         del self.yaml[key]
         del self.cfg[key]
+        self._interpolation_handler.update(self)
 
-    def has_key(self, parts: Sequence[str]) -> bool:
+    def has_key(self, parts: Sequence[str | int]) -> bool:
         try:
             self.select(parts)
         except (TypeError, ValueError):
             return False
         return True
 
-    def select(self, parts: Sequence[str], create_missing: bool = False) -> Node:
+    def select(self, parts: Sequence[str | int], create_missing: bool = False) -> Node:
         node = self
         for part in parts:
             if not isinstance(node, NodeContainer):
@@ -221,18 +291,18 @@ class NodeContainer(Node, ABC):
 
 
 class NodeDict(NodeContainer):
-    def _is_key_valid(self, key: Any) -> bool:
+    def _is_key_valid(self, key: str | int) -> bool:
         return key in self.cfg
 
     def __iter__(self):
         return iter(self.value)
 
     def __repr__(self) -> str:
-        return f"NodeDict({'.'.join(map(str, self.prefix))})"
+        return f"NodeDict({self.prefix_str})"
 
 
 class NodeList(NodeContainer):
-    def _is_key_valid(self, key: Any) -> bool:
+    def _is_key_valid(self, key: str | int) -> bool:
         return len(self.cfg) > int(key)
 
     def keys(self) -> Iterable[int]:
@@ -244,8 +314,8 @@ class NodeList(NodeContainer):
         new_val.append(value)
         self.yaml_node.value = new_val
 
-    def __getitem__(self, key: Any) -> Node:
+    def __getitem__(self, key: str | int) -> Node:
         return super().__getitem__(int(key))
 
     def __repr__(self) -> str:
-        return f"NodeList({'.'.join(map(str, self.prefix))})"
+        return f"NodeList({self.prefix_str})"

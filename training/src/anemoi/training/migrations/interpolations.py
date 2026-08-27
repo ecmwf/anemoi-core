@@ -13,7 +13,6 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Any
 
 from omegaconf import Node as OGNode
 from omegaconf.grammar_parser import parse
@@ -52,42 +51,53 @@ def replace_interpolation(value: str, interpo: str, replace: str) -> str:
     return value
 
 
-class InterpolationReferences:
+class InterpolationHandler:
     """Stores all interpolation references to easily update interpolations."""
 
-    def __init__(self) -> None:
-        self.references: dict[str, set[Sequence[Any]]] = defaultdict(set)
+    def __init__(self, ref_node: NodeContainer) -> None:
+        self.ref_node = ref_node
+        self.references: dict[Sequence[str], set[Sequence[str | int]]] = defaultdict(set)
+        self.reverse_refs: dict[Sequence[str | int], set[Sequence[str]]] = defaultdict(set)
 
-    def parse_node(
-        self,
-        node: NodeContainer,
-    ) -> None:
-        self._parse_node_impl(node, node, node.prefix)
+    def parse_config(self) -> None:
+        self._parse_config_impl(self.ref_node, self.ref_node.prefix)
 
-    def _parse_node_impl(
+    def update(self, node: Node) -> None:
+        self._parse_config_impl(node, node.prefix)
+
+    def _parse_node(self, node: NodeContainer, prefix: Sequence[str | int], key: str | int):
+        parts = (*prefix, key)
+
+        # We fisrt clear old values before recomputing.
+        # This happens when an interpolation node is updated.
+        for existing_ref in self.reverse_refs[parts]:
+            self.references[existing_ref].remove(parts)
+        del self.reverse_refs[parts]
+
+        if node.is_interpolation(key):
+            for interpo in get_interpolations(node.value[key]):
+                interpo_parts = tuple(interpo.split("."))
+                if not interpo.startswith(self.ref_node.prefix_str) or not self.ref_node.has_key(
+                    interpo_parts[len(self.ref_node.prefix) :]
+                ):
+                    LOGGER.warning("%s uses missing interpolation %s.", ".".join(map(str, parts)), interpo)
+                    continue
+                self.references[interpo_parts].add(parts)
+                self.reverse_refs[parts].add(interpo_parts)
+        elif isinstance(node[key], NodeContainer):
+            self._parse_config_impl(node[key], parts)
+
+    def _parse_config_impl(
         self,
-        ref_node: NodeContainer,
         node: Node,
-        prefix: Sequence[Any],
+        prefix: Sequence[str | int],
     ) -> None:
         if not isinstance(node, NodeContainer):
             return
 
         if isinstance(node, NodeDict):
-            iterator = node
+            for key in node:
+                self._parse_node(node, prefix, key)
         elif isinstance(node, NodeList):
-            iterator = range(len(node))
-
-        for k in iterator:
-            new_prefix = (*prefix, k)
-            if node.is_interpolation(k):
-                for interpo in get_interpolations(node.value[k]):
-                    interpo_parts = interpo.split(".")
-                    if interpo_parts[: len(ref_node.prefix)] != list(ref_node.prefix) or not ref_node.has_key(
-                        interpo_parts[len(ref_node.prefix) :]
-                    ):
-                        LOGGER.warning("%s uses missing interpolation %s.", ".".join(map(str, new_prefix)), interpo)
-                        continue
-                    self.references[interpo].add(new_prefix)
-            elif isinstance(node[k], NodeContainer):
-                self._parse_node_impl(ref_node, node[k], new_prefix)
+            for key in range(len(node)):
+                self._parse_node(node, prefix, key)
