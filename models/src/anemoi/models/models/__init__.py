@@ -10,6 +10,7 @@
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionModelEncProcDec
 from .diffusion_encoder_processor_decoder import AnemoiDiffusionTendModelEncProcDec
 from .downscaler_encoder_processor_decoder import AnemoiDownscalingModelEncProcDec
+from .equal_SNR_downscaler_encoder_processor_decoder import AnemoiEqualSNRDownscalingModelEncProcDec
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
@@ -23,4 +24,5 @@ __all__ = [
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiModelEncProcDecInterpolator",
     "AnemoiDownscalingModelEncProcDec",
+    "AnemoiEqualSNRDownscalingModelEncProcDec",
 ]

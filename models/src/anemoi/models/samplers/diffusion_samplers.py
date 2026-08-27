@@ -455,6 +455,192 @@ class EDMHeunSampler(DiffusionSampler):
 
         return y
 
+class FalckEDMHeunSampler(DiffusionSampler):
+    """EDM Heun sampler with stochastic churn following Karras et al."""
+
+    def __init__(
+        self,
+        S_churn: float = 0.0,
+        S_min: float = 0.0,
+        S_max: float = float("inf"),
+        S_noise: float = 1.0,
+        dtype: torch.dtype = torch.float64,
+        eps_prec: float = 1e-10,
+        **kwargs,
+    ):
+        self.S_churn = S_churn
+        self.S_min = S_min
+        self.S_max = S_max
+        self.S_noise = S_noise
+        self.dtype = dtype
+        self.eps_prec = eps_prec
+        self.variance = kwargs['variance']
+        self.itransform = kwargs['itransform']
+
+    def sample(
+        self,
+        x_in_interp: torch.Tensor,
+        x_in_hres: torch.Tensor,
+        y: torch.Tensor,
+        sigmas: torch.Tensor,
+        denoising_fn: DenoisingFunction,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        # Override instance defaults with any kwargs
+        S_churn = kwargs.get("S_churn", self.S_churn)
+        S_min = kwargs.get("S_min", self.S_min)
+        S_max = kwargs.get("S_max", self.S_max)
+        S_noise = kwargs.get("S_noise", self.S_noise)
+        dtype = kwargs.get("dtype", self.dtype)
+        eps_prec = kwargs.get("eps_prec", self.eps_prec)
+
+        batch_size, ensemble_size = x_in_interp.shape[0], x_in_interp.shape[2]
+        num_steps = len(sigmas) - 1
+
+        # ic("Before step", y[..., 64].mean())
+
+        # Heun sampling loop
+        for i in range(num_steps):
+            sigma_i = sigmas[i]
+            sigma_next = sigmas[i + 1]
+
+            apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
+            if apply_churn:
+                gamma = min(
+                    S_churn / num_steps,
+                    torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1,
+                )
+                sigma_effective = sigma_i + gamma * sigma_i
+                epsilon = self.itransform(torch.randn_like(y) * torch.pow(self.variance, 1/2)) * S_noise
+                #epsilon = self.itransform(torch.randn_like(y) * self.variance) * S_noise
+                y = y + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
+            else:
+                sigma_effective = sigma_i
+
+            D1 = denoising_fn(
+                x_in_interp,
+                x_in_hres,
+                y.to(dtype=x_in_interp.dtype),
+                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x_in_interp.dtype),
+                model_comm_group,
+                grid_shard_shapes,
+            ).to(dtype)
+
+            d = (y - D1) / (sigma_effective + eps_prec)  # this is the score
+
+            y_next = y + (sigma_next - sigma_effective) * d
+            # movement in direction of d, amount of movement is equal to the change in noise level
+
+            if sigma_next > eps_prec:
+                D2 = denoising_fn(
+                    x_in_interp,
+                    x_in_hres,
+                    y_next.to(dtype=x_in_interp.dtype),
+                    sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x_in_interp.dtype),
+                    model_comm_group,
+                    grid_shard_shapes,
+                ).to(dtype)
+                d_prime = (y_next - D2) / (sigma_next + eps_prec)
+                y = y + (sigma_next - sigma_effective) * (d + d_prime) / 2
+            else:
+                y = y_next
+
+        return y
+
+class HackedFalckEDMHeunSampler(DiffusionSampler):
+    """EDM Heun sampler with stochastic churn following Karras et al."""
+
+    def __init__(
+        self,
+        S_churn: float = 0.0,
+        S_min: float = 0.0,
+        S_max: float = float("inf"),
+        S_noise: float = 1.0,
+        dtype: torch.dtype = torch.float64,
+        eps_prec: float = 1e-10,
+        **kwargs,
+    ):
+        self.S_churn = S_churn
+        self.S_min = S_min
+        self.S_max = S_max
+        self.S_noise = S_noise
+        self.dtype = dtype
+        self.eps_prec = eps_prec
+        self.variance = kwargs['variance']
+        self.itransform = kwargs['itransform']
+
+    def sample(
+        self,
+        x_in_interp: torch.Tensor,
+        x_in_hres: torch.Tensor,
+        y: torch.Tensor,
+        sigmas: torch.Tensor,
+        denoising_fn: DenoisingFunction,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_shapes: Optional[list] = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        # Override instance defaults with any kwargs
+        S_churn = kwargs.get("S_churn", self.S_churn)
+        S_min = kwargs.get("S_min", self.S_min)
+        S_max = kwargs.get("S_max", self.S_max)
+        S_noise = kwargs.get("S_noise", self.S_noise)
+        dtype = kwargs.get("dtype", self.dtype)
+        eps_prec = kwargs.get("eps_prec", self.eps_prec)
+
+        batch_size, ensemble_size = x_in_interp.shape[0], x_in_interp.shape[2]
+        num_steps = len(sigmas) - 1
+
+        # ic("Before step", y[..., 64].mean())
+
+        # Heun sampling loop
+        for i in range(num_steps):
+            sigma_i = sigmas[i]
+            sigma_next = sigmas[i + 1]
+
+            apply_churn = S_min <= sigma_i <= S_max and S_churn > 0.0
+            if apply_churn:
+                gamma = min(
+                    S_churn / num_steps,
+                    torch.sqrt(torch.tensor(2.0, dtype=sigma_i.dtype)) - 1,
+                )
+                sigma_effective = sigma_i + gamma * sigma_i
+                epsilon = torch.randn_like(y) * S_noise
+                y = y + torch.sqrt(sigma_effective**2 - sigma_i**2) * epsilon
+            else:
+                sigma_effective = sigma_i
+
+            D1 = denoising_fn(
+                x_in_interp,
+                x_in_hres,
+                y.to(dtype=x_in_interp.dtype),
+                sigma_effective.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(x_in_interp.dtype),
+                model_comm_group,
+                grid_shard_shapes,
+            ).to(dtype)
+
+            d = (y - D1) / (sigma_effective + eps_prec)  # this is the score
+
+            y_next = y + (sigma_next - sigma_effective) * d
+            # movement in direction of d, amount of movement is equal to the change in noise level
+
+            if sigma_next > eps_prec:
+                D2 = denoising_fn(
+                    x_in_interp,
+                    x_in_hres,
+                    y_next.to(dtype=x_in_interp.dtype),
+                    sigma_next.view(1, 1, 1, 1).expand(batch_size, ensemble_size, 1, 1).to(dtype=x_in_interp.dtype),
+                    model_comm_group,
+                    grid_shard_shapes,
+                ).to(dtype)
+                d_prime = (y_next - D2) / (sigma_next + eps_prec)
+                y = y + (sigma_next - sigma_effective) * (d + d_prime) / 2
+            else:
+                y = y_next
+
+        return y
 
 class DPMpp2MSampler(DiffusionSampler):
     """DPM++ 2M sampler (DPM-Solver++ with 2nd order multistep)."""
@@ -532,5 +718,7 @@ NOISE_SCHEDULERS = {
 
 DIFFUSION_SAMPLERS = {
     "heun": EDMHeunSampler,
+    "falck_heun": FalckEDMHeunSampler,
+    "hacked_falck_heun": HackedFalckEDMHeunSampler,
     "dpmpp_2m": DPMpp2MSampler,
 }

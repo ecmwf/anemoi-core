@@ -10,12 +10,14 @@
 from .diffusionforecaster import GraphDiffusionForecaster
 from .diffusionforecaster import GraphDiffusionTendForecaster
 from .downscaler import GraphDiffusionDownscaler
+from .equalSNRdownscaler import EqualSNRGraphDiffusionDownscaler
 from .ensforecaster import GraphEnsForecaster
 from .forecaster import GraphForecaster
 from .interpolator import GraphInterpolator
 
 __all__ = [
     "GraphDiffusionDownscaler",
+    "EqualSNRGraphDiffusionDownscaler"
     "GraphDiffusionForecaster",
     "GraphDiffusionTendForecaster",
     "GraphEnsForecaster",

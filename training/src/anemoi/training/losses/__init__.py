@@ -17,6 +17,7 @@ from .mae import MAELoss
 from .mse import MSELoss
 from .rmse import RMSELoss
 from .weighted_mse import WeightedMSELoss
+from .variance_weighted_spectral_mse import VarianceWeightedSpectralMSELoss
 
 __all__ = [
     "AlmostFairKernelCRPS",
@@ -28,5 +29,6 @@ __all__ = [
     "MSELoss",
     "RMSELoss",
     "WeightedMSELoss",
+    "VarianceWeightedSpectralMSELoss",
     "get_loss_function",
 ]
