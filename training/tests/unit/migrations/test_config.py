@@ -253,3 +253,18 @@ def test_rename_cleanup_list(config_from_content: ConfigFromContent) -> None:
       new: value
     """)
     assert config.to_yaml() == expected_output
+
+
+def test_rename_interpolation(config_from_content: ConfigFromContent) -> None:
+    content = dedent("""\
+    baz: value
+    foo:
+      bar: ${baz}
+    other: ${baz}
+    nested: ${other}
+    """)
+    config = config_from_content(content)
+    config.rename_key("baz", "ball")
+    assert config["foo"].get("bar").value == "${ball}"
+    assert config["other"].value == "${ball}"
+    print(config.to_yaml())

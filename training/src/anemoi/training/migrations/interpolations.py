@@ -56,14 +56,34 @@ class InterpolationHandler:
 
     def __init__(self, ref_node: NodeContainer) -> None:
         self.ref_node = ref_node
-        self.references: dict[Sequence[str], set[Sequence[str | int]]] = defaultdict(set)
-        self.reverse_refs: dict[Sequence[str | int], set[Sequence[str]]] = defaultdict(set)
+        self.references: dict[tuple[str, ...], set[tuple[str | int, ...]]] = defaultdict(set)
+        self.reverse_refs: dict[tuple[str | int, ...], set[tuple[str, ...]]] = defaultdict(set)
 
     def parse_config(self) -> None:
         self._parse_config_impl(self.ref_node, self.ref_node.prefix)
 
     def update(self, node: Node) -> None:
         self._parse_config_impl(node, node.prefix)
+
+    def rename(self, old_parts: Sequence[str], target: str) -> None:
+        """Changes the interpolation after renaming.
+
+        Parameters
+        ----------
+        old_parts : Sequence[str]
+            The original parts to rename from.
+        target : str
+            The target interpolation path.
+        """
+        interpo = ".".join(old_parts)
+        changes: list[tuple[Node, str | int, str]] = []
+        for reference in self.references[tuple(old_parts)]:
+            node = self.ref_node.select(reference[:-1])
+            changes.append((node, reference[-1], replace_interpolation(node.get(reference[-1]).value, interpo, target)))
+        # Updating the nodes after the previous for loop because node.set triggers
+        # self._parse_node which updates self.references.
+        for node, key, new_value in changes:
+            node.set(key, new_value)
 
     def _parse_node(self, node: NodeContainer, prefix: Sequence[str | int], key: str | int):
         parts = (*prefix, key)
