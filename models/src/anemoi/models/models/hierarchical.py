@@ -169,11 +169,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Downscale
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-        for i in range(0, self.num_hidden - 1):
+        for i in range(1, self.num_hidden):
             src_nodes_name = self._graph_name_hidden[i]
-            dst_nodes_name = self._graph_name_hidden[i + 1]
+            dst_nodes_name = self._graph_name_hidden[i - 1]
 
-            self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
+            self.downscale_graph_providers[dst_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.downscale_mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[src_nodes_name],
@@ -181,14 +181,14 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 trainable_size=model_config.downscale_mapper.get("trainable_size", 0),
             )
 
-            self.downscale[src_nodes_name] = instantiate(
+            self.downscale[dst_nodes_name] = instantiate(
                 model_config.downscale_mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
                 num_channels=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
-                edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
+                edge_dim=self.downscale_graph_providers[dst_nodes_name].edge_dim,
             )
 
         # Decoder hidden -> data
@@ -225,7 +225,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.processor.num_channels,
+                in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
@@ -417,7 +417,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         x_latent = x_latent_proc
 
         ## Downscale
-        for i in reversed(range(0, self.num_hidden - 1)):
+        for i in reversed(range(1, self.num_hidden)):
             src_hidden_name = self._graph_name_hidden[i]
             dst_hidden_name = self._graph_name_hidden[i - 1]
 
@@ -426,7 +426,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 downscale_edge_attr,
                 downscale_edge_index,
                 ds_edge_shard_sizes,
-            ) = self.downscale_graph_providers[src_hidden_name].get_edges(
+            ) = self.downscale_graph_providers[dst_hidden_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
             )
@@ -438,7 +438,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
             # Decode to next level
-            x_latent = self.downscale[src_hidden_name](
+            x_latent = self.downscale[dst_hidden_name](
                 (x_latent, x_encoded_latents_dict[dst_hidden_name]),
                 batch_size=batch_size,
                 shard_info=ds_shard_info,
