@@ -287,6 +287,7 @@ class NodeContainer(Node, ABC):
         start_node = self.select(parts)
         value = start_node.value
         self.add_key(end, value)
+        self._interpolation_handler.rename(parts, end)
         self.drop_key(start, remove_empty)
 
 
