@@ -171,7 +171,7 @@ model:
       Activation:
         _target_: torch.nn.GELU
   encoders:
-    0:
+    "0":
       source_datasets: [ "data" ]
       dataset_fusing_strategy: "not_supported"
       mapper:
@@ -186,7 +186,7 @@ model:
           Activation:
             _target_: torch.nn.GELU
   decoders:
-    0:
+    "0":
       target_datasets: [ "data" ]
       input_target_features: [ "encoded_data" ]
       mapper:
