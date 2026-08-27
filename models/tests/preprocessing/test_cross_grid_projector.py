@@ -19,11 +19,7 @@ from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
 
 
 def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
-    """Build a CrossGridProjector from a synthetic .npz sparse matrix.
-
-    _build_from_file expects shape (n_src, n_dst): matrix[i, j] = weight from
-    src node i to dst node j (column = destination).
-    """
+    """Build a CrossGridProjector from a synthetic .npz sparse matrix."""
     import pathlib
     import tempfile
 
@@ -32,8 +28,7 @@ def _make_projector(n_src: int = 8, n_dst: int = 4) -> CrossGridProjector:
     from scipy.sparse import save_npz
 
     ratio = n_src // n_dst
-    # _build_from_file reads shape as (n_dst, n_src): rows = dst, cols = src.
-    # (matches the SparseProjector convention: W @ x where W is (n_dst, n_src))
+    # Rows are destinations and columns are sources, matching W @ x.
     row = np.repeat(np.arange(n_dst), ratio)  # dst node indices (rows)
     col = np.arange(n_src)  # src node indices (cols)
     data = np.ones(n_src, dtype=np.float32)
@@ -62,8 +57,13 @@ class TestCrossGridProjector:
 
     def test_output_shape(self, projector):
         x = torch.randn(self.BATCH, self.TIME, self.ENS, self.N_SRC, self.VARS)
-        out = projector(x)
+        out, grid_shard_sizes = projector(x)
         assert out.shape == (self.BATCH, self.TIME, self.ENS, self.N_DST, self.VARS)
+        assert grid_shard_sizes is None
+
+    def test_grid_sizes(self, projector):
+        assert projector.input_grid_size == self.N_SRC
+        assert projector.output_grid_size == self.N_DST
 
     def test_no_trainable_parameters(self, projector):
         params = list(projector.parameters())
@@ -73,13 +73,19 @@ class TestCrossGridProjector:
         """Each dst node should sum its src contributions (row_normalize=False)."""
         ratio = self.N_SRC // self.N_DST  # = 2: each dst sums 2 src nodes with weight 1
         x = torch.ones(1, 1, 1, self.N_SRC, 1)
-        out = projector(x)
+        out, _ = projector(x)
         expected = torch.full((1, 1, 1, self.N_DST, 1), float(ratio))
         assert torch.allclose(out, expected)
 
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    def test_preserves_input_dtype(self, projector, dtype):
+        x = torch.ones(1, 1, 1, self.N_SRC, 1, dtype=dtype)
+        out, _ = projector(x)
+        assert out.dtype == dtype
+
     def test_gradient_does_not_flow_through_matrix(self, projector):
         x = torch.randn(1, 1, 1, self.N_SRC, self.VARS, requires_grad=True)
-        out = projector(x)
+        out, _ = projector(x)
         out.sum().backward()
         # Gradient flows through x but projector has no parameters to update
         assert x.grad is not None
@@ -90,13 +96,15 @@ class TestCrossGridProjector:
         with pytest.raises(NotImplementedError):
             projector.inverse(x)
 
-    def test_checkpoint_roundtrip(self, projector, tmp_path):
-        """Saved and loaded projector produces identical output."""
+    def test_whole_model_serialization_roundtrip(self, projector, tmp_path):
+        """Whole-model serialization retains the in-memory projection matrix."""
         path = tmp_path / "projector.pt"
-        torch.save(projector.state_dict(), path)
+        assert not projector.state_dict()
+        torch.save(projector, path)
 
-        projector2 = _make_projector(self.N_SRC, self.N_DST)
-        projector2.load_state_dict(torch.load(path))
+        loaded = torch.load(path, weights_only=False)
 
         x = torch.randn(self.BATCH, self.TIME, self.ENS, self.N_SRC, self.VARS)
-        assert torch.allclose(projector(x), projector2(x))
+        expected, _ = projector(x)
+        actual, _ = loaded(x)
+        assert torch.allclose(expected, actual)

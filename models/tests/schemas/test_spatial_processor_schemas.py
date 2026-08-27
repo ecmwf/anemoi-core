@@ -37,8 +37,18 @@ class TestCrossGridProjectorSchema:
         assert schema.file_path is None
 
     def test_error_when_neither_source_provided(self):
-        with pytest.raises(ValidationError, match="'file_path' or 'edges_name'"):
+        with pytest.raises(ValidationError, match="exactly one of 'file_path' or 'edges_name'"):
             CrossGridProjectorSchema(**{"_target_": _TARGET})
+
+    def test_error_when_both_sources_provided(self):
+        with pytest.raises(ValidationError, match="exactly one of 'file_path' or 'edges_name'"):
+            CrossGridProjectorSchema(
+                **{
+                    "_target_": _TARGET,
+                    "file_path": "/some/matrix.npz",
+                    "edges_name": ("lowres", "to", "hires"),
+                }
+            )
 
     def test_error_on_wrong_target(self):
         with pytest.raises(ValidationError):

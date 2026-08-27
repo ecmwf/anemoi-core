@@ -14,6 +14,7 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+import anemoi.models.models.base as base_model_module
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -185,7 +186,7 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
     class RecordingSpatialProcessor(nn.Module):
         def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
             call_order.append("spatial")
-            return x
+            return x, grid_shard_sizes
 
     class RecordingPreProcessor:
         def __call__(self, x, in_place=False):
@@ -215,3 +216,37 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
         )
 
     assert call_order == ["spatial", "pre"], f"Expected spatial before pre, got order: {call_order}"
+
+
+def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(nn.Module):
+        def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_grid_shard_sizes
+            return x[..., :2, :], target_grid_shard_sizes
+
+    model = _make_minimal_model()
+    comm_group = object()
+
+    def forward(x, *, grid_shard_sizes=None, **_kwargs):
+        assert grid_shard_sizes == {"data": target_grid_shard_sizes}
+        return x
+
+    monkeypatch.setattr(model, "forward", forward)
+    monkeypatch.setattr(base_model_module, "get_shard_sizes", lambda *_args, **_kwargs: source_grid_shard_sizes)
+    monkeypatch.setattr(base_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+
+    out = model.predict_step(
+        {"data": torch.zeros(1, 1, 8, 1)},
+        pre_processors={"data": _identity_pre_processor()},
+        post_processors={"data": _identity_pre_processor()},
+        n_step_input=1,
+        model_comm_group=comm_group,
+        gather_out=False,
+        spatial_pre_processors=nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
+    )
+
+    assert out["data"].shape[-2] == 2
