@@ -17,6 +17,7 @@ from typing import Optional
 from pydantic import Field
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import field_validator
 
 from anemoi.utils.schemas import BaseModel
 
@@ -68,8 +69,18 @@ class XArrayNodeSchema(BaseModel):
 class ReducedGaussianGridNodeSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.ReducedGaussianGridNodes"] = Field(..., alias="_target_")
     "Nodes from NPZ grids class implementation from anemoi.graphs.nodes."
-    grid: Literal["o16", "o32", "o48", "o96", "o160", "o256", "o320", "n320", "o1280"]
+    grid: str = Field(..., examples=["o16", "o32", "o48", "o96", "o160", "o256", "o320", "n320", "o1280"])
     "Reduced gaussian grid."
+
+    @field_validator("grid", mode="before")
+    @classmethod
+    def grid_validator(cls, grid: str) -> str:
+        import re
+
+        grid = grid.strip().lower()
+        if not re.fullmatch(r"^[oOnN]\d+$", grid):
+            raise ValueError(f"Invalid grid format: {grid}. Expected format is 'o<number>' or 'n<number>'.")
+        return grid
 
 
 class ICONMeshNodeSchema(BaseModel):
