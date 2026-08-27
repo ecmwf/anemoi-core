@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -130,6 +130,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
+    persistent_workers: bool = Field(default=True)
+    "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet

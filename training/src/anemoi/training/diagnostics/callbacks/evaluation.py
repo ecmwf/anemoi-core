@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -81,9 +81,6 @@ class RolloutEval(Callback):
             self._log(pl_module, step_output.loss, step_output.metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
-
-        loss_scales = loss
-        loss = loss_scales.sum()
         loss_name = getattr(pl_module.loss, "name", pl_module.loss.__class__.__name__.lower())
         pl_module.log(
             f"val_r{self.max_rollout}_{loss_name}",
@@ -95,34 +92,18 @@ class RolloutEval(Callback):
             batch_size=bs,
             sync_dist=True,
         )
-        if loss_scales.numel() > 1:
-            for scale in range(loss_scales.numel()):
-                pl_module.log(
-                    f"val_r{self.max_rollout}_{loss_name}_{scale}",
-                    loss_scales[scale],
-                    on_epoch=True,
-                    on_step=True,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
 
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
-
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
-                pl_module.log(
-                    f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
-                    log_val,
-                    on_epoch=True,
-                    on_step=False,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
+            pl_module.log(
+                f"val_r{self.max_rollout}_" + mname,
+                mvalue,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=False,
+                logger=pl_module.logger_enabled,
+                batch_size=bs,
+                sync_dist=True,
+            )
 
     def on_validation_batch_end(
         self,
@@ -146,6 +127,10 @@ class RolloutEval(Callback):
                 if dtype is not None
                 else nullcontext()
             )
-
-            with context:
+            # 'torch.compile.set_stance' tells the compiler to try use compiled code if it exists
+            # but fall back to eager if it doesn't.
+            # This is used because the evaluationRollout callback seems to introduce many different input shapes
+            # These all force recompilation which slows down evaluation and eventually leads to a an error
+            # once the config.model.recompile_limit is reached.
+            with context and torch.compiler.set_stance("eager_on_recompile"):
                 self._eval(pl_module, batch)

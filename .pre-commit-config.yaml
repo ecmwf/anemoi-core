@@ -58,6 +58,18 @@ repos:
   hooks:
   - id: docconvert
     args: ["numpy"]
+- repo: https://github.com/b8raoult/pre-commit-copyright-notice
+  rev: "0.3.0"
+  hooks:
+  - id: copyright-notice
+    args:
+    - --exclude=docs/**/*.py
+    - --fix
+    - --exit-non-zero-on-fix
+    - --holder
+    - Anemoi contributors
+    - --license
+    - tools/pre-commit-copyright-notice.txt
 - repo: https://github.com/tox-dev/pyproject-fmt
   rev: "v2.23.0"
   hooks:

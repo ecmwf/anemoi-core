@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -11,7 +11,6 @@
 from abc import ABC
 from abc import abstractmethod
 
-import matplotlib.cm as cm
 from matplotlib import colormaps as mpl_colormaps
 from matplotlib.colors import Colormap
 from matplotlib.colors import ListedColormap
@@ -56,7 +55,7 @@ class MatplotlibColormap(CustomColormap):
         self.name = name
         self.colormap = mpl_colormaps.get_cmap(self.name)
 
-    def get_cmap(self) -> cm:
+    def get_cmap(self) -> Colormap:
         return self.colormap
 
 
@@ -103,5 +102,5 @@ class DistinctipyColormap(CustomColormap):
         self.n_colors = n_colors
         self.colormap = distinctipy.get_colormap(distinctipy.get_colors(n_colors, colorblind_type=colorblind_type))
 
-    def get_cmap(self) -> cm:
+    def get_cmap(self) -> Colormap:
         return self.colormap

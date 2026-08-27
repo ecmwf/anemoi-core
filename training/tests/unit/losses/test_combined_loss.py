@@ -20,8 +20,8 @@ from torch_geometric.data import HeteroData
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MAELoss
 from anemoi.training.losses import MSELoss
+from anemoi.training.losses import PowerSpectrumLoss
 from anemoi.training.losses import SpectralCRPSLoss
-from anemoi.training.losses import SpectralL2Loss
 from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
@@ -294,8 +294,32 @@ def test_combined_loss_mixed_children_filter_shard_layout_kwargs(monkeypatch: py
 
     result = loss(pred, target, weights=weights, group=group, grid_shard_sizes=grid_shard_sizes, grid_dim=-2)
 
-    assert result.shape == (1,)
+    assert result.shape == ()
     prepare_for_smoothing.assert_called_once_with(pred, target, group, grid_shard_sizes)
+
+
+def test_combined_loss_with_multiscale_child() -> None:
+    pred = torch.ones((1, 1, 1, 4, 2), requires_grad=True)
+    target = torch.zeros_like(pred)
+    loss = CombinedLoss(
+        MAELoss(),
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0, 1.0, 1.0],
+            multiscale_config={"loss_matrices": [None, None, None]},
+        ),
+    )
+
+    scalar_loss = loss(pred, target)
+    per_variable_loss = loss(pred, target, squash=False)
+
+    assert scalar_loss.shape == ()
+    assert per_variable_loss.shape == (2,)
+    torch.testing.assert_close(scalar_loss, torch.tensor(8.0))
+    torch.testing.assert_close(per_variable_loss, torch.tensor([8.0, 8.0]))
+
+    scalar_loss.backward()
+    assert pred.grad is not None
 
 
 def test_iter_leaf_losses_combined() -> None:
@@ -358,7 +382,7 @@ def test_combined_loss_with_spectral_l2_loss_backward() -> None:
     target = torch.zeros_like(pred)
 
     mse = WeightedMSELoss()
-    spectral = SpectralL2Loss(
+    spectral = PowerSpectrumLoss(
         transform="octahedral_sht",
         nlat=nlat,
     )

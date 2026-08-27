@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -50,6 +50,8 @@ def _make_pl_module(
     pl_module._collapse_ens_dim.return_value = {"data": target}
 
     pl_module.grid_shard_slice = {"data": None}
+    # no grid sharding: return tensors unchanged with a None slice, as the real method does.
+    pl_module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
     pl_module.logger_enabled = True
 
     # calculate_val_metrics returns a dict of metric_name -> tensor

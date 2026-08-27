@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -29,6 +29,7 @@ class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
     # CombinedLoss builds child losses itself, so it needs the full scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(

@@ -73,6 +73,9 @@ urls.Issues = "https://github.com/ecmwf/anemoi-graphs/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-graphs/"
 scripts.anemoi-graphs = "anemoi.graphs.__main__:main"
 
+[tool.setuptools]
+package-data."anemoi.graphs" = [ "py.typed" ]
+
 [tool.setuptools_scm]
 version_file = "src/anemoi/graphs/_version.py"
 version_scheme = "post-release"

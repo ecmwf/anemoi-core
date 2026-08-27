@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -77,6 +77,7 @@ class AnemoiEvaluator(AnemoiTrainer):
             limit_val_batches=self.config.dataloader.limit_batches.validation,
             use_distributed_sampler=False,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            enable_checkpointing=False,
         )
 
         LOGGER.debug("Starting evaluation..")
@@ -98,7 +99,7 @@ class AnemoiEvaluator(AnemoiTrainer):
         LOGGER.debug("---- DONE. ----")
 
 
-@hydra.main(version_base=None, config_path="../config", config_name="config")
+@hydra.main(version_base=None, config_path=None, config_name="config")
 def evaluate(config: DictConfig) -> None:
     AnemoiEvaluator(config).evaluate()
 

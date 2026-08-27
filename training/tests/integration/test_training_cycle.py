@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,9 +13,9 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from pydantic import ValidationError
 from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -38,7 +38,6 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     for key, subschema in schema.items():
-
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
@@ -54,6 +53,18 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
 
         if subschema is list:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
+
+
+def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
+    """Return the single run-id checkpoint directory produced by a training run."""
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    return run_dirs[0]
 
 
 @skip_if_offline
@@ -74,20 +85,22 @@ def test_config_validation_global_config(global_config: tuple[DictConfig, str, s
     BaseSchema(**cfg)
 
 
-def test_config_validation_rejects_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+def test_config_validation_accepts_unknown_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
+    # projection_kind is a free-form string; unknown values are validated lazily at
+    # runtime in Projection.from_kind, not at schema load time.
     cfg, _, _ = global_config
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
-    with pytest.raises(ValidationError, match="projection_kind"):
-        BaseSchema(**cfg)
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
+    validated = BaseSchema(**cfg)
+    assert validated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_without_validation_accepts_invalid_projection_kind(global_config: tuple[DictConfig, str, str]) -> None:
     cfg, _, _ = global_config
     cfg.config_validation = False
-    cfg.diagnostics.plot.projection_kind = "invalid_projection"
+    cfg.diagnostics.plot.settings.projection_kind = "invalid_projection"
     cfg_obj = OmegaConf.to_object(cfg)
     unvalidated = UnvalidatedBaseSchema(**DictConfig(cfg_obj))
-    assert unvalidated.diagnostics.plot.projection_kind == "invalid_projection"
+    assert unvalidated.diagnostics.plot.settings.projection_kind == "invalid_projection"
 
 
 def test_config_validation_mlflow_configs(gnn_config_mlflow: DictConfig) -> None:
@@ -278,16 +291,7 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     get_test_archive(url)
 
     AnemoiTrainer(cfg).train()
-    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
-
-    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
-
-    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-
-    checkpoint_dir = run_dirs[0]
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
     cfg.training.run_id = checkpoint_dir.name
@@ -456,3 +460,59 @@ def test_evaluator(
     cfg.training.load_weights_only = True
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_training_with_rollout(
+    gnn_config_with_rollout: tuple[DictConfig, str, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config_with_rollout
+    get_test_archive(url)
+    weights_only_cfg = deepcopy(cfg)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
+    assert (
+        trainer.task.rollout.step == 3
+    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+
+    # Resume training from the checkpoint and verify the rollout counter is restored
+    # correctly and continues to increment on further epochs.
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
+    checkpoint_path = sorted(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))[-1]
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["AnemoiDatasetsDataModule"]["epoch"] == 1
+
+    # Start a new training run from the model weights. The configured rollout
+    # must determine both the task steps and the dataset time window.
+    last_checkpoint_path = checkpoint_dir / "last.ckpt"
+    weights_only_cfg.system.input.warm_start = last_checkpoint_path
+    weights_only_cfg.training.load_weights_only = True
+    weights_only_cfg.training.max_epochs = 1
+    weights_only_cfg.task.rollout = {
+        "start": 4,
+        "epoch_increment": 0,
+        "maximum": 4,
+    }
+    weights_only_cfg.diagnostics.enable_checkpointing = False
+    weights_only_cfg.dataloader.limit_batches.validation = 0
+    weights_only_trainer = AnemoiTrainer(weights_only_cfg)
+    weights_only_trainer.train()
+
+    assert weights_only_trainer.task.rollout.step == 4
+    assert weights_only_trainer.datamodule.ds_train.rollout == 4
+
+    cfg.training.run_id = checkpoint_dir.name
+    cfg.training.max_epochs = 4
+    resumed_trainer = AnemoiTrainer(cfg)
+    resumed_trainer.train()
+
+    # After two additional epochs the counter loaded from the checkpoint (3) must have advanced
+    # to the maximum specified in the beginning.
+    assert resumed_trainer.task.rollout.step == 4, (
+        "Expected rollout step after resuming for 2 more epochs to be 4 (maximum rollout step), "
+        f"got {resumed_trainer.task.rollout.step}"
+    )

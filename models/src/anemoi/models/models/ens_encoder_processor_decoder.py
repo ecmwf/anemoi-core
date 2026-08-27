@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -62,6 +62,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             _recursive_=False,
             num_channels=self.num_channels,
             graph_data=self._graph_data,
+            sparse_projector_num_chunks=model_config.model.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
