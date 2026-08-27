@@ -13,6 +13,7 @@ import logging
 import re
 from collections import defaultdict
 from collections.abc import Sequence
+from typing import NamedTuple
 
 from omegaconf import Node as OGNode
 from omegaconf.grammar_parser import parse
@@ -51,13 +52,46 @@ def replace_interpolation(value: str, interpo: str, replace: str) -> str:
     return value
 
 
+class RelativeInterpolationError(Exception):
+    """Relative interpolation are not supported."""
+
+
+def count_leading(niddle: str, haystack: str) -> int:
+    """Returns the numbre of times that "niddle" appears in haystack at the beginning.
+
+    Parameters
+    ----------
+    niddle : str
+        The characted to count
+    haystack : str
+        The content to search
+
+    Returns
+    -------
+    int
+        The count.
+    """
+    count = 0
+    for c in haystack:
+        if c == niddle:
+            count += 1
+        else:
+            break
+    return count
+
+
+class Interpolation(NamedTuple):
+    parts: tuple[str | int, ...]
+    exact_ref: str  # used for relative interpolations
+
+
 class InterpolationHandler:
     """Stores all interpolation references to easily update interpolations."""
 
     def __init__(self, ref_node: NodeContainer) -> None:
         self.ref_node = ref_node
-        self.references: dict[tuple[str, ...], set[tuple[str | int, ...]]] = defaultdict(set)
-        self.reverse_refs: dict[tuple[str | int, ...], set[tuple[str, ...]]] = defaultdict(set)
+        self.references: dict[tuple[str | int, ...], set[Interpolation]] = defaultdict(set)
+        self.reverse_refs: dict[tuple[str | int, ...], set[Interpolation]] = defaultdict(set)
 
     def parse_config(self) -> None:
         self._parse_config_impl(self.ref_node, self.ref_node.prefix)
@@ -75,11 +109,12 @@ class InterpolationHandler:
         target : str
             The target interpolation path.
         """
-        interpo = ".".join(old_parts)
         changes: list[tuple[Node, str | int, str]] = []
-        for reference in self.references[tuple(old_parts)]:
+        for reference, exact_ref in self.references[tuple(old_parts)]:
             node = self.ref_node.select(reference[:-1])
-            changes.append((node, reference[-1], replace_interpolation(node.get(reference[-1]).value, interpo, target)))
+            changes.append(
+                (node, reference[-1], replace_interpolation(node.get(reference[-1]).value, exact_ref, target))
+            )
         # Updating the nodes after the previous for loop because node.set triggers
         # self._parse_node which updates self.references.
         for node, key, new_value in changes:
@@ -91,19 +126,26 @@ class InterpolationHandler:
         # We fisrt clear old values before recomputing.
         # This happens when an interpolation node is updated.
         for existing_ref in self.reverse_refs[parts]:
-            self.references[existing_ref].remove(parts)
+            self.references[existing_ref.parts].remove(Interpolation(parts, existing_ref.exact_ref))
         del self.reverse_refs[parts]
 
         if node.is_interpolation(key):
             for interpo in get_interpolations(node.value[key]):
-                interpo_parts = tuple(interpo.split("."))
+                if interpo.startswith("."):
+                    # Handle the relative interpolation case
+                    leading_dots = count_leading(".", interpo)
+                    prefix_idx = -(leading_dots - 1) if leading_dots > 1 else None
+                    interpo_parts = tuple(map(str, node.prefix[:prefix_idx]))
+                    interpo_parts = (*interpo_parts, *interpo.lstrip(".").split("."))
+                else:
+                    interpo_parts = tuple(interpo.split("."))
                 if not interpo.startswith(self.ref_node.prefix_str) or not self.ref_node.has_key(
                     interpo_parts[len(self.ref_node.prefix) :]
                 ):
                     LOGGER.warning("%s uses missing interpolation %s.", ".".join(map(str, parts)), interpo)
                     continue
-                self.references[interpo_parts].add(parts)
-                self.reverse_refs[parts].add(interpo_parts)
+                self.references[interpo_parts].add(Interpolation(parts, interpo))
+                self.reverse_refs[parts].add(Interpolation(interpo_parts, interpo))
         elif isinstance(node[key], NodeContainer):
             self._parse_config_impl(node[key], parts)
 
