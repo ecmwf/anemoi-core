@@ -35,6 +35,7 @@ from .encoder import GNNEncoderSchema  # noqa: TC001
 from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
 from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
 from .encoder import TransformerEncoderSchema  # noqa: TC001
+from .premixer import GraphTransformerPreMixerSchema  # noqa: TC001
 from .processor import GNNProcessorSchema  # noqa: TC001
 from .processor import GraphTransformerProcessorSchema  # noqa: TC001
 from .processor import NoOpProcessorSchema  # noqa: TC001
@@ -276,6 +277,8 @@ class BaseModelSchema(PydanticBaseModel):
         discriminator="target_",
     )
     "GNN processor schema."
+    premixer: Optional[GraphTransformerPreMixerSchema] = Field(default=None)
+    "Optional data -> data pre-mixer applied before the encoder pools. Omit to disable."
     encoder: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,

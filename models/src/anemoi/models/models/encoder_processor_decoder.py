@@ -35,6 +35,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
+        # Optional pre-mixer data -> data, applied before the encoder pools.
+        # Absent from the config => no modules built and the model is unchanged.
+        self._build_premixer(model_config)
+
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         self.encoder = torch.nn.ModuleDict()
@@ -94,6 +98,73 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
+
+    def _build_premixer(self, model_config: DotDict) -> None:
+        """Build the optional data -> data pre-mixer, one per dataset.
+
+        The encoder is a single attention block, so a hidden node can only ever
+        hold a softmax-weighted sum of *linearly* embedded data points. The
+        pre-mixer runs graph attention over a data -> data graph first, so the
+        encoder pools nonlinear local descriptors instead. See
+        `anemoi.models.layers.premixer.GraphTransformerPreMixer`.
+        """
+        self.premixer_graph_provider = torch.nn.ModuleDict()
+        self.premixer = torch.nn.ModuleDict()
+
+        premixer_config = model_config.model.get("premixer", None)
+        if premixer_config is None:
+            return
+
+        for dataset_name in self.dataset_names:
+            self.premixer_graph_provider[dataset_name] = create_graph_provider(
+                graph=self._graph_data[(dataset_name, "to", dataset_name)],
+                edge_attributes=premixer_config.get("sub_graph_edge_attributes"),
+                src_size=self.node_attributes.num_nodes[dataset_name],
+                dst_size=self.node_attributes.num_nodes[dataset_name],
+                trainable_size=premixer_config.get("trainable_size", 0),
+            )
+
+            self.premixer[dataset_name] = instantiate(
+                premixer_config,
+                _recursive_=False,  # Avoids instantiation of layer_kernels here
+                in_channels=self.input_dim[dataset_name],
+                edge_dim=self.premixer_graph_provider[dataset_name].edge_dim,
+            )
+
+    def _run_premixer(
+        self,
+        x_data_latent: Tensor,
+        *,
+        dataset_name: str,
+        batch_size: int,
+        shard_sizes_data: ShardSizes,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> Tensor:
+        """Apply the data -> data pre-mixer, or pass through if it is not configured.
+
+        Returns a tensor of the same shape and shard layout as the input, so the
+        encoder and decoder call sites are unaffected either way.
+        """
+        if dataset_name not in self.premixer:
+            return x_data_latent
+
+        (
+            premixer_edge_attr,
+            premixer_edge_index,
+            premix_edge_shard_sizes,
+        ) = self.premixer_graph_provider[dataset_name].get_edges(
+            batch_size=batch_size,
+            model_comm_group=model_comm_group,
+        )
+
+        return self.premixer[dataset_name](
+            x_data_latent,
+            batch_size=batch_size,
+            shard_info=GraphShardInfo(nodes=shard_sizes_data, edges=premix_edge_shard_sizes),
+            edge_attr=premixer_edge_attr,
+            edge_index=premixer_edge_index,
+            model_comm_group=model_comm_group,
+        )
 
     def _assemble_input(
         self,
@@ -240,6 +311,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
+
+            # Nonlinear point-to-point mixing before the encoder pools (no-op if unconfigured)
+            x_data_latent = self._run_premixer(
+                x_data_latent,
+                dataset_name=dataset_name,
+                batch_size=batch_size,
+                shard_sizes_data=shard_sizes_data,
+                model_comm_group=model_comm_group,
+            )
 
             (
                 encoder_edge_attr,

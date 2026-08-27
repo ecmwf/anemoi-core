@@ -168,6 +168,17 @@ class AnemoiModelAutoEncoder(AnemoiModelEncProcDec):
             )
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 
+            # Nonlinear point-to-point mixing before the encoder pools (no-op if unconfigured).
+            # The decoder never sees x_data_latent in the autoencoder, so this stays on the
+            # encoding side only and introduces no reconstruction shortcut.
+            x_data_latent = self._run_premixer(
+                x_data_latent,
+                dataset_name=dataset_name,
+                batch_size=batch_size,
+                shard_sizes_data=shard_sizes_data,
+                model_comm_group=model_comm_group,
+            )
+
             (
                 encoder_edge_attr,
                 encoder_edge_index,
