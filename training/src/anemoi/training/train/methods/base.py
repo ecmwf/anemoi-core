@@ -853,6 +853,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y_pred: Batch,
         y: Batch,
         validation_mode: bool = False,
+        num_task_steps: int = 1,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, SourceView]]:
         """Compute loss and metrics for the given predictions and targets.
@@ -865,6 +866,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Target values
         validation_mode : bool, optional
             Whether to compute validation metrics
+        num_task_steps : int, optional
+            Number of task steps the caller will iterate over. When greater than one, the
+            per-dataset loss keys are suffixed with the rollout step so that steps do not
+            overwrite each other; with a single step the unsuffixed key is emitted.
         **kwargs
             Additional arguments to pass to loss computation
 
@@ -875,6 +880,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
         assert isinstance(y, Batch), "y must be a dict keyed by dataset name"
+        step = kwargs.get("rollout_step") if num_task_steps > 1 else None
+        loss_suffix = "" if step is None else f"/{step + 1}"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
@@ -899,7 +906,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if validation_mode:
                     loss_obj = self.loss[dataset_name]
                     loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
+                    metrics_next[f"{dataset_name}_{loss_name}_loss{loss_suffix}"] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
@@ -925,15 +932,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def preprocess_targets(self, batch: Batch) -> Batch:
         """Normalize selected targets while preserving missing values."""
         return self._map_dataset_processors(batch, self.model.pre_processors, skip_imputation=True)
-
-    def preprocess_rollout_targets(self, raw_targets: Batch) -> tuple[Batch, Batch]:
-        """Derive loss and rollout views independently from one raw target slice.
-
-        The loss target is normalized once with imputation skipped. Rollout values
-        are separately transformed into model-input space for forcing and boundary
-        updates; the normalized loss target is never processed a second time.
-        """
-        return self.preprocess_targets(raw_targets), self.preprocess_inputs(raw_targets)
 
     def postprocess_targets(
         self,

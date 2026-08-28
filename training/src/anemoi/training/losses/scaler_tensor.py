@@ -77,7 +77,7 @@ def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLa
 def as_dimension_tuple(dimensions: int | str | Sequence[int | str]) -> tuple[int | str, ...]:
     """Normalise a dimension selector to a tuple of dimension identifiers.
 
-    A single dimension may be given as a bare axis number or as a bare `TensorDim`. 
+    A single dimension may be given as a bare axis number or as a bare `TensorDim`.
     Wrapping both scalar forms keeps name-based and axis-based selection behaving the same.
 
     Parameters

@@ -44,12 +44,20 @@ class SingleTraining(BaseTrainingModule):
         x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_kwargs in task_steps:
-            raw_y, target = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-            y, rollout_values = self.preprocess_rollout_targets(raw_y)
-            target = self.preprocess_inputs(target)
+        for step_index, task_kwargs in enumerate(task_steps):
+            # get_targets returns (targets, target_forcings): the full target slice used for the
+            # loss, and the output-time forcing variables that condition the decoder.
+            raw_targets, target_forcings = self.task.get_targets(
+                batch,
+                data_indices=self.data_indices,
+                **task_kwargs,
+            )
+            y = self.preprocess_targets(raw_targets)
+            # the target forcings are consumed by the decoder, so they are model *inputs* and go through
+            # the input processors (so NaNs get imputed, etc.)
+            target_forcings = self.preprocess_inputs(target_forcings)
 
-            y_pred = self(x, target=target)
+            y_pred = self(x, target=target_forcings)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -57,20 +65,22 @@ class SingleTraining(BaseTrainingModule):
                 y,
                 **task_kwargs,
                 validation_mode=validation_mode,
+                num_task_steps=len(task_steps),
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_preds_next,
-                rollout_values,
-                **task_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-            )
+            # advance input state for each dataset, except on the final step
+            if step_index < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_preds_next,
+                    self.preprocess_inputs(raw_targets),
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)
