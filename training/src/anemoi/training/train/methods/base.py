@@ -873,18 +873,34 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
 
-        # Snapshot which datasets carry all-NaN inputs BEFORE the pre-processors
-        # run (imputers replace NaNs with numeric values, so a post-imputation
-        # NaN check would always be False). Subclasses (e.g. SingleTraining)
-        # use this to auto-drop optional datasets whose input for this batch
-        # fell entirely on virtual missing dates.
+        # Snapshot which datasets carry an all-NaN timestep BEFORE the
+        # pre-processors run (imputers replace NaNs with numeric values, so a
+        # post-imputation NaN check would always be False). Subclasses (e.g.
+        # SingleTraining) use this to auto-drop optional datasets whose input
+        # for this batch fell on a virtual missing date at any timestep.
         #
-        # `.all()` (not `.any()`): ocean-style fields legitimately carry NaN on
-        # land cells at every date, so `.any()` would fire every batch. A
-        # padded (missing-date) slot is guaranteed to be entirely NaN.
-        self._batch_nan_datasets: set[str] = {
-            name for name, tensor in batch.items() if torch.isnan(tensor).all()
-        }
+        # Check is per-timestep: reduce all non-time dims with `.all()` so
+        # ocean-style fields with NaN on land cells do not trigger (they are
+        # not all-NaN across the grid), while any timestep that is entirely
+        # NaN (a padded missing-date slot) flags the dataset.
+        self._batch_nan_datasets: set[str] = set()
+        for name, tensor in batch.items():
+            nan_mask = torch.isnan(tensor)
+            non_time_dims = tuple(d for d in range(nan_mask.ndim) if d != TensorDim.TIME)
+            if non_time_dims:
+                per_timestep_all_nan = nan_mask.all(dim=non_time_dims)
+                n_nan_steps = int(per_timestep_all_nan.sum().item())
+                if n_nan_steps > 0:
+                    self._batch_nan_datasets.add(name)
+                    if n_nan_steps < per_timestep_all_nan.numel():
+                        LOGGER.info(
+                            "Dataset %s has %d/%d all-NaN timesteps in this batch; flagging for auto-drop.",
+                            name,
+                            n_nan_steps,
+                            per_timestep_all_nan.numel(),
+                        )
+            elif nan_mask.all():
+                self._batch_nan_datasets.add(name)
 
         for dataset_name in batch:
             batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place

@@ -127,7 +127,7 @@ class MultiDataset(IterableDataset):
         self.valid_date_indices = compute_valid_data_indices(
             self.data_readers,
             relative_date_indices,
-            optional_datasets=self.optional_datasets,
+            # optional_datasets=self.optional_datasets,
         )
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
