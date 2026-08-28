@@ -134,7 +134,7 @@ class Forecaster(BaseTask):
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         batch: torch.Tensor,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
@@ -144,6 +144,11 @@ class Forecaster(BaseTask):
         """Advance a single dataset's input state for the next rollout step.
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
+
+        ``y_pred`` may be ``None`` for datasets that were excluded from the
+        training loss (and therefore have no prediction). In that case the
+        prognostic slice is skipped and only the forcings are refreshed from
+        the batch (behaves as a "forcing-only" dataset).
         """
         keep_steps = min(self.num_input_steps, self.num_output_steps)
 
@@ -153,13 +158,14 @@ class Forecaster(BaseTask):
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
 
         for i in range(keep_steps):
-            # Get prognostic variables
-            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
-                :,
-                -(i + 1),
-                ...,
-                data_indices.model.output.prognostic,
-            ]
+            if y_pred is not None:
+                # Get prognostic variables
+                x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
+                    :,
+                    -(i + 1),
+                    ...,
+                    data_indices.model.output.prognostic,
+                ]
 
             batch_time_index = output_batch_indices[-(i + 1)]
             true_state = batch[:, batch_time_index]
@@ -196,15 +202,23 @@ class Forecaster(BaseTask):
     ) -> dict[str, torch.Tensor]:
         """Advance the input state for the next rollout step."""
         for dataset_name in x:
-            if dataset_name in (dropped_datasets or []):
+            # Datasets that were excluded from `training_loss.datasets` are not
+            # returned by `compute_loss_metrics`, so `y_pred` will not contain
+            # a key for them (e.g. atmosphere-forced setups where a dataset is
+            # used only as encoder-side forcing). Fall back to y_pred=None so
+            # only the forcings are refreshed from the batch.
+            dataset_y_pred = y_pred.get(dataset_name)
+
+            if dataset_y_pred is not None and dataset_name in (dropped_datasets or []):
                 # replace NaNs in forecasts with zeroes to avoid propagation of NaNs from dropped datasets
-                y_pred[dataset_name] = torch.zeros_like(y_pred[dataset_name])
-                nan_mask = torch.isnan(y_pred[dataset_name])
-                y_pred[dataset_name] = y_pred[dataset_name].masked_fill(nan_mask, 0.0)
-                
+                dataset_y_pred = torch.zeros_like(dataset_y_pred)
+                nan_mask = torch.isnan(dataset_y_pred)
+                dataset_y_pred = dataset_y_pred.masked_fill(nan_mask, 0.0)
+                y_pred[dataset_name] = dataset_y_pred
+
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
-                y_pred[dataset_name],
+                dataset_y_pred,
                 batch[dataset_name],
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
