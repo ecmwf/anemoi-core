@@ -161,6 +161,25 @@ def test_forecaster_rollout_increases_on_epoch_end() -> None:
     assert task.rollout.step == 3
 
 
+def test_forecaster_rollout_increases_after_configured_number_of_epochs() -> None:
+    """epoch_increment counts completed epochs before increasing the rollout."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 2, "maximum": 3},
+    )
+
+    task.on_train_epoch_end(0)
+    assert task.rollout.step == 1
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(2)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(3)
+    assert task.rollout.step == 3
+
+
 def test_forecaster_rollout_does_not_exceed_maximum() -> None:
     """rollout.step is capped at maximum even when on_train_epoch_end is called repeatedly."""
     task = Forecaster(
@@ -285,26 +304,25 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
 
 
 def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> None:
-    """A batch sized for an earlier rollout must fail loudly, not slice to an empty tensor.
-
-    ``normalize_time_indices`` collapses a single index into a slice, and slicing past
-    the end of a tensor silently yields a zero-sized time dimension. That happens on a
-    resume where the restored ``rollout.step`` runs ahead of the loaded time window.
-    """
+    """A batch sized for an earlier rollout fails before producing an empty slice."""
     task = Forecaster(
         multistep_input=2,
         multistep_output=1,
         timestep="6h",
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
-    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
-    # Batch loaded for rollout 1: offsets [-6h, 0h, +6h] → 3 time steps.
-    batch = {"data": torch.randn(b, 3, e, g, v)}
+    batch = {"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))}
     assert task.get_targets(batch, rollout_step=0)["data"].shape[1] == 1
 
-    task.rollout.increase(current_epoch=0)  # curriculum advanced; the batch is now stale
-    with pytest.raises(ValueError, match="time steps"):
+    task.rollout.increase(current_epoch=0)
+
+    with pytest.raises(ValueError, match="requires index 3") as exc_info:
         task.get_targets(batch, rollout_step=1)
+
+    assert str(exc_info.value) == (
+        "Batch for dataset 'data' contains 3 time steps, but requires index 3 (indices [3]). "
+        "The dataloader's time window does not match the task rollout."
+    )
 
 
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:

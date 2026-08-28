@@ -61,6 +61,8 @@ Keep it human-readable, your future self will thank you!
 
 ### ⚠ BREAKING CHANGES
 
+* **training:** preserve wrapped loss variable-reduction defaults when filtering variables
+* **training:** return aggregated multiscale losses and remove per-scale validation metrics
 * **training:** speedup multiscale loss ([#1212](https://github.com/ecmwf/anemoi-core/issues/1212))
 * **training:** make user-specified search path take precedence and simplify Hydra search paths hierarchy ([#1181](https://github.com/ecmwf/anemoi-core/issues/1181))
 * Forecast dataset dataloader ([#1133](https://github.com/ecmwf/anemoi-core/issues/1133))
@@ -68,6 +70,8 @@ Keep it human-readable, your future self will thank you!
 
 ### Features
 
+* **training:** add graph-based ensemble score losses
+* **training:** add global energy scores and optional coefficient-magnitude spectral CRPS
 * Add unit check for target variables ([#1155](https://github.com/ecmwf/anemoi-core/issues/1155)) ([8f98738](https://github.com/ecmwf/anemoi-core/commit/8f98738646cea115181fb2fc2be9126bd0d99e94))
 * Callback evaluate cli ([#1153](https://github.com/ecmwf/anemoi-core/issues/1153)) ([a6ed3f0](https://github.com/ecmwf/anemoi-core/commit/a6ed3f06cda5beb32a1313bf1a04b14d462008a0))
 * Export JSON schema ([#1112](https://github.com/ecmwf/anemoi-core/issues/1112)) ([082f443](https://github.com/ecmwf/anemoi-core/commit/082f44343ab68995295f8d464c92bd8d12b3442d))

@@ -41,14 +41,6 @@ class BaseTask(ABC):
     num_outputs : int
         Number of output time steps for the task.
 
-    Methods
-    -------
-    get_input_offsets() -> list[datetime.timedelta]
-        Get the list of input time offsets.
-    get_output_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the list of output time offsets.
-    get_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the full list of input and output time offsets.
     """
 
     name: str
@@ -127,31 +119,22 @@ class BaseTask(ABC):
         self,
         time_indices: list[int],
         batch: dict[str, torch.Tensor],
-        **kwargs,
+        **_kwargs,
     ) -> None:
-        """Raise if the batch does not carry all the requested time steps.
-
-        ``normalize_time_indices`` collapses a single index into a slice, and slicing past
-        the end of a tensor yields an empty tensor rather than raising, which only surfaces
-        later as a confusing shape mismatch. That happens whenever the time window the
-        dataloader was built for disagrees with the steps the task now asks for.
-        """
-        if not isinstance(time_indices, (list, tuple)) or not time_indices:
+        """Raise if the batch does not contain all requested time steps."""
+        if not time_indices:
             return
 
         required = max(time_indices) + 1
         for dataset_name, dataset_batch in batch.items():
             available = dataset_batch.shape[1]
-            if available >= required:
-                continue
-            msg = (
-                f"Batch for dataset '{dataset_name}' holds {available} time steps but step "
-                f"{kwargs} needs index {required - 1} (indices {list(time_indices)}). The "
-                f"dataloader's loaded time window does not match the task's steps; if the "
-                f"rollout curriculum advanced, the datasets need refreshing "
-                f"(`datamodule.set_epoch`)."
-            )
-            raise ValueError(msg)
+            if available < required:
+                msg = (
+                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but requires "
+                    f"index {required - 1} (indices {time_indices}). The dataloader's "
+                    "time window does not match the task rollout."
+                )
+                raise ValueError(msg)
 
     def get_inputs(
         self,
@@ -215,6 +198,9 @@ class BaseTask(ABC):
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
 
+    def log_training_state(self) -> None:  # noqa: B027
+        """Log the effective task state at the start of training."""
+
     def training_runtime_state_dict(self) -> dict:
         """Return training runtime state to be persisted in the training checkpoint.
 
@@ -259,8 +245,16 @@ class BaseSingleStepTask(BaseTask):
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
+        Parameters
+        ----------
+        *args
+            Positional arguments; the first item is the input state.
+        **_kwargs
+            Additional keyword arguments, which are ignored by the default implementation.
+
         Returns
         -------
-            dict[str, torch.Tensor]: The advanced input state for each dataset.
+        dict[str, torch.Tensor]
+            The advanced input state for each dataset.
         """
         return args[0]
