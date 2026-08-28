@@ -21,23 +21,28 @@ LOGGER = logging.getLogger(__name__)
 
 
 class RandomSpatialDropout(BasePreprocessor):
-    """Randomly drops (sets to NaN) a percentage of valid grid cells during training and validation.
+    """Randomly drops (sets to NaN) a percentage of valid grid cells during training.
 
     This preprocessor helps the model learn better spatial interpolation and
     generalization by creating artificial sparsity in the input data. It operates
     BEFORE imputation, so the imputer will fill the dropped values.
 
     Key features:
-    - Operates during training and validation
+    - Operates during training only
     - Only drops from originally valid (non-NaN) grid cells
     - Only affects input timesteps (not targets)
     - Can target specific variables or all non-forcing variables
 
-    Training/validation is distinguished from inference by tensor shape: dropout
-    is applied only when the time dimension exceeds ``multi_step`` (training
-    batches carry input plus target steps, inference tensors carry only the
-    input window). Caveat: a task whose training batch has exactly ``multi_step``
-    steps (e.g. an autoencoder) silently disables dropout.
+    Dropout is gated on ``self.training``, the standard ``nn.Module`` mode flag,
+    so it follows ``.train()`` / ``.eval()`` exactly as ``nn.Dropout`` does: on
+    during training, off during validation, off during inference (every runner
+    calls ``model.eval()`` before predicting). Natural sparsity is already present
+    in the data; this preprocessor adds artificial sparsity on top of it, so
+    leaving it off in validation keeps the metric a faithful proxy for the
+    deployment condition and comparable across a run whose dropout is scheduled.
+
+    See ``anemoi.training.diagnostics.callbacks.dropout_scheduler.DropoutScheduler``
+    for decaying ``dropout_prob`` over training.
 
     Configuration example:
     ```yaml
@@ -164,12 +169,9 @@ class RandomSpatialDropout(BasePreprocessor):
     def transform(self, x: torch.Tensor, in_place: bool = True, **kwargs) -> torch.Tensor:
         """Apply random spatial dropout to input tensor.
 
-        During training and validation, randomly sets a percentage of valid (non-NaN)
-        grid cells to NaN for specified variables in the input timesteps.
-
-        Automatically distinguishes between training/validation and inference by checking
-        tensor shape: training/validation batches have multiple timesteps (inputs + targets),
-        while inference batches typically have only input timesteps.
+        In training mode, randomly sets a percentage of valid (non-NaN) grid cells
+        to NaN for specified variables in the input timesteps. In eval mode
+        (validation and inference) the tensor is returned unchanged.
 
         Parameters
         ----------
@@ -183,16 +185,15 @@ class RandomSpatialDropout(BasePreprocessor):
         Returns
         -------
         torch.Tensor
-            Tensor with random dropout applied (training/validation) or unchanged (inference).
+            Tensor with random dropout applied (training) or unchanged (eval).
         """
         # Skip if dropout disabled or no variables to drop
         if self.dropout_prob == 0 or len(self.dropout_indices) == 0:
             return x if in_place else x.clone()
 
-        # Distinguish training/validation from inference by tensor shape
-        # Training/validation: batch has multiple timesteps (multi_step inputs + targets)
-        # Inference: batch typically has only input timesteps (multi_step or fewer)
-        if x.ndim < 2 or x.shape[1] <= self.multi_step:
+        # Training-only, following the nn.Dropout convention: self.training is set
+        # by .train()/.eval(), so this is off in validation and at inference.
+        if not self.training or x.ndim < 2:
             return x if in_place else x.clone()
 
         if not in_place:

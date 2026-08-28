@@ -81,11 +81,35 @@ def test_spatial_dropout_explicit_variables(data_indices) -> None:
     assert not torch.isnan(out[..., [0, 3, 4]]).any()
 
 
-def test_spatial_dropout_inference_noop(data_indices) -> None:
+def test_spatial_dropout_eval_noop(data_indices) -> None:
+    """Eval mode covers both validation and inference: no dropout in either."""
     dropout = _make_dropout(data_indices, dropout_prob=1.0)
-    x = torch.ones(2, 2, 10, 5)  # time dim == multi_step -> inference-like
+    dropout.eval()
+    x = torch.ones(2, 4, 10, 5)  # training-shaped batch, but eval mode
     out = dropout.transform(x, in_place=False)
     assert not torch.isnan(out).any()
+
+
+def test_spatial_dropout_applies_at_inference_window_width(data_indices) -> None:
+    """A training batch exactly multi_step wide is no longer silently skipped."""
+    torch.manual_seed(0)
+    dropout = _make_dropout(data_indices, dropout_prob=1.0)
+    x = torch.ones(2, 2, 10, 5)  # time dim == multi_step
+    out = dropout.transform(x, in_place=False)
+    assert torch.isnan(out[:, :2, :, [0, 1, 4]]).all()
+
+
+def test_spatial_dropout_mode_round_trip(data_indices) -> None:
+    """train() re-enables dropout after eval(), so validation cannot leak into training."""
+    torch.manual_seed(0)
+    dropout = _make_dropout(data_indices, dropout_prob=1.0)
+    x = torch.ones(2, 4, 10, 5)
+
+    dropout.eval()
+    assert not torch.isnan(dropout.transform(x, in_place=False)).any()
+
+    dropout.train()
+    assert torch.isnan(dropout.transform(x, in_place=False)[:, :2, :, [0, 1, 4]]).all()
 
 
 def test_spatial_dropout_zero_prob_noop(data_indices) -> None:
