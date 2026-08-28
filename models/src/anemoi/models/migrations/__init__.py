@@ -7,30 +7,28 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from anemoi.utils.migrations import MigrationMetadata
+
 from .migrator import MIGRATION_PATH
+from .migrator import CkptMigration
+from .migrator import CkptMigrator
 from .migrator import CkptType
 from .migrator import IncompatibleCheckpointException
-from .migrator import Migration
-from .migrator import MigrationMetadata
-from .migrator import MigrationOp
 from .migrator import MigrationVersions
-from .migrator import Migrator
 from .migrator import MissingAttribute
 from .migrator import SaveCkpt
-from .migrator import SerializedMigration
 from .setup_context import MigrationContext
 
 __all__ = [
     "MIGRATION_PATH",
+    "CkptMigration",
+    "CkptMigrator",
     "CkptType",
     "IncompatibleCheckpointException",
-    "Migration",
+    "MigrationContext",
     "MigrationMetadata",
     "MigrationOp",
     "MigrationVersions",
-    "Migrator",
     "MissingAttribute",
     "SaveCkpt",
-    "SerializedMigration",
-    "MigrationContext",
 ]

@@ -13,19 +13,19 @@ from pathlib import Path
 import pytest
 import torch
 
+from anemoi.models.migrations import CkptMigration
+from anemoi.models.migrations import CkptMigrator
 from anemoi.models.migrations import CkptType
 from anemoi.models.migrations import IncompatibleCheckpointException
-from anemoi.models.migrations import MigrationOp
-from anemoi.models.migrations import Migrator
 from anemoi.models.migrations import SaveCkpt
 
 
-def test_run_all_migrations(old_migrator: Migrator, empty_ckpt: Path):
-    _, migrated_model, done_ops = old_migrator.sync(empty_ckpt)
+def test_run_all_migrations(old_migrator: CkptMigrator, empty_ckpt: Path):
+    _, migrated_model, executed_migrations = old_migrator.sync(empty_ckpt)
 
-    assert len(done_ops) == 4
-    for op in done_ops:
-        assert isinstance(op, MigrationOp)
+    assert len(executed_migrations) == 4
+    for migration in executed_migrations:
+        assert isinstance(migration, CkptMigration)
     assert len(migrated_model["migrations"]) == 4
     assert "foo" in migrated_model and migrated_model["foo"] == "foo"
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
@@ -38,7 +38,7 @@ def rollback_fn_extra_migration(ckpt: CkptType) -> CkptType:
     return ckpt
 
 
-def test_extra_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
+def test_extra_migration(old_migrator: CkptMigrator, save_ckpt: SaveCkpt):
     dummy_model = save_ckpt(
         {"foo": "foo"},
         migrations=[{"name": "1750840837_add_foo"}, {"name": "dummy", "rollback": rollback_fn_extra_migration}],
@@ -48,27 +48,27 @@ def test_extra_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
         _, _, _ = old_migrator.sync(dummy_model)
 
 
-def test_break_ckpt_too_old(migrator: Migrator, tmp_path: Path):
+def test_break_ckpt_too_old(migrator: CkptMigrator, tmp_path: Path):
     path = tmp_path / "model.ckpt"
     torch.save({"pytorch-lightning_version": "", "migrations": []}, path)
     with pytest.raises(IncompatibleCheckpointException):
         migrator.sync(path)
 
 
-def test_run_last_migration(old_migrator: Migrator, save_ckpt: SaveCkpt):
+def test_run_last_migration(old_migrator: CkptMigrator, save_ckpt: SaveCkpt):
     dummy_model = save_ckpt({"foo": "foo"}, migrations=[{"name": "1750840837_add_foo"}])
 
-    _, migrated_model, done_ops = old_migrator.sync(dummy_model)
+    _, migrated_model, executed_migrations = old_migrator.sync(dummy_model)
 
-    assert len(done_ops) == 3
-    for op in done_ops:
-        assert isinstance(op, MigrationOp)
+    assert len(executed_migrations) == 3
+    for migration in executed_migrations:
+        assert isinstance(migration, CkptMigration)
     assert len(migrated_model["migrations"]) == 4
     assert "bar" in migrated_model and migrated_model["bar"] == "bar"
     assert "test" in migrated_model and migrated_model["test"] == "baz"
 
 
-def test_migrate_recent_model(migrator: Migrator, recent_ckpt: Path):
+def test_migrate_recent_model(migrator: CkptMigrator, recent_ckpt: Path):
     _, migrated_model, done_ops = migrator.sync(recent_ckpt)
 
     assert len(done_ops) == 1
