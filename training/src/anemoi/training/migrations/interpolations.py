@@ -113,7 +113,7 @@ class InterpolationHandler:
         for reference, exact_ref in self.references[tuple(old_parts)]:
             node = self.ref_node.select(reference[:-1])
             changes.append(
-                (node, reference[-1], replace_interpolation(node.get(reference[-1]).value, exact_ref, target))
+                (node, reference[-1], replace_interpolation(node.get(reference[-1]).value, exact_ref, target)),
             )
         # Updating the nodes after the previous for loop because node.set triggers
         # self._parse_node which updates self.references.
@@ -140,7 +140,7 @@ class InterpolationHandler:
                 else:
                     interpo_parts = tuple(interpo.split("."))
                 if not interpo.startswith(self.ref_node.prefix_str) or not self.ref_node.has_key(
-                    interpo_parts[len(self.ref_node.prefix) :]
+                    interpo_parts[len(self.ref_node.prefix) :],
                 ):
                     LOGGER.warning("%s uses missing interpolation %s.", ".".join(map(str, parts)), interpo)
                     continue
