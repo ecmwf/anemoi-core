@@ -36,21 +36,7 @@ class DatasetDataSchema(PydanticBaseModel):
 
 
 class DataSchema(PydanticBaseModel):
-    """A class used to represent the overall configuration of the dataset(s).
-
-    Attributes
-    ----------
-    format : str
-        The format of the data.
-    resolution : str
-        The resolution of the data.
-    frequency : str
-        The frequency of the data.
-    timestep : str
-        The timestep of the data.
-    datasets : dict[str, DatasetDataSchema] | None
-        "Dictionary mapping dataset names to their configurations."
-    """
+    """A class used to represent the overall configuration of the dataset(s)."""
 
     format: str = Field(example=None)
     "Format of the data."
