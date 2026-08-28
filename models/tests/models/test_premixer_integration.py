@@ -110,9 +110,7 @@ def _make_config(with_premixer: bool, initialise_out_zero: bool = True):
             "residual": {"_target_": "anemoi.models.layers.residual.SkipConnection", "step": -1},
             "bounding": [],
             "layer_kernels": LAYER_KERNELS,
-            "processor": _component(
-                "anemoi.models.layers.processor.GraphTransformerProcessor", num_layers=2
-            ),
+            "processor": _component("anemoi.models.layers.processor.GraphTransformerProcessor", num_layers=2),
             "encoder": _component("anemoi.models.layers.mapper.GraphTransformerForwardMapper"),
             "decoder": _component("anemoi.models.layers.mapper.GraphTransformerBackwardMapper"),
         },
