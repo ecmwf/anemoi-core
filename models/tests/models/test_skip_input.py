@@ -120,6 +120,61 @@ def test_zero_skip_base_yields_pure_climatology(tmp_path) -> None:
     assert torch.all(pure == 7.0)
 
 
+# ── inference-side normalization ──────────────────────────────────────────
+
+
+class _Doubler(torch.nn.Module):
+    """Stands in for the pre-processor chain: a shift makes zeros detectable."""
+
+    def forward(self, x: torch.Tensor, in_place: bool = True) -> torch.Tensor:  # noqa: ARG002, FBT001, FBT002
+        return x * 2.0 + 1.0
+
+
+def _normalize(skip_input: dict[str, torch.Tensor | None], x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    return BaseGraphModel._normalize_skip_input(
+        SimpleNamespace(),
+        skip_input,
+        x,
+        {"data": _Doubler()},
+        n_step_input=_TIME,
+    )
+
+
+def test_normalize_skip_input_expands_and_normalizes_raw_tensor() -> None:
+    # Inference holds raw 4-D tensors; forward asserts a 5-D match against x.
+    x = {"data": torch.randn(_BATCH, _TIME, _ENSEMBLE, _GRID, _VARS)}
+    raw = torch.randn(_BATCH, _TIME, _GRID, _VARS)
+
+    out = _normalize({"data": raw}, x)["data"]
+
+    assert out.shape == x["data"].shape
+    assert torch.equal(out, raw[:, 0:_TIME, None, ...] * 2.0 + 1.0)
+
+
+def test_normalize_skip_input_none_is_zero_after_normalization() -> None:
+    """DA cycle 0: zeros must survive as zeros, not become -mean/stdev.
+
+    ``ClimatologySkipConnection(missing_value=0.0)`` reads the base after
+    normalization, so a raw zeros tensor pushed through the pre-processors would
+    land on the wrong sentinel and reintroduce the observation mosaic.
+    """
+    x = {"data": torch.randn(_BATCH, _TIME, _ENSEMBLE, _GRID, _VARS)}
+
+    out = _normalize({"data": None}, x)["data"]
+
+    assert out.shape == x["data"].shape
+    assert torch.all(out == 0.0)
+    # A raw zeros tensor taking the normalization path would not have been zero.
+    assert not torch.all(_normalize({"data": torch.zeros(_BATCH, _TIME, _GRID, _VARS)}, x)["data"] == 0.0)
+
+
+def test_normalize_skip_input_covers_every_dataset() -> None:
+    # forward indexes skip_input[dataset_name] strictly, so a missing key would raise.
+    x = {"data": torch.randn(_BATCH, _TIME, _ENSEMBLE, _GRID, _VARS)}
+
+    assert set(_normalize({}, x)) == {"data"}
+
+
 def _subclasses(cls: type) -> Iterator[type]:
     for sub in cls.__subclasses__():
         yield sub
