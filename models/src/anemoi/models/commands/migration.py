@@ -12,6 +12,7 @@ import logging
 import subprocess
 from argparse import ArgumentParser
 from argparse import Namespace
+from datetime import UTC
 from datetime import datetime
 from pathlib import Path
 from shutil import copy2
@@ -20,8 +21,8 @@ from jinja2 import Environment
 from rich.console import Console
 
 from ..migrations import MIGRATION_PATH
+from ..migrations import CkptMigrator
 from ..migrations import IncompatibleCheckpointException
-from ..migrations import Migrator
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
@@ -31,7 +32,7 @@ root_folder = here.parent.parent.parent.parent.parent
 
 def _get_migration_name(name: str) -> str:
     name = name.lower().replace("-", "_").replace(" ", "_")
-    now = int(datetime.now().timestamp())
+    now = int(datetime.now(UTC).timestamp())
     return f"{now}_{name}.py"
 
 
@@ -44,11 +45,10 @@ def maybe_plural(count: int, text: str) -> str:
 def new_migrations_from_main_branch():
     """Finds the all now migration scripts that were added compared to origin/main"""
     run_new_migrations = subprocess.run(
-        [
-            "git diff --name-only --diff-filter=A "
-            '$(git log -n 1 origin/main --pretty=format:"%H") '
-            f"HEAD {MIGRATION_PATH.resolve()}"
-        ],
+        "git diff --name-only --diff-filter=A "
+        '$(git log -n 1 origin/main --pretty=format:"%H") '
+        f"HEAD {MIGRATION_PATH.resolve()}",
+        check=True,
         capture_output=True,
         shell=True,
     )
@@ -265,11 +265,11 @@ class Migration(Command):
         migrator_logger.setLevel(args.log_level)
 
         console = Console(force_terminal=not args.no_color, highlight=False)
-        migrator = Migrator()
+        migrator = CkptMigrator()
         ckpt_path = Path(args.ckpt)
         try:
-            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path)
-            if len(done_ops) and not args.dry_run:
+            old_ckpt, new_ckpt, executed_migrations = migrator.sync(ckpt_path)
+            if len(executed_migrations) and not args.dry_run:
                 registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""
                 if len(registered_migrations):
@@ -280,14 +280,28 @@ class Migration(Command):
                 copy2(ckpt_path, new_path)
                 print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
-                print("Executed ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
-            if len(done_ops) and args.dry_run:
-                print("Would execute ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
-            if not len(done_ops):
+                print(
+                    "Executed ",
+                    len(executed_migrations),
+                    " ",
+                    maybe_plural(len(executed_migrations), "operation"),
+                    ":",
+                    sep="",
+                )
+            if len(executed_migrations) and args.dry_run:
+                print(
+                    "Would execute ",
+                    len(executed_migrations),
+                    " ",
+                    maybe_plural(len(executed_migrations), "operation"),
+                    ":",
+                    sep="",
+                )
+            if not len(executed_migrations):
                 console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
-            for op in done_ops:
+            for migration in executed_migrations:
                 console.print(
-                    f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
+                    f"  [green]+ MIGRATE [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
         except IncompatibleCheckpointException as e:
             print(str(e))
@@ -297,18 +311,17 @@ class Migration(Command):
         It will show:
         * the migrations already registered in the checkpoint
         * the missing migrations to execute
-        * the extra migrations to rollback
 
         Parameters
         ----------
         args : Namespace
             The arguments passed to the command.
         """
-        migrator = Migrator()
+        migrator = CkptMigrator()
         console = Console(force_terminal=not args.no_color, highlight=False)
         try:
-            executed_migrations, missing_migrations, extra_migrations = migrator.inspect(args.ckpt)
-            if not len(missing_migrations) and not len(extra_migrations):
+            executed_migrations, missing_migrations = migrator.inspect(args.ckpt)
+            if not len(missing_migrations):
                 console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
             if len(executed_migrations):
                 print(
@@ -335,19 +348,7 @@ class Migration(Command):
                 console.print(
                     f"  [green]+ [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
-            if len(extra_migrations):
-                print(
-                    len(extra_migrations),
-                    "extra",
-                    maybe_plural(len(extra_migrations), "migration"),
-                    "in the checkpoint.",
-                )
-                for migration in extra_migrations:
-                    console.print(f"  [red]+ [bold]{migration}[/bold][/red]")
-                console.print(
-                    "\n[red][italic]Your checkpoint cannot be migrated because it contains extra migrations.[/italic][/red]"
-                )
-            if len(missing_migrations) and not len(extra_migrations):
+            if len(missing_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
         except IncompatibleCheckpointException as e:
