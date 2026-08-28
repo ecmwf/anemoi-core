@@ -13,12 +13,11 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
-from collections.abc import Sequence
 from copy import deepcopy
 from functools import cached_property
 from inspect import getsource
 from pathlib import Path
-from types import ModuleType
+from typing import TYPE_CHECKING
 from typing import Self
 from typing import TypedDict
 
@@ -28,6 +27,10 @@ from anemoi.utils.migrations import IncompleteMigrationScript
 from anemoi.utils.migrations import Migration
 from anemoi.utils.migrations import MigrationMetadata
 from anemoi.utils.migrations import Migrator
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+    from types import ModuleType
 
 MIGRATION_PATH = Path(__file__).parent / "scripts"
 
@@ -46,8 +49,10 @@ MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-tr
 
 
 def _get_code_digest(content: str) -> str:
-    """Get a digest for some python code. This does not take indentations, comments
-    (except docstrings) and is based on the code's ast.
+    """Get a digest for some python code.
+
+    This does not take indentations, comments (except docstrings) and is based on
+    the code's ast.
 
     Parameters
     ----------
@@ -64,12 +69,13 @@ def _get_code_digest(content: str) -> str:
 
 
 class ConfigMigration(Migration[Config, Config, MigrationVersions]):
-    """Represents a config migration"""
+    """Represents a config migration."""
 
     @classmethod
     def from_migration(cls, name: str, migration: ModuleType) -> Self:
         if not hasattr(migration, "metadata") or not isinstance(migration.metadata, MigrationMetadata):
-            raise IncompleteMigrationScript("Migration script is missing metadata.")
+            msg = "Migration script is missing metadata."
+            raise IncompleteMigrationScript(msg)
 
         metadata = migration.metadata
         signature = _get_code_digest(getsource(migration))
@@ -92,16 +98,19 @@ class ConfigMigration(Migration[Config, Config, MigrationVersions]):
 
 class ConfigMigrator(Migrator[ConfigMigration, Config]):
     def __init__(
-        self, migrations: Sequence[ConfigMigration] | None = None, obj_migration_key: str | None = None
+        self,
+        migrations: Sequence[ConfigMigration] | None = None,
+        obj_migration_key: str | None = None,
     ) -> None:
-        """Create the migrator object
+        """Create the migrator object.
 
         Parameters
         ----------
         migrations : Sequence[ConfigMigration] | None, default None
             List of migration to execute. If None, get migrations from the current folder.
+        obj_migration_key : str | None, default None
+            The migration key to use.
         """
-
         if migrations is None:
             # remove the ".migrator" at the end to get parent folder as migration package
             migration_pkg, _, _ = __name__.rpartition(".")
@@ -112,22 +121,26 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
 
     def _current_migration_name(self, obj: Config) -> str | None:
         if self._obj_migration_key not in obj:
-            raise IncompatibleConfigException("config is not compatible")
+            msg = "config is not compatible"
+            raise IncompatibleConfigException(msg)
         migration_state = obj[self._obj_migration_key].value
         if migration_state is not None and not isinstance(migration_state, str):
-            raise TypeError("The migration state should be None or str.")
+            msg = "The migration state should be None or str."
+            raise TypeError(msg)
 
         if migration_state is None:
-            return
+            return None
 
         if migration_state not in self._migration_hash_to_name:
-            raise IncompatibleConfigException("The config's migration state is not a valid migration.")
+            msg = "The config's migration state is not a valid migration."
+            raise IncompatibleConfigException(msg)
 
         return self._migration_hash_to_name[migration_state]
 
     def _current_group(self, obj: Config) -> int:
-        """Get the compatibility group of the config. Note that if the compatibility
-        group is not the latest group, then the config cannot be migrated.
+        """Get the compatibility group of the config.
+
+        Note that if the compatibility group is not the latest group, then the config cannot be migrated.
 
         Parameters
         ----------
@@ -144,7 +157,8 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
             return 0
 
         if current_migration_name not in self._migration_groups:
-            raise IncompatibleConfigException("config is not compatible")
+            msg = "config is not compatible"
+            raise IncompatibleConfigException(msg)
         return self._migration_groups[current_migration_name]
 
     def is_compatible(self, obj: Config) -> bool:
@@ -188,14 +202,13 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         if current_migration_name is None:
             return compat_group
         if current_migration_name not in self._migration_refs:
-            raise IncompatibleConfigException(
-                f"config cannot be migrated. Extra migrations are registered. ({current_migration_name})"
-            )
+            msg = (f"config cannot be migrated. Extra migrations are registered. ({current_migration_name})",)
+            raise IncompatibleConfigException(msg)
         last_registered_migration = self._migration_refs[current_migration_name]
         return compat_group[last_registered_migration + 1 :]
 
     def get_first_incompatible_version(self, config: Config) -> str | None:
-        """Get the first version where you cannot update the config
+        """Get the first version where you cannot update the config.
 
         Parameters
         ----------
@@ -214,7 +227,7 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         return self._compatibility_groups[group + 1][0].metadata.versions["anemoi-training"]
 
     def sync(self, path: str | Path) -> tuple[Config, Config, list[ConfigMigration]]:
-        """Migrate or rollbacks the config using provided migrations
+        """Migrate or rollbacks the config using provided migrations.
 
         Parameters
         ----------
@@ -234,22 +247,22 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
 
         if not self.is_compatible(config):
             first_incompatible_version = self.get_first_incompatible_version(config)
-            raise IncompatibleConfigException(
+            msg = (
                 "No compatible migration available: the config is too old. "
                 f"Use a version of anemoi-training < {first_incompatible_version}."
             )
+            raise IncompatibleConfigException(msg)
         missing_migrations = self.missing_migrations(config)
         for migration in missing_migrations:
             if migration.migrate is None:
-                raise IncompatibleConfigException(
-                    f"Migration {migration.name} cannot be executed. Missing migrate function."
-                )
+                msg = (f"Migration {migration.name} cannot be executed. Missing migrate function.",)
+                raise IncompatibleConfigException(msg)
             config = migration.migrate(config)
             config[_CONFIG_MIGRATION_KEY] = migration.name_hash
         return old_config, config, missing_migrations
 
     def inspect(self, path: str | Path) -> tuple[list[Migration], list[Migration]]:
-        """Inspect migration information in config
+        """Inspect migration information in config.
 
         Parameters
         ----------
@@ -265,8 +278,9 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         config = Config.from_path(path)
         if not self.is_compatible(config):
             first_incompatible_version = self.get_first_incompatible_version(config)
-            raise IncompatibleConfigException(
+            msg = (
                 "No compatible migration available: the config is too old. "
                 f"Use a version of anemoi-training < {first_incompatible_version}."
             )
+            raise IncompatibleConfigException(msg)
         return list(self.registered_migrations(config)), list(self.missing_migrations(config))
