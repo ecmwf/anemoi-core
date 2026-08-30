@@ -398,6 +398,41 @@ def test_graph_edge_energy_centering_preserves_spatial_offset_invariance(
     torch.testing.assert_close(shifted_score, score)
 
 
+def test_graph_edge_energy_avoids_cancellation_for_locally_close_values() -> None:
+    graph = HeteroData()
+    graph["data"].num_nodes = 3
+    graph["data", "to", "data"].edge_index = torch.tensor(
+        [
+            [1, 2, 0],
+            [0, 1, 2],
+        ],
+    )
+    prediction = torch.tensor(
+        [[[[[0.0], [10_000.0], [10_001.0]], [[0.0], [10_000.0], [10_001.0]]]]],
+        requires_grad=True,
+    )
+    target = torch.zeros(1, 1, 1, 3, 1)
+    loss = GraphEdgeEnergyScoreLoss(
+        graph_data=graph,
+        loss_graph={"edges_name": ["data", "to", "data"]},
+    )
+
+    score = loss._compute_local_score_tensor(
+        prediction,
+        target.squeeze(2),
+        *loss._graph_kernel_tensors(prediction),
+    )
+    node_score = score[..., 1, :].sum()
+    node_score.backward()
+
+    torch.testing.assert_close(node_score, torch.tensor(1.0))
+    assert prediction.grad is not None
+    expected_gradient = torch.zeros_like(prediction)
+    expected_gradient[:, :, :, 1] = -0.5
+    expected_gradient[:, :, :, 2] = 0.5
+    torch.testing.assert_close(prediction.grad, expected_gradient)
+
+
 @pytest.mark.parametrize(
     "loss_cls",
     [GraphEnergyScoreLoss, GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss],

@@ -10,26 +10,16 @@
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.training.losses.graph_edge_operations import edge_difference
+from anemoi.training.losses.graph_edge_operations import weighted_row_l2_norm
 from anemoi.training.losses.graph_energy_score_base import BaseGraphEnergyScoreLoss
-from anemoi.training.losses.graph_score_base import csr_matmul
-from anemoi.training.losses.graph_score_base import safe_sqrt
-from anemoi.training.losses.graph_score_base import scale_node_differences
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
 class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
-    """Energy score for graph edge differences.
+    """Energy score over graph edge differences."""
 
-    This class inherits from ``BaseGraphEnergyScoreLoss`` rather than
-    ``BaseGraphEdgeScoreLoss`` because it calculates edge norms without
-    materializing an edge tensor.
-
-    For node differences ``q``, the weighted squared edge norm is
-    ``A @ q**2 - 2*q*(A @ q) + q**2*(A @ 1)``. This identity avoids an
-    edge tensor.
-    """
-
-    uses_row_weight_sums: bool = True
+    uses_edge_tensors: bool = True
 
     def __init__(
         self,
@@ -63,46 +53,26 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
         self,
         differences: torch.Tensor,
         matrix: torch.Tensor | None,
-        row_weight_sum: torch.Tensor | None,
+        source_index: torch.Tensor | None,
+        destination_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
         node_valid: torch.Tensor | None,
+        edge_valid: torch.Tensor | None,
         valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
-        assert matrix is not None
-        assert row_weight_sum is not None
+        assert matrix is None
+        assert source_index is not None
+        assert destination_index is not None
+        assert edge_weights is not None
 
-        safe_differences = differences
-        if node_valid is not None:
-            safe_differences = torch.where(node_valid, differences, torch.zeros_like(differences))
-
-        # Edge differences are invariant to a constant spatial offset.
-        # Improve stability of computation
-        safe_differences = safe_differences - safe_differences[..., :1, :]
-        if node_valid is not None:
-            safe_differences = torch.where(
-                node_valid,
-                safe_differences,
-                torch.zeros_like(safe_differences),
-            )
-
-        scaled, scale = scale_node_differences(safe_differences)
-        moments = csr_matmul(matrix, torch.cat((scaled, scaled.square()), dim=-1))
-        projected, projected_square = moments.chunk(2, dim=-1)
-
-        if node_valid is None:
-            row_shape = (1,) * (scaled.ndim - 2) + (row_weight_sum.shape[0], 1)
-            effective_weight_sum = row_weight_sum.view(row_shape)
-        else:
-            assert valid_weight_sum is not None
-            effective_weight_sum = valid_weight_sum
-
-        squared_norm = projected_square - 2.0 * scaled * projected + scaled.square() * effective_weight_sum
-        if node_valid is not None and self.row_normalize:
-            squared_norm = squared_norm / torch.where(
-                effective_weight_sum > 0,
-                effective_weight_sum,
-                torch.ones_like(effective_weight_sum),
-            )
-        norm = scale * safe_sqrt(squared_norm)
-        if node_valid is not None:
-            norm = norm.masked_fill((effective_weight_sum <= 0) | ~node_valid, torch.nan)
-        return norm
+        edge_values = edge_difference(differences, source_index, destination_index)
+        return weighted_row_l2_norm(
+            edge_values,
+            destination_index,
+            edge_weights,
+            differences.shape[-2],
+            node_valid=node_valid,
+            edge_valid=edge_valid,
+            valid_weight_sum=valid_weight_sum,
+            row_normalize=self.row_normalize,
+        )
