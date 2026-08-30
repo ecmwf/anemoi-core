@@ -801,8 +801,10 @@ class PlotLossCorrected(LossCurvePlot):
         corrector_idx = pl_module.data_indices[dataset_name].data.input.corrector.to(device=y_true.device)
         corrector_vars = y_true.index_select(-1, corrector_idx)
         # Callback runs on gathered full-grid tensors on rank 0, so no
-        # comm group / shard sizes are needed.
-        return corrector(y_hat, corrector_vars)
+        # comm group / shard sizes are needed. Plot-only: no backward pass
+        # follows, so skip building the autograd graph for this GNN forward.
+        with torch.no_grad():
+            return corrector(y_hat, corrector_vars)
 
 
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
