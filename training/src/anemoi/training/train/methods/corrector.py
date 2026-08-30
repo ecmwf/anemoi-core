@@ -21,6 +21,7 @@ import logging
 import torch
 import torch.distributed as dist
 from torch import nn
+from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.distributed.graph import sync_tensor
 
@@ -99,6 +100,13 @@ class CorrectorGNN(nn.Module):
     n_out : int, optional
         Width of the output head. Defaults to ``n_target``.
     """
+
+    # Cap on edges processed per message-passing step. Bounds the peak size of
+    # the edge-message tensors independent of graph size: the unsharded
+    # (plotting) call processes the whole data-to-data graph on one rank, and
+    # even the per-shard training call can have enough local edges to be the
+    # tensor that tips an already near-full GPU into OOM.
+    _MAX_EDGES_PER_CHUNK = 20_000
 
     def __init__(
         self,
@@ -239,13 +247,20 @@ class CorrectorGNN(nn.Module):
             else:
                 x_src_nodes = x_nodes
 
-            # Build edge messages: [x_src, x_dst, edge_attr]
-            msgs = torch.cat([x_src_nodes[src_b], x_nodes[dst_b], ea_b], dim=-1)
-            msgs = self.msg_mlps[layer_idx](msgs)  # (B*e_local, H)
-
-            # Scatter-add to (local) destination nodes
+            # Build and aggregate edge messages in fixed-size chunks so peak
+            # memory is bounded by chunk size rather than by e_local (which
+            # can be several million edges for an unsharded full-grid pass).
+            # Under autograd, each chunk is its own nested checkpoint so
+            # backward doesn't need every chunk's activations held at once.
             agg = torch.zeros_like(x_nodes)
-            agg.scatter_add_(0, dst_b.unsqueeze(-1).expand_as(msgs), msgs)
+            chunk_size = min(self._MAX_EDGES_PER_CHUNK, e_local) or 1
+            for start in range(0, e_local, chunk_size):
+                end = start + chunk_size
+                chunk_args = (x_src_nodes, x_nodes, src_b[start:end], dst_b[start:end], ea_b[start:end], agg, layer_idx)
+                if torch.is_grad_enabled():
+                    agg = checkpoint(self._message_chunk, *chunk_args, use_reentrant=False)
+                else:
+                    agg = self._message_chunk(*chunk_args)
 
             # Combine self + aggregated neighbors with residual
             x_nodes = x_nodes + self.act(self.combine_mlps[layer_idx](torch.cat([x_nodes, agg], dim=-1)))
@@ -253,6 +268,28 @@ class CorrectorGNN(nn.Module):
         # Output correction
         correction = self.out(x_nodes)
         return correction.reshape(*leading_shape, g_local, -1)
+
+    def _message_chunk(
+        self,
+        x_src_nodes: torch.Tensor,
+        x_nodes: torch.Tensor,
+        src_chunk: torch.Tensor,
+        dst_chunk: torch.Tensor,
+        ea_chunk: torch.Tensor,
+        agg: torch.Tensor,
+        layer_idx: int,
+    ) -> torch.Tensor:
+        """Build and aggregate messages for one chunk of edges.
+
+        Returns a new aggregate tensor (rather than mutating ``agg`` in place)
+        so this composes safely as a nested ``torch.utils.checkpoint`` call
+        per chunk: an in-place scatter here would be a side effect on a tensor
+        external to the checkpointed function, which checkpoint's recompute
+        does not handle safely.
+        """
+        msgs = torch.cat([x_src_nodes[src_chunk], x_nodes[dst_chunk], ea_chunk], dim=-1)
+        msgs = self.msg_mlps[layer_idx](msgs)
+        return agg.index_add(0, dst_chunk, msgs)
 
     def _local_edges(self, node_offset: int, g_local: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return edges whose destination lies in ``[node_offset, node_offset + g_local)``.
