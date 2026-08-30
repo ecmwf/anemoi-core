@@ -172,3 +172,100 @@ def weighted_row_l2_norm(
         row_norm = row_norm.masked_fill((flat_valid_weight_sum <= 0) | ~flat_node_valid, torch.nan)
 
     return row_norm.reshape(*input_shape[:-2], num_nodes, num_variables)
+
+
+class _WeightedEdgeRowL2Norm(torch.autograd.Function):
+    """Evaluate stable edge-row norms without retaining edge-sized tensors."""
+
+    @staticmethod
+    def forward(
+        ctx,  # noqa: ANN001
+        node_values: torch.Tensor,
+        source_index: torch.Tensor,
+        destination_index: torch.Tensor,
+        edge_weights: torch.Tensor,
+        node_valid: torch.Tensor | None,
+        edge_valid: torch.Tensor | None,
+        valid_weight_sum: torch.Tensor | None,
+        row_normalize: bool,
+    ) -> torch.Tensor:
+        row_norm = weighted_row_l2_norm(
+            edge_difference(node_values, source_index, destination_index),
+            destination_index,
+            edge_weights,
+            node_values.shape[-2],
+            node_valid=node_valid,
+            edge_valid=edge_valid,
+            valid_weight_sum=valid_weight_sum,
+            row_normalize=row_normalize,
+        )
+        ctx.save_for_backward(
+            node_values,
+            source_index,
+            destination_index,
+            edge_weights,
+            row_norm,
+            edge_valid,
+            valid_weight_sum,
+        )
+        ctx.row_normalize = row_normalize
+        return row_norm
+
+    @staticmethod
+    def backward(
+        ctx,  # noqa: ANN001
+        grad_output: torch.Tensor,
+    ) -> tuple[torch.Tensor | None, ...]:
+        node_values, source_index, destination_index, edge_weights, row_norm, edge_valid, valid_weight_sum = (
+            ctx.saved_tensors
+        )
+        edge_values = edge_difference(node_values, source_index, destination_index)
+        gathered_norm = row_norm[..., destination_index, :]
+        positive_norm = gathered_norm > 0
+        weight_view = edge_weights.to(dtype=node_values.dtype).view((1,) * (node_values.ndim - 2) + (-1, 1))
+        active_edges = positive_norm & (weight_view > 0)
+        if edge_valid is not None:
+            active_edges = active_edges & edge_valid
+
+        safe_norm = torch.where(positive_norm, gathered_norm, torch.ones_like(gathered_norm))
+        edge_gradient = grad_output[..., destination_index, :] * weight_view
+        edge_gradient = edge_gradient * (edge_values / safe_norm)
+        if edge_valid is not None and ctx.row_normalize:
+            assert valid_weight_sum is not None
+            gathered_weight_sum = valid_weight_sum[..., destination_index, :]
+            safe_weight_sum = torch.where(
+                gathered_weight_sum > 0,
+                gathered_weight_sum,
+                torch.ones_like(gathered_weight_sum),
+            )
+            edge_gradient = edge_gradient / safe_weight_sum
+        edge_gradient = torch.where(active_edges, edge_gradient, torch.zeros_like(edge_gradient))
+
+        node_gradient = torch.zeros_like(node_values)
+        node_gradient.index_add_(-2, source_index, edge_gradient)
+        node_gradient.index_add_(-2, destination_index, -edge_gradient)
+        return node_gradient, None, None, None, None, None, None, None
+
+
+def weighted_edge_row_l2_norm(
+    node_values: torch.Tensor,
+    source_index: torch.Tensor,
+    destination_index: torch.Tensor,
+    edge_weights: torch.Tensor,
+    *,
+    node_valid: torch.Tensor | None,
+    edge_valid: torch.Tensor | None,
+    valid_weight_sum: torch.Tensor | None,
+    row_normalize: bool,
+) -> torch.Tensor:
+    """Return stable edge-row norms with a memory-efficient analytical backward."""
+    return _WeightedEdgeRowL2Norm.apply(
+        node_values,
+        source_index,
+        destination_index,
+        edge_weights,
+        node_valid,
+        edge_valid,
+        valid_weight_sum,
+        row_normalize,
+    )

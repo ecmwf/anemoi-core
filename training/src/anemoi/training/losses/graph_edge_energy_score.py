@@ -10,8 +10,7 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_edge_operations import edge_difference
-from anemoi.training.losses.graph_edge_operations import weighted_row_l2_norm
+from anemoi.training.losses.graph_edge_operations import weighted_edge_row_l2_norm
 from anemoi.training.losses.graph_energy_score_base import BaseGraphEnergyScoreLoss
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
@@ -65,12 +64,11 @@ class GraphEdgeEnergyScoreLoss(BaseGraphEnergyScoreLoss):
         assert destination_index is not None
         assert edge_weights is not None
 
-        edge_values = edge_difference(differences, source_index, destination_index)
-        return weighted_row_l2_norm(
-            edge_values,
+        return weighted_edge_row_l2_norm(
+            differences,
+            source_index,
             destination_index,
             edge_weights,
-            differences.shape[-2],
             node_valid=node_valid,
             edge_valid=edge_valid,
             valid_weight_sum=valid_weight_sum,
