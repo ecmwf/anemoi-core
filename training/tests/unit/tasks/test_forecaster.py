@@ -597,13 +597,17 @@ def test_offset_forecaster_advance_irregular_offsets(
         # duplicate offsets are not well-formed
         (["0h", "0h"], ["6h"], "default", "input_offsets contains duplicate"),
         (["0h"], ["6h", "6h"], "default", "output_offsets contains duplicate"),
+        # the latest input defines the forecast initialisation time
+        (["-12h", "-6h"], ["6h"], "default", "latest input offset must be 0h"),
+        (["6h"], ["12h"], "default", "latest input offset must be 0h"),
         # an output must come strictly after every input for a forecasting task
-        (["0h", "6h"], ["6h", "12h"], "default", "strictly greater"),
+        (["-6h", "0h"], ["0h", "12h"], "default", "strictly greater"),
         (["-6h", "0h"], ["-3h", "3h"], "default", "strictly greater"),
         # no valid shift exists
         (["-6h", "0h"], ["7h", "10h"], "default", "No valid autoregressive rollout shift"),
-        # explicit shift that repeats an output across rollout steps is rejected
+        # outputs from consecutive rollout steps must not overlap or interleave
         (["-6h", "0h"], ["6h", "12h"], "6h", "is not a valid autoregressive"),
+        (["0h"], ["2h", "5h"], "2h", "is not a valid autoregressive"),
     ],
 )
 def test_offset_convert_and_validate_rejects_invalid(

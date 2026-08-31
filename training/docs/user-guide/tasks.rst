@@ -49,7 +49,8 @@ The four built-in tasks are:
 ``OffsetForecaster``
    An experimental generalization of ``Forecaster`` where inputs and
    outputs are specified directly as time offsets relative to the start
-   of the forecast, allowing irregular time intervals.
+   of the forecast, allowing irregular time intervals. The latest input
+   offset must be ``0H``.
 
    .. code:: yaml
 
