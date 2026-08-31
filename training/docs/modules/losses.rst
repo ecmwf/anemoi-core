@@ -776,9 +776,12 @@ wavenumber :math:`m`, the loss is
                               - \sum_m |F_{lm}|^2 \Bigr)^{2}.
 
 The chosen spectral transform must provide a ``power_spectral_density``
-method, so ``PowerSpectrumLoss`` currently supports the SHT-based
-transforms (``reduced_sht``, ``octahedral_sht``). For these,
-:math:`l` is the total wavenumber and :math:`m` the zonal wavenumber.
+method: the SHT-based transforms (``reduced_sht``, ``octahedral_sht``),
+where :math:`l` is the total wavenumber and :math:`m` the zonal wavenumber,
+and the 2D Cartesian transforms (``fft2d``, ``dct2d``), whose ``(ky, kx)``
+plane is binned into radial wavenumber bands
+:math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`. Patch-wise ``fft2d``
+(``patch_size`` set) is not supported.
 
 .. note::
 

@@ -449,6 +449,11 @@ class PowerSpectrumLoss(SpectralLoss):
     .. math::
         \mathcal{L} = \sum_l \bigl( \sum_m |\hat{F}_{lm}|^2
                                    - \sum_m |F_{lm}|^2 \bigr)^2 .
+
+    With the 2D Cartesian transforms (``fft2d``, ``dct2d``), the ``(ky, kx)`` plane is
+    binned into radial-wavenumber bands :math:`l = \mathrm{round}(\sqrt{k_y^2 + k_x^2})`
+    and the power is summed per band. Patch-wise FFT2D (``patch_size`` set) is not
+    supported.
     """
 
     def __init__(self, *args, **kwargs) -> None:
@@ -456,6 +461,13 @@ class PowerSpectrumLoss(SpectralLoss):
         assert hasattr(self.transform, "power_spectral_density") and callable(
             self.transform.power_spectral_density,
         ), "spectral transform used in PowerSpectrumLoss must contain a power_spectral_density method"
+        # Patch-wise FFT2D yields a per-patch (ky, kx) plane that breaks the per-L contract.
+        assert (
+            getattr(self.transform, "patch_size", None) is None
+        ), "PowerSpectrumLoss does not support patch-wise FFT2D; set patch_size=None"
+        # The Cartesian PSD sums |coeff|^2 per radial band, which needs the band index.
+        if isinstance(self.transform, Cartesian2DTransform):
+            self.transform._register_radial_bands()
 
     def forward(
         self,

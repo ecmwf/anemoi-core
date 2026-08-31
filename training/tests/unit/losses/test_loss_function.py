@@ -11,7 +11,6 @@
 from types import SimpleNamespace
 
 import einops
-import hydra
 import numpy as np
 import pytest
 import torch
@@ -735,6 +734,47 @@ def test_amse_cartesian_transforms(transform: str) -> None:
     if transform == "fft2d":
         with pytest.raises(AssertionError, match="does not support patch-wise FFT2D"):
             SpectralAMSELoss(
+                transform="fft2d",
+                x_dim=x_dim,
+                y_dim=y_dim,
+                patch_size=[3, 4],
+            )
+
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_powerspectrum_cartesian_transforms(transform: str) -> None:
+    """PSL works with the 2D transforms via radial-wavenumber binning."""
+    nvars = 3
+    x_dim, y_dim = 8, 6
+    points = x_dim * y_dim
+
+    loss = _make_loss(
+        "anemoi.training.losses.spectral.PowerSpectrumLoss",
+        transform=transform,
+        x_dim=x_dim,
+        y_dim=y_dim,
+    )
+
+    pred = torch.zeros((2, 1, 1, points, nvars))
+    target = torch.zeros_like(pred)
+    _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+    # PSL(x, x) == 0, and the power spectrum is phase-blind: PSL(x, -x) == 0 too
+    torch.manual_seed(0)
+    pred = torch.randn(2, 1, 1, points, nvars, dtype=torch.float64)
+    assert abs(loss(pred, pred, squash=True).item()) < 1e-9
+    assert abs(loss(pred, -pred, squash=True).item()) < 1e-9
+
+    # gradients flow back through the radial-binning path (index_add_)
+    pred = pred.clone().requires_grad_(True)
+    loss(pred, target.double(), squash=True).backward()
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+    # patch-wise FFT2D has no single (ky, kx) plane to bin, so PSL must reject it
+    if transform == "fft2d":
+        with pytest.raises(AssertionError, match="does not support patch-wise FFT2D"):
+            PowerSpectrumLoss(
                 transform="fft2d",
                 x_dim=x_dim,
                 y_dim=y_dim,
