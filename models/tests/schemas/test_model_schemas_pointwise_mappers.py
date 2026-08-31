@@ -50,6 +50,8 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
     assert schema.processor.target_ == "anemoi.models.layers.processor.PointWiseMLPProcessor"
     assert schema.processor.dropout_p == 0.0
     assert schema.encoder.target_ == "anemoi.models.layers.mapper.PointWiseForwardMapper"
+    assert schema.latent_fusion.target_ == "anemoi.models.layers.fusion.SumLatentFusion"
+    assert schema.latent_fusion.gradient_checkpointing is False
     assert schema.decoder.target_ == "anemoi.models.layers.mapper.PointWiseBackwardMapper"
     assert schema.recompile_limit == 8
 

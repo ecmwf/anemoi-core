@@ -3,6 +3,11 @@ cpu_offload: False
 
 keep_batch_sharded: True
 
+latent_fusion:
+  _target_: anemoi.models.layers.fusion.SumLatentFusion
+  layer_kernels: ${model.layer_kernels}
+  gradient_checkpointing: false
+
 model:
   _target_: anemoi.models.models.AnemoiModelEncProcDec
   hidden_nodes_name: "hidden"

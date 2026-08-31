@@ -38,6 +38,20 @@ LOGGER = logging.getLogger(__name__)
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
+def resolve_attention_implementation(attention_implementation: str) -> str:
+    """Resolve the configured attention implementation against the inference override."""
+    if not ATTENTION_BACKEND or ATTENTION_BACKEND == attention_implementation:
+        return attention_implementation
+
+    LOGGER.info(
+        "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. "
+        "Overwriting attention backend from '%s' to '%s'",
+        attention_implementation,
+        ATTENTION_BACKEND,
+    )
+    return ATTENTION_BACKEND
+
+
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer
 
@@ -152,34 +166,18 @@ class MultiHeadSelfAttention(nn.Module):
             self.q_norm = layer_kernels["QueryNorm"](self.head_dim)
             self.k_norm = layer_kernels["KeyNorm"](self.head_dim)
 
-    def set_attention_function(self):
-        attn_funcs = {
-            "flash_attention": FlashAttentionWrapper,
-            "scaled_dot_product_attention": SDPAAttentionWrapper,
-        }
+    def set_attention_function(self) -> None:
+        """Set the configured attention backend, applying the inference override."""
+        attention_implementation = resolve_attention_implementation(self.attention_implementation)
+        backend_changed = attention_implementation != self.attention_implementation
+        self.attention_implementation = attention_implementation
 
-        # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND:
-            if ATTENTION_BACKEND == self.attention_implementation:
-                # Attention backend has already been updated, return early
-                return
-            LOGGER.info(
-                "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. Overwriting attention backend from '%s' to '%s'",
-                self.attention_implementation,
-                ATTENTION_BACKEND,
+        if backend_changed or not hasattr(self, "attention"):
+            self.attention = load_attention_implementation(
+                attention_implementation,
+                use_rotary_embeddings=self.use_rotary_embeddings,
+                head_dim=self.head_dim,
             )
-            self.attention_implementation = ATTENTION_BACKEND
-
-        assert self.attention_implementation in attn_funcs, f"backend '{self.attention_implementation}' not supported. \
-              Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
-
-        # initalise the attn func here
-        if self.attention_implementation == "flash_attention":
-            self.attention = attn_funcs[self.attention_implementation](
-                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
-            )
-        else:
-            self.attention = attn_funcs[self.attention_implementation]()
 
     def attention_computation(
         self,
@@ -518,6 +516,124 @@ class FlashAttentionWrapper(nn.Module):
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+
+def load_attention_implementation(
+    attention_implementation: str,
+    *,
+    use_rotary_embeddings: bool = False,
+    head_dim: Optional[int] = None,
+) -> nn.Module:
+    """Instantiate an attention backend by name."""
+    if attention_implementation == "scaled_dot_product_attention":
+        return SDPAAttentionWrapper()
+    if attention_implementation == "flash_attention":
+        return FlashAttentionWrapper(use_rotary_embeddings=use_rotary_embeddings, head_dim=head_dim)
+    raise ValueError(
+        f"Unsupported attention implementation '{attention_implementation}'. "
+        "Expected one of: flash_attention, scaled_dot_product_attention."
+    )
+
+
+class PointwiseMultiHeadCrossAttention(nn.Module):
+    """Attend over source tokens (independently) at each grid point.
+
+    Query has shape ``(grid, channels)``, keys and values have shape
+    ``(grid, sources, channels)``, and the output has shape ``(grid, channels)``.
+    """
+
+    def __init__(
+        self,
+        num_heads: int,
+        embed_dim: int,
+        layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
+        qkv_bias: bool = False,
+        qk_norm: bool = False,
+        dropout_p: float = 0.0,
+        attention_implementation: str = "scaled_dot_product_attention",
+    ) -> None:
+        super().__init__()
+        if num_heads <= 0:
+            raise ValueError(f"num_heads must be positive, got {num_heads}.")
+        if embed_dim <= 0:
+            raise ValueError(f"embed_dim must be positive, got {embed_dim}.")
+        if not 0.0 <= dropout_p <= 1.0:
+            raise ValueError(f"dropout_p must be between 0 and 1, got {dropout_p}.")
+
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels <= 0:
+            raise ValueError(f"attn_channels must be positive, got {self.attn_channels}.")
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads})."
+            )
+
+        self.num_heads = num_heads
+        self.head_dim = self.attn_channels // num_heads
+        self.dropout_p = dropout_p
+        self.qk_norm = qk_norm
+        self.attention_implementation = attention_implementation
+        self._attention_backend_applied = False
+
+        linear = layer_kernels.Linear
+        self.lin_q = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
+
+        if qk_norm:
+            self.q_norm = layer_kernels.QueryNorm(self.head_dim)
+            self.k_norm = layer_kernels.KeyNorm(self.head_dim)
+
+        self.set_attention_function()
+
+    def set_attention_function(self) -> None:
+        """Set the attention backend."""
+        attention_implementation = resolve_attention_implementation(self.attention_implementation)
+        backend_changed = attention_implementation != self.attention_implementation
+        self.attention_implementation = attention_implementation
+
+        if backend_changed or not hasattr(self, "attention"):
+            self.attention = load_attention_implementation(attention_implementation, head_dim=self.head_dim)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        """Apply cross-attention over source tokens at each grid point."""
+        query = self.lin_q(query)
+        key = self.lin_k(key)
+        value = self.lin_v(value)
+        query = einops.rearrange(
+            query,
+            "grid (heads vars) -> grid heads 1 vars",
+            heads=self.num_heads,
+        )
+        key, value = (
+            einops.rearrange(
+                tensor,
+                "grid sources (heads vars) -> grid heads sources vars",
+                heads=self.num_heads,
+            )
+            for tensor in (key, value)
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        if ATTENTION_BACKEND and not self._attention_backend_applied:
+            self.set_attention_function()
+            self._attention_backend_applied = True
+
+        output = self.attention(
+            query,
+            key,
+            value,
+            batch_size=query.shape[0],
+            causal=False,
+            dropout_p=self.dropout_p if self.training else 0.0,
+        )
+        output = einops.rearrange(output, "grid heads 1 vars -> grid (heads vars)")
+        return self.projection(output)
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
