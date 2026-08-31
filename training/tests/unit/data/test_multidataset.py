@@ -15,6 +15,8 @@ import pytest
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 
 
 class TestMultiDataset:
@@ -85,11 +87,32 @@ class TestMultiDataset:
 
         multi_dataset.set_epoch(0)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
-        assert multi_dataset.seed == 1000
+        seed_epoch_0 = multi_dataset.seed
+        assert seed_epoch_0 == derive_seed(1000, SeedContext.DATALOADER, 0)
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
-        assert multi_dataset.seed == 1005
+        seed_epoch_5 = multi_dataset.seed
+        assert seed_epoch_5 == derive_seed(1000, SeedContext.DATALOADER, 5)
+
+        assert seed_epoch_0 != seed_epoch_5
+
+        multi_dataset.per_worker_init(n_workers=4, worker_id=3)
+        assert multi_dataset.seed == seed_epoch_5
+
+    def test_worker_shuffle_repeats_for_same_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
+        """New workers reproduce the shuffle when the base seed and epoch match."""
+        mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
+        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+
+        multi_dataset.set_epoch(5)
+        multi_dataset.per_worker_init(n_workers=2, worker_id=1)
+        uninterrupted_order = list(multi_dataset)
+
+        multi_dataset.per_worker_init(n_workers=2, worker_id=1)
+        resumed_order = list(multi_dataset)
+
+        assert resumed_order == uninterrupted_order
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when a dataset has no valid anchors."""

@@ -76,9 +76,8 @@ class WeightAveragingSchema(GenericSchema):
           decay: 0.999
           update_starting_at_step: 1000
 
-    The stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes also instantiate
-    but pair parameters/buffers positionally; that is unsafe with anemoi imputers and
-    updating loss scalers (a warning will be logged).
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
+    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
     """
 
 
@@ -234,6 +233,17 @@ class ReweightedGraphNodeAttributeScalerSchema(BaseModel):
     "Normalisation method applied to the node attribute."
 
 
+class SpectralDimensionScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.SpectralDimensionScaler"] = Field(..., alias="_target_")
+    n_spectral_modes: PositiveInt = Field(example=193)
+    "Number of total wavenumbers (L dimension). For SHT-based losses this is ``truncation + 1``."
+    spectral_dims: PositiveInt | None = Field(default=None, example=193)
+    "Length of the spectral dimension as seen by the loss. Defaults to ``n_spectral_modes``. "
+    "Set explicitly for losses that keep the full (L, M) dimension flattened."
+    norm: Literal["unit-sum", "unit-mean", "l1"] | None = Field(default=None, example=None)
+    "Normalisation method applied to the scaler values."
+
+
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
@@ -245,6 +255,7 @@ ScalerSchema = (
     | UniformTimeStepScalerSchema
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
+    | SpectralDimensionScalerSchema
 )
 
 
@@ -260,7 +271,7 @@ class ImplementedLossesUsingBaseLossSchema(StrEnum):
     lsd = "anemoi.training.losses.LogSpectralDistance"
     logfft2d = "anemoi.training.losses.LogFFT2Distance"
     spectral_crps = "anemoi.training.losses.SpectralCRPSLoss"
-    spectral_l2 = "anemoi.training.losses.SpectralL2Loss"
+    power_spectrum = "anemoi.training.losses.PowerSpectrumLoss"
     spectral_amse = "anemoi.training.losses.SpectralAMSELoss"
 
 
@@ -319,6 +330,68 @@ class GraphLossMatrixSchema(BaseModel):
     row_normalize: bool = False
 
 
+class GraphScoreGraphSchema(BaseModel):
+    """Graph edge definition used by graph score losses."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    edges_name: tuple[str, str, str]
+    edge_weight_attribute: str | None = None
+    src_node_weight_attribute: str | None = None
+    row_normalize: bool = False
+    validate_row_sums: bool = False
+
+
+class EnsembleScoreLossSchema(BaseModel):
+    """Configuration shared by ensemble score losses."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    scalers: list[str] = Field(default_factory=list, example=["variable"])
+    ignore_nans: bool = False
+    predicted_variables: list[str] | None = None
+    target_variables: list[str] | None = None
+    check_variables_compatibility: CheckVariablesCompatibilitySchema = Field(
+        default_factory=CheckVariablesCompatibilitySchema,
+    )
+    no_autocast: bool = True
+
+
+class GraphScoreLossSchema(EnsembleScoreLossSchema):
+    """Configuration shared by graph score losses."""
+
+
+class GraphEnergyScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEnergyScoreLoss"] = Field(..., alias="_target_")
+    fair: bool = True
+    loss_graph: GraphScoreGraphSchema | None = None
+
+
+class EnergyScoreLossSchema(EnsembleScoreLossSchema):
+    target_: Literal["anemoi.training.losses.EnergyScoreLoss"] = Field(..., alias="_target_")
+    fair: bool = True
+    norm_over: Literal["spatial", "variables", "spatial_and_variables"] = "spatial"
+
+
+class GraphVariogramScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphVariogramScoreLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    p: float = Field(default=1.0, gt=0.0)
+    fair: bool = True
+
+
+class GraphEdgeCRPSLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEdgeCRPSLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    alpha: float = Field(default=1.0, ge=0.0, le=1.0)
+
+
+class GraphEdgeEnergyScoreLossSchema(GraphScoreLossSchema):
+    target_: Literal["anemoi.training.losses.GraphEdgeEnergyScoreLoss"] = Field(..., alias="_target_")
+    loss_graph: GraphScoreGraphSchema
+    fair: bool = True
+
+
 class MultiscaleConfigDiskSchema(BaseModel):
     """File-based multiscale config: smoothing matrices loaded from .npz files."""
 
@@ -360,11 +433,51 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
         return self
 
 
+class TimeAggregateLossWrapperSchema(BaseModel):
+    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
+
+    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
+    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
+    "Time aggregation operations to apply over the time dimension before computing the loss."
+    loss_fn: BaseLossSchema | CRPSSchema
+    "Inner loss function applied to each time-aggregated output."
+    scalers: list[str] | None = None
+    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
+
+    @field_validator("loss_fn", mode="before")
+    @classmethod
+    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
+        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
+
+        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
+        """
+        if isinstance(v, dict) and "scalers" not in v:
+            v["scalers"] = []
+        else:
+            from omegaconf import DictConfig
+            from omegaconf.omegaconf import open_dict
+
+            if isinstance(v, DictConfig) and "scalers" not in v:
+                with open_dict(v):
+                    v["scalers"] = []
+        return v
+
+
 class MultiScaleLossSchema(BaseModel):
     target_: Literal["anemoi.training.losses.MultiscaleLossWrapper"] = Field(..., alias="_target_")
-    per_scale_loss: CRPSSchema | BaseLossSchema
+    per_scale_loss: (
+        CRPSSchema
+        | TimeAggregateLossWrapperSchema
+        | GraphEnergyScoreLossSchema
+        | EnergyScoreLossSchema
+        | GraphVariogramScoreLossSchema
+        | GraphEdgeCRPSLossSchema
+        | GraphEdgeEnergyScoreLossSchema
+        | BaseLossSchema
+    )
     weights: list[float]
     multiscale_config: MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | None = None
+    sparse_projector_num_chunks: PositiveInt = 1
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None
@@ -399,36 +512,6 @@ class MultiScaleLossSchema(BaseModel):
             )
             raise ValueError(msg)
         return self
-
-
-class TimeAggregateLossWrapperSchema(BaseModel):
-    """Schema for TimeAggregateLossWrapper used inside CombinedLoss."""
-
-    target_: Literal["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"] = Field(..., alias="_target_")
-    time_aggregation_types: list[Literal["diff", "mean", "min", "max"]] = Field(min_length=1)
-    "Time aggregation operations to apply over the time dimension before computing the loss."
-    loss_fn: BaseLossSchema | CRPSSchema
-    "Inner loss function applied to each time-aggregated output."
-    scalers: list[str] | None = None
-    "Scalers to apply to the wrapped loss (delegated to inner loss_fn)."
-
-    @field_validator("loss_fn", mode="before")
-    @classmethod
-    def add_empty_scalers_to_inner(cls, v: Any) -> Any:
-        """Inject empty scalers for inner loss if missing; scalers flow through the wrapper.
-
-        This is needed to avoid validation errors on the inner loss when scalers are only defined at the wrapper level.
-        """
-        if isinstance(v, dict) and "scalers" not in v:
-            v["scalers"] = []
-        else:
-            from omegaconf import DictConfig
-            from omegaconf.omegaconf import open_dict
-
-            if isinstance(v, DictConfig) and "scalers" not in v:
-                with open_dict(v):
-                    v["scalers"] = []
-        return v
 
 
 class HuberLossSchema(BaseLossSchema):
@@ -503,6 +586,8 @@ class SpectralLossSchema(BaseLossSchema):
     """Optional slice or string to select a subgrid before the transform."""
     projection_config: SpectralProjectionConfigSchema | None = None
     """Optional sparse projection applied to the data before the spectral transform."""
+    coefficient_magnitude: bool = False
+    """For spectral CRPS, compare the moduli of the coefficients rather than their complex values."""
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
@@ -520,28 +605,29 @@ class SpectralLossSchema(BaseLossSchema):
         extra = "allow"
 
 
+_LOSS_DISCRIMINATOR_TAGS = {
+    "anemoi.training.losses.combined.CombinedLoss": "combined",
+    "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
+    "anemoi.training.losses.CRPS": "crps",
+    "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
+    "anemoi.training.losses.EnergyScoreLoss": "energy_score",
+    "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
+    "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
+    "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
+    "anemoi.training.losses.FourierCorrelationLoss": "spectral",
+    "anemoi.training.losses.LogSpectralDistance": "spectral",
+    "anemoi.training.losses.LogFFT2Distance": "spectral",
+    "anemoi.training.losses.SpectralCRPSLoss": "spectral",
+    "anemoi.training.losses.PowerSpectrumLoss": "spectral",
+    "anemoi.training.losses.SpectralAMSELoss": "spectral",
+    "anemoi.training.losses.HuberLoss": "huber",
+    "anemoi.training.losses.aggregate.TimeAggregateLossWrapper": "time_aggregate",
+}
+
+
 def _loss_discriminator(v: Any) -> str:
     target = v.get("_target_", "") if hasattr(v, "get") else getattr(v, "target_", "")
-    if target == "anemoi.training.losses.combined.CombinedLoss":
-        return "combined"
-    if target == "anemoi.training.losses.MultiscaleLossWrapper":
-        return "multiscale"
-    if target == "anemoi.training.losses.CRPS":
-        return "crps"
-    if target in {
-        "anemoi.training.losses.FourierCorrelationLoss",
-        "anemoi.training.losses.LogSpectralDistance",
-        "anemoi.training.losses.LogFFT2Distance",
-        "anemoi.training.losses.SpectralCRPSLoss",
-        "anemoi.training.losses.SpectralL2Loss",
-        "anemoi.training.losses.SpectralAMSELoss",
-    }:
-        return "spectral"
-    if target == "anemoi.training.losses.HuberLoss":
-        return "huber"
-    if target == "anemoi.training.losses.aggregate.TimeAggregateLossWrapper":
-        return "time_aggregate"
-    return "base"
+    return _LOSS_DISCRIMINATOR_TAGS.get(target, "base")
 
 
 class CombinedLossSchema(BaseLossSchema):
@@ -562,6 +648,11 @@ class CombinedLossSchema(BaseLossSchema):
             Annotated[BaseLossSchema, Tag("base")]
             | Annotated[HuberLossSchema, Tag("huber")]
             | Annotated[CRPSSchema, Tag("crps")]
+            | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+            | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
+            | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
+            | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
+            | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
@@ -617,6 +708,11 @@ LossSchemas = Annotated[
     | Annotated[HuberLossSchema, Tag("huber")]
     | Annotated[CombinedLossSchema, Tag("combined")]
     | Annotated[CRPSSchema, Tag("crps")]
+    | Annotated[GraphEnergyScoreLossSchema, Tag("graph_energy_score")]
+    | Annotated[EnergyScoreLossSchema, Tag("energy_score")]
+    | Annotated[GraphVariogramScoreLossSchema, Tag("graph_variogram_score")]
+    | Annotated[GraphEdgeCRPSLossSchema, Tag("graph_edge_crps")]
+    | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
@@ -637,6 +733,10 @@ class BaseDDPStrategySchema(BaseModel):
     "Number of GPUs per model."
     read_group_size: PositiveInt = Field(example=1)
     "Number of GPUs per reader group. Defaults to number of GPUs."
+    use_local_synchronization: bool = Field(default=True, example=True)
+    "Use synchronization local to the group when creating process groups."
+    broadcast_buffers: bool = Field(default=False, example=False)
+    "Broadcast model buffers at the start of each iteration. Defaults to False."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
@@ -713,8 +813,6 @@ class BaseTrainingSchema(BaseModel):
     "Maximum number of steps, stops earlier if max_epochs is reached first."
     optimization: OptimizationSchema
     "Optimizer and LR scheduler configuration."
-    recompile_limit: PositiveInt = 32
-    "How many times torch.compile will recompile a function for a given input shape."
     metrics: DatasetDict[list[str]]
     "List of metrics"
     ensemble_size_per_device: PositiveInt = 1
