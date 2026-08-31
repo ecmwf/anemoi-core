@@ -15,6 +15,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.graph import TrainableTensor
@@ -149,6 +150,53 @@ class TestGraphTransformerProcessor:
             assert (
                 param.grad.shape == param.shape
             ), f"param.grad.shape ({param.grad.shape}) != param.shape ({param.shape}) for {param}"
+
+    def test_processor_shares_one_halo_info_across_layers(
+        self, graphtransformer_processor, graphtransformer_init, graph_provider, monkeypatch
+    ):
+        batch_size = 1
+        x = torch.rand(
+            (self.NUM_NODES, graphtransformer_init.num_channels),
+            device=next(graphtransformer_processor.parameters()).device,
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES])
+        halo_info = HaloInfo(
+            num_local_nodes=self.NUM_NODES,
+            num_halo_nodes=0,
+            send_indices=(),
+            recv_counts=(),
+            recv_global_ids=None,
+            edge_index_local=edge_index,
+        )
+        monkeypatch.setattr(
+            graphtransformer_processor,
+            "_get_or_build_cached_halo_info",
+            lambda *args: halo_info,
+        )
+
+        received_halo_info = []
+        hooks = [
+            block.register_forward_pre_hook(
+                lambda module, args, kwargs: received_halo_info.append(kwargs["halo_info"]),
+                with_kwargs=True,
+            )
+            for block in graphtransformer_processor.proc
+        ]
+        try:
+            with torch.no_grad():
+                graphtransformer_processor(
+                    x,
+                    batch_size,
+                    shard_info,
+                    edge_attr,
+                    edge_index,
+                )
+        finally:
+            for hook in hooks:
+                hook.remove()
+
+        assert received_halo_info == [halo_info] * graphtransformer_init.num_layers
 
     def test_unsorted_edges_are_sorted_before_forward(
         self, graphtransformer_processor, graphtransformer_init, graph_provider

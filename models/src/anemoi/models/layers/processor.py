@@ -19,9 +19,16 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.halo import build_halo_info
+from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
+from anemoi.models.distributed.halo import verify_halo_info
+from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
@@ -530,6 +537,9 @@ class GraphTransformerProcessor(BaseProcessor):
             f"Supported strategies are 'edges' and 'heads'."
         )
         self.shard_strategy = shard_strategy
+        self._cached_halo_info = None
+        self._cached_halo_cache_specs = None
+        self._cached_halo_partition = None
 
         self.build_layers(
             GraphTransformerProcessorBlock,
@@ -548,6 +558,57 @@ class GraphTransformerProcessor(BaseProcessor):
         )
 
         self.offload_layers(cpu_offload)
+
+    def _get_or_build_cached_halo_info(
+        self,
+        x: Tensor,
+        edge_index: Adj,
+        shard_info: GraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ):
+        """Return one halo plan shared by all processor layers."""
+        if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
+            return None
+
+        if batch_size != 1:
+            raise ValueError(
+                "GraphTransformerProcessor halo exchange requires batch_size=1 when model sharding is enabled."
+            )
+
+        cache_specs = halo_cache_specs(shard_info, model_comm_group)
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+            return self._cached_halo_info
+
+        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
+
+        bipartite_shard_info = BipartiteGraphShardInfo(
+            src_nodes=shard_info.nodes,
+            dst_nodes=shard_info.nodes,
+            edges=shard_info.edges,
+        )
+        partition = build_graph_partition_from_shard_info(
+            edge_index,
+            (x, x),
+            bipartite_shard_info,
+            model_comm_group,
+        )
+        halo_info = build_halo_info(
+            partition,
+            edge_index,
+            model_comm_group,
+            shard_info.edges,
+            debug=ANEMOI_DEBUG_SHARDING,
+        )
+
+        if ANEMOI_DEBUG_SHARDING:
+            verify_halo_info(halo_info, partition, model_comm_group)
+
+        self._cached_halo_info = halo_info
+        self._cached_halo_cache_specs = cache_specs
+        self._cached_halo_partition = partition
+        return halo_info
 
     def forward(
         self,
@@ -609,8 +670,17 @@ class GraphTransformerProcessor(BaseProcessor):
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
         # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
+        halo_info = None
         if self.shard_strategy == "heads":
             edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
+        else:  # shard strategy "edges" w/ halo-exchange
+            halo_info = self._get_or_build_cached_halo_info(
+                x,
+                edge_index,
+                shard_info,
+                batch_size,
+                model_comm_group,
+            )
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
@@ -619,6 +689,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            halo_info=halo_info,
             edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
