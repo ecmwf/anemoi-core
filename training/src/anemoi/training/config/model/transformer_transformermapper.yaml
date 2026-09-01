@@ -102,9 +102,11 @@ output_mask:
     data:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
+node_trainable_parameters:
   data: 8
   hidden: 8
+
+edge_trainable_parameters:
   data2hidden: 8
   hidden2data: 8
 

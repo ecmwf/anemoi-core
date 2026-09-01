@@ -145,13 +145,6 @@ class TransportModel(Model):
     "Transport model objective, path, conditioning, and inference configuration."
 
 
-class TrainableParameters(PydanticBaseModel):
-    data: NonNegativeInt = Field(example=8)
-    "Size of the learnable data node tensor. Default to 8."
-    hidden: NonNegativeInt = Field(example=8)
-    "Size of the learnable hidden node tensor. Default to 8."
-
-
 class NoOutputMaskSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
@@ -209,7 +202,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Sparse projection settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
-    trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
+    node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])
     "Learnable node and edge parameters."
     bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."

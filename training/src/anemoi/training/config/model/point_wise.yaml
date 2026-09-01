@@ -38,7 +38,7 @@ encoders:
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
       layer_kernels: ${model.layer_kernels}
@@ -52,7 +52,7 @@ decoders:
     input_target_features: [ "encoded_data" ]
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       initialise_data_extractor_zero: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
@@ -69,13 +69,14 @@ output_mask:
     data:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
-  data: 0
-  hidden: 0
-  data2hidden: 0
-  hidden2data: 0
-  hidden2hidden: 0 # GNN and GraphTransformer Processor only
+node_trainable_parameters:
+  data: 8
+  hidden: 8
 
+edge_trainable_parameters:
+  data2hidden: 8
+  hidden2hidden: 8
+  hidden2data: 8
 
 attributes:
   edges:

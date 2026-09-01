@@ -24,7 +24,7 @@ model:
       # With omegaconf=2.4, the following will be supported ${model.decoders[0].mapper}
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -40,7 +40,7 @@ model:
   downscale_mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)

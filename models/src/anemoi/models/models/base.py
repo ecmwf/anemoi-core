@@ -75,7 +75,7 @@ class BaseGraphModel(nn.Module):
         self.latent_skip = model_config.model.model.latent_skip
 
         trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
+            model_config.model.node_trainable_parameters,
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )

@@ -42,7 +42,7 @@ layer_kernels:
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   num_channels: ${model.num_channels}
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 4
@@ -63,7 +63,7 @@ encoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -82,7 +82,7 @@ encoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -106,7 +106,7 @@ decoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -126,7 +126,7 @@ decoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -157,13 +157,15 @@ output_mask:
     cerra:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
-  data: 8
+node_trainable_parameters:
+  era5: 8
+  cerra: 8
   hidden: 8
-  data2hidden: 8
-  hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
 
+edge_trainable_parameters:
+  data2hidden: 8
+  hidden2hidden: 8
+  hidden2data: 8
 
 attributes:
   edges:

@@ -65,7 +65,7 @@ encoders:
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -87,7 +87,7 @@ decoders:
     input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -112,9 +112,11 @@ output_mask:
     data:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
+node_trainable_parameters:
   data: 8
   hidden: 8
+
+edge_trainable_parameters:
   data2hidden: 8
   hidden2data: 8
 
