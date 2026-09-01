@@ -29,5 +29,10 @@ system:
   output:
     root: /leonardo_work/DestE_340_26/ai-ml/${oc.env:USER}/anemoi-runs/o96-test
 
+diagnostics:
+  log:
+    mlflow:
+      tracking_uri: ${system.output.root}/mlflow  # unused while enabled: False, just satisfies the mandatory field
+
 # multi_scale.yaml's hidden mesh (TriNodes, resolution: 5, ~10k nodes) is the standard
 # pairing for O96 data (~40k grid points) - left as default, no override needed here.
