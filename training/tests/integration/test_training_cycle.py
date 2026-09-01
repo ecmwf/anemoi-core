@@ -471,6 +471,34 @@ def test_config_validation_offset_forecaster_config(offset_forecaster_config: tu
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Train the tendency transport path with irregular inputs and two forecast lead times."""
+    cfg, url = offset_forecaster_tendency_transport_config
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    assert trainer.task.name == "offset-forecaster"
+    assert trainer.datamodule.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
+    assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = offset_forecaster_tendency_transport_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_evaluator(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,

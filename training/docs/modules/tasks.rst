@@ -139,17 +139,17 @@ Rollout behavior:
  OffsetForecaster
 ******************
 
-:class:`~anemoi.training.tasks.forecasting.OffsetForecaster` is an
+:class:`~anemoi.training.tasks.forecaster.OffsetForecaster` is an
 experimental generalisation of
-:class:`~anemoi.training.tasks.forecasting.Forecaster` that declares the
+:class:`~anemoi.training.tasks.forecaster.Forecaster` that declares the
 sample directly through time offsets, i.e. times relative to the forecast initialisation time:
 
 - ``input_offsets`` — input time offsets as frequency strings, e.g.
-  ``["-1H", "-30m", "0m"]``.
+  ``["-1H", "-30m", "0m"]``. The latest input must be equivalent to ``0H``.
 - ``output_offsets`` — target time offsets as frequency strings, e.g. ``["30M",  "1h"]``.
 
 - ``rollout`` / ``validation_rollout`` — as for
-  :class:`~anemoi.training.tasks.forecasting.Forecaster`.
+  :class:`~anemoi.training.tasks.forecaster.Forecaster`.
 
 Examples
 ========
@@ -200,6 +200,8 @@ at each step.
 By default ``rollout_shift`` is set to the largest possible value. In some
 configurations several shifts are possible, so ``OffsetForecaster`` exposes it as
 an optional argument that lets the user override the default.
+For a shift to be valid, all outputs from one rollout step must precede all outputs
+from the next step; output windows cannot overlap or interleave.
 For example, with a single input and outputs ``["2H", "3H"]`` both ``2H`` and
 ``3H`` are possible. ``3H`` is the largest, and therefore the default, but the user can select ``2H`` as follows:
 

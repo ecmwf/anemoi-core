@@ -454,6 +454,12 @@ class OffsetForecaster(BaseForecaster):
         if len(output_offsets) != len(set(output_offsets)):
             msg = f"output_offsets contains duplicate values: {[frequency_to_string(v) for v in output_offsets]}"
             raise ValueError(msg)
+        if max(input_offsets) != datetime.timedelta(0):
+            msg = (
+                "The latest input offset must be 0h (the forecast initialisation time). "
+                f"input_offsets={[frequency_to_string(v) for v in input_offsets]}"
+            )
+            raise ValueError(msg)
         if max(input_offsets) >= min(output_offsets):
             msg = (
                 "All output offsets must be strictly greater than all input offsets "
@@ -465,19 +471,15 @@ class OffsetForecaster(BaseForecaster):
 
         # Check if the rollout shift is valid or replace "default" by the maximum valid shift.
 
-        # A shift S is valid if it is strictly positive, the shifted input offsets
-        # are contained in the union of input and output offsets, and no pairwise
-        # difference of output offsets is a multiple of S (which would cause the
-        # same output time step to be forecasted more than once across rollout steps).
+        # A shift S is valid if the shifted input offsets are contained in the
+        # union of input and output offsets and every output of one rollout step
+        # precedes every output of the next step. The latter also prevents the same
+        # output time from being forecast more than once across rollout steps.
         max_input = max(input_offsets)
         candidates = [o - max_input for o in output_offsets]
-        output_diffs = [o2 - o1 for o1 in output_offsets for o2 in output_offsets if o2 > o1]
-        valid = [
-            s
-            for s in candidates
-            if all(i + s in input_offsets + output_offsets for i in input_offsets[:-1])
-            and all(diff % s != datetime.timedelta(0) for diff in output_diffs)
-        ]
+        known_offsets = set(input_offsets + output_offsets)
+        output_span = max(output_offsets) - min(output_offsets)
+        valid = [s for s in candidates if all(i + s in known_offsets for i in input_offsets[:-1]) and output_span < s]
 
         if rollout_shift == "default":
             if not valid:
