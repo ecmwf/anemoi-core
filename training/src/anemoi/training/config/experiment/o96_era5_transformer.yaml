@@ -26,6 +26,8 @@ system:
   input:
     dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
     graph: null  # leave null to build from the `graph` config below; or point at a cached graph.pt
+  output:
+    root: /leonardo_work/DestE_340_26/ai-ml/${oc.env:USER}/anemoi-runs/o96-test
 
 # multi_scale.yaml's hidden mesh (TriNodes, resolution: 5, ~10k nodes) is the standard
 # pairing for O96 data (~40k grid points) - left as default, no override needed here.
