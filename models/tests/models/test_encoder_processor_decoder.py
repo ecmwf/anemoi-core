@@ -36,7 +36,7 @@ class _SharedEncoder(nn.Module):
 
 
 class _CaptureAggregator(nn.Module):
-    def forward(self, latents: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(self, hidden_latent: torch.Tensor, latents: dict[str, torch.Tensor]) -> torch.Tensor:
         self.latents = dict(latents)
         raise _AggregationReached
 
@@ -47,6 +47,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         self.input_datasets = ["dataset_a", "dataset_b"]
         self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
         self._graph_name_hidden = "hidden"
+        self.input_dim_latent = 4
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(
             {dataset_name: _GraphProvider() for dataset_name in self.input_datasets},
@@ -82,7 +83,6 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     with pytest.raises(_AggregationReached):
         model(inputs)
 
-    assert model._get_latent_aggregator_channels() == {"dataset_a": 4, "dataset_b": 4}
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
