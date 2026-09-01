@@ -10,6 +10,7 @@
 
 import logging
 from functools import cached_property
+from typing import Any
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -73,17 +74,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Return tendency statistics from all training datasets."""
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
-        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
-        # per-step differences rather than cumulative offsets from t=0), use that
-        # delta for every lead time so all steps share the same tendency statistics.
-        tendency_delta = getattr(self.task, "tendency_delta", None)
-        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
-
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {
-                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
-            }
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -149,9 +142,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        self.sync_dataset_state()
 
+    def sync_dataset_state(self) -> None:
+        """Synchronize datasets with the current epoch and task state."""
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
@@ -161,7 +157,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
             dataset.set_epoch(
-                epoch,
+                self.epoch,
                 rollout=len(tuple(self.task.steps(label))),
                 relative_date_indices=compute_relative_date_indices(
                     self.task,
@@ -170,15 +166,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 ),
             )
 
-    def _persistent_workers(self) -> bool:
-        """Return whether DataLoader workers can persist across epochs."""
+    def state_dict(self) -> dict[str, Any]:
+        """Save the epoch used to seed newly started dataloader workers."""
+        return {"epoch": self.epoch}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore the dataloader epoch before Lightning starts worker processes."""
+        self.set_epoch(state_dict["epoch"])
+
+    @cached_property
+    def _use_persistent_workers(self) -> bool:
+        """Return the effective worker persistence setting."""
+        persistent_workers = self.config.dataloader.get("persistent_workers", True)
         rollout = getattr(self.task, "rollout", None)
-        if rollout is None:
-            return True
-        # Workers could also be persisted once rollout.step >= rollout.maximum,
-        # but that would make resumed runs behave differently from uninterrupted
-        # runs.
-        return rollout.epoch_increment == 0
+        if persistent_workers and rollout is not None and rollout.epoch_increment > 0:
+            LOGGER.info(
+                "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
+            )
+            return False
+        return persistent_workers
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
@@ -201,7 +207,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._persistent_workers(),
+            persistent_workers=self._use_persistent_workers,
             **extra,
         )
 

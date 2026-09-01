@@ -9,10 +9,9 @@
 
 """Unit tests for weight averaging callback functionality."""
 
-import logging
-
 import omegaconf
-import pytest
+import pytorch_lightning as pl
+import torch
 import yaml
 
 from anemoi.training.diagnostics.callbacks import _get_weight_averaging_callback
@@ -24,6 +23,13 @@ default_config = """
 training:
   weight_averaging: null
 """
+
+
+class _ModelWithIntegerBuffer(pl.LightningModule):
+    def __init__(self) -> None:
+        super().__init__()
+        self.weight = torch.nn.Parameter(torch.tensor(1.0))
+        self.register_buffer("indices", torch.tensor([0], dtype=torch.long))
 
 
 def test_weight_averaging_disabled_when_null() -> None:
@@ -58,22 +64,15 @@ def test_swa_callback_instantiates() -> None:
     assert isinstance(callbacks[0], WeightAveraging)
 
 
-def test_pl_callback_emits_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """Targeting the stock PL class instantiates but logs a warning about anemoi-specific hazards."""
-    try:
-        from pytorch_lightning.callbacks import EMAWeightAveraging as PLEMAWeightAveraging
-    except ImportError:
-        pytest.skip("EMAWeightAveraging not available in this PyTorch Lightning version")
+def test_weight_averaging_syncs_fixed_buffers_without_averaging_them() -> None:
+    model = _ModelWithIntegerBuffer()
+    callback = EMAWeightAveraging()
+    callback.setup(None, model, "fit")
+    assert callback._average_model is not None
 
-    config = omegaconf.OmegaConf.create(yaml.safe_load(default_config))
-    config.training.weight_averaging = {
-        "_target_": "pytorch_lightning.callbacks.EMAWeightAveraging",
-        "decay": 0.999,
-    }
-    with caplog.at_level(logging.WARNING, logger="anemoi.training.diagnostics.callbacks.weight_averaging"):
-        callbacks = _get_weight_averaging_callback(config.training.weight_averaging)
+    callback._average_model.update_parameters(model)
+    model.weight.data.fill_(2.0)
+    model.indices.fill_(1)
+    callback._average_model.update_parameters(model)
 
-    assert len(callbacks) == 1
-    assert isinstance(callbacks[0], PLEMAWeightAveraging)
-    assert not isinstance(callbacks[0], WeightAveraging)
-    assert any("is from stock pytorch_lightning" in rec.message for rec in caplog.records)
+    assert callback._average_model.module.indices.item() == 1

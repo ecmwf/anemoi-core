@@ -10,10 +10,10 @@
 import numpy as np
 import pytest
 
-from anemoi.training.diagnostics.focus_area import BoundingBoxSpatialMask
-from anemoi.training.diagnostics.focus_area import NodeAttributeSpatialMask
-from anemoi.training.diagnostics.focus_area import NoOpSpatialMask
-from anemoi.training.diagnostics.focus_area import build_spatial_mask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import BoundingBoxSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import NodeAttributeSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import NoOpSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 
 _rng = np.random.default_rng()
 

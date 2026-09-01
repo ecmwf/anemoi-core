@@ -534,9 +534,16 @@ class BenchmarkProfiler(Profiler):
         batch_size_tr = self.config.dataloader.batch_size.training
         batch_size_val = self.config.dataloader.batch_size.validation
 
+        # skip the first 100 iterations to avoid warmup effects on the throughput calculation
+        # if training on less then 100 iterations, skip 50% of the iterations to avoid warmup effects
+        # on the throughput calculation
+        warmup_iterations = 100
+        if self.config.dataloader.limit_batches.get("training", 0) < warmup_iterations:
+            warmup_iterations = int(self.config.dataloader.limit_batches.get("training", 0) * 0.5)
         training_rates_array = np.array(progressbar.training_rates)
-        speed_metrics["training_avg_throughput"] = training_rates_array.mean()
-        speed_metrics["training_avg_throughput_per_sample"] = training_rates_array.mean() / batch_size_tr
+        training_throughput = training_rates_array[warmup_iterations:].mean()
+        speed_metrics["training_avg_throughput"] = training_throughput
+        speed_metrics["training_avg_throughput_per_sample"] = training_throughput / batch_size_tr
 
         validation_rates_array = np.array(progressbar.validation_rates)
         speed_metrics["validation_avg_throughput"] = validation_rates_array.mean()
@@ -670,7 +677,11 @@ class ProfilerProgressBar(TQDMProgressBar):
         self._refresh_rate = refresh_rate
 
     def _extract_rate(self, pbar: _tqdm) -> float:
-        """Extracts the iteration rate from the progress bar.
+        """Extracts the instantaneous iteration rate of the most recent batch.
+
+        The previous (n, elapsed) is stored on the progress bar so the rate is
+        computed over the last interval only, rather than as a running average
+        over the whole epoch (which is skewed by the slow init iterations).
 
         Parameters
         ----------
@@ -682,7 +693,19 @@ class ProfilerProgressBar(TQDMProgressBar):
         float
             The iteration rate.
         """
-        return (pbar.format_dict["n"] - pbar.format_dict["initial"]) / pbar.format_dict["elapsed"]
+        n = pbar.format_dict["n"]
+        elapsed = pbar.format_dict["elapsed"]
+        prev_n = getattr(pbar, "_prev_n", 0)
+        prev_elapsed = getattr(pbar, "_prev_elapsed", 0.0)
+        pbar._prev_n = n
+        pbar._prev_elapsed = elapsed
+
+        delta_n = n - prev_n
+        delta_elapsed = elapsed - prev_elapsed
+        if delta_elapsed > 0:
+            return delta_n / delta_elapsed
+        # fall back to the cumulative rate if we have no valid interval
+        return (n - pbar.format_dict["initial"]) / elapsed
 
     def on_train_batch_end(
         self,
