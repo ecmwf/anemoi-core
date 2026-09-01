@@ -17,19 +17,69 @@ import re
 import shutil
 from collections.abc import Generator
 from pathlib import Path
+from textwrap import dedent
 from typing import Any
 
 from hydra import compose
 from hydra import initialize
 from hydra import initialize_config_dir
+from jinja2 import Environment
+from jinja2 import select_autoescape
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import BaseModel
+from rich.console import Console
 
 from anemoi.training.commands import Command
+from anemoi.training.migrations.migrator import MIGRATION_PATH
+from anemoi.training.migrations.migrator import ConfigMigrator
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.utils.migrations import added_migrations_compared_to_main_branch
+from anemoi.utils.migrations import get_migration_name
+from anemoi.utils.migrations import migrations_in_incorrect_order
 
 LOGGER = logging.getLogger(__name__)
+
+here = Path(__file__).parent
+root_folder = here.parent.parent.parent.parent.parent
+
+
+def get_migration_template() -> str:
+    return dedent("""\
+        {% for import in imports %}
+        {{import}}
+        {% endfor %}
+
+        # DO NOT CHANGE -->
+        metadata = MigrationMetadata(
+            versions={
+                "migration": "{{migration_version}}",
+                "anemoi-training": "%NEXT_ANEMOI_TRAINING_VERSION%",
+            },
+            {% if final %}
+            final=True,
+            {% endif %}
+        )
+        # <-- END DO NOT CHANGE
+        {% if not final %}
+
+
+        def migrate(config: Config) -> Config:
+            \"""Migrate the config.
+
+            Parameters
+            ----------
+            config : Config
+                The config object to migrated.
+
+            Returns
+            -------
+            Config
+                The migrated config.
+            \"""
+            return config
+        {% endif %}
+        """)
 
 
 class ConfigGenerator(Command):
@@ -80,7 +130,66 @@ class ConfigGenerator(Command):
             description=help_msg,
         )
 
+        help_msg = "Config migration commands."
+        migration = subparsers.add_parser(
+            "migration",
+            help=help_msg,
+            description=help_msg,
+        )
+        migration_subcommands = migration.add_subparsers(dest="migration_subcommand", required=True)
+
+        help_msg = "Apply all migrations to your config dump."
+        migration_sync = migration_subcommands.add_parser(
+            "sync",
+            help=help_msg,
+            description=help_msg,
+        )
+        migration_sync.add_argument("path", help="Path to the config dump to migrate.")
+        migration_sync.add_argument(
+            "--output",
+            "-o",
+            default="./migrated-config.yaml",
+            type=Path,
+            help="Path to the migrated config dump.",
+        )
+        migration_sync.add_argument(
+            "--dry-run",
+            action="store_true",
+            help="Perform a dry-run, without saving the updated config.",
+        )
+        migration_sync.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
+
+        help_msg = "Generate a config migration script."
+        migration_create = migration_subcommands.add_parser(
+            "create",
+            help=help_msg,
+            description=help_msg,
+        )
+        migration_create.add_argument("name", help="Name of the migration.")
+        migration_create.add_argument(
+            "--final",
+            "-f",
+            action="store_true",
+            default=False,
+            help="Set this as the final migration. Older configs cannot be migrated past this.",
+        )
+
+        help_msg = "Fix the order of migrations after a git merge."
+        migration_subcommands.add_parser("fix-order", help=help_msg, description=help_msg)
+
     def run(self, args: argparse.Namespace) -> None:
+
+        if args.subcommand == "migration" and args.migration_subcommand == "sync":
+            LOGGER.info("Migrating config %s in %s.", args.path, args.output, args.dry_run, args.no_color)
+            self.migrate_config(args.path, args.output)
+            return
+        if args.subcommand == "migration" and args.migration_subcommand == "create":
+            LOGGER.info("Creating migration script %s.", args.name)
+            self.create_config_migration(args.name, args.final)
+            return
+        if args.subcommand == "migration" and args.migration_subcommand == "fix-order":
+            self.fix_order_config_migration()
+            return
 
         self.overwrite = args.overwrite
 
@@ -209,6 +318,86 @@ class ConfigGenerator(Command):
         LOGGER.info("Dumping file in %s.", output)
         with output.open("w") as f:
             f.write(OmegaConf.to_yaml(cfg, sort_keys=sort))
+
+    def migrate_config(
+        self,
+        config_path: Path,
+        output: Path | None,
+        dry_run: bool = False,
+        no_color: bool = False,
+    ) -> None:
+        """Migrate a config dump."""
+        from difflib import unified_diff
+
+        original_config, migrated_config, executed_migrations = ConfigMigrator().sync(config_path)
+        original_conifg_lines = original_config.to_yaml().split("\n")
+        migrated_config_content = migrated_config.to_yaml()
+        migrated_config_lines = migrated_config_content.split("\n")
+
+        console = Console(force_terminal=not no_color, highlight=False)
+        prefix = "Executed"
+        if dry_run:
+            prefix = "Would execute"
+        if len(executed_migrations):
+            console.print(f"{prefix}", len(executed_migrations), "operation(s):")
+        if not len(executed_migrations):
+            console.print("Your config is already compatible :party_popper:! No missing migration to execute.")
+        for migration in executed_migrations:
+            console.print(f"  [green]+ MIGRATE [bold]{migration.name}[/bold][/green]")
+
+        print("\n".join(unified_diff(original_conifg_lines, migrated_config_lines)))  # noqa: T201
+        if output is not None and not dry_run:
+            output.write_text(migrated_config_content)
+
+    def create_config_migration(self, name: str, final: bool = False) -> None:
+        """Create a new migration script."""
+        name = get_migration_name(name)
+
+        imports: list[str] = ["from anemoi.utils.migrations import MigrationMetadata", ""]
+        if not final:
+            imports.append("from anemoi.training.migrations.config import Config")
+        template = Environment(trim_blocks=True, lstrip_blocks=True, autoescape=select_autoescape()).from_string(
+            get_migration_template(),
+        )
+
+        migration_path = MIGRATION_PATH / name
+
+        MIGRATION_PATH.mkdir(exist_ok=True, parents=True)
+
+        migration_path.write_text(
+            template.render(
+                {
+                    "migration_version": "1.0.0",
+                    "imports": imports,
+                    "final": final,
+                },
+            ),
+        )
+
+        print(f"Created migration {MIGRATION_PATH}/{name}")  # noqa: T201
+
+    def fix_order_config_migration(self) -> None:
+        """Fixes the order of the new migration scripts.
+
+        It uses the earliest possible time with the last migration name in origin/main.
+        """
+        new_migrations = added_migrations_compared_to_main_branch(root_folder, MIGRATION_PATH)
+        all_migrations = sorted(
+            [file.name for file in MIGRATION_PATH.iterdir() if file.is_file() and file.name != "__init__.py"],
+        )
+        incorrect_order, last_upstream_name = migrations_in_incorrect_order(all_migrations, new_migrations)
+
+        if last_upstream_name is None or not len(incorrect_order):
+            print("No migration to rename.")  # noqa: T201
+            return
+
+        new_timestamp = int(last_upstream_name.partition("_")[0]) + 1
+        for k, name in enumerate(new_migrations):
+            path = MIGRATION_PATH / name
+            _, _, new_name = name.partition("_")
+            new_name = f"{new_timestamp + k}_{new_name}"
+            print(f"Renaming {name} to {new_name}.")  # noqa: T201
+            path.rename(path.with_name(new_name))
 
 
 @contextlib.contextmanager
