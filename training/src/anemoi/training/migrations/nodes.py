@@ -12,18 +12,20 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
-from collections.abc import Iterable
-from collections.abc import Sequence
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
 
-import yamlrocks
 from omegaconf import DictConfig
 from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 if TYPE_CHECKING:
+    from collections.abc import Iterable
+    from collections.abc import Sequence
+
+    import yamlrocks
+
     from anemoi.training.migrations.interpolations import InterpolationHandler
 
 LOGGER = logging.getLogger(__name__)
@@ -127,6 +129,7 @@ class Node(NodeBase):
 
     def get(self, key: str | int) -> Node:
         """Gets the key while asserting that this node is a NodeContainer.
+
         If it isnt't, raises a TypeError at runtime.
 
         Parameters
@@ -140,11 +143,13 @@ class Node(NodeBase):
             The requeted node.
         """
         if not isinstance(self, NodeContainer):
-            raise TypeError("This node is not a NodeContainer.")
+            msg = "This node is not a NodeContainer."
+            raise TypeError(msg)
         return self[key]
 
     def set(self, key: str | int, value: Any) -> None:
         """Sets the key while asserting that this node is a NodeContainer.
+
         If it isnt't, raises a TypeError at runtime.
 
         Parameters
@@ -155,11 +160,13 @@ class Node(NodeBase):
             New value to set.
         """
         if not isinstance(self, NodeContainer):
-            raise TypeError("This node is not a NodeContainer.")
+            msg = "This node is not a NodeContainer."
+            raise TypeError(msg)
         self[key] = value
 
     def delete(self, key: str | int) -> None:
         """Deletes the key while asserting that this node is a NodeContainer.
+
         If it isnt't, raises a TypeError at runtime.
 
         Parameters
@@ -168,7 +175,8 @@ class Node(NodeBase):
             Key to delete.
         """
         if not isinstance(self, NodeContainer):
-            raise TypeError("This node is not a NodeContainer.")
+            msg = "This node is not a NodeContainer."
+            raise TypeError(msg)
         del self[key]
 
     def __repr__(self) -> str:
@@ -211,7 +219,8 @@ class NodeContainer(Node, ABC):
 
     def __getitem__(self, key: str | int) -> Node:
         if not self._is_key_valid(key):
-            raise ValueError(f"key {key} not in Node.")
+            msg = f"key {key} not in Node."
+            raise ValueError(msg)
 
         if isinstance(self.cfg[key], ListConfig):
             cls = NodeList
@@ -250,7 +259,8 @@ class NodeContainer(Node, ABC):
         node = self
         for part in parts:
             if not isinstance(node, NodeContainer):
-                raise TypeError(f"Cannot select {part}. Not a container node.")
+                msg = f"Cannot select {part}. Not a container node."
+                raise TypeError(msg)
             if part not in node and create_missing:
                 node[part] = {}
             node = node[part]
@@ -261,7 +271,8 @@ class NodeContainer(Node, ABC):
         parent_node = self.select(parents)
 
         if not isinstance(parent_node, NodeContainer):
-            raise TypeError(f"Cannot delete node {keys}. Not a container node.")
+            msg = f"Cannot delete node {keys}. Not a container node."
+            raise TypeError(msg)
 
         if not remove_empty:
             del parent_node[key]
@@ -279,7 +290,8 @@ class NodeContainer(Node, ABC):
         parents, key = parse_key(keys)
         parent_node = self.select(parents, create_missing=True)
         if not isinstance(parent_node, NodeContainer):
-            raise TypeError(f"Cannot add node {keys}. Not a container node.")
+            msg = f"Cannot add node {keys}. Not a container node."
+            raise TypeError(msg)
         parent_node[key] = value
 
     def rename_key(self, start: str, end: str, remove_empty: bool = False) -> None:

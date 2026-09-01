@@ -12,10 +12,9 @@ from __future__ import annotations
 import logging
 import re
 from collections import defaultdict
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from typing import NamedTuple
 
-from omegaconf import Node as OGNode
 from omegaconf.grammar_parser import parse
 from omegaconf.grammar_visitor import GrammarVisitor
 
@@ -23,6 +22,11 @@ from anemoi.training.migrations.nodes import Node
 from anemoi.training.migrations.nodes import NodeContainer
 from anemoi.training.migrations.nodes import NodeDict
 from anemoi.training.migrations.nodes import NodeList
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from omegaconf import Node as OGNode
 
 LOGGER = logging.getLogger(__name__)
 
@@ -32,7 +36,7 @@ INTERPOLATION_PATTERN = re.compile(r"\$\{([^}]*)\}", flags=re.ASCII)
 def get_interpolations(value: str) -> list[str]:
     interpolations: list[str] = []
 
-    def node_interpolation_callback(inter_key: str, _) -> OGNode | None:
+    def node_interpolation_callback(inter_key: str, _: set[int] | None) -> OGNode | None:
         interpolations.append(inter_key)
 
     def resolver_interpolation_callback(*_args, **_kwargs) -> None:
@@ -120,7 +124,7 @@ class InterpolationHandler:
         for node, key, new_value in changes:
             node.set(key, new_value)
 
-    def _parse_node(self, node: NodeContainer, prefix: Sequence[str | int], key: str | int):
+    def _parse_node(self, node: NodeContainer, prefix: Sequence[str | int], key: str | int) -> None:
         parts = (*prefix, key)
 
         # We fisrt clear old values before recomputing.
