@@ -82,18 +82,9 @@ def test_get_edge_attributes():
 
 def test_get_distributed_device(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
 
     monkeypatch.setenv("SLURM_LOCALID", "2")
     assert get_distributed_device() == torch.device("cuda:2")
-
-    # one GPU bound per task: local rank must wrap around to a visible device
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 1)
-    assert get_distributed_device() == torch.device("cuda:0")
-
-    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
-    monkeypatch.setenv("SLURM_LOCALID", "3")
-    assert get_distributed_device() == torch.device("cuda:1")
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert get_distributed_device() == torch.device("cpu")

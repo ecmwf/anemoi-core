@@ -29,7 +29,7 @@ def get_distributed_device() -> torch.device:
         import os
 
         local_rank = int(os.environ.get("SLURM_LOCALID", 0))
-        device = torch.device(f"cuda:{local_rank % torch.cuda.device_count()}")
+        device = torch.device(f"cuda:{local_rank}")
     else:
         device = torch.device("cpu")
 
@@ -37,13 +37,7 @@ def get_distributed_device() -> torch.device:
 
 
 def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
-    """Scoped switch of the current CUDA device; no-op for CPU.
-
-    Some extension ops (e.g. torch-cluster) use the current CUDA device internally, so
-    they must run with the current device matching their input tensors' device.
-    Otherwise, every process touches GPU 0, which crashes on clusters whose GPUs run in
-    exclusive compute mode and wastes memory on a GPU-0 context elsewhere.
-    """
+    """Scoped switch of the current CUDA device; no-op for CPU."""
     device = torch.device(device)
     if device.type == "cuda":
         return torch.cuda.device(device)
