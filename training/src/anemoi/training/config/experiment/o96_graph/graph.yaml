@@ -1,0 +1,44 @@
+overwrite: True
+
+attributes:
+  edges: &edges_attributes
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: null
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: null
+
+nodes:
+  data:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: /home/masc/storage/mini_aifs.zarr
+
+  hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.TriNodes
+      resolution: 5 # R=5 gives ~2,562 nodes, R=6 gives ~40,962 nodes
+
+edges:
+  - source_name: data
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.ReversedKNNEdges
+        num_nearest_neighbours: 1
+    attributes: *edges_attributes
+
+  - source_name: hidden
+    target_name: data
+    edge_builders:
+      - _target_: anemoi.graphs.edges.KNNEdges
+        num_nearest_neighbours: 3
+    attributes: *edges_attributes
+
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+      - _target_: anemoi.graphs.edges.MultiScaleEdges
+        x_hops: 1
+        scale_resolutions: 5
+    attributes: *edges_attributes
