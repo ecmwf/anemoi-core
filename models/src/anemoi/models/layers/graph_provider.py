@@ -513,7 +513,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
         elif edges_name is not None:
             if graph is None:
                 raise ValueError("graph must be provided when constructing a projection from edges_name.")
-            self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
+            self._build_from_graph(
+                graph, edges_name, edge_weight_attribute, src_node_weight_attribute, edge_mask, row_normalize
+            )
 
     def __deepcopy__(self, memo: dict) -> "ProjectionGraphProvider":
         """Deepcopy that shares the static projection matrix by reference.
