@@ -55,7 +55,7 @@ jobs:
             #SBATCH --job-name=anemoi_core_build_env
             #SBATCH --nodes=1
             #SBATCH --cpus-per-task=32
-            #SBATCH --time=01:00:00
+            #SBATCH --time=00:30:00
             #SBATCH --qos=nf
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
@@ -106,8 +106,8 @@ jobs:
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
-        #SBATCH --time=01:00:00
-        #SBATCH --qos=ng
+        #SBATCH --time=00:30:00
+        #SBATCH --qos=dg
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
