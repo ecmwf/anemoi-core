@@ -68,7 +68,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
+      pytest_cmd: srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu --basetemp=$TMPDIR/pytest-$SLURM_PROCID
       timeout_minutes: 360
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_benchmark_pytest
