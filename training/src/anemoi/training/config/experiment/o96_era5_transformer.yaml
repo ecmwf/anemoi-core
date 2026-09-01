@@ -1,0 +1,31 @@
+# @package _global_
+#
+# O96 ERA5, TransformerProcessor + GraphTransformer encoder/decoder.
+# Run with: anemoi-training train --config-name=o96_era5_transformer
+# (after `anemoi-training config generate` has copied this config tree locally)
+
+defaults:
+  - override /data: zarr
+  - override /dataloader: native_grid
+  - override /diagnostics: evaluation
+  - override /system: example
+  - override /graph: multi_scale
+  - override /model: transformer
+  - override /task: forecaster
+  - override /training: single
+  - _self_
+
+# native_grid.yaml's defaults (batch_size 2/gpu, read_group_size = num_gpus_per_model)
+# are tuned for O96 assuming 8 GPUs -> effective batch size 16. With num_gpus_per_node: 1
+# below, effective batch size drops to 2 -- fine for a memory-fit smoke test, not for a real run.
+system:
+  hardware:
+    num_gpus_per_node: 1  # single-GPU smoke test to check O96 fits in memory
+    num_nodes: 1
+    num_gpus_per_model: 1  # raise this only if O96 + this model doesn't fit on one GPU
+  input:
+    dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
+    graph: null  # leave null to build from the `graph` config below; or point at a cached graph.pt
+
+# multi_scale.yaml's hidden mesh (TriNodes, resolution: 5, ~10k nodes) is the standard
+# pairing for O96 data (~40k grid points) - left as default, no override needed here.
