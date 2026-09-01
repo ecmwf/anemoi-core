@@ -496,7 +496,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
 
-        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        if not self.config.training.load_weights_only:
+            self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
+            # Anemoi constructs the task and datasets from the config before Lightning
+            # restores their checkpoint state. Now that the checkpoint rollout is restored,
+            # update any constructed datasets so workers load the required input and target
+            # time steps. Checkpoint conversion loads the module without creating a Trainer
+            # or datamodule, so only synchronize if a datamodule is attached.
+            trainer = getattr(self, "_trainer", None)
+            if trainer is not None and trainer.datamodule is not None:
+                trainer.datamodule.sync_dataset_state()
 
         # Extract variables_metadata for unit compatibility check
         self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
@@ -1217,9 +1227,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         super().lr_scheduler_step(scheduler, metric)
 
+    def on_train_start(self) -> None:
+        """Log the effective task state after checkpoint restoration."""
+        super().on_train_start()
+        self.task.log_training_state()
+
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        # Default epoch checkpoints are saved at validation end, before this
+        # hook. On resume Lightning finishes the saved epoch here, advancing the
+        # dataloader before newly created workers derive the seed for that epoch.
         self.trainer.datamodule.set_epoch(self.current_epoch + 1)
+        super().on_train_epoch_end()
 
     def configure_optimizers(
         self,

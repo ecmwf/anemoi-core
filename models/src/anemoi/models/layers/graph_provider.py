@@ -475,6 +475,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
+        edge_mask: Optional[Tensor] = None,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -492,6 +493,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Path to .npz file with projection matrix
         row_normalize : bool
             Whether to normalize weights per row (target node) so each row sums to 1
+        edge_mask : Tensor, optional
+            Boolean mask which selects graph edges before constructing the matrix
         """
         super().__init__()
 
@@ -539,6 +542,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         edges_name: tuple[str, str, str],
         edge_weight_attribute: Optional[str],
         src_node_weight_attribute: Optional[str],
+        edge_mask: Optional[Tensor],
         row_normalize: bool,
     ) -> None:
         """Build projection matrix from graph.
@@ -547,21 +551,26 @@ class ProjectionGraphProvider(BaseGraphProvider):
         and then converted to CSR format for efficient sparse operations.
         """
         sub_graph = graph[edges_name]
+        edge_index = sub_graph.edge_index
 
         if edge_weight_attribute:
             weights = sub_graph[edge_weight_attribute].reshape(-1)
         else:
-            weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+            weights = torch.ones(edge_index.shape[1], device=edge_index.device)
 
         if src_node_weight_attribute:
-            weights = weights * graph[edges_name[0]][src_node_weight_attribute].reshape(-1)[sub_graph.edge_index[0]]
+            weights = weights * graph[edges_name[0]][src_node_weight_attribute].reshape(-1)[edge_index[0]]
+
+        if edge_mask is not None:
+            edge_index = edge_index[:, edge_mask]
+            weights = weights[edge_mask]
 
         matrix = coo_matrix(
             (
                 weights.detach().to(dtype=torch.float32, device="cpu").contiguous().numpy(),
                 (
-                    sub_graph.edge_index[1].detach().cpu().contiguous().numpy(),
-                    sub_graph.edge_index[0].detach().cpu().contiguous().numpy(),
+                    edge_index[1].detach().cpu().contiguous().numpy(),
+                    edge_index[0].detach().cpu().contiguous().numpy(),
                 ),
             ),
             shape=(

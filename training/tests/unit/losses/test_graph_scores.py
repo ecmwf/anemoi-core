@@ -60,6 +60,19 @@ def loss_graph() -> dict[str, object]:
 
 
 @pytest.fixture
+def closed_graph_data() -> HeteroData:
+    graph = HeteroData()
+    graph["data"].num_nodes = 3
+    graph["data", "to", "data"].edge_index = torch.tensor(
+        [
+            [0, 1, 1, 2, 2, 0],
+            [0, 0, 1, 1, 2, 2],
+        ],
+    )
+    return graph
+
+
+@pytest.fixture
 def score_inputs() -> tuple[torch.Tensor, torch.Tensor]:
     pred = torch.tensor(
         [
@@ -83,6 +96,17 @@ def score_inputs() -> tuple[torch.Tensor, torch.Tensor]:
 def _edge_metadata(graph_data: HeteroData) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     edge_store = graph_data["data", "to", "data"]
     return edge_store.edge_index[0], edge_store.edge_index[1], edge_store.weight
+
+
+def _open_edge_metadata(graph_data: HeteroData) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    src, dst, weights = _edge_metadata(graph_data)
+    edge_mask = src != dst
+    src = src[edge_mask]
+    dst = dst[edge_mask]
+    weights = weights[edge_mask]
+    row_sums = torch.zeros(graph_data["data"].num_nodes, dtype=weights.dtype)
+    row_sums.index_add_(0, dst, weights)
+    return src, dst, weights / row_sums[dst]
 
 
 def _aggregate_edges(
@@ -129,7 +153,7 @@ def _graph_variogram_reference(
     fair: bool,
     p: float,
 ) -> torch.Tensor:
-    src, dst, weights = _edge_metadata(graph_data)
+    src, dst, weights = _open_edge_metadata(graph_data)
     target = target.squeeze(2)
     ensemble_size = pred.shape[2]
 
@@ -155,7 +179,7 @@ def _graph_edge_crps_reference(
     *,
     alpha: float,
 ) -> torch.Tensor:
-    src, dst, weights = _edge_metadata(graph_data)
+    src, dst, weights = _open_edge_metadata(graph_data)
     target = target.squeeze(2)
     ensemble_size = pred.shape[2]
     obs_edge = target[:, :, src] - target[:, :, dst]
@@ -176,7 +200,7 @@ def _graph_edge_energy_reference(
     *,
     fair: bool,
 ) -> torch.Tensor:
-    src, dst, weights = _edge_metadata(graph_data)
+    src, dst, weights = _open_edge_metadata(graph_data)
     target = target.squeeze(2)
     ensemble_size = pred.shape[2]
 
@@ -257,6 +281,92 @@ def test_graph_scores_match_reference(
     expected = reference(pred, target, graph_data)
 
     torch.testing.assert_close(actual, expected)
+
+
+def test_graph_energy_matches_row_normalized_closed_neighbourhood(
+    closed_graph_data: HeteroData,
+    score_inputs: tuple[torch.Tensor, torch.Tensor],
+) -> None:
+    prediction, target = score_inputs
+    loss = GraphEnergyScoreLoss(
+        graph_data=closed_graph_data,
+        loss_graph={
+            "edges_name": ["data", "to", "data"],
+            "row_normalize": True,
+        },
+        fair=True,
+    )
+    matrix = loss.graph_provider.get_edges(dtype=prediction.dtype)
+    expected_matrix = torch.tensor(
+        [
+            [0.5, 0.5, 0.0],
+            [0.0, 0.5, 0.5],
+            [0.5, 0.0, 0.5],
+        ],
+        dtype=prediction.dtype,
+    )
+
+    def neighbourhood_norm(values: torch.Tensor) -> torch.Tensor:
+        return torch.sqrt(torch.einsum("ij,...jv->...iv", expected_matrix, values.square()))
+
+    target = target.squeeze(2)
+    observation_term = neighbourhood_norm(prediction - target.unsqueeze(2)).mean(dim=2)
+    pair_term = torch.zeros_like(observation_term)
+    for first in range(prediction.shape[2]):
+        for second in range(first + 1, prediction.shape[2]):
+            pair_term += neighbourhood_norm(prediction[:, :, first] - prediction[:, :, second])
+    expected = observation_term - pair_term / (prediction.shape[2] * (prediction.shape[2] - 1))
+
+    torch.testing.assert_close(matrix.to_dense(), expected_matrix)
+    torch.testing.assert_close(
+        loss._compute_local_score_tensor(prediction, target, *loss._graph_kernel_tensors(prediction)),
+        expected,
+    )
+
+
+def test_graph_energy_row_normalization_uses_only_valid_neighbours(closed_graph_data: HeteroData) -> None:
+    prediction = torch.tensor(
+        [[[[[2.0], [torch.nan], [6.0]], [[2.0], [torch.nan], [6.0]]]]],
+        dtype=torch.float64,
+    )
+    target = torch.zeros(1, 1, 1, 3, 1, dtype=torch.float64)
+    loss = GraphEnergyScoreLoss(
+        graph_data=closed_graph_data,
+        loss_graph={
+            "edges_name": ["data", "to", "data"],
+            "row_normalize": True,
+        },
+        fair=True,
+        ignore_nans=True,
+    )
+
+    actual = loss._compute_local_score_tensor(
+        prediction,
+        target.squeeze(2),
+        *loss._graph_kernel_tensors(prediction),
+    )
+
+    torch.testing.assert_close(actual[..., 0, :], torch.tensor([[[2.0]]], dtype=torch.float64))
+    torch.testing.assert_close(actual[..., 2, :], torch.tensor([[[20.0**0.5]]], dtype=torch.float64))
+    assert torch.isnan(actual[..., 1, :]).all()
+
+
+@pytest.mark.parametrize("loss_cls", [GraphVariogramScoreLoss, GraphEdgeCRPSLoss, GraphEdgeEnergyScoreLoss])
+def test_edge_scores_remove_self_edges_before_row_normalization(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+    loss_cls: type[BaseLoss],
+) -> None:
+    loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
+
+    expected = torch.tensor(
+        [
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.4, 0.6, 0.0],
+        ],
+    )
+    torch.testing.assert_close(loss.graph_provider.get_edges().to_dense(), expected)
 
 
 @pytest.mark.parametrize("ignore_nans", [False, True])
@@ -709,11 +819,13 @@ def test_graph_definition_applies_source_node_weights(graph_data: HeteroData) ->
             "src_node_weight_attribute": "area",
         },
     )
-    src = graph_data["data", "to", "data"].edge_index[0]
-    expected = graph_data["data", "to", "data"].weight * graph_data["data"].area[src]
+    src, dst = graph_data["data", "to", "data"].edge_index
+    edge_mask = src != dst
+    src = src[edge_mask]
+    dst = dst[edge_mask]
+    expected = graph_data["data", "to", "data"].weight[edge_mask] * graph_data["data"].area[src]
 
     expected_matrix = torch.zeros(3, 3)
-    dst = graph_data["data", "to", "data"].edge_index[1]
     expected_matrix.index_put_((dst, src), expected, accumulate=True)
     torch.testing.assert_close(loss.graph_provider.get_edges().to_dense(), expected_matrix)
 
@@ -746,19 +858,19 @@ def test_graph_definition_rejects_invalid_weights(
 @pytest.mark.parametrize("loss_cls", [GraphEnergyScoreLoss, GraphEdgeEnergyScoreLoss])
 def test_energy_scores_ignore_zero_weight_edges_without_nan_gradients(loss_cls: type[BaseLoss]) -> None:
     graph = HeteroData()
-    graph["data"].num_nodes = 2
+    graph["data"].num_nodes = 3
     graph["data", "to", "data"].edge_index = torch.tensor(
         [
-            [0, 1, 1],
-            [0, 0, 1],
+            [1, 2, 0, 2],
+            [0, 1, 2, 0],
         ],
     )
-    graph["data", "to", "data"].weight = torch.tensor([1.0, 0.0, 1.0])
+    graph["data", "to", "data"].weight = torch.tensor([1.0, 1.0, 1.0, 0.0])
     pred = torch.tensor(
-        [[[[[0.0], [1.0]], [[0.0], [2.0]]]]],
+        [[[[[0.0], [1.0], [2.0]], [[0.0], [2.0], [1.0]]]]],
         requires_grad=True,
     )
-    target = torch.zeros(1, 1, 1, 2, 1)
+    target = torch.zeros(1, 1, 1, 3, 1)
     loss = loss_cls(
         graph_data=graph,
         loss_graph={
