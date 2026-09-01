@@ -13,7 +13,7 @@ from anemoi.training.migrations.nodes import NodeContainer
 from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_config(config_from_content: ConfigFromContent):
+def test_config(config_from_content: ConfigFromContent) -> None:
     content = dedent("""\
     foo:
       bar:
