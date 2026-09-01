@@ -27,7 +27,7 @@ system:
     dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
     graph: ${system.output.root}/graph.pt  # built once here on first run, then reused (see `graph` config below for how it's built)
   output:
-    root: /leonardo_work/DestE_340_26/ai-ml/${oc.env:USER}/anemoi-runs/o96-test
+    root: ${oc.env:HOME}/anemoi-runs/o96-test
 
 diagnostics:
   log:
