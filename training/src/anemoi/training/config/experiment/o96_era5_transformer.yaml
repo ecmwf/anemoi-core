@@ -25,7 +25,7 @@ system:
     num_gpus_per_model: 1  # raise this only if O96 + this model doesn't fit on one GPU
   input:
     dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
-    graph: null  # leave null to build from the `graph` config below; or point at a cached graph.pt
+    graph: ${system.output.root}/graph.pt  # built once here on first run, then reused (see `graph` config below for how it's built)
   output:
     root: /leonardo_work/DestE_340_26/ai-ml/${oc.env:USER}/anemoi-runs/o96-test
 
