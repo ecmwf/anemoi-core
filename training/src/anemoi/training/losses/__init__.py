@@ -35,21 +35,17 @@ from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
-    "CombinedLoss",
-<<<<<<< HEAD
+    "CombinedLoss",    
+    "DiscreteSobolevH1Loss",    
     "EnergyScoreLoss",
     "FourierCorrelationLoss",
     "GraphEdgeCRPSLoss",
     "GraphEdgeEnergyScoreLoss",
     "GraphEnergyScoreLoss",
     "GraphVariogramScoreLoss",
-=======
-    "DiscreteSobolevH1Loss",
-    "FourierCorrelationLoss",
     "GradientMeanSquareLoss",
     "GradientMeanAbsLoss",
     "GradientMaxAbsLoss",     
->>>>>>> 939408efe (feat(training) : add gradient loss)
     "HuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
