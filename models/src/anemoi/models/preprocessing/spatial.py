@@ -12,6 +12,8 @@ import logging
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.distributed.shapes import ShardSizes
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -22,27 +24,48 @@ class SpatialPreprocessor(nn.Module):
     ``SpatialPreprocessor`` subclasses may change the grid dimension — for example
     projecting data from a low-resolution grid onto a high-resolution grid.
 
-    Subclasses must implement ``forward``. The ``inverse`` method raises
-    ``NotImplementedError`` by default because spatial projections are generally
-    not invertible.
+    Subclasses must implement ``forward`` and expose their input and output grid
+    sizes. The ``inverse`` method raises ``NotImplementedError`` by default
+    because spatial projections are generally not invertible.
 
     Spatial preprocessors are registered on ``AnemoiModelInterface`` as
     ``self.spatial_pre_processors`` (a ``nn.ModuleDict`` keyed by dataset name)
-    and are saved in the model checkpoint.
+    and are included when the complete model is serialized for inference.
     """
 
-    def forward(self, x: Tensor, model_comm_group=None, grid_shard_sizes=None) -> Tensor:
+    @property
+    def input_grid_size(self) -> int:
+        """Number of spatial points expected by the preprocessor."""
+        raise NotImplementedError
+
+    @property
+    def output_grid_size(self) -> int:
+        """Number of spatial points produced by the preprocessor."""
+        raise NotImplementedError
+
+    def forward(
+        self,
+        x: Tensor,
+        model_comm_group=None,
+        grid_shard_sizes: ShardSizes = None,
+    ) -> tuple[Tensor, ShardSizes]:
         """Project input to a (potentially different) grid.
 
         Parameters
         ----------
         x : Tensor
             Input tensor, shape ``(batch, time, ensemble, grid_src, vars)``.
+        model_comm_group : ProcessGroup, optional
+            Process group used for distributed projection.
+        grid_shard_sizes : ShardSizes, optional
+            Source-grid shard size for each rank, or ``None`` for replicated input.
 
         Returns
         -------
-        Tensor
-            Output tensor, shape ``(batch, time, ensemble, grid_dst, vars)``.
+        tuple[Tensor, ShardSizes]
+            Output tensor with shape ``(batch, time, ensemble, grid_dst, vars)``
+            and the target-grid shard size for each rank. The shard sizes are
+            ``None`` when the output is replicated.
         """
         raise NotImplementedError
 

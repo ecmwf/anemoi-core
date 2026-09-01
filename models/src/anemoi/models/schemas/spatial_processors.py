@@ -47,11 +47,10 @@ class CrossGridProjectorSchema(BaseModel):
     @model_validator(mode="after")
     def check_source_provided(self) -> CrossGridProjectorSchema:
         """Require exactly one of ``file_path`` or ``edges_name``."""
-        if self.file_path is None and self.edges_name is None:
-            msg = (
-                "CrossGridProjectorSchema requires either 'file_path' or 'edges_name' "
-                "to build the projection matrix."
-            )
+        if (self.file_path is None and self.edges_name is None) or (
+            self.file_path is not None and self.edges_name is not None
+        ):
+            msg = "CrossGridProjectorSchema requires exactly one of 'file_path' or 'edges_name'."
             raise ValueError(msg)
         return self
 

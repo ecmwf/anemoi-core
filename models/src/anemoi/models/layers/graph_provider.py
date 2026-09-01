@@ -495,6 +495,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
         """
         super().__init__()
 
+        if (file_path is None and edges_name is None) or (file_path is not None and edges_name is not None):
+            raise ValueError("Exactly one of file_path or edges_name must be provided.")
+
         if file_path is not None:
             if src_node_weight_attribute is not None:
                 msg = f"Building ProjectionGraphProvider from file, so src_node_weight_attribute='{src_node_weight_attribute}' will be ignored."
@@ -504,10 +507,9 @@ class ProjectionGraphProvider(BaseGraphProvider):
                 msg = f"Building ProjectionGraphProvider from file, so edge_weight_attribute='{edge_weight_attribute}' will be ignored."
                 LOGGER.warning(msg)
             self._build_from_file(file_path, row_normalize)
-        else:
-            assert (
-                graph is not None and edges_name is not None
-            ), "Must provide graph and edges_name if file_path not given"
+        elif edges_name is not None:
+            if graph is None:
+                raise ValueError("graph must be provided when constructing a projection from edges_name.")
             self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
 
     def __deepcopy__(self, memo: dict) -> "ProjectionGraphProvider":
@@ -657,6 +659,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         """
         if device is not None or dtype is not None:
             # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
+            # TODO(SL): Calling this with different dtypes at runtime can cause precision deterioration;
+            # use a proper device/dtype cache that retains the canonical matrix.
             self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
