@@ -1,6 +1,6 @@
 # @package _global_
 #
-# O96 ERA5, TransformerProcessor + GraphTransformer encoder/decoder.
+# O96 ERA5, GraphTransformerProcessor + GraphTransformer encoder/decoder.
 # Run with: anemoi-training train --config-name=o96_era5_transformer
 # (after `anemoi-training config generate` has copied this config tree locally)
 
@@ -10,7 +10,7 @@ defaults:
   - override /diagnostics: evaluation
   - override /system: example
   - override /graph: multi_scale
-  - override /model: transformer
+  - override /model: graphtransformer
   - override /task: forecaster
   - override /training: single
   - _self_
@@ -18,6 +18,13 @@ defaults:
 # native_grid.yaml's defaults (batch_size 2/gpu, read_group_size = num_gpus_per_model)
 # are tuned for O96 assuming 8 GPUs -> effective batch size 16. With num_gpus_per_node: 1
 # below, effective batch size drops to 2 -- fine for a memory-fit smoke test, not for a real run.
+graph:
+  # multi_scale.yaml defaults to overwrite: True (always rebuilds); flip it off so the
+  # cached graph.pt at system.input.graph is reused after the first successful build.
+  # GraphTransformerProcessor (unlike plain TransformerProcessor) needs the hidden->hidden
+  # edges multi_scale.yaml builds by default, so no edges override here.
+  overwrite: False
+
 system:
   hardware:
     num_gpus_per_node: 1  # single-GPU smoke test to check O96 fits in memory
@@ -25,7 +32,7 @@ system:
     num_gpus_per_model: 1  # raise this only if O96 + this model doesn't fit on one GPU
   input:
     dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
-    graph: ${system.output.root}/graph.pt  # built once here on first run, then reused (see `graph` config below for how it's built)
+    graph: ${system.output.root}/graph.pt  # built once here on first run (own dataset, no hidden->hidden edges), then reused
   output:
     root: ${oc.env:HOME}/anemoi-runs/o96-test
 
