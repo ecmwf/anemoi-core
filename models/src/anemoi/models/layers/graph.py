@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from collections import defaultdict
 
 import einops
@@ -16,8 +17,8 @@ from torch import Tensor
 from torch import nn
 from torch_geometric.data import HeteroData
 
-import logging
 LOGGER = logging.getLogger(__name__)
+
 
 class TrainableTensor(nn.Module):
     """Trainable Tensor Module."""
@@ -97,7 +98,9 @@ class NamedNodesAttributes(nn.Module):
 
             self.num_nodes[nodes_name] = graph_data[nodes_name].num_nodes
             self.attr_ndims[nodes_name] = 2 * graph_data[nodes_name].x.shape[1] + trainable_parameters[nodes_name]
-            LOGGER.info(f"{self.__class__.__name__} | Nodes `{nodes_name}` will have {trainable_parameters[nodes_name]} trainable parameters.")
+            LOGGER.info(
+                f"{self.__class__.__name__} | Nodes `{nodes_name}` will have {trainable_parameters[nodes_name]} trainable parameters."
+            )
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
         """Register coordinates."""
