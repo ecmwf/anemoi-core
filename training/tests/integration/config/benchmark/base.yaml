@@ -34,7 +34,7 @@ training:
   num_sanity_val_steps: 0
 
   strategy:
-  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
 
 diagnostics:
   callbacks: []
