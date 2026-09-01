@@ -21,6 +21,7 @@ graph:
   overwrite: False
 
 model:
+  compile: []
   encoder:
     num_chunks: 2
   decoder:
