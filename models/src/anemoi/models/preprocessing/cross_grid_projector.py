@@ -16,6 +16,8 @@ from torch import Tensor
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import all_to_all_transpose
+from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -120,16 +122,25 @@ class CrossGridProjector(SpatialPreprocessor):
         x_flat = einops.rearrange(x, "b t e g v -> (b t e) g v")
 
         channel_shard_sizes = get_shard_sizes(x_flat, -1, model_comm_group)
-        if grid_shard_sizes is not None:
-            x_flat = all_to_all_transpose(x_flat, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
-
-        x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
-
         output_grid_shard_sizes: ShardSizes = None
-        if grid_shard_sizes is not None:
+        if grid_shard_sizes is not None and min(channel_shard_sizes) > 0:
+            # All ranks have at least one channel: use channel-transpose strategy for efficiency.
+            x_flat = all_to_all_transpose(x_flat, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
             output_grid_shard_sizes = get_shard_sizes(x_proj, -2, model_comm_group)
             x_proj = all_to_all_transpose(
                 x_proj, -2, output_grid_shard_sizes, -1, channel_shard_sizes, model_comm_group
             )
+        elif grid_shard_sizes is not None:
+            # Fewer variables than ranks: channel-transpose would give zero-size shards on some
+            # ranks.  Fall back to gather the full source grid, project locally, then shard the
+            # output grid.
+            x_flat = gather_tensor(x_flat, -2, grid_shard_sizes, model_comm_group)
+            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
+            output_grid_shard_sizes = get_shard_sizes(x_proj, -2, model_comm_group)
+            x_proj = shard_tensor(x_proj, -2, output_grid_shard_sizes, model_comm_group)
+        else:
+            x_proj = self.projector(x_flat, self.provider.get_edges(device=x.device, dtype=x.dtype))
+
         x_proj = einops.rearrange(x_proj, "(b t e) g v -> b t e g v", b=batch, t=time, e=ensemble)
         return x_proj, output_grid_shard_sizes

@@ -78,3 +78,70 @@ def test_cross_grid_projector_returns_target_shards(
         backend=distributed_backend,
         world_size=distributed_world_size,
     )
+
+
+def _test_cross_grid_projector_fewer_vars_than_ranks_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+) -> None:
+    """Projection with fewer variables than ranks uses the gather-project-shard fallback.
+
+    Exercises the path where ``min(channel_shard_sizes) == 0``.
+    """
+    source_grid_size = world_size * 4
+    target_grid_size = world_size * 2
+    # Fewer variables than ranks triggers the fallback path.
+    variables = 1
+
+    graph = HeteroData()
+    graph["source"].num_nodes = source_grid_size
+    graph["target"].num_nodes = target_grid_size
+    graph["source", "to", "target"].edge_index = torch.stack(
+        (
+            torch.arange(source_grid_size),
+            torch.arange(source_grid_size) // 2,
+        )
+    )
+    projector = CrossGridProjector(
+        graph=graph,
+        edges_name=("source", "to", "target"),
+        row_normalize=False,
+    )
+
+    full = torch.arange(source_grid_size * variables, dtype=torch.float32, device=device).reshape(
+        1,
+        1,
+        1,
+        source_grid_size,
+        variables,
+    )
+    source_grid_shard_sizes = get_balanced_partition_sizes(source_grid_size, world_size)
+    target_grid_shard_sizes = get_balanced_partition_sizes(target_grid_size, world_size)
+    local = torch.split(full, source_grid_shard_sizes, dim=-2)[rank].contiguous()
+
+    projected, returned_grid_shard_sizes = projector(
+        local,
+        model_comm_group=group,
+        grid_shard_sizes=source_grid_shard_sizes,
+    )
+
+    # Each target node sums 2 source nodes (ratio = source_grid_size // target_grid_size = 2).
+    expected_full = full.reshape(1, 1, 1, target_grid_size, 2, variables).sum(dim=-2)
+    expected_local = torch.split(expected_full, target_grid_shard_sizes, dim=-2)[rank].contiguous()
+    assert returned_grid_shard_sizes == target_grid_shard_sizes
+    torch.testing.assert_close(projected, expected_local)
+
+
+@pytest.mark.distributed
+def test_cross_grid_projector_fewer_vars_than_ranks(
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    run_distributed_test(
+        _test_cross_grid_projector_fewer_vars_than_ranks_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+    )
