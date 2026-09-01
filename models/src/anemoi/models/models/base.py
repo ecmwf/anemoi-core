@@ -156,6 +156,20 @@ class BaseGraphModel(nn.Module):
         for target_features in self.decoders_target_input.values():
             target_features.validate()
 
+    def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
+        """Build the latent aggregator."""
+        latent_aggregator_channels = {
+            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            for dataset_name in self.input_datasets
+        }
+
+        self.latent_aggregator = instantiate(
+            aggregator_config,
+            _recursive_=False,
+            input_channels=self.input_dim_latent,
+            source_channels=latent_aggregator_channels,
+        )
+
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         """Compute per-dataset input/output channel counts, dimensions and internal data indices."""
         # Multi-dataset: create dictionaries for each property

@@ -119,7 +119,10 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
 ``ConcatAggregator``
    Concatenation along the channel dimension. The aggregated channel
    dimension is the **sum** of the per-dataset channel dimensions, so
-   the processor ``num_channels`` must be sized accordingly.
+   the processor ``num_channels`` must be sized accordingly. Channels are
+   concatenated in the configured dataset order, independently of
+   the order of the mapping passed to the model. Every configured dataset
+   must be active because omitting one would change the output width.
 
 *************************
  Decoder target features

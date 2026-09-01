@@ -73,10 +73,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         # Latent aggregator: combines encoder outputs before the processor
-        self.latent_aggregator = instantiate(
-            model_config.latent_aggregator,
-            num_channels=self._get_latent_aggregator_channels(),
-        )
+        self._build_latent_aggregator(model_config.latent_aggregator)
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
@@ -373,7 +370,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = self.latent_aggregator(dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         (
@@ -446,13 +443,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         return x_out_dict
-
-    def _get_latent_aggregator_channels(self) -> dict[str, int]:
-        """Return encoder output widths by dataset."""
-        return {
-            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
-            for dataset_name in self.input_datasets
-        }
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
