@@ -819,3 +819,71 @@ def temporal_downscaler_ensemble_config(
     assert isinstance(cfg, DictConfig)
 
     return cfg, url_dataset
+
+
+@pytest.fixture
+def offset_forecaster_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url, _ = build_global_config(
+        ["model=graphtransformer"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+
+    OmegaConf.set_struct(cfg.task, False)
+    cfg.task = {
+        "_target_": "anemoi.training.tasks.OffsetForecaster",
+        "input_offsets": ["-12H", "0H"],
+        "output_offsets": ["6H", "12H"],
+        "rollout": {
+            "start": 2,
+            "epoch_increment": 0,
+            "maximum": 2,
+        },
+    }
+
+    return cfg, url
+
+
+@pytest.fixture
+def offset_forecaster_tendency_transport_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    """Compose a multi-output tendency transport model using irregular input offsets."""
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_offset_forecaster_tendency_transport",
+    ):
+        template = compose(config_name="transport_edm_diffusion_tendency")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+
+    OmegaConf.set_struct(cfg.task, False)
+    cfg.task = {
+        "_target_": "anemoi.training.tasks.OffsetForecaster",
+        "input_offsets": ["-12H", "0H"],
+        "output_offsets": ["6H", "12H"],
+        "rollout": {
+            "start": 1,
+            "epoch_increment": 0,
+            "maximum": 1,
+        },
+        "validation_rollout": 1,
+    }
+    cfg.training.max_epochs = 1
+    cfg.dataloader.limit_batches.training = 1
+    cfg.dataloader.limit_batches.validation = 1
+    cfg.diagnostics.plot.callbacks = []
+
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url_dataset
