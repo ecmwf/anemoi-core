@@ -29,7 +29,6 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
-from anemoi.models.utils.config import broadcast_config_keys
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -74,12 +73,9 @@ class BaseGraphModel(nn.Module):
 
         self.latent_skip = model_config.model.model.latent_skip
 
-        trainable_parameters = broadcast_config_keys(
-            model_config.model.node_trainable_parameters,
-            data=self.dataset_names,
-            hidden=self._graph_name_hidden,
+        self.node_attributes = NamedNodesAttributes(
+            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
