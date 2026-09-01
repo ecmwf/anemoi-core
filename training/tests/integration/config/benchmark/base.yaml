@@ -33,6 +33,9 @@ training:
   max_epochs: 1
   num_sanity_val_steps: 0
 
+  strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+
 diagnostics:
   callbacks: []
   plot:
