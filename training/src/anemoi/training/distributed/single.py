@@ -14,6 +14,11 @@ from pytorch_lightning.strategies import SingleDeviceStrategy as SingleDeviceStr
 class SingleDeviceStrategy(SingleDeviceStrategyLightning):
     """Single device strategy, supporting removing kwargs commonly used in Anemoi distributed strategies."""
 
+    @property
+    def read_group_size(self) -> int:
+        """Mimics to ensure compatibility with distributed strategies."""
+        return 1
+
     def __init__(
         self,
         device: str = "auto",
