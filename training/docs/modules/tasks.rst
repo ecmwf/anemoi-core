@@ -145,7 +145,7 @@ experimental generalisation of
 sample directly through time offsets, i.e. times relative to the forecast initialisation time:
 
 - ``input_offsets`` — input time offsets as frequency strings, e.g.
-  ``["-1H", "-30m", "0m"]``. The latest input must be ``0H``.
+  ``["-1H", "-30m", "0m"]``. The latest input must be equivalent to ``0H``.
 - ``output_offsets`` — target time offsets as frequency strings, e.g. ``["30M",  "1h"]``.
 
 - ``rollout`` / ``validation_rollout`` — as for
