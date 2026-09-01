@@ -39,7 +39,7 @@ from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import FlatView
+    from anemoi.models.data.flat import FlatView
     from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)

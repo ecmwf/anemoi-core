@@ -27,6 +27,7 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
+from anemoi.models.data.flat import FlatView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -52,33 +53,6 @@ def _fancy_variable_index(
     if isinstance(indices, torch.Tensor):
         return indices.tolist()
     return indices
-
-
-@dataclass(frozen=True, slots=True)
-class FlatView:
-    """A flattened view of the data, coordinates and timedeltas for a single sample.
-
-    This is used as an intermediate representation when applying functions or
-    losses to the data, before unflattening back to a SourceView.
-    """
-
-    data: torch.Tensor
-    coordinates: torch.Tensor
-    device: torch.device | None
-    shard_sizes: ShardSizes
-    batch_sizes: tuple[int, ...] | None = None
-    timedeltas: torch.Tensor | None = None
-
-    def to(self, device: torch.device) -> "FlatView":
-        """Return a copy of this view with all tensors moved to the given device."""
-        return FlatView(
-            data=self.data.to(device),
-            coordinates=self.coordinates.to(device),
-            timedeltas=None if self.timedeltas is None else self.timedeltas.to(device),
-            device=device,
-            shard_sizes=self.shard_sizes,
-            batch_sizes=self.batch_sizes,
-        )
 
 
 @dataclass(frozen=True, slots=True)
