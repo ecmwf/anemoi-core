@@ -75,7 +75,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
             "model": {
-                "trainable_parameters": {
+                "node_trainable_parameters": {
                     "data": 0,
                     "hidden": 0,
                 },
@@ -123,7 +123,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         {
             "model": {
                 "num_channels": 8,
-                "trainable_parameters": {
+                "node_trainable_parameters": {
                     "data": 0,
                     "hidden": 0,
                 },
