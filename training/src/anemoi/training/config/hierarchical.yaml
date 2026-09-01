@@ -59,6 +59,11 @@ model:
       shard_strategy: "edges"
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
       edge_pre_mlp: False
+  
+  node_trainable_parameters:
+    hidden_1: 8
+    hidden_2: 8
+    hidden_3: 8
 
   processor:
     num_chunks: 2
