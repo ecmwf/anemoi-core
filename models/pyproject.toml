@@ -36,7 +36,8 @@ dynamic = [ "version" ]
 dependencies = [
   "anemoi-graphs>=0.9.4",
   # Fix certain dependencies during development
-  "anemoi-utils>=0.1.9",
+  # Update this when anemoi-utils#339 is merged
+  "anemoi-utils @ git+https://github.com/ecmwf/anemoi-utils.git@feat/migration-utils",
   "einops>=0.6.1",
   "hydra-core>=1.3",
   "scipy>=1.6",
