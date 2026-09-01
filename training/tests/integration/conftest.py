@@ -8,14 +8,12 @@
 # nor does it submit to any jurisdiction.
 
 
-import gc
 import logging
 import os
 import shutil
 from pathlib import Path
 from typing import Union
 
-import psutil
 import pytest
 import torch
 from hydra import compose
@@ -57,23 +55,6 @@ def _reset_torch_compile(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Non
 
     torch._dynamo.reset()
     return
-
-
-@pytest.fixture(autouse=True)
-def log_memory_usage(request: pytest.FixtureRequest) -> None:
-    """Log CPU RSS before and after each test to help debug memory leaks."""
-    process = psutil.Process()
-    rss_before = process.memory_info().rss / 1024**3
-    LOGGER.info("MEMORY [%s] before: %.2f GB RSS", request.node.name, rss_before)
-    yield
-    gc.collect()
-    rss_after = process.memory_info().rss / 1024**3
-    LOGGER.info(
-        "MEMORY [%s] after: %.2f GB RSS (delta: %+.2f GB)",
-        request.node.name,
-        rss_after,
-        rss_after - rss_before,
-    )
 
 
 @pytest.fixture(autouse=True)
@@ -146,6 +127,17 @@ def gnn_config_mlflow(
     )
     assert isinstance(cfg, DictConfig)
     return cfg
+
+
+@pytest.fixture
+def gnn_config_with_rollout(gnn_config: tuple[DictConfig, str, str]) -> tuple[DictConfig, str, str]:
+    cfg, url_dataset = gnn_config
+    cfg.task.rollout = {
+        "start": 1,
+        "epoch_increment": 1,
+        "maximum": 4,
+    }
+    return cfg, url_dataset
 
 
 def build_global_config(

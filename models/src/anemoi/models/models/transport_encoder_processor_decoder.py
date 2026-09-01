@@ -442,12 +442,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 x = shard_tensor(x, -2, shard_sizes, model_comm_group)
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
-            if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
-                x = spatial_pre_processors[dataset_name](
-                    x,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=(grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None),
-                )
+            (x,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x,),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
 
             x = pre_processors[dataset_name](x, in_place=False)
 
@@ -927,17 +928,13 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 x_t0 = shard_tensor(x_t0, -2, shard_sizes, model_comm_group)
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
-            if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
-                x_in = spatial_pre_processors[dataset_name](
-                    x_in,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=(grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None),
-                )
-                x_t0 = spatial_pre_processors[dataset_name](
-                    x_t0,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=(grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None),
-                )
+            (x_in, x_t0), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x_in, x_t0),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
 
             x_in = pre_processors[dataset_name](x_in, in_place=False)
             x_t0 = pre_processors[dataset_name](x_t0, in_place=False)

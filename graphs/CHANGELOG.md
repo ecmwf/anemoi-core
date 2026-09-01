@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.6](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.5...graphs-0.9.6) (2026-08-11)
+
+
+### Features
+
+* Create and ship py.typed ([#1249](https://github.com/ecmwf/anemoi-core/issues/1249)) ([d0cfe4c](https://github.com/ecmwf/anemoi-core/commit/d0cfe4c88198d0aa9f9acf47009e4822734731b0))
+
+
+### Bug Fixes
+
+* **graphs:** Replace qhull joggle with merged facets in PlanarAreaWeights ([#1298](https://github.com/ecmwf/anemoi-core/issues/1298)) ([80af680](https://github.com/ecmwf/anemoi-core/commit/80af68077da1ead39ba072e7acd571461a49734c))
+* **graphs:** Use weights_only=True when loading graphs in anemoi-graphs ([#1303](https://github.com/ecmwf/anemoi-core/issues/1303)) ([ab292a5](https://github.com/ecmwf/anemoi-core/commit/ab292a52ab938da491bed7fe462b70de6f332802))
+
+
+### Reverts
+
+* "fix(graphs): use weights_only=True when loading graphs in anemoi-graphs" ([#1311](https://github.com/ecmwf/anemoi-core/issues/1311)) ([c30e3e8](https://github.com/ecmwf/anemoi-core/commit/c30e3e8fe304bc97b8103b86b9dbb81707bc8497))
+
 ## [0.9.5](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.4...graphs-0.9.5) (2026-07-23)
 
 

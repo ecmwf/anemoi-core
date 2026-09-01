@@ -329,9 +329,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.shard_sizes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            if dataset_name in self.model.spatial_pre_processors:
+                self.grid_sizes[dataset_name] = self.model.spatial_pre_processors[dataset_name].input_grid_size
+            else:
+                self.grid_sizes[dataset_name] = graph_data[
+                    dataset_name
+                ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
@@ -493,7 +496,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
         }
 
-        self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+        if not self.config.training.load_weights_only:
+            self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
+
+            # Anemoi constructs the task and datasets from the config before Lightning
+            # restores their checkpoint state. Now that the checkpoint rollout is restored,
+            # update any constructed datasets so workers load the required input and target
+            # time steps. Checkpoint conversion loads the module without creating a Trainer
+            # or datamodule, so only synchronize if a datamodule is attached.
+            trainer = getattr(self, "_trainer", None)
+            if trainer is not None and trainer.datamodule is not None:
+                trainer.datamodule.sync_dataset_state()
 
         # Extract variables_metadata for unit compatibility check
         self._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
@@ -882,11 +895,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Owned by the model; applied before normalization so projectors see raw values.
         for ds_name, projector in self.model.spatial_pre_processors.items():
             if ds_name in batch:
-                batch[ds_name] = projector(
+                batch[ds_name], output_grid_shard_sizes = projector(
                     batch[ds_name],
                     model_comm_group=self.model_comm_group,
                     grid_shard_sizes=self.grid_shard_sizes[ds_name],
                 )
+                self.grid_shard_sizes[ds_name] = output_grid_shard_sizes
+                if output_grid_shard_sizes is None:
+                    self.grid_shard_slice[ds_name] = None
+                else:
+                    start, end = get_partition_range(
+                        partition_sizes=output_grid_shard_sizes,
+                        partition_id=self.model_comm_group_rank,
+                    )
+                    self.grid_shard_slice[ds_name] = slice(start, end)
 
         # Batch normalization
         batch = self._normalize_batch(batch)
@@ -1205,9 +1227,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         super().lr_scheduler_step(scheduler, metric)
 
+    def on_train_start(self) -> None:
+        """Log the effective task state after checkpoint restoration."""
+        super().on_train_start()
+        self.task.log_training_state()
+
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        # Default epoch checkpoints are saved at validation end, before this
+        # hook. On resume Lightning finishes the saved epoch here, advancing the
+        # dataloader before newly created workers derive the seed for that epoch.
         self.trainer.datamodule.set_epoch(self.current_epoch + 1)
+        super().on_train_epoch_end()
 
     def configure_optimizers(
         self,

@@ -286,7 +286,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
         spatial_configs = getattr(getattr(self.config, "data", None), "spatial_processors", {}) or {}
         for dataset_name, sp_config in spatial_configs.items():
-            projector = instantiate(sp_config, graph=self.graph_data.get(dataset_name), _recursive_=False)
+            projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
             if not isinstance(projector, SpatialPreprocessor):
                 raise TypeError(
                     f"spatial_processors.{dataset_name} must instantiate a SpatialPreprocessor, "
