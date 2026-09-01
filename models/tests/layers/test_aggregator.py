@@ -60,4 +60,3 @@ def test_aggregator_validates_named_source_shapes(latents: dict[str, torch.Tenso
 
     with pytest.raises(ValueError, match=error):
         aggregator(torch.randn(6, 3), latents)
-
