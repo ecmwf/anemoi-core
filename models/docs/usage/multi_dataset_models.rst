@@ -166,8 +166,8 @@ first batch.
 .. tip::
 
    New target features can be registered from user code with the
-   :func:`anemoi.models.models.target_features.register_target_feature`
-   decorator on a :class:`~anemoi.models.models.target_features.DecodingTargetFeature`
+   :func:`anemoi.models.layers.target_features.register_target_feature`
+   decorator on a :class:`~anemoi.models.layers.target_features.DecodingTargetFeature`
    subclass.
 
 ********************************

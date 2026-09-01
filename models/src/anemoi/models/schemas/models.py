@@ -27,7 +27,7 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
-from anemoi.models.models.target_features import VALID_TARGET_FEATURES
+from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
