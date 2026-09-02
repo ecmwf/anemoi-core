@@ -12,8 +12,9 @@ import pytest
 import torch
 import xarray as xr
 import yaml
-from nodes.test_icon_nodes import DatasetMock
 from torch_geometric.data import HeteroData
+
+from anemoi.graphs.testing import DatasetMock
 
 lats = [-0.15, 0, 0.15]
 lons = [0, 0.25, 0.5, 0.75]
@@ -116,7 +117,10 @@ def graph_with_nodes() -> HeteroData:
 def graph_with_rectilinear_nodes() -> HeteroData:
     graph = HeteroData()
     num_lons, num_lats = 10, 10
-    lat_grid, lon_grid = np.meshgrid(np.linspace(-np.pi / 2, np.pi / 2, num_lats), np.linspace(0, 2 * np.pi, num_lons))
+    lat_grid, lon_grid = np.meshgrid(
+        np.linspace(-np.pi / 2, np.pi / 2, num_lats),
+        np.linspace(0, 2 * np.pi, num_lons),
+    )
     coords = torch.tensor(np.array([lat_grid.ravel(), lon_grid.ravel()]).T)
     graph["test_nodes"].x = coords
     return graph
