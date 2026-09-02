@@ -24,7 +24,7 @@ def migrator() -> Migrator:
     -------
     A Migrator instance
     """
-    return Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
+    return Migrator.from_path(Path(__file__).parent / "migrations", "tests.migrations.migrations")
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +62,10 @@ def recent_ckpt(ckpt_dir: Path) -> Path:
         migrations=[
             {
                 "name": "1751895180_final",
-                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}, "final": True},
+                "metadata": {
+                    "versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"},
+                    "final": True,
+                },
             }
         ],
         name="recent.ckpt",
