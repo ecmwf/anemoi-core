@@ -18,13 +18,13 @@ from operator import getitem
 import matplotlib as mpl
 import pytest
 import torch
-from conftest import GetTmpPath
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
 from typeguard import typechecked
 
 from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.testing import GetTmpPath
 from anemoi.training.train.train import AnemoiTrainer
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import GetTestData
