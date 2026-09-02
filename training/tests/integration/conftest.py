@@ -12,6 +12,7 @@ import logging
 import os
 import shutil
 from pathlib import Path
+from typing import Any
 
 import pytest
 import torch
@@ -22,6 +23,7 @@ from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import GetTestData
 from anemoi.utils.testing import TemporaryDirectoryForTestData
 
@@ -78,21 +80,6 @@ def testing_modifications_with_temp_dir(config_with_tempdir: DictConfig) -> Dict
 
     assert isinstance(testing_modifications_with_tempdir, DictConfig)
     return testing_modifications_with_tempdir
-
-
-class GetTmpPath:
-    def __init__(self, temporary_directory_for_test_data: TemporaryDirectoryForTestData) -> None:
-        self.temporary_directory_for_test_data = temporary_directory_for_test_data
-
-    def __call__(self, url: str) -> tuple[str, list[str], list[str]]:
-
-        url_archive = url + ".tgz"
-        name_dataset = Path(url).name
-        tmp_path_dataset = self.temporary_directory_for_test_data(url_archive, archive=True)
-
-        tmp_path = Path(tmp_path_dataset) / name_dataset
-
-        return tmp_path, url_archive
 
 
 @pytest.fixture
@@ -887,3 +874,54 @@ def offset_forecaster_tendency_transport_config(
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
     return cfg, url_dataset
+
+
+@pytest.fixture(scope="session")
+def partial_metadata_schema() -> dict[str, Any]:
+    return {
+        "version": None,
+        "config": None,
+        "seed": None,
+        "base_seed": None,
+        "run_id": None,
+        "dataset": None,
+        "data_indices": None,
+        "provenance_training": None,
+        "timestamp": None,
+        "metadata_inference": {
+            "seed": None,
+            "base_seed": None,
+            "run_id": None,
+            "dataset_names": list,  # list of datasets
+            "task": None,
+            "__datasets__": {  # schema applied to each dataset entry
+                "timesteps": {
+                    "relative_date_indices_training": None,
+                    "input_relative_date_indices": None,
+                    "output_relative_date_indices": None,
+                    "timestep": None,
+                    # extra entries populated by offset-forecaster only
+                    "input_offsets": None,
+                    "output_offsets": None,
+                    "rollout_shift": None,
+                    "advance_map": None,
+                },
+                "data_indices": {
+                    "input": None,
+                    "output": None,
+                },
+                "variable_types": {
+                    "forcing": None,
+                    "target": None,
+                    "prognostic": None,
+                    "diagnostic": None,
+                },
+                "shapes": {
+                    "variables": None,
+                    "input_timesteps": None,
+                    "ensemble": None,
+                    "grid": None,
+                },
+            },
+        },
+    }
