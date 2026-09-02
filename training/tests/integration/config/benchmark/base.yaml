@@ -21,6 +21,7 @@ graph:
   overwrite: False
 
 model:
+  recompile_limit: 64 # increase compile cache limit to avoid recompilation errors in tests
   encoder:
     num_chunks: 2
   decoder:

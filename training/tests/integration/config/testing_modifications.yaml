@@ -37,6 +37,7 @@ graph:
   overwrite: True
 
 model:
+  recompile_limit: 64 # increase compile cache limit to avoid recompilation errors in tests
   num_channels: 16
   processor:
     num_layers: 2
