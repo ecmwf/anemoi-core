@@ -37,6 +37,7 @@ graph:
   overwrite: True
 
 model:
+  compile: []
   num_channels: 16
   processor:
     num_layers: 2
