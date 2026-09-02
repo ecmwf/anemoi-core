@@ -23,7 +23,6 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from distributed_runner import run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.primitives import _alltoall_transpose
@@ -32,6 +31,7 @@ from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
+from anemoi.models.testing import run_distributed_test
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
