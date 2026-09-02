@@ -141,7 +141,9 @@ class LocalHresBranch(nn.Module):
             layer_kernels = default_layer_kernels(num_channels, cond_dim)
 
         self.proj = nn.Linear(in_features, num_channels)
-        self.processor = GraphTransformerProcessor(
+        # named local_gt on purpose: training.submodules_to_freeze freezes by child NAME recursively,
+        # so an inner module called "processor" would be frozen together with the trunk processor.
+        self.local_gt = GraphTransformerProcessor(
             num_layers=num_layers,
             num_channels=num_channels,
             num_chunks=num_chunks,
@@ -205,7 +207,7 @@ class LocalHresBranch(nn.Module):
         shard_info = GraphShardInfo(nodes=node_shard_sizes, edges=edge_shard_sizes)
 
         h = self.proj(h_in)
-        h = self.processor(
+        h = self.local_gt(
             x=h,
             batch_size=batch_size,
             shard_info=shard_info,
