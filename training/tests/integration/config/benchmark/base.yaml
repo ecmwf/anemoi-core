@@ -5,6 +5,7 @@ system:
     accelerator: cuda
     num_gpus_per_node: 2
     num_nodes: 1
+    num_gpus_per_model: 1
 
 dataloader:
   num_workers:
@@ -32,13 +33,10 @@ model:
 training:
   max_epochs: 1
   num_sanity_val_steps: 0
-
-  # NOTE: the distributed strategy is intentionally not overridden here.
-  # Each benchmark template already selects the correct strategy via its
-  # `training` defaults (DDPGroupStrategy for deterministic runs,
-  # DDPEnsGroupStrategy for ensemble runs). Forcing DDPGroupStrategy here
-  # deep-merges onto the ensemble strategy block and leaves a stale
-  # `num_gpus_per_ensemble` kwarg, which DistributedDataParallel rejects.
+  optimization:
+    lr: 10e-5
+    lr_scheduler:
+      warmup_t: 1
 
 diagnostics:
   callbacks: []
