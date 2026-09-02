@@ -33,8 +33,12 @@ training:
   max_epochs: 1
   num_sanity_val_steps: 0
 
-  strategy:
-    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  # NOTE: the distributed strategy is intentionally not overridden here.
+  # Each benchmark template already selects the correct strategy via its
+  # `training` defaults (DDPGroupStrategy for deterministic runs,
+  # DDPEnsGroupStrategy for ensemble runs). Forcing DDPGroupStrategy here
+  # deep-merges onto the ensemble strategy block and leaves a stale
+  # `num_gpus_per_ensemble` kwarg, which DistributedDataParallel rejects.
 
 diagnostics:
   callbacks: []
