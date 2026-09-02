@@ -419,6 +419,58 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
+        self._build_hres_branch(model_config)
+
+    def _build_hres_branch(self, model_config: DotDict) -> None:
+        """Optional shallow local branch on the output grid (fine-scale epic, 2026-09-02).
+
+        Configured by ``model.model.hres_branch``; absent by default. When the block is absent
+        nothing is built and no random numbers are drawn, so the model is bit-identical to the
+        version without this method. The branch needs a ``(data, to, data)`` edge set in the
+        decoder dataset's graph, added to the graph file by
+        ``graphs/scripts/augment_data_knn_edges.py``.
+        """
+        self.hres_branch = None
+        self.hres_branch_graph_provider = None
+        branch_cfg = model_config["model"]["model"].get("hres_branch", None)
+        if not branch_cfg:
+            return
+        from anemoi.models.layers.graph_provider import create_graph_provider
+        from anemoi.models.layers.hres_branch import CONFIG_KEYS
+        from anemoi.models.layers.hres_branch import LocalHresBranch
+
+        dataset_name = self._decoder_datasets[0]
+        edge_key = (self._graph_name_data, "to", self._graph_name_data)
+        graph = self._graph_data[dataset_name]
+        if edge_key not in graph.edge_types:
+            raise ValueError(
+                f"hres_branch requires a {edge_key} edge set in the '{dataset_name}' graph; "
+                "augment the graph file first (graphs/scripts/augment_data_knn_edges.py)"
+            )
+        num_data = self.node_attributes[dataset_name].num_nodes[self._graph_name_data]
+        edge_attributes = branch_cfg.get(
+            "sub_graph_edge_attributes", model_config.model.processor.get("sub_graph_edge_attributes")
+        )
+        self.hres_branch_graph_provider = create_graph_provider(
+            graph=graph[edge_key],
+            edge_attributes=edge_attributes,
+            src_size=num_data,
+            dst_size=num_data,
+            trainable_size=0,
+        )
+        kwargs = {k: branch_cfg[k] for k in CONFIG_KEYS if k in branch_cfg}
+        self.hres_branch = LocalHresBranch(
+            in_features=self.input_dim[dataset_name] + self.num_output_channels[dataset_name],
+            out_features=self.num_output_channels[dataset_name],
+            edge_dim=self.hres_branch_graph_provider.edge_dim,
+            cond_dim=self.noise_cond_dim,
+            **kwargs,
+        )
+        LOGGER.info(
+            "hres_branch built on dataset %s with %d data->data edges",
+            dataset_name, int(graph[edge_key].edge_index.shape[1]),
+        )
+
     def _build_residual(self, residual_config):
         """Build residual connections with per-dataset configs.
 
@@ -544,6 +596,11 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             x_in_lres, x_in_hres, y_noised_tensor, bse, grid_shard_sizes, model_comm_group, dataset_name
         )
 
+        # LEGACY_PICKLE_COMPAT: instances unpickled from checkpoints made before the option
+        # existed have no `hres_branch` attribute; getattr keeps them on the original path.
+        hres_branch = getattr(self, "hres_branch", None)
+        x_data_raw = x_data_latent if hres_branch is not None else None
+
         x_hidden_latent = self.node_attributes[dataset_name](self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
@@ -615,6 +672,21 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             keep_x_dst_sharded=in_out_sharded["out_hres"],
             **bwd_mapper_kwargs,
         )
+
+        # Optional local branch on the output grid: adds a correction to the decoder output so
+        # that D = c_skip * y_noised + c_out * (decoder + branch). A zero-initialised head makes
+        # this an exact no-op until trained.
+        if hres_branch is not None:
+            x_out = x_out + hres_branch(
+                x_data_raw,
+                x_out,
+                graph_provider=self.hres_branch_graph_provider,
+                batch_size=bse,
+                node_shard_sizes=shard_sizes_data,
+                model_comm_group=model_comm_group,
+                cond=c_data,
+                inputs_sharded=bool(in_out_sharded["out_hres"]),
+            )
 
         # Assemble output
         dtype = x_in_lres.dtype
