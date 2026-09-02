@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .diffusiondownscaler import GraphDiffusionDownscaler
+from .localdownscaler import DeterministicLocalDownscaler
 from .diffusionforecaster import GraphDiffusionForecaster
 from .diffusionforecaster import GraphDiffusionTendForecaster
 from .ensforecaster import GraphEnsForecaster
@@ -20,6 +21,7 @@ from .single_step import GraphDownscaler
 __all__ = [
     "GraphAutoEncoder",
     "GraphDiffusionDownscaler",
+    "DeterministicLocalDownscaler",
     "GraphDiffusionForecaster",
     "GraphDiffusionTendForecaster",
     "GraphEnsForecaster",

@@ -180,7 +180,7 @@ class LocalHresBranch(nn.Module):
         cond: Optional[torch.Tensor],
         inputs_sharded: bool,
     ) -> torch.Tensor:
-        """Return the branch correction on the same node layout as ``x_dec``.
+        """Return the branch correction on the same node layout as ``x_dec`` (or ``x_raw`` if ``x_dec`` is None).
 
         ``x_raw`` and ``x_dec`` are ``(batch*ensemble*grid, features)`` tensors. When the caller
         holds the full grid on every rank (``inputs_sharded`` False) but a model communication
@@ -188,10 +188,12 @@ class LocalHresBranch(nn.Module):
         tensor already uses, processed, and gathered back; when the caller already holds its
         shard, the branch runs on it directly.
         """
+        out_dtype = x_raw.dtype if x_dec is None else x_dec.dtype
         if self.detach_inputs:
-            x_dec = x_dec.detach()
+            x_dec = x_dec.detach() if x_dec is not None else None
             cond = cond.detach() if cond is not None else None
-        h_in = torch.cat([x_raw, x_dec.to(x_raw.dtype)], dim=-1)
+        # single-input mode (deterministic local downscaler): no decoder output to concatenate
+        h_in = x_raw if x_dec is None else torch.cat([x_raw, x_dec.to(x_raw.dtype)], dim=-1)
 
         gather_back = False
         if not inputs_sharded and model_comm_group is not None and model_comm_group.size() > 1:
@@ -219,4 +221,4 @@ class LocalHresBranch(nn.Module):
         out = self.head(self.out_norm(h))
         if gather_back:
             out = gather_tensor(out, 0, node_shard_sizes, model_comm_group)
-        return out.to(x_dec.dtype)
+        return out.to(out_dtype)

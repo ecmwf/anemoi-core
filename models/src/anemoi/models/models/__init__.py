@@ -9,6 +9,7 @@
 
 from .base import BaseGraphModel
 from .diffusiondownscaler_encoder_processor_decoder import AnemoiD2ModelEncProcDec
+from .local_downscaler import AnemoiLocalDownscaler
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
@@ -33,4 +34,5 @@ __all__ = [
     "AnemoiModelHierarchicalAutoEncoder",
     "AnemoiModelEncProcDecMultiOutInterpolator",
     "AnemoiD2ModelEncProcDec",
+    "AnemoiLocalDownscaler",
 ]
