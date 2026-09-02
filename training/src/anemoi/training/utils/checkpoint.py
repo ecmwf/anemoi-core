@@ -103,7 +103,17 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     return inference_filepath
 
 
-def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> nn.Module:
+def transfer_learning_loading(
+    model: torch.nn.Module, ckpt_path: Path | str, extend_input_columns: bool = False
+) -> nn.Module:
+    """Load weights for transfer learning.
+
+    extend_input_columns (fine-scale epic, 2026-09-02): when True, a 2-D weight whose output
+    dimension matches but whose INPUT dimension grew (new static inputs appended at the end of
+    the feature vector) is loaded with the checkpoint values in its first columns and zeros in
+    the new ones, so the warm start reproduces the donor exactly at step zero. Default False =
+    the original behaviour (the mismatched tensor is dropped and re-initialised).
+    """
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
 
@@ -121,6 +131,22 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
 
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
+            ck, mk = state_dict[key], model_state_dict[key]
+            if (
+                extend_input_columns
+                and ck.ndim == 2
+                and mk.ndim == 2
+                and ck.shape[0] == mk.shape[0]
+                and ck.shape[1] < mk.shape[1]
+            ):
+                extended = torch.zeros(mk.shape, dtype=ck.dtype, device=ck.device)
+                extended[:, : ck.shape[1]] = ck
+                state_dict[key] = extended
+                LOGGER.info(
+                    "Extending parameter %s from %s to %s with zero columns (exact warm start)",
+                    key, tuple(ck.shape), tuple(mk.shape),
+                )
+                continue
             LOGGER.info("Skipping loading parameter: %s", key)
             LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
             LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))

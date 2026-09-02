@@ -70,10 +70,15 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = model_config.training.multistep_output
         self.num_channels = model_config.model.num_channels
 
+        # Fine-scale epic 2026-09-02: model.attributes.nodes lists graph node attributes to feed the
+        # model as static per-node inputs (e.g. sdor, slor, fsr on the data nodes). Empty by default.
+        static_names = list(((model_config.model.get("attributes", None) or {}).get("nodes", None)) or [])
         self.node_attributes = torch.nn.ModuleDict()
         for dataset_name in self._graph_data.keys():
             self.node_attributes[dataset_name] = NamedNodesAttributes(
-                model_config.model.trainable_parameters.hidden, self._graph_data[dataset_name]
+                model_config.model.trainable_parameters.hidden,
+                self._graph_data[dataset_name],
+                static_attribute_names=static_names,
             )
 
         self._calculate_shapes_and_indices(data_indices)

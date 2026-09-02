@@ -68,16 +68,31 @@ class NamedNodesAttributes(nn.Module):
     attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
-    def __init__(self, num_trainable_params: int, graph_data: HeteroData) -> None:
-        """Initialize NamedNodesAttributes."""
+    def __init__(
+        self,
+        num_trainable_params: int,
+        graph_data: HeteroData,
+        static_attribute_names: list[str] | None = None,
+    ) -> None:
+        """Initialize NamedNodesAttributes.
+
+        static_attribute_names (fine-scale epic, 2026-09-02): names of float node attributes stored in
+        the graph (e.g. ``sdor``, ``slor``, ``fsr`` on the data nodes) to concatenate AFTER the
+        coordinates and the trainable tensor, so they enter the model as static per-node inputs.
+        Absent by default: with an empty list nothing changes and the class is bit-identical to
+        the version without this argument. Attributes missing from a node set are skipped for it.
+        """
         super().__init__()
 
+        self.static_attribute_names = list(static_attribute_names or [])
+        self.static_ndims: dict[str, int] = {}
         self.define_fixed_attributes(graph_data, num_trainable_params)
 
         self.trainable_tensors = nn.ModuleDict()
         for nodes_name, nodes in graph_data.node_items():
             self.register_coordinates(nodes_name, nodes.x)
             self.register_tensor(nodes_name, num_trainable_params)
+            self.register_static_attributes(nodes_name, nodes)
 
     def define_fixed_attributes(self, graph_data: HeteroData, num_trainable_params: int) -> None:
         """Define fixed attributes."""
@@ -86,6 +101,10 @@ class NamedNodesAttributes(nn.Module):
         self.attr_ndims = {
             nodes_name: 2 * graph_data[nodes_name].x.shape[1] + num_trainable_params for nodes_name in nodes_names
         }
+        for nodes_name in nodes_names:
+            present = [a for a in self.static_attribute_names if a in graph_data[nodes_name]]
+            self.static_ndims[nodes_name] = sum(int(graph_data[nodes_name][a].shape[-1]) for a in present)
+            self.attr_ndims[nodes_name] += self.static_ndims[nodes_name]
 
     def register_coordinates(self, name: str, node_coords: Tensor) -> None:
         """Register coordinates."""
@@ -104,10 +123,26 @@ class NamedNodesAttributes(nn.Module):
         """Register a trainable tensor."""
         self.trainable_tensors[name] = TrainableTensor(self.num_nodes[name], num_trainable_params)
 
+    def register_static_attributes(self, name: str, nodes) -> None:
+        """Register the named static attributes of one node set as a persistent buffer (if any)."""
+        present = [a for a in self.static_attribute_names if a in nodes]
+        if not present:
+            return
+        cols = []
+        for a in present:
+            v = nodes[a]
+            v = v.reshape(v.shape[0], -1) if v.ndim != 2 else v
+            cols.append(v.to(torch.float32))
+        self.register_buffer(f"static_{name}", torch.cat(cols, dim=-1), persistent=True)
+
     def forward(self, name: str, batch_size: int) -> Tensor:
         """Returns the node attributes to be passed trough the graph neural network.
 
         It includes both the coordinates and the trainable parameters.
         """
         latlons = getattr(self, f"latlons_{name}")
-        return self.trainable_tensors[name](latlons, batch_size)
+        out = self.trainable_tensors[name](latlons, batch_size)
+        static = getattr(self, f"static_{name}", None)
+        if static is not None:
+            out = torch.cat([out, einops.repeat(static.to(out.device), "e f -> (repeat e) f", repeat=batch_size)], dim=-1)
+        return out

@@ -252,7 +252,13 @@ class AnemoiTrainer(ABC):
                     "Loading weights with Transfer Learning from %s",
                     self.last_checkpoint,
                 )
-                model = transfer_learning_loading(model, self.last_checkpoint)
+                model = transfer_learning_loading(
+                    model,
+                    self.last_checkpoint,
+                    extend_input_columns=bool(
+                        getattr(self.config.training, "transfer_learning_extend_inputs", False)
+                    ),
+                )
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)
                 # pop data_indices so that the data indices on the checkpoint do not get overwritten
