@@ -30,7 +30,7 @@ model:
   upscale_mapper:
       # With omegaconf=2.4, the following will be supported ${model.decoders[0].mapper}
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -45,7 +45,7 @@ model:
       edge_pre_mlp: False
   downscale_mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -59,6 +59,11 @@ model:
       shard_strategy: "edges"
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
       edge_pre_mlp: False
+
+  node_trainable_parameters:
+    hidden_1: 8
+    hidden_2: 8
+    hidden_3: 8
 
   processor:
     num_chunks: 2

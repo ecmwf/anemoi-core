@@ -33,6 +33,8 @@ from anemoi.utils.schemas import BaseModel
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .bounding import BoundingSchema
+from .aggregator import AggregatorSchema  # noqa: TC001
+from .bounding import BoundingSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -209,7 +211,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Sparse projection settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
-    trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
+    node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])
     "Learnable node and edge parameters."
     bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."

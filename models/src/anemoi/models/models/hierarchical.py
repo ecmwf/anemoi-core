@@ -34,7 +34,17 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         """Builds the model components."""
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
+        self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.input_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
+                )
+                continue
+
+            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
+
+            # Create graph providers
             if dataset_name not in self.input_datasets:
                 LOGGER.info(
                     f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
@@ -47,8 +57,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
                 edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
+                edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[dataset_name],
                 dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
+                trainable_size=encoder_config.mapper.get("trainable_size", 0),
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
 
@@ -62,9 +74,31 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
             self.encoder[encoder_name] = instantiate(
                 encoder_config.mapper,
+        self.encoder = torch.nn.ModuleDict()
+        for encoder_name, encoder_config in model_config.encoders.items():
+            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
+            assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
+                f"All datasets for encoder {encoder_name} must have the same input dimension, "
+                f"but got {encoder_in_channels_src}."
+            )
+
+            self.encoder[encoder_name] = instantiate(
+                encoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
+                in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
+                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+            )
+
+        # Latent aggregator: combines encoder outputs before the processor
+        self._build_latent_aggregator(model_config.latent_aggregator)
+
+        # self.hidden_dims is the dimentionality of features at each depth
+        self.hidden_dims = {
+            hidden: self.latent_aggregator.hidden_dim * (2**i) for i, hidden in enumerate(self._graph_name_hidden)
+        }
+        self.num_hidden = len(self._graph_name_hidden)
                 edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
             )
 
@@ -79,6 +113,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Level processors
         self.level_process = model_config.enable_hierarchical_level_processing
+        self.level_process = model_config.enable_hierarchical_level_processing
         if self.level_process:
             self.down_level_processor = nn.ModuleDict()
             self.down_level_processor_graph_providers = nn.ModuleDict()
@@ -91,16 +126,20 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
+                    edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
                     src_size=self.node_attributes.num_nodes[nodes_names],
                     dst_size=self.node_attributes.num_nodes[nodes_names],
+                    trainable_size=model_config.processor.get("trainable_size", 0),
                     trainable_size=model_config.processor.get("trainable_size", 0),
                 )
 
                 self.down_level_processor[nodes_names] = instantiate(
                     model_config.processor,
+                    model_config.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
+                    num_layers=model_config.level_process_num_layers,
                     num_layers=model_config.level_process_num_layers,
                 )
 
@@ -108,16 +147,20 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
                     graph=self._graph_data[(nodes_names, "to", nodes_names)],
                     edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
+                    edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
                     src_size=self.node_attributes.num_nodes[nodes_names],
                     dst_size=self.node_attributes.num_nodes[nodes_names],
+                    trainable_size=model_config.processor.get("trainable_size", 0),
                     trainable_size=model_config.processor.get("trainable_size", 0),
                 )
 
                 self.up_level_processor[nodes_names] = instantiate(
                     model_config.processor,
+                    model_config.processor,
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
+                    num_layers=model_config.level_process_num_layers,
                     num_layers=model_config.level_process_num_layers,
                 )
 
@@ -127,12 +170,15 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
             ],
             edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
             dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
+            trainable_size=model_config.processor.get("trainable_size", 0),
             trainable_size=model_config.processor.get("trainable_size", 0),
         )
 
         self.processor = instantiate(
+            model_config.processor,
             model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
@@ -170,7 +216,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             src_nodes_name = self._graph_name_hidden[i]
             dst_nodes_name = self._graph_name_hidden[i + 1]
 
-            self.downscale_graph_providers[src_nodes_name] = create_graph_provider(
+            self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
                 graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
                 edge_attributes=model_config.downscale_mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[src_nodes_name],
@@ -184,13 +230,22 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 in_channels_src=self.hidden_dims[src_nodes_name],
                 in_channels_dst=self.hidden_dims[dst_nodes_name],
                 num_channels=self.hidden_dims[src_nodes_name],
+                num_channels=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
             )
 
         # Decoder hidden -> data
         self.decoder_graph_provider = torch.nn.ModuleDict()
+        self.decoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
+            if dataset_name not in self.target_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
+                )
+                continue
+
+            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
             if dataset_name not in self.target_datasets:
                 LOGGER.info(
                     f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
@@ -201,11 +256,28 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
                 edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
+                edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
                 dst_size=self.node_attributes.num_nodes[dataset_name],
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
+                trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
 
+        self.decoder = torch.nn.ModuleDict()
+        for decoder_name, decoder_config in model_config.decoders.items():
+            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same target dimension, "
+                f"but got {decoder_in_channels_dst}."
+            )
+            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same output dimension, "
+                f"but got {decoder_output_channels_dst}."
+            )
+
+            self.decoder[decoder_name] = instantiate(
+                decoder_config.mapper,
         self.decoder = torch.nn.ModuleDict()
         for decoder_name, decoder_config in model_config.decoders.items():
             decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
@@ -241,7 +313,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         ----------
         x : dict[str, Tensor]
             Input data.
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
+            Model communication group, by default None.
             Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
@@ -252,6 +326,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         Returns
         -------
         dict[str, Tensor]
+            Output of the model, with the same shape as the input (sharded if input is sharded).
             Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
@@ -314,6 +389,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             # Encoder for this dataset
             encoder_name = self.dataset2encoder[dataset_name]
             x_data_latent, x_latent = self.encoder[encoder_name](
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latents[self._graph_name_hidden[0]]),
                 batch_size=batch_size,
                 shard_info=enc_shard_info,
@@ -327,7 +404,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
 
         # Combine all dataset latents in the innermost layer
         x_latent = self.latent_aggregator(x_hidden_latents[self._graph_name_hidden[0]], dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latents[self._graph_name_hidden[0]], dataset_latents)
 
+        ## Upscale
         ## Upscale
         x_encoded_latents_dict = {}
         for i in range(0, self.num_hidden - 1):
@@ -362,7 +441,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_skip_dict[src_hidden_name] = x_latent
 
             # Compute edges for upscale mapper
+            # Compute edges for upscale mapper
             (
+                upscale_edge_attr,
+                upscale_edge_index,
+                us_edge_shard_sizes,
+            ) = self.upscale_graph_providers[src_hidden_name].get_edges(
                 upscale_edge_attr,
                 upscale_edge_index,
                 us_edge_shard_sizes,
@@ -372,15 +456,21 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
             us_shard_info = BipartiteGraphShardInfo(
+            us_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden_dict[src_hidden_name],
                 dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
+                edges=us_edge_shard_sizes,
                 edges=us_edge_shard_sizes,
             )
 
             # Encode to next hidden level
             x_encoded_latents_dict[src_hidden_name], x_latent = self.upscale[src_hidden_name](
+            x_encoded_latents_dict[src_hidden_name], x_latent = self.upscale[src_hidden_name](
                 (x_latent, x_hidden_latents[dst_hidden_name]),
                 batch_size=batch_size,
+                shard_info=us_shard_info,
+                edge_attr=upscale_edge_attr,
+                edge_index=upscale_edge_index,
                 shard_info=us_shard_info,
                 edge_attr=upscale_edge_attr,
                 edge_index=upscale_edge_index,
@@ -431,8 +521,10 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             )
 
             ds_shard_info = BipartiteGraphShardInfo(
+            ds_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden_dict[src_hidden_name],
                 dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
+                edges=ds_edge_shard_sizes,
                 edges=ds_edge_shard_sizes,
             )
 
@@ -440,6 +532,9 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             x_latent = self.downscale[src_hidden_name](
                 (x_latent, x_encoded_latents_dict[dst_hidden_name]),
                 batch_size=batch_size,
+                shard_info=ds_shard_info,
+                edge_attr=downscale_edge_attr,
+                edge_index=downscale_edge_index,
                 shard_info=ds_shard_info,
                 edge_attr=downscale_edge_attr,
                 edge_index=downscale_edge_index,
@@ -491,6 +586,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edges=dec_edge_shard_sizes,
             )
 
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
                 (x_latent, x_data_latent_dict[dataset_name]),

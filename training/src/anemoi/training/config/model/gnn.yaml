@@ -21,7 +21,7 @@ layer_kernels:
 processor:
   _target_: anemoi.models.layers.processor.GNNProcessor
   num_channels: ${model.num_channels}
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
   num_chunks: 2
@@ -39,7 +39,7 @@ encoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GNNForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 1
       mlp_extra_layers: 0
@@ -55,11 +55,11 @@ latent_aggregator:
 decoders:
   "0":
     target_datasets: [ "data" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GNNBackwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 1
       mlp_extra_layers: 0
@@ -80,12 +80,14 @@ output_mask:
     data:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
+node_trainable_parameters:
   data: 8
   hidden: 8
+
+edge_trainable_parameters:
   data2hidden: 8
-  hidden2data: 8
   hidden2hidden: 8
+  hidden2data: 8
 
 attributes:
   edges:
