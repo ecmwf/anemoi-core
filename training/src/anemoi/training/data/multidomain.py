@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -19,7 +19,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -39,6 +40,8 @@ class MultiDomainDataset(AnemoiDataset):
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multidomain",
+        epoch: int = 0,
+        rollout: int = 1,
     ) -> None:
         """A dataset that combines multiple data_readers together.
 
@@ -58,16 +61,16 @@ class MultiDomainDataset(AnemoiDataset):
             data_readers=data_readers,
             shuffle=shuffle,
             label=label,
+            epoch=epoch,
+            rollout=rollout,
         )
 
+        self.anchors = {
+            name: data_reader.compute_anchors(relative_date_indices[name])
+            for name, data_reader in self.data_readers.items()
+        }
         self.valid_date_indices = {
-            name: get_usable_indices(
-                ds.missing,
-                len(ds.dates),
-                relative_date_indices[name],
-                ds.trajectory_ids if ds.has_trajectories else None,
-            )
-            for name, ds in self.data_readers.items()
+            name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
@@ -76,6 +79,31 @@ class MultiDomainDataset(AnemoiDataset):
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+
+        self.anchors = {
+            name: data_reader.compute_anchors(relative_date_indices[name])
+            for name, data_reader in self.data_readers.items()
+        }
+        self.valid_date_indices = {
+            name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
+        }
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
 
     def _check_datasets_units(self) -> None:
         """Check that all datasets have the same units.
@@ -151,17 +179,20 @@ class MultiDomainDataset(AnemoiDataset):
             )
 
         base_seed = get_base_seed()
-        torch.manual_seed(base_seed)
-        random.seed(base_seed)
-        self.rng = np.random.default_rng(seed=base_seed)
+        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
+        torch.manual_seed(seed)
+        random.seed(seed)
+        self.rng = np.random.default_rng(seed=seed)
         sanity_rnd = self.rng.random(1)[0]
 
         LOGGER.info(
-            ("Worker %d (%s, pid %d, base_seed %d, sanity rnd %f)"),
+            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
             worker_id,
             self.label,
             os.getpid(),
-            base_seed,
+            self.epoch,
+            self.rollout,
+            seed,
             sanity_rnd,
         )
 
@@ -176,14 +207,15 @@ class MultiDomainDataset(AnemoiDataset):
         -------
             dict[str, torch.Tensor]: The sample retrieved from the specified domain and index.
         """
-        time_step = offset_time_indices(index, self.relative_date_indices[domain_name])
-        if self.shard_shapes is not None and self.shard_shapes[domain_name] is not None:
-            start, end = get_partition_range(self.shard_shapes[domain_name], self.reader_group_rank)
+        sequence, position = (int(value) for value in self.anchors[domain_name][index])
+        time_step = offset_time_indices(position, self.relative_date_indices[domain_name])
+        if self.shard_sizes is not None and self.shard_sizes[domain_name] is not None:
+            start, end = get_partition_range(self.shard_sizes[domain_name], self.reader_group_rank)
             grid_indices = slice(start, end)
         else:
             grid_indices = slice(None)
 
-        return {domain_name: self.data_readers[domain_name].get_sample(time_step, grid_indices)}
+        return {domain_name: self.data_readers[domain_name].get_sample(sequence, time_step, grid_indices)}
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.

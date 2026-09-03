@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,6 +24,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 
 LOGGER = logging.getLogger(__name__)
@@ -37,6 +38,8 @@ class AnemoiDataset(IterableDataset, ABC):
         data_readers: dict[str, BaseAnemoiReader],
         shuffle: bool = True,
         label: str = "multi",
+        epoch: int = 0,
+        rollout: int = 1,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -49,11 +52,17 @@ class AnemoiDataset(IterableDataset, ABC):
             Shuffle batches, by default True
         label : str, optional
             label for the dataset, by default "multi"
+        epoch : int, optional
+            Epoch used for deterministic epoch-dependent shuffling, by default 0
+        rollout : int, optional
+            Rollout length represented by the loaded relative date indices, by default 1
         """
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
+        self.epoch = epoch
+        self.rollout = rollout
         self._lazy_init_model_and_reader_group_info()
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
@@ -74,7 +83,7 @@ class AnemoiDataset(IterableDataset, ABC):
         self.ens_comm_num_groups = 1
         self.ens_comm_group_id = 0
 
-        self.shard_shapes = None
+        self.shard_sizes = None
 
         # additional state vars (lazy init)
         self.n_samples_per_worker = 0
@@ -138,7 +147,7 @@ class AnemoiDataset(IterableDataset, ABC):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_shapes: dict[str, list[int]],
+        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
@@ -156,8 +165,8 @@ class AnemoiDataset(IterableDataset, ABC):
             Reader group rank
         reader_group_size : int
             Reader group size
-        shard_shapes : dict[str, list[int]]
-            Shard shapes for all data readers
+        shard_sizes : dict[str, ShardSizes]
+            Shard sizes for all datasets
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -169,7 +178,7 @@ class AnemoiDataset(IterableDataset, ABC):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        self.shard_shapes = shard_shapes
+        self.shard_sizes = shard_sizes
 
         assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
 

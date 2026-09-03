@@ -25,15 +25,16 @@ class TestMultiDomain:
         mock_dataset_a = mocker.MagicMock()
         mock_dataset_a.missing = {7, 8, 9, 10}
         mock_dataset_a.dates = list(range(30))
-        mock_dataset_a.has_trajectories = False
         mock_dataset_a.frequency = "3h"
+        mock_dataset_a.compute_anchors.return_value = np.array(
+            [[0, 0], *[[0, index] for index in range(11, 24)]],
+        )
 
         mock_dataset_b = mocker.MagicMock()
         mock_dataset_b.missing = set()
         mock_dataset_b.dates = list(range(20, 60))
-        mock_dataset_b.has_trajectories = True
-        mock_dataset_b.trajectory_ids = np.array([0] * 20 + [1] * 20)  # split at 40
         mock_dataset_b.frequency = "1h"
+        mock_dataset_b.compute_anchors.return_value = np.array([[0, 0], [0, 1], [1, 0], [1, 1]])
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 6, 18]}  # e.g. f([t, t-6h]) = t+12h
@@ -55,28 +56,15 @@ class TestMultiDomain:
 
         relative_date_indices = [0, 1, 2]
 
-        dataset_a:
-        dates:   [0, 1, 2, ..., 29]
-        indices: [0, 1, 2, ..., 22, 23]
-                where 23 = 29 - max(data_relative_time_indices) = 29 - 6
-
-        dataset_b:
-        missing indices: {26, 27, 28, 29}
-        indices: [20, 21, 22, 23, 24, 25, 30, 31, 32]
-                where 32 = 49 - max(data_relative_time_indices) = 49 - 18
+        Each reader supplies valid ``(sequence, position)`` anchors. The
+        dataset keeps a one-dimensional index for shuffling and sharding.
         """
-        # Test valid_date_indices property
-        valid_indices = multi_domain.valid_date_indices
-
-        # Should return a dictionary with concatenation [0, 11, 12, 13, ..., 22, 23]
-        expected_indices = {
-            "dataset_a": np.array(
-                [0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
-            ),
-            "dataset_b": np.array([0, 1, 20, 21]),
-        }
+        expected_indices = {"dataset_a": np.arange(14), "dataset_b": np.arange(4)}
         for key in expected_indices:
-            assert np.array_equal(valid_indices[key], expected_indices[key])
+            assert np.array_equal(multi_domain.valid_date_indices[key], expected_indices[key])
+
+        assert np.array_equal(multi_domain.anchors["dataset_a"][:, 1], [0, *range(11, 24)])
+        assert np.array_equal(multi_domain.anchors["dataset_b"], [[0, 0], [0, 1], [1, 0], [1, 1]])
 
     def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
@@ -101,6 +89,9 @@ class TestMultiDomain:
 
         multi_domain.data_readers["dataset_a"].get_sample.assert_called_once()
         multi_domain.data_readers["dataset_b"].get_sample.assert_not_called()
+
+        multi_domain.get_sample("dataset_b", 2)
+        assert multi_domain.data_readers["dataset_b"].get_sample.call_args.args[0] == 1
 
     def test_check_datasets_units_raises_error_for_incompatible_units(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.metadata = {
