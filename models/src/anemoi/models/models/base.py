@@ -29,8 +29,6 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
-from anemoi.models.models.target_features import DecodingTargetFeature
-from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 

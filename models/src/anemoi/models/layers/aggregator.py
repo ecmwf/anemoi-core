@@ -122,7 +122,7 @@ class SumAggregator(BaseLatentAggregator):
         return torch.stack(tuple(source_latents), dim=0).sum(dim=0)
 
 
-class MeanAggregator(SumAggregator):
+class MeanAggregator(BaseLatentAggregator):
     """Average latents element-wise."""
 
     def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
