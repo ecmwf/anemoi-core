@@ -201,7 +201,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
                 error_msg = (
                     f"No trainable parameters configured for dataset '{dataset_name}'. "
                     f"Set trainable_parameters.data > 0 (for dataset '{dataset_name}') "
-                    f"or remove '{self.name}' from decoder.{decoder_name}.input_target_features."
+                    f"or remove '{self.name}' from decoder.{decoder_name}.target_node_features."
                 )
                 raise ValueError(error_msg)
             num_trainable_params[dataset_name] = self.model.node_attributes.num_trainable_parameters[dataset_name]
@@ -235,7 +235,7 @@ class EncodedDataFeature(DecodingTargetFeature):
                 decoder_name = self.model.dataset2decoder[dataset_name]
                 raise ValueError(
                     f'"{self.name}" requires dataset "{dataset_name}" to have an encoder. '
-                    f"Update decoder.{decoder_name}.input_target_features."
+                    f"Update decoder.{decoder_name}.target_node_features."
                 )
             input_dims[dataset_name] = self.model.input_dim[dataset_name]
         assert len(set(input_dims.values())) == 1, (
@@ -317,7 +317,7 @@ def create_decoding_target_features(
     """Create a dict of :class:`DecodingTargetFeature` instances from a list of registry keys."""
     invalid = set(features) - VALID_TARGET_FEATURES
     assert not invalid, (
-        f"Decoder has invalid input_target_features: {invalid}. " f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
+        f"Decoder has invalid target_node_features: {invalid}. " f"Valid options: {sorted(VALID_TARGET_FEATURES)}"
     )
 
     return CompositeTargetFeature(model, datasets_names=decoder_datasets_names, feature_names=features)

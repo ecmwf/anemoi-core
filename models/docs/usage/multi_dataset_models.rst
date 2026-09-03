@@ -62,14 +62,14 @@ choose stable, descriptive names.
    decoders:
      global:
        target_datasets: [ "era5" ]
-       input_target_features: [ "encoded_data" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
        target_datasets: [ "cerra" ]
-       input_target_features: [ "encoded_data" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
@@ -129,7 +129,7 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
 *********************************
 
 Each decoder group builds its input from an ordered list of
-``input_target_features``. These are features defined on the decoder's
+``target_node_features``. These are features defined on the decoder's
 target (output) grid and supplied as inputs to the decoder. They control
 what the decoder receives in addition to the processed latent representation.
 
@@ -138,7 +138,7 @@ what the decoder receives in addition to the processed latent representation.
    decoders:
      global:
        datasets: [ "era5" ]
-       input_target_features: [ "encoded_data" ]  # default
+       target_node_features: [ "encoded_data" ]  # default
 
 Valid features:
 

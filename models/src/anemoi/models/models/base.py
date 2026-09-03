@@ -131,7 +131,7 @@ class BaseGraphModel(nn.Module):
                 self.dataset2decoder[d] = decoder_name
 
             self.decoders_target_input[decoder_name] = create_decoding_target_features(
-                decoder_config.input_target_features, datasets_to_decode, self
+                decoder_config.target_node_features, datasets_to_decode, self
             )
 
         self.target_datasets = list(self.dataset2decoder.keys())

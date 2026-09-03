@@ -17,7 +17,7 @@ model:
     _target_: anemoi.models.layers.processor.NoOpProcessor
   decoders:
     "0":
-      input_target_features: [ "coordinates" ]
+      target_node_features: [ "coordinates" ]
 
 
   upscale_mapper:

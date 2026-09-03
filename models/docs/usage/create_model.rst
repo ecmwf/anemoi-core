@@ -51,7 +51,7 @@ First, let's take the model configuration ``transformer.yaml``:
    decoders:
      0:
        target_datasets: [ "data" ]
-       input_target_features: [ "encoded_data" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024

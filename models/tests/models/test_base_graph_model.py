@@ -93,7 +93,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                 "decoders": {
                     0: {
                         "target_datasets": ["data"],
-                        "input_target_features": ["coordinates"],
+                        "target_node_features": ["coordinates"],
                         "mapper": {},
                     },
                 },
@@ -141,7 +141,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
                 "decoders": {
                     0: {
                         "target_datasets": ["data"],
-                        "input_target_features": ["coordinates"],
+                        "target_node_features": ["coordinates"],
                         "mapper": {},
                     },
                 },

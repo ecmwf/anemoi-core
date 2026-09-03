@@ -44,7 +44,7 @@ def test_base_model_schema_accepts_pointwise_mapper_configuration():
         decoders={
             "0": {
                 "target_datasets": ["data"],
-                "input_target_features": ["encoded_data"],
+                "target_node_features": ["encoded_data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseBackwardMapper",
                     "num_channels": 64,
@@ -113,7 +113,7 @@ def test_base_model_schema_accepts_sparse_projector_configuration():
         decoders={
             "0": {
                 "target_datasets": ["data"],
-                "input_target_features": ["encoded_data"],
+                "target_node_features": ["encoded_data"],
                 "mapper": {
                     "_target_": "anemoi.models.layers.mapper.PointWiseBackwardMapper",
                     "num_channels": 64,

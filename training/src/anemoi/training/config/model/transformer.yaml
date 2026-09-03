@@ -65,7 +65,7 @@ encoders:
 decoders:
   "0":
     target_datasets: [ "data" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, encoded_data
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       trainable_size: ${model.edge_trainable_parameters.hidden2data}

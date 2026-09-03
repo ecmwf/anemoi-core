@@ -180,7 +180,7 @@ class DecodersSchema(BaseModel):
 
     target_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
-    input_target_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
+    target_node_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
         default_factory=lambda: ["encoded_data"]
     )
     "Whether to use the encoded latents from the encoder."
