@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .forecaster import Forecaster
+from .forecaster import OffsetForecaster
 from .spatial_downscaler import SpatialDownscaler
 from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
@@ -15,6 +16,7 @@ from .timeless import Autoencoder
 __all__ = [
     "Autoencoder",
     "Forecaster",
+    "OffsetForecaster",
     "SpatialDownscaler",
     "TemporalDownscaler",
 ]
