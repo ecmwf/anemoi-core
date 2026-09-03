@@ -12,6 +12,7 @@ from __future__ import annotations
 from functools import cached_property
 from pathlib import Path
 from typing import Any
+from typing import Self
 
 import yamlrocks
 from omegaconf import OmegaConf
@@ -21,11 +22,16 @@ from anemoi.training.migrations.nodes import NodeDict
 
 
 class Config(NodeDict):
-    def __init__(self, path: Path | str) -> None:
-        self._path = Path(path)
-        self._cfg = OmegaConf.load(self._path)
+    def __init__(self, content: str) -> None:
+        self._content = content
+        self._cfg = OmegaConf.create(self._content)
         self._interpolation_handler = InterpolationHandler(self)
         self._interpolation_handler.parse_config()
+
+    @classmethod
+    def from_path(cls, path: Path | str) -> Self:
+        content = Path(path).read_text()
+        return cls(content)
 
     @property
     def prefix(self) -> tuple[()]:
@@ -33,7 +39,7 @@ class Config(NodeDict):
 
     @cached_property
     def yaml(self) -> yamlrocks.YAMLRocksDocument:
-        doc = yamlrocks.load(self._path, option=yamlrocks.OPT_ROUND_TRIP)
+        doc = yamlrocks.loads(self._content, option=yamlrocks.OPT_ROUND_TRIP)
         assert isinstance(doc, yamlrocks.YAMLRocksDocument)
         return doc
 
@@ -53,4 +59,7 @@ class Config(NodeDict):
         return self.yaml.to_yaml().decode()
 
     def __repr__(self) -> str:
-        return f"Config({self._path})"
+        return f'Config("""\n{self._content}\n""")'
+
+    def __deepcopy__(self, memo: Any) -> Self:
+        return self.__class__(self.to_yaml())
