@@ -303,6 +303,45 @@ def test_initialise_updating_scalers_uses_runtime_storage() -> None:
         )
 
 
+def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def forward(
+            self,
+            x: torch.Tensor,
+            model_comm_group: object | None = None,
+            grid_shard_sizes: list[int] | None = None,
+        ) -> tuple[torch.Tensor, list[int]]:
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_grid_shard_sizes
+            return x[..., :2, :], target_grid_shard_sizes
+
+    class ModelWithSpatialPreprocessor(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.spatial_pre_processors = torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()})
+            self.pre_processors = torch.nn.ModuleDict({"data": Processors([])})
+
+    comm_group = object()
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = ModelWithSpatialPreprocessor()
+    module.model_comm_group = comm_group
+    module.model_comm_group_rank = 1
+    module.grid_shard_sizes = {"data": source_grid_shard_sizes}
+    module.grid_shard_slice = {"data": slice(4, 8)}
+    module._setup_batch_sharding = lambda batch: batch
+    module._prepare_loss_scalers = lambda: None
+
+    result = module.on_after_batch_transfer({"data": torch.zeros(1, 1, 1, 4, 1)}, 0)
+
+    assert result["data"].shape[-2] == 2
+    assert module.grid_shard_sizes == {"data": target_grid_shard_sizes}
+    assert module.grid_shard_slice == {"data": slice(2, 4)}
+
+
 # Shared minimal configs
 _CFG_EMPTY = DictConfig(
     {"training": {"transport": {"prediction_mode": "state", "objective": "stochastic_interpolant"}}},

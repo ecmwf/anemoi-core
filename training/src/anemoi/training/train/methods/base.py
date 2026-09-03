@@ -328,9 +328,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.shard_sizes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            if dataset_name in self.model.spatial_pre_processors:
+                self.grid_sizes[dataset_name] = self.model.spatial_pre_processors[dataset_name].input_grid_size
+            else:
+                self.grid_sizes[dataset_name] = graph_data[
+                    dataset_name
+                ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,
@@ -893,6 +896,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
+
+        # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
+        # Owned by the model; applied before normalization so projectors see raw values.
+        for ds_name, projector in self.model.spatial_pre_processors.items():
+            if ds_name in batch:
+                batch[ds_name], output_grid_shard_sizes = projector(
+                    batch[ds_name],
+                    model_comm_group=self.model_comm_group,
+                    grid_shard_sizes=self.grid_shard_sizes[ds_name],
+                )
+                self.grid_shard_sizes[ds_name] = output_grid_shard_sizes
+                if output_grid_shard_sizes is None:
+                    self.grid_shard_slice[ds_name] = None
+                else:
+                    start, end = get_partition_range(
+                        partition_sizes=output_grid_shard_sizes,
+                        partition_id=self.model_comm_group_rank,
+                    )
+                    self.grid_shard_slice[ds_name] = slice(start, end)
 
         # Batch normalization
         batch = self._normalize_batch(batch)

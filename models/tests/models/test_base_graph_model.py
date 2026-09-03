@@ -10,9 +10,11 @@
 from types import SimpleNamespace
 
 import torch
+import torch.nn as nn
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+import anemoi.models.models.base as base_model_module
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -164,3 +166,130 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
+
+
+# ---------------------------------------------------------------------------
+# predict_step — spatial preprocessor ordering
+# ---------------------------------------------------------------------------
+
+
+def _make_minimal_model():
+    """Return a DummyGraphModel with a working predict_step."""
+    model_config = OmegaConf.create(
+        {
+            "model": {
+                "num_channels": 8,
+                "node_trainable_parameters": {"data": 0, "hidden": 0},
+                "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+                "encoders": {
+                    0: {
+                        "source_datasets": ["data"],
+                        "dataset_fusing_strategy": "not_supported",
+                        "mapper": {},
+                    },
+                },
+                "decoders": {
+                    0: {
+                        "target_datasets": ["data"],
+                        "target_node_features": ["coordinates"],
+                        "mapper": {},
+                    },
+                },
+                "residual": {
+                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                },
+                "bounding": {"datasets": {"data": []}},
+            },
+        }
+    )
+    return DummyGraphModel(
+        model_config=model_config,
+        data_indices=_make_data_indices(),
+        statistics={"data": None},
+        n_step_input=1,
+        n_step_output=1,
+        graph_data=_make_graph(),
+    )
+
+
+def _identity_pre_processor():
+    """Pre-processor that returns its input unchanged (identity)."""
+
+    class _Proc:
+        def __call__(self, x, in_place=False):
+            return x
+
+    return _Proc()
+
+
+def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypatch):
+    """Spatial preprocessors must be called before normalization preprocessors."""
+    call_order = []
+
+    class RecordingSpatialProcessor(nn.Module):
+        def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
+            call_order.append("spatial")
+            return x, grid_shard_sizes
+
+    class RecordingPreProcessor:
+        def __call__(self, x, in_place=False):
+            call_order.append("pre")
+            return x
+
+    model = _make_minimal_model()
+
+    # Patch forward so predict_step can complete without a real graph network.
+    BATCH, TIME, GRID, VARS = 1, 1, 4, 1
+    dummy_out = torch.zeros(BATCH, 1, 1, GRID, VARS)  # (b, t, ens, grid, vars)
+    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": dummy_out})
+
+    spatial_processors = nn.ModuleDict({"data": RecordingSpatialProcessor()})
+    pre_processors = {"data": RecordingPreProcessor()}
+    post_processors = {"data": _identity_pre_processor()}
+
+    batch = {"data": torch.zeros(BATCH, TIME, GRID, VARS)}
+
+    with torch.no_grad():
+        model.predict_step(
+            batch,
+            pre_processors=pre_processors,
+            post_processors=post_processors,
+            n_step_input=TIME,
+            spatial_pre_processors=spatial_processors,
+        )
+
+    assert call_order == ["spatial", "pre"], f"Expected spatial before pre, got order: {call_order}"
+
+
+def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(nn.Module):
+        def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_grid_shard_sizes
+            return x[..., :2, :], target_grid_shard_sizes
+
+    model = _make_minimal_model()
+    comm_group = object()
+
+    def forward(x, *, grid_shard_sizes=None, **_kwargs):
+        assert grid_shard_sizes == {"data": target_grid_shard_sizes}
+        return x
+
+    monkeypatch.setattr(model, "forward", forward)
+    monkeypatch.setattr(base_model_module, "get_shard_sizes", lambda *_args, **_kwargs: source_grid_shard_sizes)
+    monkeypatch.setattr(base_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+
+    out = model.predict_step(
+        {"data": torch.zeros(1, 1, 8, 1)},
+        pre_processors={"data": _identity_pre_processor()},
+        post_processors={"data": _identity_pre_processor()},
+        n_step_input=1,
+        model_comm_group=comm_group,
+        gather_out=False,
+        spatial_pre_processors=nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
+    )
+
+    assert out["data"].shape[-2] == 2

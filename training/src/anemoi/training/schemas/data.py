@@ -14,6 +14,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
 from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
+from anemoi.models.schemas.spatial_processors import SpatialProcessorSchema  # noqa: TC002
 
 
 class DatasetDataSchema(PydanticBaseModel):
@@ -44,3 +45,5 @@ class DataSchema(PydanticBaseModel):
     "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
+    spatial_processors: dict[str, SpatialProcessorSchema] | None = Field(default=None)
+    "Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector for downscaling)."
