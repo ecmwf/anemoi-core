@@ -26,7 +26,18 @@ jobs:
     timeout-minutes: 120
     # On a pull_request the expensive tests only run when the author opted in
     # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-expensive-tests') }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        (
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'run-expensive-tests'
+        ) ||
+        (
+          github.event.action != 'labeled' &&
+          contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
+        )
+      }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
