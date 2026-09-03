@@ -27,7 +27,7 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
-from anemoi.models.models.target_features import VALID_TARGET_FEATURES
+from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
@@ -147,13 +147,6 @@ class TransportModel(Model):
     "Transport model objective, path, conditioning, and inference configuration."
 
 
-class TrainableParameters(PydanticBaseModel):
-    data: NonNegativeInt = Field(example=8)
-    "Size of the learnable data node tensor. Default to 8."
-    hidden: NonNegativeInt = Field(example=8)
-    "Size of the learnable hidden node tensor. Default to 8."
-
-
 class NoOutputMaskSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
@@ -189,7 +182,7 @@ class DecodersSchema(BaseModel):
 
     target_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the decoder is applicable."
-    input_target_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
+    target_node_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
         default_factory=lambda: ["encoded_data"]
     )
     "Whether to use the encoded latents from the encoder."

@@ -139,15 +139,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
-    def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
-        """Build the latent aggregator."""
-        self.latent_aggregator = instantiate(
-            aggregator_config,
-            _recursive_=False,
-            input_channels=self.input_dim_latent,
-            source_channels=self._get_latent_aggregator_channels(),
-        )
-
     def _assemble_input(
         self,
         x: torch.Tensor,
@@ -483,13 +474,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         return x_out_dict
-
-    def _get_latent_aggregator_channels(self) -> dict[str, int]:
-        """Return encoder output widths by dataset."""
-        return {
-            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
-            for dataset_name in self.input_datasets
-        }
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
