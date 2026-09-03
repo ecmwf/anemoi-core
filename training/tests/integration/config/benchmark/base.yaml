@@ -5,6 +5,7 @@ system:
     accelerator: cuda
     num_gpus_per_node: 2
     num_nodes: 1
+    num_gpus_per_model: 1
 
 dataloader:
   num_workers:
@@ -32,6 +33,10 @@ model:
 training:
   max_epochs: 1
   num_sanity_val_steps: 0
+  optimization:
+    lr: 10e-5
+    lr_scheduler:
+      warmup_t: 1
 
 diagnostics:
   callbacks: []

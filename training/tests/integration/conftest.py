@@ -12,14 +12,12 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Union
 
 import pytest
 import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
-from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
@@ -67,17 +65,19 @@ def set_working_directory() -> None:
     os.chdir(repo_root)
 
 
-def _load_testing_modifications(tmp_path: Path) -> Union[DictConfig, ListConfig]:
-    modifications_file = "training/tests/integration/config/testing_modifications.yaml"
-    testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
-    assert isinstance(testing_modifications, DictConfig)
-    testing_modifications.system.output.root = str(tmp_path)
-    return testing_modifications
+@pytest.fixture
+def config_with_tempdir(tmp_path: Path) -> DictConfig:
+    return OmegaConf.create({"system": {"output": {"root": str(tmp_path)}}})
 
 
 @pytest.fixture
-def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
-    return _load_testing_modifications(tmp_path)
+def testing_modifications_with_temp_dir(config_with_tempdir: DictConfig) -> DictConfig:
+    modifications_file = "training/tests/integration/config/testing_modifications.yaml"
+    testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
+    testing_modifications_with_tempdir = OmegaConf.merge(testing_modifications, config_with_tempdir)
+
+    assert isinstance(testing_modifications_with_tempdir, DictConfig)
+    return testing_modifications_with_tempdir
 
 
 class GetTmpPath:
@@ -526,7 +526,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 )
 def benchmark_config(
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: OmegaConf,
+    config_with_tempdir: OmegaConf,
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
@@ -566,7 +566,7 @@ def benchmark_config(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
     OmegaConf.set_struct(template.data, False)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
+    cfg = OmegaConf.merge(template, config_with_tempdir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
     OmegaConf.resolve(cfg)
