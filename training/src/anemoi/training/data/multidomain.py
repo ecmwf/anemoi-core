@@ -11,11 +11,11 @@ import logging
 import os
 import random
 from collections.abc import Generator
+from collections.abc import Mapping
 
 import numpy as np
 import torch
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.data_reader import BaseAnemoiReader
@@ -31,8 +31,50 @@ LOGGER = logging.getLogger(__name__)
 # it may be that multidomain is not a good name for this, but it is what it is for now
 
 
+class MultiDomainSampler:
+    """Sample domain and index pairs for a multi-domain worker."""
+
+    def __init__(
+        self,
+        valid_date_indices: Mapping[str, np.ndarray],
+        chunk_index_range: Mapping[str, np.ndarray],
+        rng: np.random.Generator,
+        shuffle: bool = True,
+    ) -> None:
+        self.valid_date_indices = valid_date_indices
+        self.chunk_index_range = chunk_index_range
+        self.shuffle = shuffle
+        self.rng = rng
+
+    def __len__(self) -> int:
+        """Return the number of samples assigned to the worker."""
+        return sum(len(indices) for indices in self.chunk_index_range.values())
+
+    def __iter__(self) -> Generator[tuple[str, int], None, None]:
+        """Yield domain and index pairs in worker sampling order."""
+        domain_indices = {
+            domain: (
+                self.rng.choice(indices, size=len(indices), replace=False)[self.chunk_index_range[domain]]
+                if self.shuffle
+                else indices[self.chunk_index_range[domain]]
+            )
+            for domain, indices in self.valid_date_indices.items()
+        }
+        samples = [(domain, int(index)) for domain, indices in domain_indices.items() for index in indices]
+        if self.shuffle:
+            order = self.rng.choice(len(samples), size=len(samples), replace=False)
+            samples = [samples[int(index)] for index in order]
+        yield from samples
+
+
 class MultiDomainDataset(AnemoiDataset):
-    """Multi-domain wrapper that returns different samples from multiple data readers."""
+    """Sample independent domains through one iterable dataset.
+
+    Unlike :class:`MultiDataset`, which returns synchronized samples from every
+    reader, each iteration yields one domain. Readers retain independent grids
+    and date ranges. Mixing single-sequence native-grid readers with
+    multi-sequence trajectory readers is currently unsupported.
+    """
 
     def __init__(
         self,
@@ -42,20 +84,27 @@ class MultiDomainDataset(AnemoiDataset):
         label: str = "multidomain",
         epoch: int = 0,
         rollout: int = 1,
+        check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
         """A dataset that combines multiple data_readers together.
 
-        Args:
-            data_readers (dict[str, BaseAnemoiReader]):
-                A dictionary mapping domain names to their corresponding data readers.
-            relative_date_indices (dict[str, TimeIndices]):
-                A dictionary mapping domain names to their corresponding relative date indices.
-            shuffle (bool, optional):
-                Whether to shuffle the data. Defaults to True.
-            label (str, optional):
-                A label for this dataset. Defaults to "multidomain".
-        Return:
-            None
+        Parameters
+        ----------
+        data_readers : dict[str, BaseAnemoiReader]
+            Domain names mapped to their data readers.
+        relative_date_indices : dict[str, TimeIndices]
+            Domain names mapped to their relative date indices.
+        shuffle : bool, optional
+            Whether to shuffle samples, by default True.
+        label : str, optional
+            Dataset label, by default ``"multidomain"``.
+        epoch : int, optional
+            Epoch used for deterministic shuffling, by default 0.
+        rollout : int, optional
+            Rollout length represented by the relative date indices, by default 1.
+        check_variables_compatibility : Mapping[str, object], optional
+            Options forwarded to ``Variable.check_compatibility``. The options
+            follow ``CheckVariablesCompatibilitySchema``.
         """
         super().__init__(
             data_readers=data_readers,
@@ -64,6 +113,16 @@ class MultiDomainDataset(AnemoiDataset):
             epoch=epoch,
             rollout=rollout,
         )
+
+        single_seq = [name for name, reader in data_readers.items() if reader.num_sequences == 1]
+        multi_seq = [name for name, reader in data_readers.items() if reader.num_sequences > 1]
+        if single_seq and multi_seq:
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                "Trajectory datasets (init x step axes) in the same MultiDomainDataset is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
+            )
+            raise ValueError(msg)
 
         self.anchors = {
             name: data_reader.compute_anchors(relative_date_indices[name])
@@ -76,6 +135,7 @@ class MultiDomainDataset(AnemoiDataset):
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
+        self._check_datasets_units(**dict(check_variables_compatibility or {}))
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
@@ -105,7 +165,7 @@ class MultiDomainDataset(AnemoiDataset):
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
 
-    def _check_datasets_units(self) -> None:
+    def _check_datasets_units(self, **options: object) -> None:
         """Check that all datasets have the same units.
 
         Raises
@@ -139,7 +199,7 @@ class MultiDomainDataset(AnemoiDataset):
                 }
 
                 try:
-                    Variable.check_compatibility(variable_domain1, variable_domain2)
+                    Variable.check_compatibility(variable_domain1, variable_domain2, **options)
                 except ValueError as e:
                     msg = f"Variable compatibility check failed for domain1 '{domain1}' and domain2 '{domain2}': {e}"
                     raise ValueError(msg) from e
@@ -160,11 +220,11 @@ class MultiDomainDataset(AnemoiDataset):
         self.worker_id = worker_id
 
         for dataset in self.dataset_names:
-            shard_size = len(self.valid_date_indices[dataset]) // self.sample_comm_num_groups
-            shard_start = self.sample_comm_group_id * shard_size
-
-            self.n_samples_per_worker[dataset] = shard_size // n_workers
-            low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+            self.n_samples_per_worker[dataset], low, high = self._get_worker_index_range(
+                len(self.valid_date_indices[dataset]),
+                n_workers,
+                worker_id,
+            )
 
             self.chunk_index_range[dataset] = np.arange(low, high, dtype=np.uint32)
 
@@ -218,37 +278,29 @@ class MultiDomainDataset(AnemoiDataset):
         return {domain_name: self.data_readers[domain_name].get_sample(sequence, time_step, grid_indices)}
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
-        """Return an iterator that yields a tuple torch.Tensor and its corresponding domain name.
+        """Yield samples from independently partitioned domains.
+
+        Each domain is shuffled before its worker slice is selected. The slices
+        are then combined and shuffled again, giving sampling proportional to
+        each domain's available samples. All sample communication groups use the
+        same seed and therefore process domains in the same order, avoiding
+        mismatched collective operations. ``MultiDomainSampler`` owns this
+        ordering because PyTorch does not support a DataLoader sampler for
+        ``IterableDataset``.
 
         Returns
         -------
         Generator[dict[str, torch.Tensor], None, None]
             A generator yielding dictionaries containing tensor samples and their corresponding domain names
         """
-        if self.shuffle:
-            shuffled_chunk_indices = {
-                dataset: self.rng.choice(
-                    indices,
-                    size=len(indices),
-                    replace=False,
-                )[self.chunk_index_range[dataset]]
-                for dataset, indices in self.valid_date_indices.items()
-            }
-
-            labeled_samples_and_indexes = [
-                (domain, i) for domain, indices in shuffled_chunk_indices.items() for i in indices
-            ]
-
-            labeled_samples = self.rng.choice(
-                labeled_samples_and_indexes,
-                size=len(labeled_samples_and_indexes),
-                replace=False,
-            )
-        else:
-            shuffled_chunk_indices = {
-                domain: indices[self.chunk_index_range[domain]] for domain, indices in self.valid_date_indices.items()
-            }
-            labeled_samples = [(domain, i) for domain, inds in shuffled_chunk_indices.items() for i in inds]
+        labeled_samples = list(
+            MultiDomainSampler(
+                self.valid_date_indices,
+                self.chunk_index_range,
+                self.rng,
+                self.shuffle,
+            ),
+        )
 
         LOGGER.debug(
             (
@@ -265,6 +317,5 @@ class MultiDomainDataset(AnemoiDataset):
             labeled_samples[:10],
         )
 
-        for batch in labeled_samples:
-            domain_name, index = batch
-            yield self.get_sample(domain_name, int(index))
+        for domain_name, index in labeled_samples:
+            yield self.get_sample(domain_name, index)

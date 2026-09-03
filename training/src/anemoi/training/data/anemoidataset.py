@@ -22,6 +22,7 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
@@ -41,7 +42,7 @@ class AnemoiDataset(IterableDataset, ABC):
         epoch: int = 0,
         rollout: int = 1,
     ) -> None:
-        """Initialize multi-dataset with synchronized data readers.
+        """Initialize a dataset backed by one or more data readers.
 
         Parameters
         ----------
@@ -235,6 +236,13 @@ class AnemoiDataset(IterableDataset, ABC):
     @abstractmethod
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all data readers for this worker. To be overwritten by subclasses."""
+
+    def _get_worker_index_range(self, n_samples: int, n_workers: int, worker_id: int) -> tuple[int, int, int]:
+        """Partition samples across communication groups and workers."""
+        shard_size = n_samples // self.sample_comm_num_groups
+        shard_start = self.sample_comm_group_id * shard_size
+        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+        return shard_size // n_workers, low, high
 
     @cached_property
     def shard_shapes(self) -> dict[str, list]:

@@ -61,6 +61,28 @@ for training and supports:
    should sub-class ``MultiDataset`` and override the ``__iter__``
    method or the ``get_sample`` method.
 
+Multi-Domain
+------------
+
+``MultiDomainDataset`` combines independent domains in one iterable dataset.
+Where ``MultiDataset`` returns synchronized data from every reader in each
+sample, multi-domain iteration returns data from one reader at a time. The
+readers may have different grids and date ranges. Mixing single-sequence
+native-grid readers with multi-sequence trajectory readers is currently
+unsupported and raises an error during initialization.
+
+Each domain is partitioned independently across distributed sample groups and
+data-loader workers. ``MultiDomainSampler`` shuffles each domain before
+selecting its worker partition, then combines and shuffles the selected samples.
+This samples domains in proportion to their available samples while ensuring
+that all sample communication groups process domains in the same order.
+
+Variable metadata is checked across domains when the dataset is created.
+Options from ``CheckVariablesCompatibilitySchema`` can be passed through the
+``check_variables_compatibility`` argument to ignore selected metadata checks.
+Configuration and data-module integration for multi-domain training are outside
+the scope of this class and must be provided separately.
+
 API Reference
 =============
 
@@ -76,6 +98,14 @@ Multi-Dataset API
 -----------------
 
 .. automodule:: anemoi.training.data.multidataset
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Multi-Domain API
+----------------
+
+.. automodule:: anemoi.training.data.multidomain
    :members:
    :no-undoc-members:
    :show-inheritance:

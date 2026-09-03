@@ -14,7 +14,6 @@ import random
 import numpy as np
 import torch
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.data_reader import BaseAnemoiReader
@@ -120,13 +119,11 @@ class MultiDataset(AnemoiDataset):
 
         # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
         # note that we need even splits here across DDP ranks, so we might throw away some samples
-        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
-        shard_start = self.sample_comm_group_id * shard_size
-
-        self.n_samples_per_worker = shard_size // n_workers
-
-        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
-        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+        self.n_samples_per_worker, low, high = self._get_worker_index_range(
+            len(self.valid_date_indices),
+            n_workers,
+            worker_id,
+        )
 
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
