@@ -140,6 +140,10 @@ what the decoder receives in addition to the processed latent representation.
        datasets: [ "era5" ]
        target_node_features: [ "encoded_data" ]  # default
 
+.. note::
+   Here, "__target__" refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
+   It does not refer to the targets used to compute the loss of the ML model.
+
 Valid features:
 
 ``encoded_data`` *(default)*
