@@ -331,6 +331,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             # Encoder for this dataset
             encoder_name = self.dataset2encoder[dataset_name]
             x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
+            # Encoder for this dataset
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=bse,
                 shard_info=enc_shard_info,
@@ -372,6 +375,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
+        for dataset_name in self.target_datasets:
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -390,6 +394,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 edges=dec_edge_shard_sizes,
             )
 
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
                 (x_latent_proc, x_data_latent_dict[dataset_name]),

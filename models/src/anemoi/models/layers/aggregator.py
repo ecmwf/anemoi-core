@@ -9,119 +9,160 @@
 
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
+from collections.abc import Sequence
 
 import torch
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.layers.utils import maybe_checkpoint
+
 
 class BaseLatentAggregator(nn.Module, ABC):
-    """Base class for combining latent representations from multiple encoders.
+    """Combine named dataset latents for the processor."""
 
-    Subclasses implement the strategy for merging a dictionary of per-dataset
-    latent tensors into a single latent tensor that is fed to the processor.
-    """
-
-    def __init__(self, num_channels: dict[str, int]) -> None:
+    def __init__(
+        self,
+        *,
+        input_channels: int,
+        source_channels: Mapping[str, int],
+        gradient_checkpointing: bool = False,
+    ) -> None:
         super().__init__()
-        self.num_channels = num_channels
+
+        if input_channels <= 0:
+            raise ValueError(f"{self.__class__.__name__}: input_channels must be positive, got {input_channels}.")
+
+        if not source_channels:
+            raise ValueError(f"{self.__class__.__name__}: At least one latent source is required.")
+
+        self.input_channels = input_channels
+        self.source_channels = dict(source_channels)
+        self.source_names = tuple(source_channels)
+        self.gradient_checkpointing = gradient_checkpointing
 
     @property
     @abstractmethod
     def hidden_dim(self) -> int:
         """Return the channel dimension of the aggregated latent tensor."""
 
+    def forward(self, hidden_latent: Tensor, latents: Mapping[str, Tensor]) -> Tensor:
+        """Aggregate dataset latents in configured source order."""
+        if hidden_latent.shape[-1] != self.input_channels:
+            raise ValueError(
+                f"Hidden latent must have {self.input_channels} channels, got {hidden_latent.shape[-1]}.",
+            )
+        if not latents:
+            raise ValueError("At least one latent tensor is required.")
+
+        unknown_sources = set(latents).difference(self.source_channels)
+        if unknown_sources:
+            raise ValueError(f"Unknown latent sources: {sorted(unknown_sources)}.")
+
+        source_names = tuple(name for name in self.source_names if name in latents)
+        source_latents = tuple(latents[name] for name in source_names)
+        for source_name, latent in zip(source_names, source_latents, strict=True):
+            expected_channels = self.source_channels[source_name]
+            if latent.shape[-1] != expected_channels:
+                raise ValueError(
+                    f"Latent source '{source_name}' must have {expected_channels} channels, got {latent.shape[-1]}.",
+                )
+            if latent.shape[:-1] != hidden_latent.shape[:-1]:
+                raise ValueError(
+                    f"Latent source '{source_name}' and the hidden latent must have matching leading dimensions, "
+                    f"got {latent.shape[:-1]} and {hidden_latent.shape[:-1]}.",
+                )
+
+        return maybe_checkpoint(
+            self._forward,
+            self.gradient_checkpointing,
+            hidden_latent,
+            source_names,
+            source_latents,
+        )
+
     @abstractmethod
-    def forward(self, latents: dict[str, Tensor]) -> Tensor:
-        """Aggregate per-dataset latent tensors.
-
-        Parameters
-        ----------
-        latents : dict[str, Tensor]
-            Mapping from dataset name to latent tensor.
-            Each tensor has shape ``(nodes, channels)``.
-
-        Returns
-        -------
-        Tensor
-            Aggregated latent tensor with shape ``(nodes, channels)``.
-        """
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        """Aggregate dataset latents."""
 
 
 class SumAggregator(BaseLatentAggregator):
-    """Element-wise sum of latent representations.
+    """Sum latents element-wise."""
 
-    This is a zero-parameter, zero-overhead aggregator: when a single dataset
-    is provided the tensor is returned as-is without any copy or computation.
-    """
-
-    def __init__(self, num_channels: dict[str, int], skipna: bool = True) -> None:
-        super().__init__(num_channels)
-        self.skipna = skipna
-        self._hidden_dim = list(num_channels.values())[0]
-        assert all(
-            ch == self._hidden_dim for ch in num_channels.values()
-        ), f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
+    def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
+        super().__init__(input_channels=input_channels, source_channels=source_channels)
+        self._hidden_dim = next(iter(self.source_channels.values()))
+        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
+            raise ValueError(
+                f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
+                f"got {self.source_channels}.",
+            )
 
     @property
     def hidden_dim(self) -> int:
         return self._hidden_dim
 
-    def forward(self, latents: dict[str, Tensor]) -> Tensor:
-        values = list(latents.values())
-        if len(values) == 1:
-            return values[0]
-
-        all_values = torch.stack(values)
-        if self.skipna:
-            # Skip NaN values in the sum
-            return torch.nansum(all_values, dim=0)
-
-        assert not torch.isnan(
-            all_values
-        ).any(), f"NaN values found in latent tensors, but {self.__class__.__name__}.skipna is False."
-        return all_values.sum(dim=0)
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        if len(source_latents) == 1:
+            return source_latents[0]
+        return torch.stack(tuple(source_latents), dim=0).sum(dim=0)
 
 
 class MeanAggregator(BaseLatentAggregator):
-    """Element-wise mean of latent representations."""
+    """Average latents element-wise."""
 
-    def __init__(self, num_channels: dict[str, int]) -> None:
-        super().__init__(num_channels)
-        self._hidden_dim = list(num_channels.values())[0]
-        assert all(
-            ch == self._hidden_dim for ch in num_channels.values()
-        ), f"All latent tensors must have the same channel dimension for {self.__class__.__name__}."
+    def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
+        super().__init__(input_channels=input_channels, source_channels=source_channels)
+        self._hidden_dim = next(iter(self.source_channels.values()))
+        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
+            raise ValueError(
+                f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
+                f"got {self.source_channels}.",
+            )
 
     @property
     def hidden_dim(self) -> int:
         return self._hidden_dim
 
-    def forward(self, latents: dict[str, Tensor]) -> Tensor:
-        values = list(latents.values())
-        if len(values) == 1:
-            return values[0]
-        return torch.stack(values).mean(dim=0)
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        if len(source_latents) == 1:
+            return source_latents[0]
+        return torch.stack(tuple(source_latents), dim=0).mean(dim=0)
 
 
 class ConcatAggregator(BaseLatentAggregator):
-    """Concatenate latent representations."""
-
-    def __init__(self, num_channels: dict[str, int]) -> None:
-        super().__init__(num_channels)
-        self.expected_datasets = set(num_channels.keys())
-        self._hidden_dim = sum(num_channels.values())
+    """Concatenate dataset latents in source order."""
 
     @property
     def hidden_dim(self) -> int:
-        return self._hidden_dim
+        return sum(self.source_channels.values())
 
-    def forward(self, latents: dict[str, Tensor]) -> Tensor:
-        if set(latents.keys()) != self.expected_datasets:
-            raise ValueError(f"Latent tensors must match the expected datasets: {self.expected_datasets}")
-
-        values = list(latents.values())
-        if len(values) == 1:
-            return values[0]
-
-        return torch.cat(values, dim=-1)
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        if tuple(source_names) != self.source_names:
+            missing_sources = set(self.source_names).difference(source_names)
+            raise ValueError(
+                f"{self.__class__.__name__} requires every configured latent source; "
+                f"missing {sorted(missing_sources)}.",
+            )
+        return torch.cat(tuple(source_latents), dim=-1)

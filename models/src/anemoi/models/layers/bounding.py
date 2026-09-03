@@ -12,16 +12,14 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
-
-# from typing import Optional
+from typing import Optional
 
 import torch
 from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
-
-# from anemoi.models.data_indices.tensor import InputTensorIndex
+from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
 
 
@@ -41,6 +39,13 @@ class BaseBounding(nn.Module, ABC):
             A list of strings representing the variables that will be bounded.
         """
         super().__init__()
+        for var in variables:
+            if var not in name_to_index:
+                raise KeyError(
+                    f"{self.__class__.__name__}: variable '{var}' is not present in the name_to_index mapping."
+                )
+
+        self.name_to_index = name_to_index
         self.variables = variables
 
     def _get_indices(self, name_to_index: dict[str, int]) -> torch.Tensor:
@@ -278,8 +283,9 @@ def _build_dataset_boundings(
     nn.Sequential
         Sequence of bounding modules.
     """
-    return nn.Sequential(
-        *[
+
+    return nn.ModuleList(
+        [
             instantiate(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,

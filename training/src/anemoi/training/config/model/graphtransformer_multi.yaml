@@ -25,7 +25,7 @@ layer_kernels:
 
 processor:
   _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-  trainable_size: ${model.trainable_parameters.hidden2hidden}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
   sub_graph_edge_attributes: ${model.attributes.edges}
   num_channels: ${model.num_channels}
   num_layers: 16
@@ -43,11 +43,11 @@ processor:
 encoders:
   global: # user-defined key. It will appear in the state-dict
     source_datasets: [ "era5" ]
-    dataset_fusing_strategy:  "none" # Options: "none", "sequential", "joint"
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -62,11 +62,11 @@ encoders:
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
     source_datasets: [ "cerra" ]
-    dataset_fusing_strategy:  "none" # Options: "none", "sequential", "joint"
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.data2hidden}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -86,11 +86,11 @@ latent_aggregator:
 decoders:
   global: # user-defined key. It will appear in the state-dict
     target_datasets: [ "era5" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -106,11 +106,11 @@ decoders:
       edge_pre_mlp: False
   regional: # user-defined key. It will appear in the state-dict
     target_datasets: [ "cerra" ]
-    input_target_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       num_channels: ${model.num_channels}
-      trainable_size: ${model.trainable_parameters.hidden2data}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
@@ -142,12 +142,15 @@ output_mask:
     cerra:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
-trainable_parameters:
-  data: 8
+node_trainable_parameters:
+  era5: 8
+  cerra: 8
   hidden: 8
+
+edge_trainable_parameters:
   data2hidden: 8
+  hidden2hidden: 8
   hidden2data: 8
-  hidden2hidden: 8 # GNN and GraphTransformer Processor only
 
 # Torch compile configuration
 # A list of modules present in the model, which will be compiled

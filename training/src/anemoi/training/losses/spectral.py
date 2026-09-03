@@ -92,6 +92,7 @@ class SpectralLoss(BaseLoss):
 
     transform: SpectralTransform
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
 
     def __init__(
         self,
@@ -689,6 +690,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         alpha: float = 1.0,
         backend: CRPSBackend = "stable",
         no_autocast: bool = True,
+        coefficient_magnitude: bool = False,
         ignore_nans: bool = False,
         scalers: list | None = None,
         **kwargs,
@@ -705,6 +707,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         self.alpha = alpha
         self.backend = backend
         self.no_autocast = no_autocast
+        self.coefficient_magnitude = coefficient_magnitude
 
     def _forward_impl(
         self,
@@ -738,6 +741,11 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
             # -> [..., modes, vars]
             pred_spec = self._to_spectral_flat(pred)
             tgt_spec = self._to_spectral_flat(target)
+
+            if self.coefficient_magnitude:
+                # The modulus compares coefficient amplitudes and discards phase.
+                pred_spec = torch.abs(pred_spec)
+                tgt_spec = torch.abs(tgt_spec)
 
             pred_spec = einops.rearrange(pred_spec, "b t e m v -> b t v m e")  # ensemble dim last for preds
             tgt_spec = einops.rearrange(tgt_spec, "b t 1 m v -> b t v m 1")

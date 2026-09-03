@@ -34,6 +34,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
 from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
@@ -221,6 +222,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
 
+            if dataset_name not in self.input_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
+                )
+                continue
+
+            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
+
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
@@ -239,6 +248,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             num_channels=self._get_latent_aggregator_channels(),
         )
 
+        # Latent aggregator: combines encoder outputs before the processor
+        self._build_latent_aggregator(model_config.latent_aggregator)
+
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=static_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)],
@@ -249,6 +261,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
         self.processor = instantiate(
+            model_config.processor,
             model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
@@ -269,6 +282,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 continue
 
             decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
+            if dataset_name not in self.target_datasets:
+                LOGGER.info(
+                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
+                )
+                continue
+
+            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
@@ -278,6 +298,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
 
+        self.decoder = torch.nn.ModuleDict()
+        for decoder_name, decoder_config in model_config.decoders.items():
+            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same target dimension, "
+                f"but got {decoder_in_channels_dst}."
+            )
+            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
+            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
+                f"All datasets for decoder {decoder_name} must have the same output dimension, "
+                f"but got {decoder_output_channels_dst}."
+            )
+
+            self.decoder[decoder_name] = instantiate(
+                decoder_config.mapper,
         self.decoder = torch.nn.ModuleDict()
         for decoder_name, decoder_config in model_config.decoders.items():
             decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]

@@ -35,7 +35,9 @@ from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
-from anemoi.models.utils.config import broadcast_config_keys
+from anemoi.models.layers.target_features import DecodingTargetFeature
+from anemoi.models.layers.target_features import create_decoding_target_features
+from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -149,10 +151,8 @@ class BaseGraphModel(nn.Module):
 
         self.latent_skip = model_config.model.model.latent_skip
 
-        trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
-            data=self.dataset_names,
-            hidden=self._graph_name_hidden,
+        self.node_attributes = NamedNodesAttributes(
+            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
         self.node_attributes = NodeTrainableParameters(trainable_parameters, self._graph_data)
 
@@ -167,11 +167,13 @@ class BaseGraphModel(nn.Module):
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
+
+        self._assert_model_routing()
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config.model, self._graph_data, dynamic_graph_config.edges)
+        self._build_networks(model_config.model, self._graph_data, dynamic_graph_config.edges.model)
 
         # build residual connection
         self._build_residual(
@@ -343,6 +345,15 @@ class BaseGraphModel(nn.Module):
             assert (
                 hidden_name in self._graph_data.node_types
             ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        """Calculate the encoder input dimension for a given dataset."""
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+
+    def _calculate_input_dim_latent(self) -> int:
+        """Calculate the latent input dimension."""
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
+        return self.node_attributes.attr_ndims[nodes_name]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.

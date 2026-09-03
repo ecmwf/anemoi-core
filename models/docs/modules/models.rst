@@ -24,7 +24,7 @@ the model config; see :ref:`residual-connections` for details.
 
 This base model also encodes and decodes multiple datasets; see
 :ref:`usage-multi-dataset` for the ``encoders``/``decoders``,
-``latent_aggregator`` and decoder ``input_target_features`` options.
+``latent_aggregator`` and decoder ``target_node_features`` options.
 
 Reproducing the ``AnemoiModelAutoEncoder`` (deprecated)
 ========================================================
@@ -38,7 +38,7 @@ encoded latent. Reproduce it with two changes:
    *diagnostic* — leave nothing prognostic. With no prognostic
    variables, the residual skip connection has no state to carry over
    and is effectively a no-op, so no special residual class is needed.
-#. In the **model** config, set the decoder ``input_target_features`` to
+#. In the **model** config, set the decoder ``target_node_features`` to
    ``[forcings, coordinates]`` (the base model default is
    ``[encoded_data]``).
 
@@ -48,7 +48,7 @@ encoded latent. Reproduce it with two changes:
      global:
        datasets: [era5]
        # AutoEncoder behaviour: reconstruct from forcings + coordinates.
-       input_target_features: [forcings, coordinates]
+       target_node_features: [forcings, coordinates]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          # ... mapper configuration
@@ -75,7 +75,7 @@ Key features:
 
 For the training-side CRPS setup, including loss, truncation, and
 ensemble-specific configuration changes, see
-:doc:`anemoi-training:user-guide/kcrps-set-up`.
+:ref:`anemoi-training:ensemble-crps-training`.
 
 **********************************************
  Hierarchical Encoder-Processor-Decoder Model

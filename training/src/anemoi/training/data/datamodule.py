@@ -11,6 +11,7 @@
 import logging
 from collections.abc import Callable
 from functools import cached_property
+from typing import Any
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -150,9 +151,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return dataset
 
     def set_epoch(self, epoch: int) -> None:
-        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        self.sync_dataset_state()
 
+    def sync_dataset_state(self) -> None:
+        """Synchronize datasets with the current epoch and task state."""
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
@@ -162,7 +166,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
             dataset.set_epoch(
-                epoch,
+                self.epoch,
                 rollout=len(tuple(self.task.steps(label))),
                 relative_date_indices=compute_relative_date_indices(
                     self.task,
@@ -171,15 +175,25 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 ),
             )
 
-    def _persistent_workers(self) -> bool:
-        """Return whether DataLoader workers can persist across epochs."""
+    def state_dict(self) -> dict[str, Any]:
+        """Save the epoch used to seed newly started dataloader workers."""
+        return {"epoch": self.epoch}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore the dataloader epoch before Lightning starts worker processes."""
+        self.set_epoch(state_dict["epoch"])
+
+    @cached_property
+    def _use_persistent_workers(self) -> bool:
+        """Return the effective worker persistence setting."""
+        persistent_workers = self.config.dataloader.get("persistent_workers", True)
         rollout = getattr(self.task, "rollout", None)
-        if rollout is None:
-            return True
-        # Workers could also be persisted once rollout.step >= rollout.maximum,
-        # but that would make resumed runs behave differently from uninterrupted
-        # runs.
-        return rollout.epoch_increment == 0
+        if persistent_workers and rollout is not None and rollout.epoch_increment > 0:
+            LOGGER.info(
+                "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
+            )
+            return False
+        return persistent_workers
 
     def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
         static_coord_datasets = tuple(ds.static_coord_datasets)
@@ -220,7 +234,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._persistent_workers(),
+            persistent_workers=self._use_persistent_workers,
             collate_fn=self._make_collate_fn(ds),
             **extra,
         )

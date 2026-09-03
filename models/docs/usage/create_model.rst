@@ -34,7 +34,7 @@ First, let's take the model configuration ``transformer.yaml``:
 
    encoders:
      0:                        # user-defined group name (appears in the state-dict)
-       datasets: [ "data" ]           # datasets encoded by this group
+       source_datasets: [ "data" ]           # datasets encoded by this group
        dataset_fusing_strategy: "not_supported"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -50,8 +50,8 @@ First, let's take the model configuration ``transformer.yaml``:
 
    decoders:
      0:
-       datasets: [ "data" ]
-       input_target_features: [ "encoded_data" ]
+       target_datasets: [ "data" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024

@@ -28,7 +28,7 @@ model:
     latent_skip: False
   decoders:
     "0":
-      input_target_features: [ "coordinates" ]
+      target_node_features: [ "coordinates" ]
   processor:
     _target_: anemoi.models.layers.processor.NoOpProcessor
 

@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from collections import defaultdict
 
 import einops
@@ -18,6 +19,8 @@ from torch_geometric.data import HeteroData
 
 from rich.console import Console
 from rich.tree import Tree
+
+LOGGER = logging.getLogger(__name__)
 
 
 class TrainableTensor(nn.Module):
@@ -70,7 +73,9 @@ class NodeTrainableParameters(nn.Module):
         Get the node attributes to be passed trough the graph neural network.
     """
 
+    num_nodes: dict[str, int]
     num_trainable_parameters: dict[str, int]
+    attr_ndims: dict[str, int]
     trainable_tensors: dict[str, TrainableTensor]
 
     def __init__(self, trainable_parameters: dict[str, int], graph_data: HeteroData) -> None:

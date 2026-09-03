@@ -16,7 +16,7 @@ on:
           - test_training_cycle
           - test_accuracy
   pull_request:
-    types: [opened, reopened, synchronize, labeled]
+    types: [synchronize, labeled]
   merge_group:
 
 jobs:
@@ -26,7 +26,18 @@ jobs:
     timeout-minutes: 120
     # On a pull_request the expensive tests only run when the author opted in
     # via the 'run-expensive-tests' label; schedule/dispatch/merge_group always run.
-    if: ${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'run-expensive-tests') }}
+    if: >-
+      ${{
+        github.event_name != 'pull_request' ||
+        (
+          github.event.action == 'labeled' &&
+          github.event.label.name == 'run-expensive-tests'
+        ) ||
+        (
+          github.event.action != 'labeled' &&
+          contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
+        )
+      }}
     steps:
       - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -55,7 +66,7 @@ jobs:
             #SBATCH --job-name=anemoi_core_build_env
             #SBATCH --nodes=1
             #SBATCH --cpus-per-task=32
-            #SBATCH --time=01:00:00
+            #SBATCH --time=00:30:00
             #SBATCH --qos=nf
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
@@ -86,7 +97,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/test_training_cycle.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
@@ -106,8 +117,8 @@ jobs:
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
-        #SBATCH --time=01:00:00
-        #SBATCH --qos=ng
+        #SBATCH --time=00:30:00
+        #SBATCH --qos=dg
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
@@ -146,7 +157,7 @@ jobs:
         with:
           issue-number: 294
           body: |
-            ## 🚨 Nightly Job Failed
+            ## Nightly Job Failed
 
             **Repository:** ${{ github.repository }}
             **Workflow:** ${{ github.workflow }}

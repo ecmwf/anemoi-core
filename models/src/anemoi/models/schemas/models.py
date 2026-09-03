@@ -19,6 +19,8 @@ from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -35,6 +37,8 @@ from anemoi.models.transport.settings import StochasticInterpolantSettings
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
+from .aggregator import AggregatorSchema  # noqa: TC001
+from .bounding import BoundingSchema
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
@@ -88,47 +92,52 @@ class SparseProjectorSchema(BaseModel):
 
 
 class TransportSourceConfig(BaseModel):
-    kind: Literal["default", "zero", "gaussian", "reference_state"] = TransportSourceSettings.kind
+    """Configuration of the starting/source field for transport objectives.
+
+    The defaults map 1:1 to :class:`TransportSourceSettings` in
+    ``anemoi.models.transport.settings`` and are restated here so that importing
+    the schemas does not pull in the model code.
+    """
+
+    kind: Literal["default", "zero", "gaussian", "reference_state"] = "default"
     "Starting field used before the transport objective moves toward the target."
-    scale: NonNegativeFloat = Field(default=TransportSourceSettings.scale, examples=[TransportSourceSettings.scale])
+    scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
     "Multiplier applied to the starting/source field."
-    noise_scale: NonNegativeFloat = Field(default=TransportSourceSettings.noise_scale, examples=[0.1])
+    noise_scale: NonNegativeFloat = Field(default=0.0, examples=[0.1])
     "Additional additive Gaussian noise applied to the starting/source field."
 
 
 class TransportConfig(BaseModel):
+    """Configuration of the transport objective, path, conditioning and inference.
+
+    The defaults map 1:1 to :class:`EdmSettings`, :class:`NoiseConditioningSettings`
+    and :class:`StochasticInterpolantSettings` in ``anemoi.models.transport.settings``
+    and are restated here so that importing the schemas does not pull in the model code.
+    """
+
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Training and sampling objective used by the transport model."
-    sigma_data: PositiveFloat = Field(default=EdmSettings.sigma_data, examples=[EdmSettings.sigma_data])
+    sigma_data: PositiveFloat = Field(default=1.0, examples=[1.0])
     "Typical data scale used by EDM diffusion."
-    noise_channels: PositiveInt = Field(
-        default=NoiseConditioningSettings.channels,
-        examples=[NoiseConditioningSettings.channels],
-    )
+    noise_channels: PositiveInt = Field(default=32, examples=[32])
     "Number of channels in the noise or bridge-time embedding."
-    noise_cond_dim: PositiveInt = Field(
-        default=NoiseConditioningSettings.cond_dim,
-        examples=[NoiseConditioningSettings.cond_dim],
-    )
+    noise_cond_dim: PositiveInt = Field(default=16, examples=[16])
     "Size of the conditioning vector passed to conditional layers."
-    sigma_max: PositiveFloat = Field(default=EdmSettings.sigma_max, examples=[EdmSettings.sigma_max])
+    sigma_max: PositiveFloat = Field(default=100.0, examples=[100.0])
     "Maximum EDM diffusion noise level used during training."
-    sigma_min: PositiveFloat = Field(default=EdmSettings.sigma_min, examples=[EdmSettings.sigma_min])
+    sigma_min: PositiveFloat = Field(default=0.02, examples=[0.02])
     "Minimum EDM diffusion noise level used during training."
-    rho: PositiveFloat = Field(default=EdmSettings.rho, examples=[EdmSettings.rho])
+    rho: PositiveFloat = Field(default=7.0, examples=[7.0])
     "Shape parameter for the Karras EDM noise schedule."
-    si_alpha_schedule: Literal["linear"] = StochasticInterpolantSettings.alpha_schedule
+    si_alpha_schedule: Literal["linear"] = "linear"
     "Schedule for how strongly the SI bridge keeps the source field."
-    si_beta_schedule: Literal["linear", "quadratic"] = StochasticInterpolantSettings.beta_schedule
+    si_beta_schedule: Literal["linear", "quadratic"] = "linear"
     "Schedule for how strongly the SI bridge moves toward the target field."
-    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = StochasticInterpolantSettings.sigma_schedule
+    si_sigma_schedule: Literal["brownian_bridge", "quadratic_bridge"] = "brownian_bridge"
     "Schedule for the SI bridge-noise amplitude."
     source: TransportSourceConfig = Field(default_factory=TransportSourceConfig)
     "Configuration for the starting/source field."
-    si_noise_scale: NonNegativeFloat = Field(
-        default=StochasticInterpolantSettings.noise_scale,
-        examples=[StochasticInterpolantSettings.noise_scale],
-    )
+    si_noise_scale: NonNegativeFloat = Field(default=1.0, examples=[1.0])
     "Overall scale of the stochastic-interpolant bridge noise."
     training_condition: dict = Field(default_factory=dict)
     "Distribution used to sample one training noise level or bridge time per sample."
@@ -141,99 +150,6 @@ class TransportConfig(BaseModel):
 class TransportModel(Model):
     transport: TransportConfig = Field(default_factory=TransportConfig)
     "Transport model objective, path, conditioning, and inference configuration."
-
-
-class TrainableParameters(PydanticBaseModel):
-    data: NonNegativeInt = Field(example=8)
-    "Size of the learnable data node tensor. Default to 8."
-    hidden: NonNegativeInt = Field(example=8)
-    "Size of the learnable hidden node tensor. Default to 8."
-
-
-class ReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.ReluBounding"] = Field(..., alias="_target_")
-    "Relu bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the Relu method."
-
-
-class LeakyReluBoundingSchema(ReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-class FractionBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
-    "Fraction bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh fraction method."
-    min_val: float
-    "The minimum value for the HardTanh activation. Correspond to the minimum fraction of the total_var."
-    max_val: float
-    "The maximum value for the HardTanh activation. Correspond to the maximum fraction of the total_var."
-    total_var: str
-    "Variable from which the secondary variables are derived. \
-    For example, convective precipitation should be a fraction of total precipitation."
-
-
-class LeakyFractionBoundingSchema(FractionBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
-    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
-
-
-class HardtanhBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
-    "Hard tanh bounding method function from anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh method."
-    min_val: float
-    "The minimum value for the HardTanh activation."
-    max_val: float
-    "The maximum value for the HardTanh activation."
-
-
-class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
-    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
-
-
-class NormalizedReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
-    variables: list[str]
-    min_val: list[float]
-    normalizer: list[str]
-
-    @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(
-        self,
-    ) -> NormalizedReluBoundingSchema:
-        error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
-        match the number of variables ({len(self.variables)})"""
-        assert len(self.normalizer) == len(self.variables), error_msg
-        error_msg = f"""{self.__class__} requires that number of min_val ({len(self.min_val)}) or  match
-        the number of variables ({len(self.variables)})"""
-        assert len(self.min_val) == len(self.variables), error_msg
-        return self
-
-
-class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-Bounding = Annotated[
-    Union[
-        ReluBoundingSchema,
-        LeakyReluBoundingSchema,
-        FractionBoundingSchema,
-        LeakyFractionBoundingSchema,
-        HardtanhBoundingSchema,
-        LeakyHardtanhBoundingSchema,
-        NormalizedReluBoundingSchema,
-        NormalizedLeakyReluBoundingSchema,
-    ],
-    Field(discriminator="target_"),
-]
 
 
 class NoOutputMaskSchema(BaseModel):
@@ -308,14 +224,17 @@ class BaseModelSchema(PydanticBaseModel):
     "Sparse projection settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
-    trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
+    node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])
     "Learnable node and edge parameters."
     bounding: DatasetDict[list[Bounding]]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
+    output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     latent_aggregator: AggregatorSchema
     "Latent aggregator schema."
     processor: Union[
@@ -334,11 +253,29 @@ class BaseModelSchema(PydanticBaseModel):
     decoders: dict[str, DecodersSchema]
     "Model decoders schemas."
     residual: DatasetDict[ResidualConnectionSchema]
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
+    residual: DatasetDict[ResidualConnectionSchema]
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+
+    @model_validator(mode="before")
+    @classmethod
+    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
+        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
+        for field in ("encoders", "decoders"):
+            if field in data:
+                if isinstance(data[field], dict):
+                    data[field] = {str(k): v for k, v in data[field].items()}
+                elif isinstance(data[field], DictConfig):
+                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
+        return data
 
     @model_validator(mode="before")
     @classmethod
@@ -420,6 +357,22 @@ class TransportModelSchema(BaseModelSchema):
     @model_validator(mode="after")
     def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
+            if "datasets" in self.bounding:
+                for dataset_name, bounding_list in self.bounding["datasets"].items():
+                    if (bounding_list is not None) and len(bounding_list) > 0:
+                        msg = (
+                            "Transport models do not support bounding layers. "
+                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
+                            f"Please remove all bounding configurations for transport models."
+                        )
+                        raise ValueError(msg)
+            elif len(self.bounding) > 0:
+                msg = (
+                    "Transport models do not support bounding layers. "
+                    f"Found {len(self.bounding)} bounding configuration(s). "
+                    f"Please remove all bounding configurations for transport models."
+                )
+                raise ValueError(msg)
             if "datasets" in self.bounding:
                 for dataset_name, bounding_list in self.bounding["datasets"].items():
                     if (bounding_list is not None) and len(bounding_list) > 0:
