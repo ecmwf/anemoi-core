@@ -16,7 +16,7 @@ on:
           - test_training_cycle
           - test_accuracy
   pull_request:
-    types: [opened, reopened, synchronize, labeled]
+    types: [synchronize, labeled]
   merge_group:
 
 jobs:
@@ -157,7 +157,7 @@ jobs:
         with:
           issue-number: 294
           body: |
-            ## 🚨 Nightly Job Failed
+            ## Nightly Job Failed
 
             **Repository:** ${{ github.repository }}
             **Workflow:** ${{ github.workflow }}
