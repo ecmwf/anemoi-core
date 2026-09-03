@@ -45,14 +45,14 @@ choose stable, descriptive names.
 
    encoders:
      global:                 # user-defined group name (appears in the state-dict)
-       datasets: [ "era5", "ifs"]  # datasets encoded by this group
+       source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
        dataset_fusing_strategy: "not_supported"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
-       datasets: [ "cerra" ]
+       source_datasets: [ "cerra" ]
        dataset_fusing_strategy: "not_supported"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -61,21 +61,21 @@ choose stable, descriptive names.
 
    decoders:
      global:
-       datasets: [ "era5" ]
-       input_target_features: [encoded_data]
+       target_datasets: [ "era5" ]
+       input_target_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
-       datasets: [ "cerra" ]
-       input_target_features: [encoded_data]
+       target_datasets: [ "cerra" ]
+       input_target_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
          # ... mapper configuration
 
-``datasets``
+``{source|target}_datasets``
    The list of dataset names handled by this group. Datasets sharing a
    group share the same mapper weights.
 
@@ -124,14 +124,14 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    the order of the mapping passed to the model. Every configured dataset
    must be active because omitting one would change the output width.
 
-*************************
- Decoder target features
-*************************
+*********************************
+  Decoder target node features
+*********************************
 
 Each decoder group builds its input from an ordered list of
-``input_target_features``. This controls what the decoder receives in
-addition to (or instead of) the processed latent, and is the mechanism
-that replaces bespoke model subclasses such as the former autoencoder.
+``input_target_features``. These are features defined on the decoder's
+target (output) grid and supplied as inputs to the decoder. They control
+what the decoder receives in addition to the processed latent representation.
 
 .. code:: yaml
 
