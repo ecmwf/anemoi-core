@@ -8,6 +8,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/training-0.16.0...training-0.17.0) (2026-09-03)
+
+
+### ⚠ BREAKING CHANGES
+
+* **configs:** expand configurability for models with multiple encoders/decoders ([#1229](https://github.com/ecmwf/anemoi-core/issues/1229))
+
+### Features
+
+* **configs:** Expand configurability for models with multiple encoders/decoders ([#1229](https://github.com/ecmwf/anemoi-core/issues/1229)) ([98a16a0](https://github.com/ecmwf/anemoi-core/commit/98a16a05fe28e6ef98647bca910dbeca4fcbe729))
+* **training:** Flexible timestepping for forecaster ([#1070](https://github.com/ecmwf/anemoi-core/issues/1070)) ([fdeb9cf](https://github.com/ecmwf/anemoi-core/commit/fdeb9cf90203e3aa55b45ea6da6595f81c0c7a32))
+* **training:** Graph scores ([#1268](https://github.com/ecmwf/anemoi-core/issues/1268)) ([11e8498](https://github.com/ecmwf/anemoi-core/commit/11e8498e4b3fa38c32e80089f521387f7d2f19ec))
+* **training:** Strategy distribute by 1 ([#1346](https://github.com/ecmwf/anemoi-core/issues/1346)) ([3bf1a70](https://github.com/ecmwf/anemoi-core/commit/3bf1a707ba39dd132a14a4d827cf3ca62e587a24))
+
+
+### Bug Fixes
+
+* Circular import ([#1322](https://github.com/ecmwf/anemoi-core/issues/1322)) ([89036bc](https://github.com/ecmwf/anemoi-core/commit/89036bc84623bb50efbb5af163099cb390b42b0b))
+* **documentation, training:** Clean-up of graph scores and fix documentation ([#1338](https://github.com/ecmwf/anemoi-core/issues/1338)) ([5aa6585](https://github.com/ecmwf/anemoi-core/commit/5aa658592332f4ccf67d70b8b11d02bc6bf16b24))
+* **training:** Honour diagnostics.enable_checkpointing in the trainer ([#1332](https://github.com/ecmwf/anemoi-core/issues/1332)) ([2236216](https://github.com/ecmwf/anemoi-core/commit/2236216eee65f5979f4f85e65b30be3849fa7cb1))
+* **training:** Restore rollout and dataloader epoch on restart ([#1339](https://github.com/ecmwf/anemoi-core/issues/1339)) ([c6d79c1](https://github.com/ecmwf/anemoi-core/commit/c6d79c161a4fdc919bba7aa11515affb2eea92d6))
+
+
+### Performance Improvements
+
+* **training:** Use tensor.sum() on the scaling mask in ReweightedGraphNodeAttributeScaler ([#1328](https://github.com/ecmwf/anemoi-core/issues/1328)) ([ce8d0d6](https://github.com/ecmwf/anemoi-core/commit/ce8d0d6ea75f0f5925b94f40380af4b2118f5e62))
+
+
+### Reverts
+
+* **training:** "feat: reuse processing callbacks ([#1213](https://github.com/ecmwf/anemoi-core/issues/1213))" ([#1319](https://github.com/ecmwf/anemoi-core/issues/1319)) ([93476b7](https://github.com/ecmwf/anemoi-core/commit/93476b7a6ba35e1f0914b194f7971654b3d1e66b))
+
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-08-11)
 
 
