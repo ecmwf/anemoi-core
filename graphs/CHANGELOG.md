@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.6...graphs-0.9.7) (2026-09-03)
+
+
+### Bug Fixes
+
+* **graphs:** Correct planar area weights at the domain edge ([#1320](https://github.com/ecmwf/anemoi-core/issues/1320)) ([d55d7e7](https://github.com/ecmwf/anemoi-core/commit/d55d7e76af7fa1a4d033f647ea20e2e26dda5983))
+
 ## [0.9.6](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.5...graphs-0.9.6) (2026-08-11)
 
 
