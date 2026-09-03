@@ -5,7 +5,6 @@ system:
     accelerator: cuda
     num_gpus_per_node: 2
     num_nodes: 1
-    num_gpus_per_model: 1
 
 dataloader:
   num_workers:
