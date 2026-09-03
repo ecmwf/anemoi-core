@@ -12,14 +12,12 @@ from __future__ import annotations
 from abc import ABC
 from abc import abstractmethod
 from typing import Any
-from typing import Optional
 
 import torch
 from hydra.utils import instantiate
 from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.data_indices.tensor import InputTensorIndex
 from anemoi.models.layers.activations import leaky_hardtanh
 
 
@@ -246,7 +244,7 @@ def _build_dataset_boundings(
     bounding_cfgs: Any,
     data_indices: IndexCollection,
     statistics: dict | None,
-) -> nn.ModuleList:
+) -> nn.Module:
     """Build the list of model-output bounding modules from configuration.
 
     This is a thin factory over Hydra's ``instantiate`` that reads the iterable
@@ -273,12 +271,11 @@ def _build_dataset_boundings(
 
     Returns
     -------
-    nn.Sequential
+    nn.Module
         Sequence of bounding modules.
     """
-
-    return nn.ModuleList(
-        [
+    return nn.Sequential(
+        *(
             instantiate(
                 cfg,
                 name_to_index=data_indices.model.output.name_to_index,
@@ -286,7 +283,7 @@ def _build_dataset_boundings(
                 name_to_index_stats=data_indices.data.input.name_to_index,
             )
             for cfg in bounding_cfgs
-        ]
+        )
     )
 
 

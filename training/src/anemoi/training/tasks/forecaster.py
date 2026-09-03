@@ -184,7 +184,7 @@ class BaseForecaster(BaseTask):
             )
         return x
 
-    def log_extra(self, logger: Callable, logger_enabled: bool) -> None:
+    def log_extra(self, logger: Callable, logger_enabled: bool, **_kwargs) -> None:
         """Log any task-specific information."""
         logger(
             "rollout",

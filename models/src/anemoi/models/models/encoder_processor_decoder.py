@@ -693,15 +693,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         return {self._latent_key(encoder_name, sources[0].dataset_name): x_latent}
 
-    def _aggregate_latents(self, dataset_latents: dict[str, Tensor], x_hidden_latent: Tensor) -> Tensor:
-        """Combine per-encoder latents into the processor input."""
-        if not dataset_latents:
-            # Every source dataset was empty in this batch: hand the processor a zero latent
-            # rather than an empty aggregation.
-            return x_hidden_latent.new_zeros((x_hidden_latent.shape[0], self.latent_aggregator.hidden_dim))
-
-        return self.latent_aggregator(dataset_latents)
-
     def forward(
         self,
         batch: Batch,
@@ -798,7 +789,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         # Combine all encoded latents
-        x_latent = self._aggregate_latents(dataset_latents, x_hidden_latent)
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         processor_edge_attr, processor_edge_index, proc_edge_shard_sizes = self.processor_graph_provider.get_edges(
@@ -911,15 +902,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if self.encoder_fusing_strategy[encoder_name] == "joint":
             return encoder_name
         return dataset_name
-
-    def _get_latent_aggregator_channels(self) -> dict[str, int]:
-        """Return encoder output widths by latent key."""
-        return {
-            self._latent_key(self.dataset2encoder[dataset_name], dataset_name): self.encoder[
-                self.dataset2encoder[dataset_name]
-            ].hidden_dim
-            for dataset_name in self.input_datasets
-        }
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
