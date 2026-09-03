@@ -21,6 +21,8 @@ from typing import Any
 import pytorch_lightning as pl
 import torch
 from hydra.utils import instantiate
+from omegaconf import DictConfig
+from omegaconf import ListConfig
 from omegaconf import OmegaConf
 from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
@@ -1248,12 +1250,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             self.logger.log_hyperparams(hyper_params)
 
     def _resolve_subgrid(self, config: dict) -> None:
-        def per_dataset_resolve(per_dataset_config: dict, dataset_name: str) -> None:
-            for k, v in per_dataset_config.items():
-                if isinstance(v, dict):
-                    per_dataset_resolve(v, dataset_name)
-                elif (k, v) == ("subgrid", "output_mask"):
-                    per_dataset_config[k] = self.output_mask[dataset_name].as_tuple()
+        def per_dataset_resolve(node: object, dataset_name: str) -> None:
+            # OmegaConf DictConfig/ListConfig are not subclasses of dict/list, so match both.
+            if isinstance(node, (dict, DictConfig)):
+                for k, v in node.items():
+                    if isinstance(v, (dict, DictConfig, list, ListConfig)):
+                        per_dataset_resolve(v, dataset_name)
+                    elif (k, v) == ("subgrid", "output_mask"):
+                        node[k] = self.output_mask[dataset_name].as_tuple()
+            elif isinstance(node, (list, ListConfig)):
+                for item in node:
+                    per_dataset_resolve(item, dataset_name)
 
         for dataset_name, dataset_config in config.items():
             if dataset_config is not None:
