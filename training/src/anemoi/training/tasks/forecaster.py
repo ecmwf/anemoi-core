@@ -171,7 +171,7 @@ class BaseForecaster(BaseTask):
         for dataset_name in x:
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],
-                y_pred[dataset_name],
+                y_pred.get(dataset_name),
                 batch[dataset_name],
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
@@ -287,6 +287,9 @@ class Forecaster(BaseForecaster):
         output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
 
         for i in range(keep_steps):
+            if y_pred is None:
+                continue
+
             # Get prognostic variables
             x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
                 :,
