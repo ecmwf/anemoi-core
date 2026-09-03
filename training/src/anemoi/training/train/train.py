@@ -38,6 +38,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
+from anemoi.training.diagnostics.callbacks.compile import CompileCache
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -47,6 +48,7 @@ from anemoi.training.schemas.dataloader import DatasetConfigSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.checkpoint import freeze_submodule_by_name
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.compile import configure_compile_cache_environment
 from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
@@ -715,9 +717,18 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        # TODO(cathal): better place to put this logic?
+        callbacks = self.callbacks
+        compile_cache_file = self.config.system.input.compile_cache
+        if compile_cache_file is not None:
+            # This must happen before any sanity-validation or training graph is
+            # compiled: Inductor embeds this setting in generated Python.
+            configure_compile_cache_environment()
+            callbacks = [*callbacks, CompileCache(str(compile_cache_file))]
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
-            callbacks=self.callbacks,
+            callbacks=callbacks,
             deterministic=self.config.training.deterministic,
             detect_anomaly=self.config.diagnostics.debug.anomaly_detection,
             strategy=self.strategy,
@@ -742,7 +753,6 @@ class AnemoiTrainer(ABC):
             enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
-
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
         LOGGER.debug("Starting training..")
