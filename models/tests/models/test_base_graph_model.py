@@ -20,7 +20,7 @@ from anemoi.models.models.base import BaseGraphModel
 
 class DummyGraphModel(BaseGraphModel):
     def _build_networks(self, model_config) -> None:
-        self.seen_hidden_name = model_config.model.model.hidden_nodes_name
+        self.seen_hidden_name = model_config.model.hidden_nodes_name
 
     def _assemble_input(self, x, batch_size, grid_shard_sizes=None, model_comm_group=None):
         return x
@@ -40,7 +40,7 @@ class _IndexGroup(SimpleNamespace):
 def _make_data_indices() -> dict:
     dataset_indices = SimpleNamespace(
         model=SimpleNamespace(
-            input=_IndexGroup(prognostic=[0]),
+            input=_IndexGroup(prognostic=[0], forcing=[]),
             output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
             _forcing=[],
         ),
@@ -77,8 +77,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
             "model": {
-                "num_channels": 8,
-                "trainable_parameters": {
+                "node_trainable_parameters": {
                     "data": 0,
                     "hidden": 0,
                 },
@@ -86,10 +85,24 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                     "hidden_nodes_name": "hidden",
                     "latent_skip": False,
                 },
-                "residual": {
-                    "_target_": "anemoi.models.layers.residual.SkipConnection",
+                "encoders": {
+                    0: {
+                        "source_datasets": ["data"],
+                        "dataset_fusing_strategy": "not_supported",
+                        "mapper": {},
+                    },
                 },
-                "bounding": [],
+                "decoders": {
+                    0: {
+                        "target_datasets": ["data"],
+                        "target_node_features": ["coordinates"],
+                        "mapper": {},
+                    },
+                },
+                "residual": {
+                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                },
+                "bounding": {"datasets": {"data": []}},
             },
         },
     )
@@ -112,7 +125,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         {
             "model": {
                 "num_channels": 8,
-                "trainable_parameters": {
+                "node_trainable_parameters": {
                     "data": 0,
                     "hidden": 0,
                 },
@@ -120,10 +133,24 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
                     "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
                     "latent_skip": False,
                 },
-                "residual": {
-                    "_target_": "anemoi.models.layers.residual.SkipConnection",
+                "encoders": {
+                    0: {
+                        "source_datasets": ["data"],
+                        "dataset_fusing_strategy": "not_supported",
+                        "mapper": {},
+                    },
                 },
-                "bounding": [],
+                "decoders": {
+                    0: {
+                        "target_datasets": ["data"],
+                        "target_node_features": ["coordinates"],
+                        "mapper": {},
+                    },
+                },
+                "residual": {
+                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+                },
+                "bounding": {"datasets": {"data": []}},
             },
         },
     )
