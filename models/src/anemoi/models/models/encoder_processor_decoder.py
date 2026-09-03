@@ -34,7 +34,6 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.layers.processor import NoOpProcessor
 from anemoi.models.models import BaseGraphModel
 from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
@@ -166,18 +165,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             return x_data_latent
         return self.encoder_src_projection[encoder_name][dataset_name](x_data_latent)
 
-    def _build_encoders(self, model_config: DotDict) -> None:
+    def _build_encoding_networks(self, encoders_config: DotDict) -> None:
         """Instantiate one mapper per encoder, plus thin source projections where needed.
 
         Requires self.encoder_graph_provider to be populated, since an encoder's edge
         dimension comes from its source datasets' graph providers.
         """
-        self.encoder = torch.nn.ModuleDict()
         # Per-dataset "thin" projections onto a shared width, for multi-source encoders whose
         # source datasets differ in input dimension. Keyed [encoder_name][dataset_name].
         self.encoder_src_projection = torch.nn.ModuleDict()
 
-        for encoder_name, encoder_config in model_config.encoders.items():
+        self.encoder = torch.nn.ModuleDict()
+        for encoder_name, encoder_config in encoders_config.items():
             in_dims = {d: self.input_dim[d] for d in self.encoder2datasets[encoder_name]}
             edge_dims = {d: self.encoder_graph_provider[d].edge_dim for d in self.encoder2datasets[encoder_name]}
             if len(set(edge_dims.values())) > 1:
@@ -209,9 +208,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     {d: Linear(dim, in_channels_src) for d, dim in in_dims.items()}
                 )
 
-    def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
-        """Builds the model components."""
-        # Encoder data -> hidden
+    def _build_encoding_graphproviders(
+        self,
+        encoders_config: DotDict,
+        static_graph: HeteroData,
+        dynamic_graph_config: DotDict
+    ) -> None:
+        """Builds the graph providers for the encoding networks."""
+
         self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             if dataset_name not in self.input_datasets:
@@ -220,49 +224,38 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 )
                 continue
 
-            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
-
-            if dataset_name not in self.input_datasets:
-                LOGGER.info(
-                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
-                )
-                continue
-
-            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
+            encoder_config = encoders_config[self.dataset2encoder[dataset_name]]
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
+                graph=static_graph[(dataset_name, "to", self._graph_name_hidden)],
                 edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(dataset_name, "to", self._graph_name_hidden)],
-                src_size=self._graph_data[dataset_name].num_nodes,
-                dst_size=self._graph_data[self._graph_name_hidden].num_nodes,
+                src_size=static_graph[dataset_name].num_nodes,
+                dst_size=static_graph[self._graph_name_hidden].num_nodes,
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
             )
 
-        self._build_encoders(model_config)
+    def _build_processing_graphproviders(
+        self,
+        processor_config: DotDict,
+        static_graph: HeteroData,
+        dynamic_graph_config: DotDict
+    ) -> None:
+        """Builds the graph providers for the processor network."""
 
-        # Latent aggregator: combines encoder outputs before the processor
-        self.latent_aggregator = instantiate(
-            model_config.latent_aggregator,
-            num_channels=self._get_latent_aggregator_channels(),
-        )
-
-        # Latent aggregator: combines encoder outputs before the processor
-        self._build_latent_aggregator(model_config.latent_aggregator)
-
-        # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
             graph=static_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attribute_names=model_config.processor.get("sub_graph_edge_attributes"),
-            src_size=self._graph_data[self._graph_name_hidden].num_nodes,
-            dst_size=self._graph_data[self._graph_name_hidden].num_nodes,
-            trainable_size=model_config.processor.get("trainable_size", 0),
+            edge_attribute_names=processor_config.get("sub_graph_edge_attributes"),
+            **dynamic_graph_config[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            src_size=static_graph[self._graph_name_hidden].num_nodes,
+            dst_size=static_graph[self._graph_name_hidden].num_nodes,
+            trainable_size=processor_config.get("trainable_size", 0),
         )
-
+    
+    def _build_processing_networks(self, processor_config: DotDict) -> None:
         self.processor = instantiate(
-            model_config.processor,
-            model_config.processor,
+            processor_config,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
         )
@@ -272,7 +265,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             f" ({self.latent_aggregator.hidden_dim})."
         )
 
-        # Decoder hidden -> data
+    def _build_decoding_graphproviders(
+        self,
+        decoders_config: DotDict,
+        static_graph: HeteroData,
+        dynamic_graph_config: DotDict
+    ) -> None:
+        """Builds the graph providers for the decoding network."""
         self.decoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
             if dataset_name not in self.target_datasets:
@@ -281,40 +280,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 )
                 continue
 
-            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
-            if dataset_name not in self.target_datasets:
-                LOGGER.info(
-                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
-                )
-                continue
-
-            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
+            decoder_config = decoders_config[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
+                graph=static_graph[(self._graph_name_hidden, "to", dataset_name)],
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 **dynamic_graph_config[(self._graph_name_hidden, "to", dataset_name)],
-                src_size=self._graph_data[self._graph_name_hidden].num_nodes,
-                dst_size=self._graph_data[dataset_name].num_nodes,
+                src_size=static_graph[self._graph_name_hidden].num_nodes,
+                dst_size=static_graph[dataset_name].num_nodes,
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
             )
 
+    def _build_decoding_networks(self, decoders_config: DotDict) -> None:
+        """Builds the decoding networks."""
         self.decoder = torch.nn.ModuleDict()
-        for decoder_name, decoder_config in model_config.decoders.items():
-            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
-            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
-                f"All datasets for decoder {decoder_name} must have the same target dimension, "
-                f"but got {decoder_in_channels_dst}."
-            )
-            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
-            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
-                f"All datasets for decoder {decoder_name} must have the same output dimension, "
-                f"but got {decoder_output_channels_dst}."
-            )
-
-            self.decoder[decoder_name] = instantiate(
-                decoder_config.mapper,
-        self.decoder = torch.nn.ModuleDict()
-        for decoder_name, decoder_config in model_config.decoders.items():
+        for decoder_name, decoder_config in decoders_config.items():
             decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
             assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
                 f"All datasets for decoder {decoder_name} must have the same target dimension, "
@@ -334,6 +313,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
+
+    def _build_networks(self, model_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict) -> None:
+        """Builds the model components."""
+        self._build_encoding_graphproviders(model_config.encoders, static_graph, dynamic_graph_config)
+        self._build_encoding_networks(model_config.encoders)
+        
+        self._build_latent_aggregator(model_config.latent_aggregator)
+        self._build_processing_graphproviders(model_config.processor, static_graph, dynamic_graph_config)
+        self._build_processing_networks(model_config.processor)
+
+        self._build_decoding_graphproviders(model_config.decoders, static_graph, dynamic_graph_config)
+        self._build_decoding_networks(model_config.decoders)
 
     def _assemble_input(
         self,

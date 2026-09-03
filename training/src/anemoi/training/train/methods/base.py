@@ -47,7 +47,6 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import BaseMask
 from anemoi.training.utils.masks import create_output_masks
-from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 

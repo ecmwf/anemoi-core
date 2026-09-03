@@ -60,10 +60,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         self.noise_injector = instantiate(
             model_config.noise_injector,
-            model_config.noise_injector,
             _recursive_=False,
             graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
             sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
@@ -250,8 +248,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             # Encoder for this dataset
             encoder_name = self.dataset2encoder[dataset_name]
             x_data_latent, x_latent = self.encoder[encoder_name](
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_ens_size,
                 shard_info=enc_shard_info,
@@ -310,16 +306,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 dataset_name,
             )
 
-        for dataset_name in self.target_datasets:
-            x_target_latent, shard_sizes_target = self._assemble_targets(
-                x[dataset_name],
-                x_data_latent_dict.get(dataset_name, None),
-                batch_size,
-                grid_shard_sizes,
-                model_comm_group,
-                dataset_name,
-            )
-
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -335,13 +321,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
                 dst_nodes=shard_sizes_target,  # None if not sharded
-                dst_nodes=shard_sizes_target,  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_target_latent),
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
                 (x_latent_proc, x_target_latent),

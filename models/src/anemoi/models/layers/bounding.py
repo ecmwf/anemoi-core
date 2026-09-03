@@ -39,13 +39,6 @@ class BaseBounding(nn.Module, ABC):
             A list of strings representing the variables that will be bounded.
         """
         super().__init__()
-        for var in variables:
-            if var not in name_to_index:
-                raise KeyError(
-                    f"{self.__class__.__name__}: variable '{var}' is not present in the name_to_index mapping."
-                )
-
-        self.name_to_index = name_to_index
         self.variables = variables
 
     def _get_indices(self, name_to_index: dict[str, int]) -> torch.Tensor:
@@ -326,10 +319,10 @@ def build_boundings(
         configured classes.
     """
     bounding_modules = nn.ModuleDict()
-    for dataset_name in data_indices.keys():
+    for dataset_name, data_indices_obj in data_indices.items():
         bounding_modules[dataset_name] = _build_dataset_boundings(
             boundings_config.get(dataset_name, []),
-            data_indices=data_indices[dataset_name],
+            data_indices=data_indices_obj,
             statistics=statistics[dataset_name],
         )
 

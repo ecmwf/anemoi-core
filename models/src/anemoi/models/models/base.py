@@ -22,8 +22,6 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
 
-# from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
-# from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import gather_tensor
@@ -35,9 +33,6 @@ from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
-from anemoi.models.layers.target_features import DecodingTargetFeature
-from anemoi.models.layers.target_features import create_decoding_target_features
-from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -151,10 +146,7 @@ class BaseGraphModel(nn.Module):
 
         self.latent_skip = model_config.model.model.latent_skip
 
-        self.node_attributes = NamedNodesAttributes(
-            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
-        )
-        self.node_attributes = NodeTrainableParameters(trainable_parameters, self._graph_data)
+        self.node_attributes = NodeTrainableParameters(model_config.model.node_trainable_parameters, self._graph_data)
 
         self.dynamic_node_attributes: dict[str, dict[str, object]] = {}
         self.dynamic_node_attribute_dims: dict[str, int] = {}
@@ -173,7 +165,7 @@ class BaseGraphModel(nn.Module):
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config.model, self._graph_data, dynamic_graph_config.edges.model)
+        self._build_networks(model_config.model, self._graph_data, dynamic_graph_config.edges)
 
         # build residual connection
         self._build_residual(
@@ -231,7 +223,7 @@ class BaseGraphModel(nn.Module):
                 self.dataset2decoder[d] = decoder_name
 
             self.decoders_target_input[decoder_name] = create_decoding_target_features(
-                decoder_config.input_target_features, datasets_to_decode, self
+                decoder_config.target_node_features, datasets_to_decode, self
             )
 
         self.target_datasets = list(self.dataset2decoder.keys())
@@ -274,6 +266,20 @@ class BaseGraphModel(nn.Module):
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
             target_features.validate()
+
+    def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
+        """Build the latent aggregator."""
+        latent_aggregator_channels = {
+            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            for dataset_name in self.input_datasets
+        }
+
+        self.latent_aggregator = instantiate(
+            aggregator_config,
+            _recursive_=False,
+            input_channels=self.input_dim_latent,
+            source_channels=latent_aggregator_channels,
+        )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         """Compute per-dataset input/output channel counts, dimensions and internal data indices."""
@@ -326,35 +332,6 @@ class BaseGraphModel(nn.Module):
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
         return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
 
-    @staticmethod
-    def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
-    ) -> list[str]:
-        if isinstance(hidden_nodes_name, str):
-            return [hidden_nodes_name]
-
-        if isinstance(hidden_nodes_name, (list, ListConfig)):
-            return list(hidden_nodes_name)
-
-        raise TypeError(
-            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
-        )
-
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
-            assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
-
-    def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
-
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
 
@@ -374,6 +351,26 @@ class BaseGraphModel(nn.Module):
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
         return self.n_step_output * self.num_output_channels[dataset_name]
+
+    @staticmethod
+    def _as_hidden_node_names(
+        hidden_nodes_name: str | list[str] | ListConfig,
+    ) -> list[str]:
+        if isinstance(hidden_nodes_name, str):
+            return [hidden_nodes_name]
+
+        if isinstance(hidden_nodes_name, (list, ListConfig)):
+            return list(hidden_nodes_name)
+
+        raise TypeError(
+            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
+        )
+
+    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
+        for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
+            assert (
+                hidden_name in self._graph_data.node_types
+            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _assert_matching_indices(self, data_indices: dict) -> None:
         # Multi-dataset: check assertions for each dataset
