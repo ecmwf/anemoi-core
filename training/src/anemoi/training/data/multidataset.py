@@ -315,6 +315,8 @@ class MultiDataset(IterableDataset):
         )
 
         base_seed = get_base_seed()
+        # The datamodule checkpoints this epoch and restores it before new workers
+        # start, so resuming from an epoch checkpoint derives the same seed.
         seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
 
         torch.manual_seed(seed)
