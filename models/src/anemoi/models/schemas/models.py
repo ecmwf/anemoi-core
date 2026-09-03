@@ -33,8 +33,6 @@ from anemoi.utils.schemas import BaseModel
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .bounding import BoundingSchema
-from .aggregator import AggregatorSchema  # noqa: TC001
-from .bounding import BoundingSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
