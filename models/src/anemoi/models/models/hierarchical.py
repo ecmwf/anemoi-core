@@ -246,7 +246,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
-        **kwargs
+        **kwargs : Any
             Additional model arguments.
 
         Returns
