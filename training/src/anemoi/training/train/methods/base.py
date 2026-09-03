@@ -15,7 +15,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
-from pathlib import PosixPath
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -156,7 +156,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         task: BaseTask,
-        graph_data: dict[str, HeteroData] | PosixPath,
+        graph_data: HeteroData | Path,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -171,7 +171,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Job configuration
         task : BaseTask
             Training task.
-        graph_data : HeteroData | PosixPath
+        graph_data : HeteroData | Path
             Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
@@ -188,9 +188,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         super().__init__()
         self.task = task
 
-        assert isinstance(graph_data, (HeteroData, PosixPath)), "graph_data must be a HeteroData object or a file path"
+        assert isinstance(graph_data, (HeteroData, Path)), "graph_data must be a HeteroData object or a file path"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
-        if isinstance(graph_data, PosixPath):
+        self.graph_data = graph_data
+        if isinstance(graph_data, Path):
             self._graph_data_dict = _GraphFileDataset(graph_data)
         else:
             self.graph_data = graph_data.to(self.device)
@@ -198,9 +199,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.dataset_names = list(data_indices.keys())
         self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=self._graph_data_dict[name])
+            name: instantiate(
+                config.model.output_mask,
+                nodes=(
+                    self._graph_data_dict[name][DEFAULT_DATASET_NAME]
+                    if isinstance(self.graph_data, Path)
+                    else self.graph_data[name]
+                ),
+            )
             for name in self.dataset_names
-        }  # VERY INEFFICIENT, can we get all these attributes once instead of looping every time?
+        }
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -251,11 +259,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 continue
 
             self.target_dataset_names.append(dataset_name)
-            if isinstance(graph_data, PosixPath):
+            if isinstance(graph_data, Path):
                 fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
             else:
                 fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            dataset_graph = (
+                self._graph_data_dict[dataset_name] if isinstance(self.graph_data, Path) else self.graph_data
+            )
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -266,9 +277,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
                 task=self.task,
-                graph_data=(
-                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
-                ),
+                graph_data=dataset_graph,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -290,9 +299,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                graph_data=(
-                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
-                ),
+                graph_data=dataset_graph,
                 data_node_name=data_node_name,
             )
 
@@ -304,9 +311,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                graph_data=(
-                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, PosixPath) else self.graph_data
-                ),
+                graph_data=dataset_graph,
                 data_node_name=data_node_name,
             )
             self._initialise_updating_scalers(
@@ -341,9 +346,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.shard_sizes, self.grid_sizes = {}, {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = self._graph_data_dict[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            self.grid_sizes[dataset_name] = (
+                self._graph_data_dict[dataset_name][DEFAULT_DATASET_NAME].num_nodes
+                if isinstance(self.graph_data, Path)
+                else self.graph_data[dataset_name].num_nodes
+            )  # TODO(Mario): Replace by dataset.grid_size
             self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
                 self.grid_sizes[dataset_name],
                 reader_group_size,

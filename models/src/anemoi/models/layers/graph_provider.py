@@ -39,10 +39,10 @@ LOGGER = logging.getLogger(__name__)
 
 
 def create_graph_provider(
-    graph: Optional[HeteroData] = None,
+    graph: Optional[HeteroData | Path] = None,
     edge_attributes: Optional[list[str]] = None,
-    src_size: Optional[int] = None,
-    dst_size: Optional[int] = None,
+    src_size: Optional[int | str] = None,
+    dst_size: Optional[int | str] = None,
     trainable_size: int = 0,
     dataset_name: Optional[str] = None,
 ) -> "BaseGraphProvider":
@@ -54,41 +54,42 @@ def create_graph_provider(
 
     Parameters
     ----------
-    graph : HeteroData, optional
+    graph : HeteroData | Path, optional
         Graph containing edges (for static mode)
     edge_attributes : list[str], optional
         Edge attributes to use (for static mode)
-    src_size : int, optional
-        Source grid size (for static mode)
-    dst_size : int, optional
+    src_size : int | str, optional
+        Source grid size or node name
+    dst_size : int | str, optional
         Destination grid size (for static mode)
     trainable_size : int, optional
         Trainable tensor size, by default 0
+    dataset_name : str, optional
+        Graph file stem to load in file mode
+
     Returns
     -------
     BaseGraphProvider
         Appropriate graph provider instance
     """
+    if isinstance(graph, Path):
+        return FileGraphProvider(
+            graph_dir=graph,
+            src_size=src_size,
+            dst_size=dst_size,
+            dataset_name=dataset_name,
+            edge_attributes=edge_attributes,
+            trainable_size=trainable_size,
+        )
     if graph:
-        if isinstance(graph, Path) and graph.is_dir():
-            return FileGraphProvider(
-                graph_dir=graph,
-                src_size=src_size,
-                dst_size=dst_size,
-                dataset_name=dataset_name,
-                edge_attributes=edge_attributes,
-                trainable_size=trainable_size,
-            )
-        else:
-            return StaticGraphProvider(
-                graph=graph,
-                edge_attributes=edge_attributes,
-                src_size=src_size,
-                dst_size=dst_size,
-                trainable_size=trainable_size,
-            )
-    else:
-        return NoOpGraphProvider()
+        return StaticGraphProvider(
+            graph=graph,
+            edge_attributes=edge_attributes,
+            src_size=src_size,
+            dst_size=dst_size,
+            trainable_size=trainable_size,
+        )
+    return NoOpGraphProvider()
 
 
 def normalize_projection_edges_name(
@@ -135,6 +136,8 @@ class BaseGraphProvider(nn.Module, ABC):
             Model communication group
         shard_edges : bool, optional
             Whether to shard edges, by default True
+        device : torch.device, optional
+            Device on which to materialize file-backed edges
 
         Returns
         -------
@@ -293,6 +296,8 @@ class StaticGraphProvider(BaseGraphProvider):
             Whether to shard edges, by default True.
         act_checkpoint : bool, optional
             Whether to use gradient checkpointing, by default True.
+        device : torch.device, optional
+            Unused for in-memory graphs.
 
         Returns
         -------
@@ -344,6 +349,8 @@ class NoOpGraphProvider(BaseGraphProvider):
         model_comm_group : ProcessGroup, optional
             Unused
         shard_edges : bool, optional
+            Unused
+        device : torch.device, optional
             Unused
 
         Returns
@@ -455,6 +462,8 @@ class DynamicGraphProvider(BaseGraphProvider):
             Whether to shard edges, by default True
         act_checkpoint : bool, optional
             Whether to use gradient checkpointing, by default True.
+        device : torch.device, optional
+            Unused
 
         Returns
         -------
@@ -778,6 +787,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
             row_normalize=bool(config.get("row_normalize", False)),
         )
 
+
 # ---------------------------------------------------------------------------
 # File-based graph loading helpers
 # ---------------------------------------------------------------------------
@@ -802,11 +812,11 @@ class _GraphFileDataset(Dataset):
         if not self.graph_dir.is_dir():
             raise FileNotFoundError(f"Graph directory not found: {self.graph_dir}")
 
-        self.paths: list[Path] = sorted(self.graph_dir.glob(f"*{extension}"))
-        if not self.paths:
+        paths = sorted(self.graph_dir.glob(f"*{extension}"))
+        if not paths:
             raise RuntimeError(f"No {extension} files found in {self.graph_dir}")
 
-        self.paths = {path.parts[-1].split(".")[0]: path for path in self.paths}
+        self.paths = {path.stem: path for path in paths}
         self.names = list(self.paths.keys())
 
         LOGGER.info("Found %d graph file(s) in %s", len(self.paths), self.graph_dir)
@@ -815,7 +825,7 @@ class _GraphFileDataset(Dataset):
         return len(self.paths)
 
     def __getitem__(self, name: str) -> HeteroData:
-        """Load and return the graph object at *names*."""
+        """Load and return the graph object named *name*."""
         path = self.paths[name]
         return torch.load(path, weights_only=False, map_location="cpu")
 
@@ -829,42 +839,37 @@ class _GraphFileDataset(Dataset):
 
 
 class FileGraphProvider(BaseGraphProvider):
-    """Provider that loads graphs from files in a directory using a DataLoader.
+    """Provider that loads graphs lazily from files in a directory.
 
-    Creates an internal graph DataLoader to lazily stream pre-computed graph
-    files (e.g. ``*.pt``) from disk.  The provider exposes an iterable
-    interface so callers can iterate over the loaded graphs.
-
-    Graph metadata (``src_size``, ``dst_size``, ``edge_attributes``, ``trainable_size``)
-    is inferred from the first graph file in the directory.  Each graph is expected to
-    carry:
-
-    * ``edge_index`` – [2, num_edges] tensor
-    * One or more edge attribute tensors (names listed in ``edge_attribute_names``)
-    * ``src_size`` (int attribute) – number of source nodes
-    * ``dst_size`` (int attribute) – number of destination nodes
-    * ``edge_attribute_names`` (list[str]) – names of edge attribute tensors to concatenate
-    * ``trainable_size`` (int attribute, optional) – learnable edge param width (default 0)
-
-    If ``src_size`` / ``dst_size`` are not stored on the graph they are inferred
-    from ``edge_index``.
+    Each graph is expected to contain the configured source and destination
+    node stores and their ``(source, "to", destination)`` edge store.
 
     Parameters
     ----------
+    src_size : str
+        Source node name.
+    dst_size : str
+        Destination node name.
     graph_dir : str | Path
         Directory containing graph files.
+    dataset_name : str, optional
+        Graph file stem to load.
+    edge_attributes : list[str], optional
+        Edge attributes to concatenate.
+    trainable_size : int
+        Size of trainable edge parameters.
     extension : str
         File extension to search for (default ``".pt"``).
     batch_size : int
-        Number of graphs per batch (default 1).
+        Reserved for future batched file loading.
     num_workers : int
-        Number of DataLoader worker processes (default 1).
+        Reserved for future parallel file loading.
     prefetch_factor : int
-        Batches to prefetch per worker (default 1).
+        Reserved for future parallel file loading.
     shuffle : bool
-        Whether to shuffle file order each epoch (default False).
+        Reserved for future parallel file loading.
     pin_memory : bool
-        Whether to pin tensors into page-locked memory (default True).
+        Reserved for future parallel file loading.
     """
 
     def __init__(
@@ -872,7 +877,7 @@ class FileGraphProvider(BaseGraphProvider):
         src_size: str,
         dst_size: str,
         graph_dir: Union[str, Path],
-        dataset_name: str = None,
+        dataset_name: Optional[str] = None,
         edge_attributes: Optional[list[str]] = None,
         trainable_size: int = 0,
         extension: str = ".pt",
@@ -888,24 +893,21 @@ class FileGraphProvider(BaseGraphProvider):
         self.graph_name = dataset_name if dataset_name is not None else "graph"
         self.edge_attributes = edge_attributes
         self.trainable_size = trainable_size
+        assert self.edge_attributes is not None, "Edge attributes must be provided"
 
         self.graph_dir = Path(graph_dir)
 
-        # Build dataset and dataloader
         self._dataset = _GraphFileDataset(self.graph_dir, extension=extension)
         self.names = self._dataset.names
-        # Peek at the first graph to derive metadata
-        first_graph = self._dataset[self.names[0]]
-        self._init_from_graph(first_graph)
+        graph = self._dataset[self.graph_name]
+        self._init_from_graph(graph)
 
     def _init_from_graph(self, graph: HeteroData) -> None:
         """Derive src_size, dst_size, edge_attributes, trainable_size from a graph."""
         # --- src_size / dst_size ---
         self.src_size = graph[self.src_name].num_nodes
         self.dst_size = graph[self.dst_name].num_nodes
-        assert (
-            self.src_size is not None or self.dst_size is not None
-        ), "Graph must have at least one of src_size or dst_size attributes"
+        assert self.src_size is not None and self.dst_size is not None, "Graph node sizes must be defined"
 
         edge_attr_tensor = torch.cat(
             [graph[(self.src_name, "to", self.dst_name)][attr] for attr in self.edge_attributes], axis=1
@@ -936,17 +938,12 @@ class FileGraphProvider(BaseGraphProvider):
 
     def __getitem__(self, index: int) -> HeteroData:
         """Get a specific subgraph by index."""
-        graph = self._dataset[self.names[index]][(self.src_name, "to", self.dst_name)]
-        assert (
-            graph.src_size == self.src_size
-        ), f"Graph src_size {graph.src_size} does not match expected {self.src_size}"
-        assert (
-            graph.dst_size == self.dst_size
-        ), f"Graph dst_size {graph.dst_size} does not match expected {self.dst_size}"
-        assert (
-            int(getattr(graph, "trainable_size", 0)) == self.trainable_size
-        ), f"Graph trainable_size {getattr(graph, 'trainable_size', 0)} does not match expected {self.trainable_size}"
-        return graph
+        full_graph = self._dataset[self.names[index]]
+        src_size = full_graph[self.src_name].num_nodes
+        dst_size = full_graph[self.dst_name].num_nodes
+        assert src_size == self.src_size, f"Graph src_size {src_size} does not match expected {self.src_size}"
+        assert dst_size == self.dst_size, f"Graph dst_size {dst_size} does not match expected {self.dst_size}"
+        return full_graph[(self.src_name, "to", self.dst_name)]
 
     def _expand_edges(self, edge_index: Adj, batch_size: int) -> Adj:
         """Expand edge index for batched processing."""
@@ -972,6 +969,8 @@ class FileGraphProvider(BaseGraphProvider):
             Model communication group.
         shard_edges : bool, optional
             Whether to shard edges, by default True.
+        device : torch.device, optional
+            Device on which to materialize the selected graph.
 
         Returns
         -------
@@ -980,33 +979,21 @@ class FileGraphProvider(BaseGraphProvider):
         """
 
         full_graph = self._dataset[self.graph_name]
+        graph = full_graph[(self.src_name, "to", self.dst_name)].to(device)
+
         src_size = full_graph[self.src_name].num_nodes
         dst_size = full_graph[self.dst_name].num_nodes
-        graph = self._dataset[self.graph_name][(self.src_name, "to", self.dst_name)].to(device)
+        assert src_size == self.src_size, f"Graph src_size {src_size} does not match expected {self.src_size}"
+        assert dst_size == self.dst_size, f"Graph dst_size {dst_size} does not match expected {self.dst_size}"
 
+        edge_index, perm = sort_edge_index_by_dst(graph.edge_index, max_value=dst_size)
         edge_attr = torch.cat([graph[attr] for attr in self.edge_attributes], axis=1)
+        edge_attr = edge_attr.index_select(0, perm)
         edge_attr = self.trainable(edge_attr, batch_size).to(device)
-
-        # Derive src/dst sizes from this specific graph (may differ across files)
-        src_size = int(getattr(graph, "src_size", graph.edge_index[0].max().item() + 1))
-        dst_size = int(getattr(graph, "dst_size", graph.edge_index[1].max().item() + 1))
-
-        edge_index = graph.edge_index
-        edge_inc = torch.tensor([[src_size], [dst_size]], dtype=torch.int64, device=device)
-        edge_index = torch.cat(
-            [edge_index + i * edge_inc for i in range(batch_size)],
-            dim=1,
-        )
-        edge_index = edge_index.to(torch.int64)
-        edge_attr = edge_attr.to(torch.float16)
+        edge_index = self._expand_edges(edge_index, batch_size).to(torch.int64)
 
         if shard_edges:
-            # ensure correct dtypes for sharding
-
             return shard_edges_1hop(
                 edge_attr, edge_index, src_size * batch_size, dst_size * batch_size, model_comm_group
             )
-        # remove graph from memory after processing
-        del graph
-        del full_graph
         return edge_attr, edge_index, None

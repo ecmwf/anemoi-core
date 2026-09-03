@@ -187,7 +187,7 @@ class AnemoiTrainer(ABC):
         return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
 
     @cached_property
-    def graph_data(self) -> HeteroData:
+    def graph_data(self) -> HeteroData | Path:  # noqa: C901
         """Graph data built or loaded for the current trainer config."""
         dataset_names = self._dataset_names
         graph_cfg = self.config.graph
@@ -205,6 +205,8 @@ class AnemoiTrainer(ABC):
             if not save_path.exists():
                 msg = f"Existing graph file not found: {save_path}"
                 raise FileNotFoundError(msg)
+            if save_path.is_dir():
+                return save_path
             graph = load_graph_from_file(save_path)
             fused = uses_fused_dataset_graph(graph, dataset_names)
             required = dataset_names if fused else [DEFAULT_DATASET_NAME]
@@ -253,13 +255,14 @@ class AnemoiTrainer(ABC):
         # Try loading existing saved graph before rebuilding.
         overwrite = graph_cfg.get("overwrite", False)
         if save_path and save_path.exists() and not overwrite:
-            if save_path.suffix == ".pt":
+            if save_path.is_file():
                 fused = uses_fused_dataset_graph(graph_cfg, dataset_names)
                 required = dataset_names if fused else [DEFAULT_DATASET_NAME]
                 graph = load_graph_from_file(save_path)
                 validate_loaded_graph(graph, required)
                 return graph
-            return save_path  # Assume the filename is a path or a dict of paths: return path for graph provider
+            if save_path.is_dir():
+                return save_path
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(

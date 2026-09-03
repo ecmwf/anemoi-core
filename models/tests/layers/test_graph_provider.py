@@ -91,6 +91,23 @@ def test_file_graph_provider_edge_dim(graph_dir: Path) -> None:
     assert provider.edge_dim == EDGE_ATTR_DIM
 
 
+def test_file_graph_provider_uses_selected_graph_metadata(graph_dir: Path) -> None:
+    """Provider metadata comes from the selected graph file."""
+    graph = _make_fake_graph()
+    graph["data"].num_nodes = NUM_SRC_NODES + 1
+    torch.save(graph, graph_dir / "larger_graph.pt")
+
+    provider = FileGraphProvider(
+        graph_dir=graph_dir,
+        src_size="data",
+        dst_size="hidden",
+        edge_attributes=["edge_length"],
+        dataset_name="larger_graph",
+    )
+
+    assert provider.src_size == NUM_SRC_NODES + 1
+
+
 def test_file_graph_provider_iteration(graph_dir: Path) -> None:
     """Iterating over the provider yields all graphs."""
     provider = FileGraphProvider(
@@ -103,7 +120,6 @@ def test_file_graph_provider_iteration(graph_dir: Path) -> None:
         pin_memory=False,
     )
 
-    print(provider._dataset)
     assert len(provider) == 4
 
     for g in provider:
@@ -127,7 +143,9 @@ def test_file_graph_provider_get_edges_no_shard(graph_dir: Path) -> None:
     edge_attr, edge_index, shard_sizes = provider.get_edges(batch_size=1, shard_edges=False, device=torch.device("cpu"))
 
     assert edge_attr.shape == (NUM_EDGES, EDGE_ATTR_DIM)
+    assert edge_attr.dtype == torch.float32
     assert edge_index.shape == (2, NUM_EDGES)
+    assert torch.all(edge_index[1, :-1] <= edge_index[1, 1:])
     assert shard_sizes is None
 
 

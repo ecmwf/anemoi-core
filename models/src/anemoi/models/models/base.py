@@ -10,7 +10,7 @@
 
 import logging
 from abc import abstractmethod
-from pathlib import PosixPath
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -48,7 +48,7 @@ class BaseGraphModel(nn.Module):
         statistics: dict,
         n_step_input: int,
         n_step_output: int,
-        graph_data: HeteroData,
+        graph_data: HeteroData | Path,
     ) -> None:
         """Initializes the graph neural network.
 
@@ -60,14 +60,14 @@ class BaseGraphModel(nn.Module):
             Data indices
         statistics : dict
             Data statistics
-        graph_data : HeteroData
+        graph_data : HeteroData | Path
             Graph definition
         """
         super().__init__()
         self._graph_data = graph_data
         self.data_indices = data_indices
         self.statistics = statistics
-        if isinstance(self._graph_data, PosixPath):
+        if isinstance(self._graph_data, Path):
             self._graph_data_dict = _GraphFileDataset(self._graph_data)
         else:
             self._graph_data_dict = self._graph_data
@@ -85,10 +85,7 @@ class BaseGraphModel(nn.Module):
             data=self.dataset_names,
             hidden=self._graph_name_hidden,
         )
-        if isinstance(self._graph_data, PosixPath):
-            self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
-        else:
-            self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
+        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
         self._calculate_shapes_and_indices(data_indices)
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
@@ -159,7 +156,19 @@ class BaseGraphModel(nn.Module):
         )
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
-        pass  # reference to the graph should be removed
+        hidden_node_names = self._as_hidden_node_names(hidden_nodes_name)
+        if isinstance(self._graph_data, Path):
+            for dataset_name in self.dataset_names:
+                graph_data = self._graph_data_dict[dataset_name]
+                for hidden_name in hidden_node_names:
+                    assert (
+                        hidden_name in graph_data.node_types
+                    ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {graph_data.node_types}"
+        else:
+            for hidden_name in hidden_node_names:
+                assert (
+                    hidden_name in self._graph_data.node_types
+                ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         # Default behaviour is to pass the same input as to the encoder.
@@ -249,19 +258,13 @@ class BaseGraphModel(nn.Module):
     def _build_residual(self, residual_config: DotDict, sparse_projector_config: DotDict) -> None:
         self.residual = torch.nn.ModuleDict()
         graph_data = (
-            self._graph_data_dict[self.dataset_names[0]]
-            if isinstance(self._graph_data, PosixPath)
-            else self._graph_data
+            self._graph_data_dict[self.dataset_names[0]] if isinstance(self._graph_data, Path) else self._graph_data
         )
         fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name in self.dataset_names:
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-            graph_data = (
-                self._graph_data_dict[dataset_name]
-                if isinstance(self._graph_data, PosixPath)
-                else self._graph_data
-            )
+            graph_data = self._graph_data_dict[dataset_name] if isinstance(self._graph_data, Path) else self._graph_data
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=graph_data,
@@ -274,17 +277,16 @@ class BaseGraphModel(nn.Module):
 
     def _build_named_node_attributes_graph(self) -> HeteroData:
         node_attributes_graph = HeteroData()
-        if isinstance(self._graph_data, PosixPath):
+        if isinstance(self._graph_data, Path):
             for dataset_name in self.dataset_names:
-                # I think my graphs have an old definition where the dataset name is not the same
-                node_attributes_graph[dataset_name].x = self._graph_data_dict[dataset_name]["data"].x
-                node_attributes_graph[dataset_name].num_nodes = len(self._graph_data_dict[dataset_name]["data"].x)
-                node_attributes_graph[self._graph_name_hidden].x = self._graph_data_dict[dataset_name][
-                    self._graph_name_hidden
-                ].x
-                node_attributes_graph[self._graph_name_hidden].num_nodes = len(
-                    self._graph_data_dict[dataset_name][self._graph_name_hidden].x
-                )
+                graph_data = self._graph_data_dict[dataset_name]
+                node_attributes_graph[dataset_name].x = graph_data[DEFAULT_DATASET_NAME].x
+                node_attributes_graph[dataset_name].num_nodes = graph_data[DEFAULT_DATASET_NAME].num_nodes
+
+            graph_data = self._graph_data_dict[self.dataset_names[0]]
+            for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+                node_attributes_graph[hidden_name].x = graph_data[hidden_name].x
+                node_attributes_graph[hidden_name].num_nodes = graph_data[hidden_name].num_nodes
 
         else:
             for dataset_name in self.dataset_names:
