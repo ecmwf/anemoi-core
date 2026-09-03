@@ -18,4 +18,4 @@ class ConfigFromContent:
 
     def __call__(self, content: str) -> Config:
         self._path.write_text(content)
-        return Config(self._path)
+        return Config.from_path(self._path)
