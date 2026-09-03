@@ -139,7 +139,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
         """Test that the target feature has the expected dimension and produces the correct tensor shape."""
         feature = create_decoding_target_features([feature_name], [self.DATASET], model)
 
-        # Test feature dimension
+        # Test feature dimension
         assert feature.dim == expected_dim
 
         # Test feature shape
@@ -151,7 +151,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
 
         out = feature.tensor(x_input_data, x_encoded_data, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET)
         if feature_name == "forcings":
-            # Test forcing specific shape and content
+            # Test forcing specific shape and content
             assert out.shape == (self.BATCH_SIZE * ensemble_size * num_nodes, feature.dim)
             for batch in range(self.BATCH_SIZE):
                 for ens in range(ensemble_size):
@@ -245,6 +245,7 @@ class TestTargetFeatureRegistry(TargetFeatureTestCase):
 
     def test_register_target_feature_sets_name_and_registers(self) -> None:
         """Test that registering a new target feature sets its name and registers it correctly."""
+
         @register_target_feature("new_feature")
         class NewFeature(DecodingTargetFeature):
             @property
