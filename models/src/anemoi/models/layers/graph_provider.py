@@ -28,6 +28,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch.utils.data import Dataset
 from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import EdgeStorage
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
@@ -824,7 +825,7 @@ class _GraphFileDataset(Dataset):
     def __len__(self) -> int:
         return len(self.paths)
 
-    def __getitem__(self, key: int | str) -> HeteroData:
+    def __getitem__(self, key: int | str) -> EdgeStorage:
         """Load and return the graph object identified by *key* (stem or index)."""
         if isinstance(key, int):
             key = self.names[key]
@@ -959,7 +960,7 @@ class FileGraphProvider(BaseGraphProvider):
         batch_size: int = 1,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-        device: Optional[torch.device] = None,
+        device: Optional[torch.device] = "cpu",
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edges from a specific loaded graph.
 
@@ -979,7 +980,8 @@ class FileGraphProvider(BaseGraphProvider):
         tuple[Tensor, Adj, Optional[ShardSizes]]
             Edge attributes, expanded edge index, and optional edge_shard_sizes.
         """
-
+        if self.graph_name not in self._dataset.names:
+            raise FileNotFoundError(f"Graph name is not present in folder {self._dataset.graph_dir}")
         full_graph = self._dataset[self.graph_name]
         graph = full_graph[(self.src_name, "to", self.dst_name)].to(device)
 
