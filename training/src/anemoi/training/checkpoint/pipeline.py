@@ -94,8 +94,9 @@ from typing import TYPE_CHECKING
 from typing import Any
 from typing import Union
 
-from hydra.utils import instantiate
 from omegaconf import DictConfig
+
+from anemoi.utils.builder import build
 
 if TYPE_CHECKING:
     from .base import CheckpointContext
@@ -219,7 +220,7 @@ class CheckpointPipeline:
             if isinstance(stage, dict | DictConfig):
                 # Use Hydra to instantiate from config
                 try:
-                    instantiated_stage = instantiate(stage)
+                    instantiated_stage = build(stage)
                     instantiated.append(instantiated_stage)
                     LOGGER.debug("Instantiated stage %d from config: %s", i, instantiated_stage)
                 except Exception as e:
@@ -604,7 +605,7 @@ class CheckpointPipeline:
         """
         if isinstance(stage, dict | DictConfig):
             try:
-                stage = instantiate(stage)
+                stage = build(stage)
             except Exception as e:
                 from .exceptions import CheckpointConfigError
 

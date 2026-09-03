@@ -57,9 +57,10 @@ class MultiScaleEdges(BaseEdgeBuilder):
         target_name: str,
         x_hops: int,
         scale_resolutions: int | list[int] | None = None,
+        attributes: dict | list | None = None,
         **kwargs,
     ):
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, attributes=attributes)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
         assert isinstance(x_hops, int), "Number of x_hops must be an integer"
         assert x_hops > 0, "Number of x_hops must be positive"

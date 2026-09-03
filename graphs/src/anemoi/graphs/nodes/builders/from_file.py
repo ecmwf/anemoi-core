@@ -43,10 +43,10 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: DictConfig, name: str) -> None:
+    def __init__(self, dataset: DictConfig, name: str, attributes: dict | list | None = None) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
@@ -76,12 +76,14 @@ class TextNodes(BaseNodeBuilder):
         The index of the latitude in the dataset.
     """
 
-    def __init__(self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1) -> None:
+    def __init__(
+        self, dataset: str | Path, name: str, idx_lon: int = 0, idx_lat: int = 1, attributes: dict | list | None = None
+    ) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
         self.idx_lat = idx_lat
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -125,6 +127,7 @@ class NPZFileNodes(BaseNodeBuilder):
         name: str,
         lat_key: str = "latitudes",
         lon_key: str = "longitudes",
+        attributes: dict | list | None = None,
     ) -> None:
         """Initialize the NPZFileNodes builder.
 
@@ -144,7 +147,7 @@ class NPZFileNodes(BaseNodeBuilder):
         self.npz_file = Path(npz_file)
         self.lat_key = lat_key
         self.lon_key = lon_key
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -172,8 +175,9 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
         lon_key: str = "longitudes",
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: dict | list | None = None,
     ) -> None:
-        super().__init__(npz_file, name, lat_key, lon_key)
+        super().__init__(npz_file, name, lat_key, lon_key, attributes=attributes)
 
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
@@ -225,9 +229,11 @@ class XArrayNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon") -> None:
+    def __init__(
+        self, dataset: str, name: str, lat_key: str = "lat", lon_key: str = "lon", attributes: dict | list | None = None
+    ) -> None:
 
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.dataset = dataset
         self.lat_key = lat_key
         self.lon_key = lon_key

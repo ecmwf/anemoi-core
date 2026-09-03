@@ -59,7 +59,7 @@ def test_register_attributes(
     """Test NPZFileNodes register correctly the weights."""
     grid_definition_path, _ = mock_grids_path
     node_builder = NPZFileNodes(npz_file=grid_definition_path + f"/grid-{resolution}.npz", name="test_nodes")
-    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
+    config = {"test_attr": attr_class()}
 
     graph = node_builder.register_attributes(graph_with_nodes, config)
 

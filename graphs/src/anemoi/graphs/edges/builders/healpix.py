@@ -26,9 +26,10 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
         source_name: str,
         target_name: str,
         scale_resolutions: Optional[int | list[int]] = None,
+        attributes: dict | list | None = None,
         **kwargs,
     ):
-        super().__init__(source_name, target_name)
+        super().__init__(source_name, target_name, attributes=attributes)
         assert source_name == target_name, f"{self.__class__.__name__} requires source and target nodes to be the same."
         if isinstance(scale_resolutions, int):
             assert scale_resolutions > 0, "The scale_resolutions argument only supports positive integers."
