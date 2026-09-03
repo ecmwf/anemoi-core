@@ -19,6 +19,8 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 
+from anemoi.models.data.batch import Batch
+
 
 class AnemoiModelInterface(torch.nn.Module):
     """An interface for Anemoi models.
@@ -206,9 +208,27 @@ class AnemoiModelInterface(torch.nn.Module):
         # Use the forward method of the model directly
         self.forward = self.model.forward
 
+    def _prepare_data(self, data: torch.Tensor, dataset_name: str):
+        """Prepare the input data for the model."""
+        spec = {
+            "latitudes": None,
+            "longitudes": None,
+            "variables": [],
+            "layout": (),
+        }
+        if data is not None:
+            spec["data"] = data
+
+        return spec
+
+    def prepare_batch(self, batch: dict[str, torch.Tensor]):
+        """Prepare the model for inference."""
+        return Batch({dataset_name: self._prepare_data(data, dataset_name) for dataset_name, data in batch.items()})
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -219,6 +239,8 @@ class AnemoiModelInterface(torch.nn.Module):
         ----------
         batch : dict[str, torch.Tensor]
             Input batched data.
+        target : dict[str, torch.Tensor]
+            Target batched data.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
@@ -233,7 +255,8 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
-            "batch": batch,
+            "batch": self.prepare_batch(batch),
+            "target": self.prepare_batch(target),
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,

@@ -525,6 +525,7 @@ class BaseGraphModel(nn.Module):
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
         n_step_input: int,
@@ -539,11 +540,13 @@ class BaseGraphModel(nn.Module):
 
         Parameters
         ----------
-        batch : torch.Tensor
+        batch : dict[str, torch.Tensor]
             Input batched data (before pre-processing).
-        pre_processors : nn.Module
+        target : dict[str, torch.Tensor]
+            Target batched data (before pre-processing).
+        pre_processors : nn.ModuleDict
             Pre-processing module.
-        post_processors : nn.Module
+        post_processors : nn.ModuleDict
             Post-processing module.
         n_step_input : int
             Number of input timesteps.
@@ -558,21 +561,47 @@ class BaseGraphModel(nn.Module):
         -------
         dict[str, torch.Tensor]
             Model output (after post-processing).
+
+        Examples
+        --------
+        - Only tabular datasets supported.
+        ```python
+        batch = {
+            "dataset1": {
+                "data": torch.randn(2, 1000, 18),  # Example input tensor (num_time_steps, grid_size, num_variables)
+                "latitudes": torch.randn(1, 1000),  # Example latitude tensor
+                "longitudes": torch.randn(1, 1000),  # Example longitude tensor
+                "variables": ["var_1", "var_2", ..., "var_N"],
+                "layout": ["time", "grid", "variable"]
+            },
+            "dataset2": {
+                "data": torch.randn(8, 10, 32, 5),
+                "latitudes": torch.randn(1, 32),  # Example latitude tensor
+                "longitudes": torch.randn(1, 32),  # Example longitude tensor
+                "variables": ["var_1", "var_2", ..., "var_N"],
+                "layout": ["time", "grid", "variable"]
+            },
+        }
+
+        target = {
+            "dataset1": {
+                "latitudes": torch.randn(1, 1000),  # Example latitude tensor
+                "longitudes": torch.randn(1, 1000),  # Example longitude tensor
+                "variables": ["var_1", "var_2", ..., "var_M"],
+                "layout": ["time", "grid", "variable"]
+            },
+        }
+
+        output = model.predict_step(
+            batch=batch,
+            target=target,
+            pre_processors=pre_processors,
+            post_processors=post_processors,
+        )
+        ```
         """
         with torch.no_grad():
             dataset_names = list(batch.keys())
-
-            for dataset_name in dataset_names:
-                assert (
-                    len(batch[dataset_name].shape) == 4
-                ), f"The {dataset_name} input tensor has an incorrect shape: expected a 4-dimensional tensor, got {batch[dataset_name].shape}!"
-                # Dimensions are: batch, timesteps, grid, variables
-
-            x = {}
-            for dataset_name in dataset_names:
-                x[dataset_name] = batch[dataset_name][
-                    :, 0:n_step_input, None, ...
-                ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
             grid_shard_sizes: DatasetShardSizes | None = None
