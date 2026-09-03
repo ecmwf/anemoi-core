@@ -172,8 +172,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         task : BaseTask
             Training task.
         graph_data : HeteroData | Path
-            Graph objects keyed by dataset name
-        statistics : dict
+            Either an in-memory PyG HeteroData graph, or a directory containing per-dataset graph files (stems must match dataset names).
             Statistics of the training data
         statistics_tendencies : dict
             Statistics of data tendencies.
