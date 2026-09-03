@@ -12,9 +12,10 @@ diagnostics:
     interval: 50
 model:
   num_channels: 256 # 1/4 of number of channels for n320 models
-  trainable_parameters:
+  node_trainable_parameters:
     data: 0 # node
     hidden: 0 # node
+  edge_trainable_parameters:
     data2hidden: 0 # edge
     hidden2data: 0 # edge
     hidden2hidden: 0 # edge

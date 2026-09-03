@@ -592,11 +592,11 @@ def global_config_with_checkpoint(
 
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-08-18.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-08-18.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
@@ -723,7 +723,7 @@ def stochastic_interpolant_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_transport_edm",
+                "model=graphtransformer_multi_transport_edm",
                 "training=multi_transport",
                 "training.transport.prediction_mode=state",
                 "training.transport.objective=edm_diffusion",
@@ -732,7 +732,7 @@ def stochastic_interpolant_config(
         ),
         pytest.param(
             [
-                "model=graphtransformer_transport_tendency_edm",
+                "model=graphtransformer_multi_transport_tendency_edm",
                 "training=multi_transport",
                 "training.transport.prediction_mode=tendency",
                 "training.transport.objective=edm_diffusion",

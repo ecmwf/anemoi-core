@@ -1,32 +1,33 @@
 num_channels: 1024
-condition_on_residual: False
 cpu_offload: False
 
 keep_batch_sharded: True
 
 model:
-  _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+  _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
   hidden_nodes_name: "hidden"
   latent_skip: True
-
-noise_injector:
-  _target_: anemoi.models.layers.ensemble.NoiseConditioning
-  noise_std: 1
-  noise_channels_dim: 4
-  noise_mlp_hidden_dim: 32
-  noise_matrix: null
-  noise_edges_name: null
-  edge_weight_attribute: null
-  row_normalize_noise_matrix: false
-  autocast: false
-  layer_kernels:
-    Activation:
-      _target_: torch.nn.GELU
+  transport:
+    objective: edm_diffusion
+    sigma_data: 1.0
+    noise_channels: 32
+    noise_cond_dim: 16
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
+    noise_embedder:
+      _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+      num_channels: ${model.model.transport.noise_channels}
+      max_period: 1000
 
 layer_kernels:
   # The layer_kernels can be adjusted per model component, but are defined here for convenience.
   LayerNorm:
-    _target_: torch.nn.LayerNorm
+    _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+    normalized_shape: ${model.num_channels}
+    condition_shape: 16
+    zero_init: True
+    autocast: false
   Linear:
     _target_: torch.nn.Linear
   Activation:
@@ -39,43 +40,31 @@ layer_kernels:
     bias: False
 
 processor:
-  _target_: anemoi.models.layers.processor.TransformerProcessor
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
   num_channels: ${model.num_channels}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
   num_layers: 16
-  num_chunks: 2
+  num_chunks: 4
   mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
   mlp_implementation: mlp
   num_heads: 16 # GraphTransformer or Transformer only
-  window_size: 512
-  dropout_p: 0.0
-  attention_implementation: flash_attention # Possible values:  scaled_dot_product_attention, flash_attention
-  qk_norm: True # Transformer and GraphTransformer only
-  softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
+  qk_norm: True
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
-  layer_kernels:
-    LayerNorm:
-      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
-      normalized_shape: ${model.num_channels}
-      condition_shape: ${model.noise_injector.noise_channels_dim}
-      zero_init: True
-      autocast: false
-      #Any arguments to your chosen function go here
-    Linear:
-      _target_: torch.nn.Linear # These reflect the defaults, but are shown here for clarity
-    Activation:
-      _target_: torch.nn.GELU
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
 
 encoders:
-  "0":
-    source_datasets: [ "data" ]
+  global: # user-defined key. It will appear in the state-dict
+    source_datasets: [ "era5" ]
     dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
       trainable_size: ${model.edge_trainable_parameters.data2hidden}
       sub_graph_edge_attributes: ${model.attributes.edges}
-      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
@@ -86,20 +75,39 @@ encoders:
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
-
+      edge_pre_mlp: False
+  regional: # user-defined key. It will appear in the state-dict
+    source_datasets: [ "cerra" ]
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
 
 latent_aggregator:
   _target_: anemoi.models.layers.aggregator.SumAggregator
 
 decoders:
-  "0":
-    target_datasets: [ "data" ]
+  global: # user-defined key. It will appear in the state-dict
+    target_datasets: [ "era5" ]
     target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
       trainable_size: ${model.edge_trainable_parameters.hidden2data}
       sub_graph_edge_attributes: ${model.attributes.edges}
-      num_channels: ${model.num_channels}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
@@ -111,31 +119,47 @@ decoders:
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
       graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
+  regional: # user-defined key. It will appear in the state-dict
+    target_datasets: [ "cerra" ]
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
 
 residual:
   datasets:
-    data:
+    era5:
       _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
       step: -1 # use the latest step as skip connection
-# To use truncated connection, replace the above with one of:
-# Option A — build subgraph at runtime from config:
-#  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_config:
-#    grid: o32
-#    num_nearest_neighbours: 32
-#    sigma: 0.18840
-# Option B — load pre-computed projection matrices from files:
-#  _target_: anemoi.models.layers.residual.TruncatedConnection
-#  truncation_up_file_path: ${system.input.truncation}
-#  truncation_down_file_path: ${system.input.truncation_inv}
+    cerra:
+      _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+      step: -1 # use the latest step as skip connection
 
 output_mask:
   datasets:
-    data:
+    era5:
+      _target_: anemoi.training.utils.masks.NoOutputMask
+    cerra:
       _target_: anemoi.training.utils.masks.NoOutputMask
 
 node_trainable_parameters:
-  data: 8
+  era5: 8
+  cerra: 8
   hidden: 8
 
 edge_trainable_parameters:
@@ -145,8 +169,8 @@ edge_trainable_parameters:
 
 attributes:
   edges:
-    - edge_length
-    - edge_dirs
+  - edge_length
+  - edge_dirs
   nodes: []
 
 # Torch compile configuration
@@ -172,53 +196,12 @@ attributes:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
-    #options:
+    #options: # An example of setting torch.compile options
       #dynamic: false
-      #mode: max-autotune # an example of setting the compilation mode
+      #mode: max-autotune
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
-    options:
-      dynamic: false
-  - module: anemoi.training.losses.CRPS
-    options:
-      dynamic: false
-      fullgraph: true
-      mode: max-autotune
-
-# if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
-# A higher limit can result in better performance but will increase compilation time and disk space
-recompile_limit: 32 # need to increase recompile limit when compiling CRPS w dynamic=false
 
 # Bounding configuration
-bounding: #These are applied in order
+bounding:
   datasets:
-    data:
-      # Bound tp (total precipitation) with a Relu bounding layer
-      # ensuring a range of [0, infinity) to avoid negative precipitation values.
-      - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
-        variables:
-          - tp
-
-      # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
-      # This guarantees that cp is physically consistent with tp by restricting cp
-      # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
-      # NOTE: If this bounding strategy is used, the normalization of cp must be
-      # changed to "std" normalization, and the "cp" statistics should be remapped
-      # to those of tp to ensure consistency.
-
-      # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
-      #   variables:
-      #   - cp
-      #   min_val: 0
-      #   max_val: 1
-      #   total_var: tp
-
-      # [OPTIONAL] NormalizedReluBounding
-      # This is an extension of the Relu bounding in case the thrshold to be used
-      # is not 0. For example, in case of the sea surface temperature we don't use
-      # [0, infinity), buth rather [-2C, infinity). We do not want the water
-      # temperature to be below the freezing temperature.
-
-      # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
-      #   variables: [sst]
-      #   min_val: [-2]
-      #   normalizer: ['mean-std']
+    data: []

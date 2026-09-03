@@ -20,7 +20,7 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 

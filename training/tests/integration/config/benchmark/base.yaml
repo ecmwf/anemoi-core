@@ -22,10 +22,14 @@ graph:
   overwrite: False
 
 model:
-  encoder:
-    num_chunks: 2
-  decoder:
-    num_chunks: 2
+  encoders:
+    "0":
+      mapper:
+        num_chunks: 2
+  decoders:
+    "0":
+      mapper:
+        num_chunks: 2
   processor:
     num_chunks: 2
   num_channels: 512
