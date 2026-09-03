@@ -824,9 +824,11 @@ class _GraphFileDataset(Dataset):
     def __len__(self) -> int:
         return len(self.paths)
 
-    def __getitem__(self, name: str) -> HeteroData:
-        """Load and return the graph object named *name*."""
-        path = self.paths[name]
+    def __getitem__(self, key: int | str) -> HeteroData:
+        """Load and return the graph object identified by *key* (stem or index)."""
+        if isinstance(key, int):
+            key = self.names[key]
+        path = self.paths[key]
         return torch.load(path, weights_only=False, map_location="cpu")
 
     def __repr__(self) -> str:
