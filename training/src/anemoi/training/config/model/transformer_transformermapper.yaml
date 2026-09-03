@@ -71,7 +71,7 @@ latent_aggregator:
 decoders:
   "0":
     target_datasets: [ "data" ]
-    target_node_features [ "encoded_data" ] # options: coordinates, forcings,
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings,
     mapper:
       _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
       cpu_offload: ${model.cpu_offload}

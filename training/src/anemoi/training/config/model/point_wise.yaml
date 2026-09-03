@@ -49,7 +49,7 @@ latent_aggregator:
 decoders:
   "0":
     target_datasets: [ "cerra" ]
-    target_node_features [ "encoded_data" ]
+    target_node_features: [ "encoded_data" ]
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseBackwardMapper
       trainable_size: ${model.edge_trainable_parameters.hidden2data}
