@@ -130,12 +130,17 @@ attributes:
 #       section of code it can't compile. When False, it will fallback to
 #       non-compiled ("eager") execution for those lines.
 # options (dict): a dict of further options which can be passed to torch.compile
-compile:
-  - module: anemoi.models.layers.conv.GraphTransformerConv
-    #options: # An example of setting torch.compile options
-      #dynamic: false
-      #mode: max-autotune
-  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+# Torch compile configuration
+# Disabled by default due to known instability with max-autotune/fullgraph on CRPS
+# leading to hard aborts (illegal memory access) and recompile-limit related failures.
+# Uncomment to opt back in.
+compile: []
+# compile:
+#   - module: anemoi.models.layers.conv.GraphTransformerConv
+#     #options: # An example of setting torch.compile options
+#       #dynamic: false
+#       #mode: max-autotune
+#   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
 
 # Bounding configuration
 bounding: []
