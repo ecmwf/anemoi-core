@@ -458,7 +458,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # run for it (the pipeline resolves the file and loads nothing). Lightning
         # holds a reference to this dict, so a replacement (the ledger-driven
         # migration returns a new object) is written back in place rather than rebound.
-        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        trainer = getattr(self, "_trainer", None)
+        corrected = apply_checkpoint_corrections(
+            checkpoint,
+            self,
+            self.config,
+            checkpoint_path=getattr(trainer, "ckpt_path", None) if trainer is not None else None,
+        )
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)

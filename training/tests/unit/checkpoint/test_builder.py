@@ -282,8 +282,7 @@ def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeyp
     asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
 
     assert [type(stage).__name__ for stage in pipeline.stages] == ["LocalSource", "WeightsOnlyLoader"]
-    # The source loads the file (the ledger-driven migration may read it again).
-    assert loads and all(path == Path(loads[0]) for path in loads)
+    assert len(loads) == 1
     assert model.weights_initialized is True
 
 

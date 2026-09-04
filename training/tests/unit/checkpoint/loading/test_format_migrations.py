@@ -23,6 +23,7 @@ patches only the resolver so the real ledger stays reachable.
 
 from __future__ import annotations
 
+import logging
 import sys
 import types
 from types import SimpleNamespace
@@ -104,6 +105,7 @@ def _ckpt(processor: object | None = None) -> dict:
         processor = _processor(num_layers=4, num_chunks=2)
     return {
         "state_dict": _state_dict(),
+        "pytorch-lightning_version": "2.6.5",
         "hyper_parameters": {"config": SimpleNamespace(model=SimpleNamespace(processor=processor))},
     }
 
@@ -283,15 +285,26 @@ def _ledger(*names: str) -> list[dict]:
     ]
 
 
+def _all_shipped_migration_names() -> list[str]:
+    """Every migration the installed anemoi-models ships, in ledger order.
+
+    Read from the migrator rather than hardcoded, so a new migration does not
+    quietly turn the up-to-date test below into a partial-ledger test.
+    """
+    from anemoi.models.migrations import Migrator
+
+    return [migration.name for migration in Migrator()._grouped_migrations[-1]]
+
+
 def test_ledger_recorded_migration_is_not_reapplied(spy_chunking_migration: MagicMock) -> None:
-    """A checkpoint whose ledger already records chunking_fix is left alone.
+    """A checkpoint missing no migration is left alone.
 
     Every checkpoint anemoi writes carries this ledger, so this is the common
     case: loading an up-to-date checkpoint must not re-run a migration it has
     already had, regardless of which loading strategy is used.
     """
     ckpt = _ckpt()
-    ckpt["migrations"] = _ledger("1762857428_chunking_fix")
+    ckpt["migrations"] = _ledger(*_all_shipped_migration_names())
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
     WeightsOnlyLoader()._apply_corrections(context)
@@ -301,10 +314,36 @@ def test_ledger_recorded_migration_is_not_reapplied(spy_chunking_migration: Magi
     assert "_migration_applied" not in context.checkpoint_data
 
 
+def test_ledger_recording_chunking_fix_is_not_treated_as_up_to_date(
+    caplog: pytest.LogCaptureFixture,
+    spy_chunking_migration: MagicMock,
+) -> None:
+    """A ledger through chunking_fix but missing newer migrations is NOT current.
+
+    ``register_migrations`` stamps every migration the writing version knew, not the
+    ones it applied, so essentially every real checkpoint records ``chunking_fix``.
+    Gating on that one name declared almost every checkpoint current and skipped all
+    the newer migrations in silence. It is no longer silent.
+    """
+    ckpt = _ckpt()
+    ckpt["migrations"] = _ledger(*_all_shipped_migration_names()[:3])
+    assert any(
+        "chunking_fix" in name for name in _all_shipped_migration_names()[:3]
+    ), "fixture assumes chunking_fix is within the first three migrations"
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
+
+    with caplog.at_level(logging.WARNING):
+        WeightsOnlyLoader()._apply_corrections(context)
+
+    assert "behind the installed anemoi-models" in caplog.text
+    # And it is a warning, not a refusal: the load carried on to the in-memory path.
+    spy_chunking_migration.assert_called_once()
+
+
 def test_empty_ledger_still_migrates(spy_chunking_migration: MagicMock) -> None:
     """Positive control: an empty ledger with usable geometry still migrates.
 
-    Guards the test above against passing vacuously — the skip must come from the
+    Guards the test above against passing vacuously: the skip must come from the
     ledger, not from the spy never being reachable.
     """
     ckpt = _ckpt()
@@ -379,126 +418,92 @@ async def test_real_chunking_fix_leaves_autoencoder_checkpoint_intact() -> None:
 
 
 # ---------------------------------------------------------------------------
-# A checkpoint with a file behind it gets the full ledger-driven migration via
-# ``Migrator.sync`` — every migration it is missing, not only chunking_fix.
+# An incomplete ledger is reported precisely and the load proceeds.
 # ---------------------------------------------------------------------------
 
 
-class _FakeMigrator:
-    """Stands in for ``anemoi.models.migrations.Migrator``."""
-
-    def __init__(self, registered: tuple[str, ...] = (), sync_error: Exception | None = None) -> None:
-        self._registered = [SimpleNamespace(name=name) for name in registered]
-        self._sync_error = sync_error
-        self.sync_calls: list[object] = []
-
-    def registered_migrations(self, ckpt: dict) -> list:  # noqa: ARG002
-        return self._registered
-
-    def sync(self, path: object) -> tuple[dict, dict, list]:
-        self.sync_calls.append(path)
-        if self._sync_error is not None:
-            raise self._sync_error
-        return (
-            {},
-            {"state_dict": _state_dict(), "_synced": True},
-            [SimpleNamespace(migration=SimpleNamespace(name="1762857428_chunking_fix"))],
-        )
-
-
-@pytest.fixture
-def use_migrator(monkeypatch: pytest.MonkeyPatch):  # noqa: ANN201
-    """Install a ``_FakeMigrator`` as the resolved migration ledger."""
-
-    def _install(migrator: _FakeMigrator) -> _FakeMigrator:
-        monkeypatch.setattr(
-            "anemoi.training.checkpoint.loading.base._migrator",
-            lambda: migrator,
-        )
-        return migrator
-
-    return _install
-
-
-def test_on_disk_checkpoint_with_incomplete_ledger_is_migrated_by_sync(
-    tmp_path: object,
-    use_migrator: object,
+def test_incomplete_ledger_warns_naming_the_migrations_and_still_loads(
+    caplog: pytest.LogCaptureFixture,
     spy_chunking_migration: MagicMock,
 ) -> None:
-    """With a file behind it, an out-of-date checkpoint goes through Migrator.sync.
+    """An out-of-date checkpoint is reported precisely and still loads.
 
-    That is what makes every migration reachable — the hand-named chunking_fix
-    fallback only knows one of the ten anemoi-models ships.
+    Refusing would block work that has always succeeded: most of what a ledger can
+    be missing does not affect this load, and the remedy is a local file operation
+    that a read-only ``anemoi-training evaluate`` or a remote source cannot perform.
+    Migrating in-process (``Migrator.sync``) re-reads and deep-copies the file and
+    runs setup hooks that mutate ``sys.modules`` of the live process. The defect
+    being fixed is that the old gate reported these checkpoints as *up to date*;
+    saying precisely what is missing is the fix.
     """
-    ckpt_file = tmp_path / "last.ckpt"
-    ckpt_file.write_bytes(b"not really a checkpoint; sync is faked")
-    migrator = use_migrator(_FakeMigrator(registered=()))
-    context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
+    ckpt = _ckpt()
+    ckpt["migrations"] = _ledger(*_all_shipped_migration_names()[:3])
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt, checkpoint_path="/scratch/last.ckpt")
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    with caplog.at_level(logging.WARNING):
+        WeightsOnlyLoader()._apply_corrections(context)  # must not raise
 
-    assert migrator.sync_calls == [ckpt_file]
-    assert context.checkpoint_data["_synced"] is True
-    spy_chunking_migration.assert_not_called()
-
-
-def test_sync_incompatible_checkpoint_raises_checkpoint_incompatible_error(
-    tmp_path: object,
-    use_migrator: object,
-) -> None:
-    """A checkpoint anemoi-models cannot migrate fails loudly, in our exception type.
-
-    Previously this class of problem was invisible: the hardcoded call either
-    silently no-opped or died with whatever the migration happened to raise.
-    """
-    from anemoi.models.migrations import IncompatibleCheckpointException
-    from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-
-    ckpt_file = tmp_path / "last.ckpt"
-    ckpt_file.write_bytes(b"stub")
-    use_migrator(_FakeMigrator(sync_error=IncompatibleCheckpointException("too old")))
-    context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
-
-    with pytest.raises(CheckpointIncompatibleError, match="cannot be migrated"):
-        WeightsOnlyLoader()._apply_corrections(context)
-
-
-def test_sync_rejecting_a_non_training_checkpoint_falls_back_in_memory(
-    tmp_path: object,
-    use_migrator: object,
-    spy_chunking_migration: MagicMock,
-) -> None:
-    """Migrator.sync only accepts Lightning training checkpoints.
-
-    An inference checkpoint or raw state_dict save makes it raise ValueError; that
-    is a "not a candidate for sync" signal, not a failure, so the in-memory path
-    still gets its chance.
-    """
-    ckpt_file = tmp_path / "inference.ckpt"
-    ckpt_file.write_bytes(b"stub")
-    use_migrator(_FakeMigrator(sync_error=ValueError("You can only migrate training checkpoint")))
-    context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
-
-    WeightsOnlyLoader()._apply_corrections(context)
-
+    for name in _all_shipped_migration_names()[3:]:
+        assert name in caplog.text
+    assert "anemoi-models migration sync /scratch/last.ckpt" in caplog.text
+    # The remedy rewrites the user's checkpoint, so the warning says so.
+    assert "rewrites the checkpoint in place" in caplog.text
+    # And the load went ahead rather than being refused.
     spy_chunking_migration.assert_called_once()
-    assert context.checkpoint_data["_migration_applied"] is True
+    assert context.checkpoint_data is not None
 
 
-def test_checkpoint_path_pointing_nowhere_falls_back_in_memory(
-    tmp_path: object,
-    use_migrator: object,
+def test_remote_checkpoint_warning_does_not_tell_the_user_to_migrate_a_url(
+    caplog: pytest.LogCaptureFixture,
     spy_chunking_migration: MagicMock,
 ) -> None:
-    """A path that is not a file (a download removed underneath us) uses the fallback."""
-    migrator = use_migrator(_FakeMigrator(registered=()))
-    context = CheckpointContext(
-        model=_Model(),
-        checkpoint_data=_ckpt(),
-        checkpoint_path=tmp_path / "already-deleted.ckpt",
-    )
+    """With no local file there is nothing to run the CLI against; say so."""
+    ckpt = _ckpt()
+    ckpt["migrations"] = _ledger(*_all_shipped_migration_names()[:3])
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_corrections(context)
+    with caplog.at_level(logging.WARNING):
+        WeightsOnlyLoader()._apply_corrections(context)  # must not raise
 
-    assert migrator.sync_calls == []
+    assert "downloading it" in caplog.text
+    assert "migration sync None" not in caplog.text
+    spy_chunking_migration.assert_called_once()
+
+
+def test_non_training_checkpoint_is_not_warned_about_missing_migrations(
+    caplog: pytest.LogCaptureFixture,
+    spy_chunking_migration: MagicMock,
+) -> None:
+    """A raw state_dict / inference checkpoint has no ledger to be behind on.
+
+    It carries no ``pytorch-lightning_version``, which is what ``Migrator._load_ckpt``
+    itself gates on. Warning about "missing migrations" would be noise on every
+    S3/HTTP weights-only load of a non-Lightning checkpoint.
+    """
+    ckpt = _ckpt()
+    del ckpt["pytorch-lightning_version"]
+    ckpt["migrations"] = _ledger(*_all_shipped_migration_names()[:3])
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
+
+    with caplog.at_level(logging.WARNING):
+        WeightsOnlyLoader()._apply_corrections(context)  # must not raise
+
+    assert "behind the installed anemoi-models" not in caplog.text
+    # Falls through to the narrow in-memory path, exactly as before.
+    spy_chunking_migration.assert_called_once()
+
+
+def test_unreadable_ledger_is_treated_as_unknown_not_current(
+    caplog: pytest.LogCaptureFixture,
+    spy_chunking_migration: MagicMock,
+) -> None:
+    """A ledger the migrator cannot resolve neither blocks the load nor claims it is current."""
+    ckpt = _ckpt()
+    ckpt["migrations"] = [{"name": "not-a-real-ledger-entry"}]
+    context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
+
+    with caplog.at_level(logging.WARNING):
+        WeightsOnlyLoader()._apply_corrections(context)  # must not raise
+
+    # "Cannot tell" falls through to the in-memory path rather than reporting up to date.
     spy_chunking_migration.assert_called_once()
