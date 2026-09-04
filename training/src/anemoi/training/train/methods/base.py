@@ -450,23 +450,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         # The task's training runtime state (e.g. rollout step) is resume state the
-        # checkpoint pipeline does not apply, so restore it regardless of the
-        # parity-skip guard below.
+        # checkpoint pipeline does not apply, so restore it here.
         self.task.load_training_runtime_state_dict(checkpoint.get("task_state", {}))
 
-        # Warm start resumes via Lightning's ckpt_path, which calls this hook. The
-        # checkpoint pipeline has already applied weights + parity to this model at
-        # build time (it sets weights_initialized), so the parity steps below would
-        # be a redundant second pass — skip them. Lightning still restores the
-        # optimizer/scheduler/loop-progress state, which the pipeline cannot (those
-        # objects exist only at fit time); that is what ckpt_path is retained for.
-        # The body remains a fallback for a direct, non-pipeline Lightning load.
-        if getattr(self, "weights_initialized", False):
-            return
-
-        # Lightning holds a reference to this dict and loads from it after the hook,
-        # so a replacement (the ledger-driven migration returns a new object) is
-        # written back in place rather than rebound.
+        # A resume is loaded once, by Trainer.fit(ckpt_path=), which calls this hook
+        # on the dict it is about to load: this is the only place the corrections can
+        # run for it (the pipeline resolves the file and loads nothing). Lightning
+        # holds a reference to this dict, so a replacement (the ledger-driven
+        # migration returns a new object) is written back in place rather than rebound.
         corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
         if corrected is not checkpoint:
             checkpoint.clear()

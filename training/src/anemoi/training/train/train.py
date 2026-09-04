@@ -440,12 +440,15 @@ class AnemoiTrainer(ABC):
         self,
         model: pl.LightningModule,
     ) -> pl.LightningModule:
-        """Load weights and apply modifiers through the checkpoint pipeline.
+        """Run the checkpoint pipeline: acquire, load (unless resuming), modify.
 
         Runs the configured ``training.checkpoint`` ``source`` -> ``loading`` ->
-        ``modifiers`` stages. This is the single checkpoint load path.
-        :attr:`last_checkpoint` resolves the ckpt_path independently from the source
-        config (via :meth:`RunIdSource.resolve_path`), so it is not cached here.
+        ``modifiers`` stages. On a resume (see
+        :func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`) the
+        source only resolves the checkpoint to a local file and no loading stage
+        runs: ``Trainer.fit(ckpt_path=)`` performs the one load. The resolved file
+        escapes the pipeline as :attr:`_resolved_checkpoint_path`, which is what
+        :attr:`last_checkpoint` hands to Lightning.
 
         Parameters
         ----------
@@ -456,13 +459,11 @@ class AnemoiTrainer(ABC):
         Returns
         -------
         pl.LightningModule
-            The same module, with checkpoint weights loaded and any modifier
-            stages applied.
+            The same module, with checkpoint weights loaded (unless resuming) and
+            any modifier stages applied.
         """
         from anemoi.training.checkpoint import build_checkpoint_pipeline
         from anemoi.training.checkpoint.base import CheckpointContext
-
-        has_loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None) is not None
 
         context = CheckpointContext(model=model, config=self.config)
         # Runtime, logger-derived server-to-server lineage cannot reach a RunIdSource
@@ -477,14 +478,20 @@ class AnemoiTrainer(ABC):
         executed = asyncio.run(pipeline.execute(context))
         loaded_model = executed.model
 
+        # The file the source stage resolved is what Lightning's ckpt_path reads on a
+        # resume. Only the path escapes; the loaded dict stays local to this call.
+        self._resolved_checkpoint_path = executed.checkpoint_path
+
         # Downloads a source kept on disk (so Lightning can read them at fit) are
         # deleted by :meth:`_remove_temporary_checkpoints` once training finishes.
         self._temporary_checkpoint_files = list(executed.temporary_files)
 
         # Trainer-side parity until the dataset/units validators move into the
-        # pipeline: when weights were loaded, keep the current config's data
-        # indices and run the transfer-learning compatibility checks.
-        if has_loading:
+        # pipeline: when a loading strategy applied weights, keep the current
+        # config's data indices and run the transfer-learning compatibility checks.
+        # A resume loads nothing here (same architecture, same data), so there is
+        # no checkpoint metadata on the model to compare against yet.
+        if getattr(loaded_model, "weights_initialized", False):
             loaded_model.data_indices = self.data_indices
             self._validate_transfer_learning_datasets(loaded_model)
             self._validate_transfer_learning_units(loaded_model)
@@ -536,47 +543,27 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def last_checkpoint(self) -> Path | None:
-        """Path to the checkpoint to resume from, for Lightning's ``ckpt_path``.
+        """The local checkpoint file for Lightning's ``ckpt_path``.
 
-        Resolved directly from the configured ``training.checkpoint.source`` — no need
-        to build the model. A ``RunIdSource`` yields
-        ``<checkpoints.root.parent>/<id>/last.ckpt`` via :meth:`RunIdSource.resolve_path`
-        (shared with the source stage so the two cannot drift); a ``LocalSource`` yields
-        its explicit file. Remote sources (S3/HTTP) record no local path (``None``),
-        which is why warm start is restricted to Local/Run sources (enforced by
-        :func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`).
+        This is the file the source stage resolved while the model was built: a
+        ``RunIdSource`` finds ``<checkpoints.root.parent>/<id>/last.ckpt``, a
+        ``LocalSource`` its explicit path (``~`` expanded, canonicalised), and a
+        remote source the node-local download it kept. The path is read back from
+        the executed pipeline rather than derived a second time from the config,
+        so the file Lightning reads is the one the source checked; touching
+        :attr:`model` here makes that hold whatever the caller's order.
 
-        Returns ``None`` when there is nothing to resume. A configured-but-missing run
-        checkpoint still surfaces from the source stage during model build
-        (``RuntimeError`` on rank 0 / ``CheckpointNotFoundError`` for an explicit file);
-        the rank-0 policy lives solely in the acquisition layer, not here.
+        Returns ``None`` when there is nothing to resume. A configured-but-missing
+        run checkpoint still surfaces from the source stage during model build
+        (``RuntimeError`` on rank 0 / ``CheckpointNotFoundError`` for an explicit
+        file); the rank-0 policy lives solely in the acquisition layer, not here.
         """
         if not self.start_from_checkpoint:
             return None
 
-        source = OmegaConf.select(self.config, "training.checkpoint.source", default=None)
-        target = OmegaConf.select(source, "_target_", default="") or ""
-
-        if target.endswith("RunIdSource"):
-            from anemoi.training.checkpoint.sources.run import RunIdSource
-
-            run_id = OmegaConf.select(source, "run_id", default=None)
-            if run_id is None:
-                return None
-            return RunIdSource.resolve_path(
-                self.config,
-                run_id,
-                bool(OmegaConf.select(source, "fork", default=False)),
-                getattr(self, "parent_run_server2server", None),
-                getattr(self, "fork_run_server2server", None),
-            )
-
-        if target.endswith("LocalSource"):
-            path = OmegaConf.select(source, "path", default=None)
-            return Path(path) if path is not None else None
-
-        # Remote sources (S3/HTTP) provide no local path to hand Lightning.
-        return None
+        # Building the model runs the pipeline, whose source stage resolves the path.
+        _ = self.model
+        return getattr(self, "_resolved_checkpoint_path", None)
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
@@ -796,39 +783,23 @@ class AnemoiTrainer(ABC):
         )
 
     def _skip_lightning_restore(self) -> bool:
-        """Whether to skip Lightning's ``ckpt_path`` full-state restore.
+        """Whether ``ckpt_path`` is withheld from Lightning because the pipeline already loaded the weights.
 
-        The checkpoint pipeline applies the checkpoint *weights* to the model at build
-        (:meth:`model`), so Lightning must not redo that. ``ckpt_path`` additionally
-        makes Lightning restore the optimizer, scheduler and loop/epoch state — which is
-        wanted only for warm start. Concretely, keyed on the configured
-        ``training.checkpoint.loading``:
-
-        - **kept** (returns ``False``, Lightning restores full training state): a loader
-          that declares
-          :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
-          — i.e. ``WarmStartLoader``.
-        - **suppressed** (returns ``True``, ``ckpt_path=None``, weights-only): every other
-          loader — ``WeightsOnlyLoader`` / ``ColdStartLoader`` / ``TransferLearningLoader``
-          — because they intentionally start fresh training state. A run with no loading
-          configured returns ``False`` (nothing to suppress).
+        A checkpoint has exactly one loader. Either the run **resumes**, and
+        ``Trainer.fit(ckpt_path=)`` loads weights, optimizer, scheduler and loop
+        progress in one pass (returns ``False``: ``ckpt_path`` is passed); or a
+        loading strategy applied the weights at model build and training state starts
+        fresh (returns ``True``: ``ckpt_path`` is withheld, so Lightning does not load
+        the file a second time). Which one is decided by
+        :func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`, the same
+        function the builder uses to decide whether to emit a loading stage: a
+        resume is no ``training.checkpoint.loading`` block, or a loader declaring
+        ``restores_training_state`` (``WarmStartLoader``); ``WeightsOnlyLoader`` /
+        ``ColdStartLoader`` / ``TransferLearningLoader`` are the other case.
         """
-        loading = OmegaConf.select(self.config, "training.checkpoint.loading", default=None)
-        if loading is None:
-            return False
-        target = OmegaConf.select(loading, "_target_", default="") or ""
-        if not target:
-            return False
+        from anemoi.training.checkpoint.builder import resumes_via_lightning
 
-        from hydra.utils import get_class
-
-        try:
-            loader_cls = get_class(target)
-        except (ImportError, ValueError):
-            # An unresolvable loader fails the pipeline build elsewhere; do not
-            # suppress the resume here.
-            return False
-        return not getattr(loader_cls, "restores_training_state", False)
+        return not resumes_via_lightning(self.config)
 
     @cached_property
     def fit_parameters(self) -> Any:
@@ -846,9 +817,8 @@ class AnemoiTrainer(ABC):
 
         params["model"] = self.model
         params["datamodule"] = self.datamodule
-        # ckpt_path drives Lightning's optimizer/scheduler/epoch restore. Only warm start
-        # wants it (the pipeline already loaded the weights); weights-only / cold-start /
-        # transfer-learning suppress it so training state starts fresh. See
+        # One loader per checkpoint: on a resume Lightning loads everything from
+        # ckpt_path; after a pipeline load ckpt_path is withheld. See
         # :meth:`_skip_lightning_restore`.
         params["ckpt_path"] = None if self._skip_lightning_restore() else self.last_checkpoint
 

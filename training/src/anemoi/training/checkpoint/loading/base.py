@@ -88,14 +88,12 @@ class LoadingStrategy(PipelineStage):
     ...         return context
     """
 
-    #: Whether this strategy needs the optimizer / scheduler / loop-progress state
-    #: restored at fit time. The pipeline always applies weights + parity at
-    #: model-build, but cannot restore optimizer/loop state (those objects exist
-    #: only once ``trainer.fit()`` starts). Strategies that resume an interrupted
-    #: run set this ``True`` so the trainer keeps Lightning's ``ckpt_path`` resume,
-    #: which owns that runtime-state restore. Fresh-training strategies leave it
-    #: ``False`` (the default) so ``ckpt_path`` is suppressed and no second load
-    #: happens.
+    #: Whether selecting this strategy means the run resumes through
+    #: ``Trainer.fit(ckpt_path=)``. ``True`` (``WarmStartLoader``) makes Lightning
+    #: perform the one and only load — weights, optimizer, scheduler and loop
+    #: progress — and the builder emits no loading stage at all. ``False`` (the
+    #: default) means the strategy applies the weights itself at model build and
+    #: the trainer suppresses ``ckpt_path`` so training state starts fresh.
     restores_training_state: bool = False
 
     @abstractmethod
@@ -198,6 +196,11 @@ class LoadingStrategy(PipelineStage):
           weights.
         - ``validation.validate_pipeline_health`` treats it as a health
           **finding** (collected into the issues list).
+
+        Both readers exempt a resume, where the weights arrive at
+        ``Trainer.fit(ckpt_path=)`` and no strategy runs. The trainer also reads
+        the flag to decide whether the transfer-learning validators have a loaded
+        checkpoint to compare against.
 
         A strategy that forgets to call ``_mark_weights_loaded`` after a
         source has run will therefore trip the pipeline gate. Tests that

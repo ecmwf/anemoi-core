@@ -11,18 +11,25 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
+import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
 import anemoi.training
+from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
+from anemoi.training.checkpoint.builder import resumes_via_lightning
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
+_LOADERS = "anemoi.training.checkpoint.loading.strategies"
 
 
 def _checkpoint_template_dir() -> Path:
@@ -129,7 +136,8 @@ def test_builder_injects_server2server_into_run_source() -> None:
         parent_run_server2server="remote-parent",
         fork_run_server2server="remote-fork",
     )
-    source = pipeline.stages[0]
+    # A source-only config is a resume: the stage is the resolve-only wrapper around the source.
+    source = pipeline.stages[0].source
     assert source.parent_run_server2server == "remote-parent"
     assert source.fork_run_server2server == "remote-fork"
 
@@ -138,7 +146,7 @@ def test_builder_server2server_defaults_leave_run_source_untouched() -> None:
     """Without runtime lineage, a config-provided RunIdSource is built verbatim."""
     cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "abc"}}}})
     pipeline = build_checkpoint_pipeline(cfg)
-    source = pipeline.stages[0]
+    source = pipeline.stages[0].source
     assert source.parent_run_server2server is None
     assert source.fork_run_server2server is None
 
@@ -147,4 +155,176 @@ def test_builder_server2server_ignored_for_local_source() -> None:
     """Runtime lineage kwargs are a no-op for non-RunIdSource sources (no instantiation error)."""
     cfg = compose_test_config(source="local")
     pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
-    assert type(pipeline.stages[0]).__name__.endswith("LocalSource")
+    assert type(pipeline.stages[0].source).__name__.endswith("LocalSource")
+
+
+# --- a resume has one owner: Trainer.fit(ckpt_path=) ------------------------------
+
+
+class _EncoderNet(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+        self.encoder = torch.nn.Linear(2, 2)
+        self.decoder = torch.nn.Linear(2, 2)
+
+
+class ResumeLoader(WarmStartLoader):
+    """A loader that restores training state without being named ``WarmStartLoader``.
+
+    Stands in for a third-party strategy that declares ``restores_training_state``; its
+    ``_target_`` does not end in ``WarmStartLoader``, so a class-name match would miss it.
+    """
+
+
+_RESUME_LOADER = f"{__name__}.ResumeLoader"
+_S3_SOURCE = "anemoi.training.checkpoint.sources.s3.S3Source"
+
+
+def _spy_torch_load(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    calls: list[object] = []
+    real_load = torch.load
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        calls.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _spy)
+    return calls
+
+
+def _resume_cfg(tmp_path: Path, loading: str | None, modifiers: list | None = None) -> tuple[DictConfig, Path]:
+    ckpt = tmp_path / "last.ckpt"
+    torch.save({"state_dict": _EncoderNet().state_dict()}, ckpt)
+    checkpoint: dict = {
+        "source": {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": str(ckpt)},
+    }
+    if loading is not None:
+        checkpoint["loading"] = {"_target_": loading}
+    if modifiers:
+        checkpoint["modifiers"] = modifiers
+    return OmegaConf.create({"training": {"checkpoint": checkpoint}}), ckpt
+
+
+def test_warm_start_resolves_the_source_only_and_emits_no_loader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """For a loader declaring ``restores_training_state`` the pipeline resolves and loads nothing.
+
+    ``Trainer.fit(ckpt_path=)`` reads the file and runs the corrections in
+    ``on_load_checkpoint``; a load here would apply them to a copy Lightning discards.
+    """
+    cfg, ckpt = _resume_cfg(tmp_path, f"{_LOADERS}.WarmStartLoader")
+    loads = _spy_torch_load(monkeypatch)
+    model = _EncoderNet()
+    before = {key: value.clone() for key, value in model.state_dict().items()}
+
+    pipeline = build_checkpoint_pipeline(cfg)
+    executed = asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert loads == []
+    assert executed.checkpoint_path == ckpt.resolve()
+    assert executed.checkpoint_data is None
+    assert not getattr(model, "weights_initialized", False)
+    for key, value in before.items():
+        assert torch.equal(model.state_dict()[key], value)
+
+
+def test_warm_start_still_runs_modifiers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Modifiers change the model, not the checkpoint, so they still apply on a resume."""
+    cfg, _ = _resume_cfg(
+        tmp_path,
+        f"{_LOADERS}.WarmStartLoader",
+        modifiers=[{"_target_": _FREEZING_TARGET, "submodules_to_freeze": ["encoder"]}],
+    )
+    loads = _spy_torch_load(monkeypatch)
+    model = _EncoderNet()
+
+    pipeline = build_checkpoint_pipeline(cfg)
+    asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource", "FreezingModifierStage"]
+    assert loads == []
+    assert model.encoder.weight.requires_grad is False
+    assert model.decoder.weight.requires_grad is True
+
+
+def test_source_without_loading_is_a_resume(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A bare source resumes: the file is resolved for ``Trainer.fit(ckpt_path=)`` and nothing is loaded.
+
+    This is the configuration the user guide prescribes for restarting a run.
+    """
+    cfg, ckpt = _resume_cfg(tmp_path, None)
+    loads = _spy_torch_load(monkeypatch)
+
+    pipeline = build_checkpoint_pipeline(cfg)
+    executed = asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert loads == []
+    assert executed.checkpoint_path == ckpt.resolve()
+
+
+def test_restoring_loader_subclass_is_treated_like_warm_start(tmp_path: Path) -> None:
+    """The resume decision keys on the declared attribute, not the class name."""
+    cfg, _ = _resume_cfg(tmp_path, _RESUME_LOADER)
+    assert [type(stage).__name__ for stage in build_checkpoint_pipeline(cfg).stages] == ["ResolveOnlySource"]
+
+
+def test_weights_only_loader_still_loads_in_the_pipeline(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Only a resume is deferred to Lightning; every other loader applies weights here."""
+    cfg, _ = _resume_cfg(tmp_path, f"{_LOADERS}.WeightsOnlyLoader")
+    loads = _spy_torch_load(monkeypatch)
+    model = _EncoderNet()
+
+    pipeline = build_checkpoint_pipeline(cfg)
+    asyncio.run(pipeline.execute(CheckpointContext(model=model, config=cfg)))
+
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["LocalSource", "WeightsOnlyLoader"]
+    # The source loads the file (the ledger-driven migration may read it again).
+    assert loads and all(path == Path(loads[0]) for path in loads)
+    assert model.weights_initialized is True
+
+
+def test_warm_start_from_a_remote_source_builds() -> None:
+    """A remote source is downloaded to a local file for Lightning; it is no longer refused."""
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": _S3_SOURCE, "url": "s3://bucket/last.ckpt"},
+                    "loading": {"_target_": f"{_LOADERS}.WarmStartLoader"},
+                },
+            },
+        },
+    )
+    pipeline = build_checkpoint_pipeline(cfg)
+    assert [type(stage).__name__ for stage in pipeline.stages] == ["ResolveOnlySource"]
+    assert type(pipeline.stages[0].source).__name__ == "S3Source"
+
+
+def test_warm_start_without_a_source_is_rejected() -> None:
+    """There is nothing for Lightning to read, so the composition fails at build."""
+    cfg = OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}}})
+    with pytest.raises(CheckpointConfigError, match=r"no training\.checkpoint\.source"):
+        build_checkpoint_pipeline(cfg)
+
+
+@pytest.mark.parametrize(
+    ("loading", "expected"),
+    [
+        (None, True),
+        (f"{_LOADERS}.WarmStartLoader", True),
+        (_RESUME_LOADER, True),
+        (f"{_LOADERS}.WeightsOnlyLoader", False),
+        (f"{_LOADERS}.ColdStartLoader", False),
+        (f"{_LOADERS}.TransferLearningLoader", False),
+    ],
+)
+def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
+    """The one decision the builder and the trainer share."""
+    checkpoint: dict = {"source": {"_target_": "anemoi.training.checkpoint.sources.local.LocalSource", "path": "x"}}
+    if loading is not None:
+        checkpoint["loading"] = {"_target_": loading}
+    assert resumes_via_lightning(OmegaConf.create({"training": {"checkpoint": checkpoint}})) is expected

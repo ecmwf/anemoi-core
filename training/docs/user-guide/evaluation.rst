@@ -69,8 +69,9 @@ resolved checkpoint is applied:
   evaluation) — model weights are loaded once during model initialisation;
   ``ckpt_path=None`` is passed to ``trainer.validate()`` to avoid a redundant
   second load and to skip restoring optimizer/scheduler state.
-- **``warm_start``** — PyTorch Lightning restores the full training state
-  (weights, optimizer, epoch counter) from ``ckpt_path`` before validation.
+- **``warm_start``**, or no ``loading`` block at all — PyTorch Lightning loads
+  the checkpoint (weights, optimizer, epoch counter) from ``ckpt_path`` before
+  validation; the pipeline only resolves the source to a local file.
 
 .. note::
 

@@ -187,13 +187,14 @@ https://…`` to download over HTTP(S).
 
 .. note::
 
-   **Warm start (resume) needs a local file.** ``WarmStartLoader`` can only be
-   paired with ``LocalSource`` or ``RunIdSource``, because resuming the optimizer
-   and epoch state is handled by PyTorch Lightning, which needs the checkpoint
-   as a file on disk. Pairing warm start with ``S3Source``/``HTTPSource`` is
-   rejected with a clear error (see :ref:`cp_warmstart_ownership`). To use a
-   remote checkpoint, either download it first to a local path, or use a
-   weights-only / transfer-learning / cold-start strategy.
+   **Warm start (resume) is Lightning's load.** ``WarmStartLoader`` — or a
+   ``source`` with no ``loading`` block at all — tells the trainer that the
+   checkpoint is loaded once, by PyTorch Lightning's ``ckpt_path`` mechanism at
+   ``trainer.fit()``, which reads the checkpoint as a file on disk. Any source
+   works: ``LocalSource`` and ``RunIdSource`` already point at a file, and
+   ``S3Source``/``HTTPSource`` download to a node-local temporary file that the
+   trainer hands to Lightning and deletes after training (see
+   :ref:`cp_warmstart_ownership`).
 
 Start a fresh run (no checkpoint)
 =================================
@@ -533,9 +534,10 @@ modifier after this loader (Station 3).
 Warm start
 ==========
 
-Resume an interrupted run so it continues exactly where it stopped. It loads
-weights with an **exact-match requirement** (resuming assumes the same
-architecture) and applies the compatibility steps. It takes no parameters.
+Resume an interrupted run so it continues exactly where it stopped. It takes
+no parameters, and it is a *marker*: selecting it tells the trainer to let
+PyTorch Lightning load the checkpoint. Leaving out the ``loading`` block
+altogether means the same thing.
 
 .. code:: yaml
 
@@ -549,38 +551,26 @@ architecture) and applies the compatibility steps. It takes no parameters.
 Who restores what (the warm-start ownership rule)
 -------------------------------------------------
 
-This is the one subtlety worth understanding, because it explains an error you
-might hit.
+A checkpoint has exactly one loader.
 
-When you resume, two different things need restoring:
+-  On a **resume** (``WarmStartLoader``, or no ``loading`` block) the loader is
+   **PyTorch Lightning**: ``trainer.fit(ckpt_path=...)`` reads the file once and
+   restores weights, optimizer, scheduler and the training clock (epoch/step)
+   together. The pipeline's part is to make the checkpoint reachable as a local
+   file (the source's *resolve* step; a remote source downloads to a node-local
+   temporary file that is deleted after training) and to run any modifiers. The
+   compatibility steps — format migrations, the trainable-edge-permutation
+   migration, the processor-statistics refresh — run inside the Lightning load
+   hook, on the dict Lightning is about to load.
+-  With **any other strategy** the loader is the **pipeline**, at the moment the
+   model is built: the strategy applies the weights (and the same compatibility
+   steps) and training starts with a fresh optimizer at epoch 0. ``ckpt_path``
+   is withheld from Lightning so the file is not loaded a second time.
 
-#. the **weights** — done by the checkpoint pipeline, at the moment the model is
-   built;
-#. the **optimizer, scheduler, and training clock** (epoch/step) — done by
-   **PyTorch Lightning**, when ``trainer.fit()`` starts.
-
-Why the split? The pipeline runs early, while the model is being constructed —
-before the optimizer and the training loop even exist, so it *cannot* restore
-them. Lightning restores them later, from the same checkpoint file, through its
-built-in ``ckpt_path`` mechanism.
-
-Two consequences for you:
-
--  **Only ``WarmStartLoader`` triggers the Lightning restore.** The other
-   strategies start with a fresh optimizer and epoch 0. (Internally each loader
-   declares this via a ``restores_training_state`` flag that the trainer reads.)
--  **Warm start needs a local file.** Lightning's restore reads the checkpoint
-   from disk, so warm start only works with ``LocalSource`` or ``RunIdSource``.
-   Configuring it with ``S3Source`` or ``HTTPSource`` is rejected up front with
-   an explanatory error, rather than silently dropping your optimizer and epoch
-   state.
-
-.. note::
-
-   Warm start also records the checkpoint's epoch/step onto the run metadata for
-   inspection (via a small ``TrainingState`` record). That is informational
-   only — the value that actually drives the resumed run is Lightning's restore,
-   not this metadata.
+Internally each loader declares which case it is via a
+``restores_training_state`` flag that the trainer and the pipeline builder both
+read. A resume with no source at all is rejected when the pipeline is built:
+there is nothing for Lightning to read.
 
 *********************************************
  Station 3 — Modifiers (adjust the model after loading)
@@ -658,7 +648,7 @@ which makes the intent explicit:
 
    -  -  Continue the same run seamlessly
       -  ``RunIdSource`` with ``fork: false``
-      -  ``WarmStartLoader``
+      -  ``WarmStartLoader`` (or no ``loading`` block)
 
    -  -  Branch a new run from an old one's weights, fresh optimizer
       -  ``RunIdSource`` with ``fork: true``

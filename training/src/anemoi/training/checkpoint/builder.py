@@ -79,48 +79,111 @@ def _inject_run_lineage(
     return OmegaConf.merge(source, overrides)
 
 
-def reject_unsupported_warm_start(cfg: DictConfig) -> None:
-    """Reject warm start configured with a source that has no local checkpoint.
+def loader_restores_training_state(cfg: DictConfig) -> bool:
+    """Whether the configured loading strategy declares ``restores_training_state``.
 
-    Warm start restores optimizer and epoch state through Lightning's ``ckpt_path``,
-    which needs a checkpoint reachable as a local file. Only ``LocalSource`` (an explicit
-    path) and ``RunIdSource`` (a resolved ``last.ckpt`` on a shared filesystem) provide one.
-    With an ``S3Source`` / ``HTTPSource`` — or no source at all — the pipeline would still
-    load the weights, but there is no local path for Lightning to resume the optimizer /
-    epoch state, so it would silently start from step 0. Fail loudly here instead of
-    degrading silently. Called at the start of :func:`build_checkpoint_pipeline` so the
-    checkpoint module owns this composition rule.
+    Resolves ``training.checkpoint.loading._target_`` to its class and reads the
+    declared
+    :attr:`~anemoi.training.checkpoint.loading.base.LoadingStrategy.restores_training_state`
+    rather than matching the class name: a subclass, or any third-party strategy
+    that declares the attribute, is treated exactly like ``WarmStartLoader``.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        A training-run configuration.
+
+    Returns
+    -------
+    bool
+        ``True`` when a loading strategy is configured and declares the attribute.
+        An absent or empty ``_target_`` yields ``False``; so does one that cannot be
+        imported, which the pipeline build then reports as a ``CheckpointConfigError``
+        naming the target.
+    """
+    loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
+    if loading is None:
+        return False
+    target = OmegaConf.select(loading, "_target_", default="") or ""
+    if not target:
+        return False
+
+    from hydra.utils import get_class
+
+    try:
+        loader_cls = get_class(target)
+    except (ImportError, ValueError):
+        return False
+    return bool(getattr(loader_cls, "restores_training_state", False))
+
+
+def resumes_via_lightning(cfg: DictConfig) -> bool:
+    """Whether ``Trainer.fit(ckpt_path=)`` owns the checkpoint load for this config.
+
+    ``True`` when no loading strategy is configured (a bare
+    ``training.checkpoint.source`` resumes the run, the way the removed
+    ``training.run_id`` did) or when the configured strategy declares
+    ``restores_training_state`` (``WarmStartLoader``). Every decision about a
+    resume keys on this: the builder emits a resolve-only source and no loading
+    stage, and the trainer keeps ``ckpt_path`` so Lightning loads the weights,
+    optimizer, scheduler and loop progress together in one pass.
+
+    Parameters
+    ----------
+    cfg : DictConfig
+        A training-run configuration.
+
+    Returns
+    -------
+    bool
+        ``True`` when Lightning owns the load.
+    """
+    loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
+    if loading is None:
+        return True
+    return loader_restores_training_state(cfg)
+
+
+def reject_unsupported_warm_start(cfg: DictConfig) -> None:
+    """Reject a resume that has nothing to resume from.
+
+    A loading strategy that declares ``restores_training_state`` needs a
+    ``training.checkpoint.source``: Lightning's ``ckpt_path`` load is the whole
+    restore, and the source stage is what produces the file it reads. Any source
+    will do — a remote one is downloaded to a node-local file that the trainer hands
+    to Lightning and deletes afterwards. Called at the start of
+    :func:`build_checkpoint_pipeline` so the checkpoint module owns this composition
+    rule.
 
     Raises
     ------
     CheckpointConfigError
-        If ``training.checkpoint.loading`` is a ``WarmStartLoader`` but the source is not
-        a Local/Run source.
+        If ``training.checkpoint.loading`` declares ``restores_training_state`` but no
+        source is configured.
     """
-    loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is None:
-        return
-    loading_target = OmegaConf.select(loading, "_target_", default="") or ""
-    if not loading_target.endswith("WarmStartLoader"):
+    if not loader_restores_training_state(cfg):
         return
 
-    source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
-    source_target = (OmegaConf.select(source, "_target_", default="") or "") if source is not None else ""
-    if source_target.endswith(("LocalSource", "RunIdSource")):
+    if OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None) is not None:
         return
 
     from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 
-    described = source_target.rsplit(".", 1)[-1] if source_target else "no source"
     msg = (
-        "Warm start restores optimizer and epoch state via Lightning's ckpt_path, "
-        "which requires a checkpoint reachable as a local file. The configured "
-        f"training.checkpoint.source ({described}) does not provide one, so the optimizer "
-        "and epoch state would be silently dropped. Use a LocalSource or RunIdSource for "
-        "warm start, or switch training.checkpoint.loading to WeightsOnlyLoader / "
-        "TransferLearningLoader if you only need the weights."
+        "Warm start resumes through Trainer.fit(ckpt_path=), which needs a checkpoint to "
+        "read, but no training.checkpoint.source is configured. Add a source "
+        "(RunIdSource, LocalSource, S3Source or HTTPSource), or switch "
+        "training.checkpoint.loading to WeightsOnlyLoader / TransferLearningLoader / "
+        "ColdStartLoader to start fresh training state from a checkpoint."
     )
     raise CheckpointConfigError(msg)
+
+
+def _resolve_only(source: Any) -> Any:
+    """Wrap a source config so only its ``resolve`` step runs (see ``ResolveOnlySource``)."""
+    return OmegaConf.create(
+        {"_target_": "anemoi.training.checkpoint.sources.base.ResolveOnlySource", "source": source},
+    )
 
 
 def build_checkpoint_pipeline(
@@ -145,6 +208,11 @@ def build_checkpoint_pipeline(
           ``_target_`` modifier stages, applied in list order after loading.
 
         Any of these blocks may be absent; an absent block contributes no stage.
+        When the run resumes through Lightning (no ``loading`` block, or a loader
+        that declares ``restores_training_state`` — see :func:`resumes_via_lightning`)
+        the source is wrapped so only its ``resolve`` step runs, no loading stage is
+        emitted, and modifiers still apply: ``Trainer.fit(ckpt_path=)`` performs the
+        one and only load.
     parent_run_server2server : str, optional
         Runtime server-to-server resume lineage id. When set and the source is a
         ``RunIdSource``, it is merged into the source config before instantiation so
@@ -164,18 +232,25 @@ def build_checkpoint_pipeline(
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)
 
-    # Composition rule: warm start needs a source that yields a local ckpt_path.
+    # Composition rule: a resume needs a source to hand Lightning.
     reject_unsupported_warm_start(cfg)
+
+    # Resume has one owner. Trainer.fit(ckpt_path=) reads the file and runs
+    # on_load_checkpoint on the dict it loads, so the pipeline only resolves the
+    # file (a download is kept on disk) and never loads it here: a pipeline load
+    # would read the file a second time and apply the corrections to a copy that
+    # Lightning then discards.
+    resume = resumes_via_lightning(cfg)
 
     stage_configs: list[Any] = []
 
     source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
     if source is not None:
         source = _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
-        stage_configs.append(source)
+        stage_configs.append(_resolve_only(source) if resume else source)
 
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is not None:
+    if loading is not None and not resume:
         stage_configs.append(loading)
 
     modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}", default=None)

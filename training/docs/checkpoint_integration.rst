@@ -165,7 +165,9 @@ Two things happen automatically when you construct a pipeline:
 After execution, a safety check (``_verify_weights_loaded``) **raises**
 :class:`CheckpointLoadError` if a source ran but the model never reported
 ``weights_initialized`` — this prevents silently training a randomly-initialised
-model when ``continue_on_error=True`` swallowed a loading failure.
+model when ``continue_on_error=True`` swallowed a loading failure. A resume is
+exempt: its resolve-only source marks the context, because the weights arrive
+at ``Trainer.fit(ckpt_path=)`` rather than from a pipeline stage.
 
 From configuration
 ==================
@@ -193,37 +195,37 @@ statically in YAML.
 ***********************************
 
 This is the most important behaviour to understand when reading the loading
-code.
+code: a checkpoint has exactly one loader.
 
-The pipeline runs **at model-build time** — before the optimizer, scheduler, and
-training loop exist. So loading strategies can restore **weights** (and apply
-the parity steps below), but they **cannot** restore the optimizer/scheduler/
-loop progress, because those objects are not there yet.
+**Resume.** When the configured loader declares ``restores_training_state``
+(``WarmStartLoader``), or when no ``training.checkpoint.loading`` block is
+configured at all, PyTorch Lightning is the loader. The builder
+(:func:`~anemoi.training.checkpoint.builder.resumes_via_lightning`) wraps the
+source in a ``ResolveOnlySource`` — the source's ``resolve`` step makes the
+checkpoint reachable as a local file and publishes ``context.checkpoint_path``;
+nothing is ``torch.load``-ed — emits no loading stage, and keeps the modifier
+stages. The trainer reads the resolved path back from the executed context
+(``AnemoiTrainer.last_checkpoint``) and hands it to
+``trainer.fit(ckpt_path=...)``. Lightning then reads the file once, calls
+``BaseTrainingModule.on_load_checkpoint`` on the dict it is about to load —
+which is where
+:func:`~anemoi.training.checkpoint.loading.base.apply_checkpoint_corrections`
+runs for a resume — and restores weights, optimizer, scheduler and loop
+progress together.
 
-Restoring that runtime state is therefore owned by **PyTorch Lightning**, via
-its ``ckpt_path`` mechanism at ``trainer.fit()``. The handshake is one class
-attribute:
+**Pipeline load.** Every other strategy (``WeightsOnlyLoader``,
+``ColdStartLoader``, ``TransferLearningLoader``) applies the weights at
+model-build time and runs the same corrections itself; the trainer withholds
+``ckpt_path`` (``_skip_lightning_restore``) so Lightning does not load the file
+a second time, and training state starts fresh.
 
--  ``LoadingStrategy.restores_training_state`` — defaults to ``False``.
--  ``WarmStartLoader`` overrides it to ``True``.
-
-The trainer reads this attribute (through ``hydra.utils.get_class`` on the
-configured loader) in ``_skip_lightning_restore``: if ``True``, it hands the
-resolved checkpoint path to ``trainer.fit(ckpt_path=...)`` so Lightning restores
-optimizer + epoch; if ``False``, ``ckpt_path`` is suppressed and training starts
-with a fresh optimizer at epoch 0 (the weights are already loaded).
-
-Because Lightning's restore needs a real file, warm start is restricted to
-``LocalSource`` / ``RunIdSource``.
-:func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`, called
-from ``build_checkpoint_pipeline``, raises a clear
-:class:`CheckpointConfigError` if warm start is paired with a remote source,
-rather than silently dropping optimizer/epoch state.
-
-``WarmStartLoader`` also extracts the checkpoint's training progress into a small
-:class:`~anemoi.training.checkpoint.loading.state.TrainingState` and records it
-on ``context.metadata`` for inspection. That is **observational only** — the
-trainer drives the resumed run from Lightning's restore, not from this metadata.
+Any source works for a resume. ``LocalSource`` and ``RunIdSource`` resolve to an
+existing file (``~`` expanded, canonicalised); ``HTTPSource`` and ``S3Source``
+download to a node-local temporary file, keep it, and register it on
+``context.temporary_files``, which the trainer deletes once ``fit()`` returns
+(``atexit`` is the backstop). A resume with no source at all is rejected at
+build time by
+:func:`~anemoi.training.checkpoint.builder.reject_unsupported_warm_start`.
 
 Shared parity helpers
 =====================
@@ -234,13 +236,19 @@ time) or through Lightning's own ``on_load_checkpoint`` hook. These live as
 module-level functions in ``anemoi.training.checkpoint.loading.base`` and are
 the single home for that logic:
 
--  ``apply_checkpoint_format_migrations`` — apply anemoi-models format
-   migrations (e.g. chunking fix) if available; no-op otherwise.
--  ``apply_trainable_edge_perm_migration`` — apply the model-dependent
-   trainable-edge-permutation migration if available.
--  ``refresh_checkpoint_processors`` — rebuild stale pre/post-processor weights
-   from the current model when
-   ``training.update_ds_stats_on_ckpt_load.{states,tendencies}`` is set.
+-  ``apply_checkpoint_corrections`` — the one entry point for the three steps
+   that change the checkpoint, in one fixed order: format migrations, then the
+   trainable-edge-permutation migration, then the processor refresh. The
+   pipeline strategies call it (``LoadingStrategy._apply_corrections``) and so
+   does ``on_load_checkpoint`` on a resume. It composes:
+
+   -  ``apply_checkpoint_format_migrations`` — apply anemoi-models format
+      migrations (e.g. chunking fix) if available; no-op otherwise.
+   -  ``apply_trainable_edge_perm_migration`` — apply the model-dependent
+      trainable-edge-permutation migration if available.
+   -  ``refresh_checkpoint_processors`` — rebuild stale pre/post-processor
+      weights from the current model when
+      ``training.update_ds_stats_on_ckpt_load.{states,tendencies}`` is set.
 -  ``preserve_anemoi_metadata`` — restore ``model._ckpt_model_name_to_index``
    from the checkpoint's ``data_indices`` (multi-dataset aware).
 -  ``extract_checkpoint_variables_metadata`` — populate
@@ -249,8 +257,9 @@ the single home for that logic:
    differs from the current run's, since weight loading keeps the current
    architecture.
 
-If you write a custom loader, call these (the built-ins do) so your strategy
-stays consistent with the rest of the system.
+If you write a custom loader, call ``self._apply_corrections(context)`` and the
+metadata helpers (the built-ins do) so your strategy stays consistent with the
+rest of the system.
 
 ****************
  Error handling

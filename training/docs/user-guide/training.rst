@@ -512,6 +512,11 @@ resume keeps the new checkpoints in the same folder as the old ones:
          run_id: <run_id>
          # fork: false   # optional; false is the default (resume), set true to fork
 
+With no ``loading`` block the run *resumes*: PyTorch Lightning loads the
+checkpoint — weights, optimizer and training progress — at ``trainer.fit()``.
+Add ``training/checkpoint/loading=weights_only`` (or another strategy) to start
+fresh training state from those weights instead.
+
 With ``fork: true`` the old run is unaffected and the new checkpoints go to a
 new folder with a fresh run_id — useful for starting multiple new runs from a
 single old run. The same can be selected on the command line with the Hydra

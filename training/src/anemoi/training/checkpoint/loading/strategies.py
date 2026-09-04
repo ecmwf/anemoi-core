@@ -13,10 +13,10 @@ from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
+from typing import NoReturn
 
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
-from anemoi.training.checkpoint.loading.state import TrainingState
 
 if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
@@ -170,68 +170,46 @@ class TransferLearningLoader(LoadingStrategy):
 
 
 class WarmStartLoader(LoadingStrategy):
-    """Resume an interrupted training run on the same architecture.
+    """Marker strategy: resume an interrupted run through Lightning's ``ckpt_path`` load.
 
-    Loads model weights (``strict=True`` — an exact architecture match is
-    expected when resuming) and applies the parity steps, exactly like the other
-    strategies. The pipeline runs at model-build, before the optimizer, scheduler
-    and Lightning fit-loop exist, so it cannot restore optimizer/scheduler/loop
-    progress here.
+    Selecting it tells the trainer that ``Trainer.fit(ckpt_path=)`` performs the
+    one and only load of the checkpoint — weights, optimizer, scheduler and loop
+    progress together — with ``BaseTrainingModule.on_load_checkpoint`` applying
+    the corrections to the dict Lightning loads. The pipeline's part of a resume
+    is to make the checkpoint reachable as a local file (the source's ``resolve``
+    step) and to run the modifier stages; the builder emits no loading stage, so
+    this class's ``process`` never runs in a training run.
 
-    That runtime-state restore is owned by Lightning's ``ckpt_path`` resume, which
-    runs at ``trainer.fit()`` once those objects exist. :attr:`restores_training_state`
-    is ``True`` so the trainer keeps ``ckpt_path`` for this strategy (and only this
-    one); for the weights-only / transfer / cold-start strategies ``ckpt_path`` is
-    suppressed, since they start fresh training state.
-
-    The extracted training progress (epoch, global step, best metric, metric
-    history) is also recorded on ``context.metadata`` via :class:`TrainingState`
-    for inspection and tooling. This is observational only — it does not drive the
-    live restore, which remains owned by Lightning's ``ckpt_path`` (see above).
+    The class exists so ``training/checkpoint/loading=warm_start`` composes like
+    every other strategy; :attr:`restores_training_state` is what the trainer and
+    builder read.
     """
 
     restores_training_state = True
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Load model weights (strict) and apply the parity steps.
+    async def process(self, context: CheckpointContext) -> NoReturn:
+        """Refuse to run: a resume is loaded by ``Trainer.fit(ckpt_path=)``, not here.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context with ``checkpoint_data`` and ``model`` set.
+            Unused; the pipeline never routes a resume through this stage.
 
         Returns
         -------
-        CheckpointContext
-            Context with weights loaded; optimizer/scheduler/loop progress are
-            restored later by Lightning's ``ckpt_path`` (see the class docstring).
+        NoReturn
+            Never returns.
+
+        Raises
+        ------
+        RuntimeError
+            Always. Reaching this means the pipeline was hand-built with a
+            ``WarmStartLoader`` stage; use the builder, or a loading strategy
+            that applies weights.
         """
-        from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-
-        self._apply_corrections(context)
-
-        # Model weights (strict — exact match expected for resume)
-        state_dict = self._extract_state_dict(context)
-        try:
-            context.model.load_state_dict(state_dict, strict=True)
-        except RuntimeError as e:
-            msg = f"WarmStart requires exact model match: {e}"
-            raise CheckpointIncompatibleError(msg) from e
-
-        self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
-        self._extract_variables_metadata(context.model, context.checkpoint_data)
-        self._mark_weights_loaded(context.model)
-        context.metadata["loading_strategy"] = "warm_start"
-
-        # Surface the extracted training progress on the context for inspection
-        # and tooling. Observational only: Lightning's ckpt_path owns the live
-        # restore (see the class docstring), so nothing downstream consumes this
-        # to mutate the trainer.
-        TrainingState.from_checkpoint(context.checkpoint_data or {}).apply_to(context)
-
-        LOGGER.info("Warm start: loaded weights; optimizer/epoch restore deferred to Lightning ckpt_path")
-
-        return context
+        del context
+        msg = "WarmStartLoader is a marker: resume loads happen in Trainer.fit(ckpt_path=)"
+        raise RuntimeError(msg)
 
 
 class ColdStartLoader(WeightsOnlyLoader):

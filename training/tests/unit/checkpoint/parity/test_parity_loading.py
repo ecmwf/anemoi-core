@@ -399,78 +399,16 @@ def test_warm_start_has_no_strict_parameter() -> None:
 
 
 @pytest.mark.asyncio
-async def test_warm_start_raises_on_unexpected_key() -> None:
+async def test_warm_start_is_a_marker_and_never_loads() -> None:
+    """Resume loads happen in ``Trainer.fit(ckpt_path=)``; the marker's ``process`` refuses to run."""
     model = _LinearModel()
-    checkpoint_data = {
-        "state_dict": {
-            "linear.weight": torch.full((5, 10), 1.0),
-            "linear.bias": torch.full((5,), 2.0),
-            "extra.weight": torch.full((2, 2), 3.0),  # unexpected under strict=True
-        },
-    }
+    context = CheckpointContext(model=model, checkpoint_data={"state_dict": _exact_state_dict(model)})
 
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    with pytest.raises(CheckpointIncompatibleError):
+    with pytest.raises(RuntimeError, match="WarmStartLoader is a marker"):
         await WarmStartLoader().process(context)
 
-
-@pytest.mark.asyncio
-async def test_warm_start_surfaces_best_metric_when_present() -> None:
-    model = _LinearModel()
-    checkpoint_data = {"state_dict": _exact_state_dict(model), "best_metric": 0.95}
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert result.metadata["best_metric"] == 0.95
-
-
-@pytest.mark.asyncio
-async def test_warm_start_omits_best_metric_when_absent() -> None:
-    model = _LinearModel()
-    checkpoint_data = {"state_dict": _exact_state_dict(model)}
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert "best_metric" not in result.metadata
-
-
-@pytest.mark.asyncio
-async def test_warm_start_surfaces_metrics_history_when_present() -> None:
-    model = _LinearModel()
-    metrics_history = {"loss": [1.0, 0.5]}
-    checkpoint_data = {"state_dict": _exact_state_dict(model), "metrics_history": metrics_history}
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert result.metadata["metrics_history"] == metrics_history
-
-
-@pytest.mark.asyncio
-async def test_warm_start_omits_metrics_history_when_empty() -> None:
-    model = _LinearModel()
-    checkpoint_data = {"state_dict": _exact_state_dict(model), "metrics_history": {}}
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert "metrics_history" not in result.metadata
-
-
-@pytest.mark.asyncio
-async def test_warm_start_leaves_scheduler_none() -> None:
-    model = _LinearModel()
-    checkpoint_data = {
-        "state_dict": _exact_state_dict(model),
-        "lr_schedulers": [{"last_epoch": 5}],
-    }
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert result.scheduler is None
+    assert not getattr(model, "weights_initialized", False)
+    assert context.metadata == {}
 
 
 # ---------------------------------------------------------------------------

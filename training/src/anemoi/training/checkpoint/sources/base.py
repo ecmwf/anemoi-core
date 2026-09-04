@@ -263,3 +263,48 @@ class CheckpointSource(PipelineStage):
             "Detected checkpoint format '%s' from data keys",
             context.checkpoint_format,
         )
+
+
+#: ``context.metadata`` marker a :class:`ResolveOnlySource` sets: the checkpoint is
+#: loaded by ``Trainer.fit(ckpt_path=)``, not by a pipeline stage.
+CHECKPOINT_LOAD_OWNER = "checkpoint_load_owner"
+
+
+class ResolveOnlySource(CheckpointSource):
+    """Run only a source's :meth:`~CheckpointSource.resolve` step.
+
+    The builder wraps the configured source in this for a resume:
+    ``Trainer.fit(ckpt_path=)`` performs the load, so the pipeline only makes
+    the checkpoint reachable as a local file and publishes its path. The
+    context is marked (``metadata["checkpoint_load_owner"] = "trainer"``) so
+    the pipeline's "weights were loaded" check knows the weights arrive at
+    ``fit()`` rather than being missing.
+
+    Parameters
+    ----------
+    source : CheckpointSource
+        The configured source whose resolve step runs.
+    """
+
+    def __init__(self, source: CheckpointSource) -> None:
+        self.source = source
+
+    async def resolve(self, context: CheckpointContext) -> Path | None:
+        """Delegate to the wrapped source's resolve step."""
+        return await self.source.resolve(context)
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``; load nothing."""
+        path = await self.resolve(context)
+        context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})
+        if path is None:
+            LOGGER.debug(
+                "%s: nothing resolved on this rank; Trainer.fit(ckpt_path=) owns the load",
+                type(self.source).__name__,
+            )
+        else:
+            LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
+        return context
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.source!r})"

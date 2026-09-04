@@ -33,11 +33,12 @@ from hydra import compose
 from hydra import initialize_config_module
 from omegaconf import OmegaConf
 
+from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
-from anemoi.training.checkpoint.formats import extract_state_dict
-from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+from anemoi.training.checkpoint.sources.base import ResolveOnlySource
 from anemoi.training.checkpoint.sources.local import LocalSource
 from anemoi.training.schemas.base_schema import _DEPRECATED_KEYS
 from anemoi.training.schemas.training import CheckpointPipelineSchema
@@ -50,6 +51,7 @@ if TYPE_CHECKING:
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
 _LOCAL_SOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
 _WEIGHTS_ONLY = "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"
+_WARM_START = "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"
 _TRANSFER_LEARNING = "anemoi.training.checkpoint.loading.strategies.TransferLearningLoader"
 _FREEZING = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 
@@ -69,6 +71,13 @@ class _SmallNet(nn.Module):
 def _index_collection(name_to_index: dict[str, int]) -> object:
     """Build an object exposing ``.name_to_index`` like a real IndexCollection."""
     return type("IndexCollection", (), {"name_to_index": name_to_index})()
+
+
+class _PicklableIndex:
+    """An ``IndexCollection`` stand-in that survives ``torch.save`` (module-level, so it pickles)."""
+
+    def __init__(self, name_to_index: dict[str, int]) -> None:
+        self.name_to_index = name_to_index
 
 
 # --- mixed precision / dtype load (fp32 <-> bf16) ---------------------
@@ -143,7 +152,7 @@ def test_same_checkpoint_loads_identically_into_two_models(tmp_path: Path) -> No
         assert torch.equal(state_a[key], source_state[key]), f"{key} does not match the source"
 
 
-# --- double-load idempotency (pipeline + Lightning ckpt_path) ---------
+# --- a resume is one load: Lightning's, corrected by the hook -----------
 
 
 class _StepStub(BaseTrainingModule):
@@ -156,8 +165,35 @@ class _StepStub(BaseTrainingModule):
         raise NotImplementedError
 
 
-def _lightning_module_wrapping(model: nn.Module) -> _StepStub:
-    """Build a minimal training module whose ``.model`` is ``model``, parity refresh off."""
+class _BufferProcessor(nn.Module):
+    """A processor whose only state is one buffer, so refreshes are visible in the state dict."""
+
+    def __init__(self, value: float) -> None:
+        super().__init__()
+        self.register_buffer("value", torch.tensor([value], dtype=torch.float32))
+
+
+class _TendencyModel(nn.Module):
+    """A model with state and tendency processors, keyed the way the trainer's inner model is."""
+
+    def __init__(self, lead_times: list[str], offset: float) -> None:
+        super().__init__()
+        self.pre_processors = nn.ModuleDict({"data": Processors([["dummy", _BufferProcessor(offset)]])})
+        self.post_processors = nn.ModuleDict(
+            {"data": Processors([["dummy", _BufferProcessor(offset + 100)]], inverse=True)},
+        )
+        pre_tend = StepwiseProcessors(lead_times)
+        post_tend = StepwiseProcessors(lead_times)
+        for idx, lead_time in enumerate(lead_times):
+            pre_tend.set(lead_time, Processors([["dummy", _BufferProcessor(offset + idx)]]))
+            post_tend.set(lead_time, Processors([["dummy", _BufferProcessor(offset + idx + 50)]], inverse=True))
+        self.pre_processors_tendencies = nn.ModuleDict({"data": pre_tend})
+        self.post_processors_tendencies = nn.ModuleDict({"data": post_tend})
+        self.body = nn.Linear(2, 2)
+
+
+def _lightning_module_wrapping(model: nn.Module, *, tendencies: bool = False) -> _StepStub:
+    """Build a minimal training module whose ``.model`` is ``model``."""
     from types import SimpleNamespace
 
     module = _StepStub.__new__(_StepStub)
@@ -165,42 +201,122 @@ def _lightning_module_wrapping(model: nn.Module) -> _StepStub:
     module.task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     module.model = model
     module.config = SimpleNamespace(
-        training=SimpleNamespace(update_ds_stats_on_ckpt_load=SimpleNamespace(states=False, tendencies=False)),
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=SimpleNamespace(states=False, tendencies=tendencies)),
     )
     return module
 
 
-def test_double_load_via_pipeline_then_lightning_is_bit_exact() -> None:
-    """Pipeline load then a second Lightning ckpt_path pass leaves the model bit-exact.
+def _legacy_on_load_checkpoint(module: _StepStub, checkpoint: dict) -> None:
+    """``BaseTrainingModule.on_load_checkpoint`` as it stands at origin/main 4842e8bb8.
 
-    A warm-start resume applies the checkpoint twice: once by the pipeline at model
-    build (which sets ``weights_initialized``), then again by Lightning's ``ckpt_path``
-    at fit time. The second pass must not perturb the weights, and ``on_load_checkpoint``
-    must skip its parity steps because the pipeline already ran them.
+    Reproduced from that revision's ``train/methods/base.py`` (edge-perm migration,
+    then ``_update_checkpoint_state_dict_for_load``, then ``_ckpt_model_name_to_index``),
+    minus the task-state and datamodule steps that need a trainer. This is the reference
+    a resume must match bit for bit.
     """
-    torch.manual_seed(1)
-    source = _SmallNet()
-    checkpoint = {"state_dict": {key: value.clone() for key, value in source.state_dict().items()}}
+    import importlib
 
-    torch.manual_seed(99)
-    model = _SmallNet()
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint)
-    asyncio.run(WarmStartLoader().process(context))
-    after_pipeline = {key: value.clone() for key, value in model.state_dict().items()}
-    assert getattr(model, "weights_initialized", False) is True
+    edge_perm = importlib.import_module("anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix").migrate
+    edge_perm(checkpoint, model=module)
 
-    # Second application: Lightning's ckpt_path reloads the same weights, then fires
-    # the on_load_checkpoint hook (which must short-circuit on weights_initialized).
-    model.load_state_dict(extract_state_dict(checkpoint), strict=True)
-    module = _lightning_module_wrapping(model)
-    module.weights_initialized = True
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+    update_cfg = module.config.training.update_ds_stats_on_ckpt_load
+    state_dict = checkpoint.get("state_dict")
+    if isinstance(state_dict, dict) and (update_cfg.states or update_cfg.tendencies):
+        processor_prefixes: tuple[str, ...] = ()
+        if update_cfg.states:
+            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
+        if update_cfg.tendencies:
+            processor_prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+        for key in list(state_dict.keys()):
+            if key.startswith(processor_prefixes):
+                del state_dict[key]
+        model_state_dict = module.model.state_dict()
+        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
+        for key, value in model_state_dict.items():
+            full_key = f"model.{key}"
+            if full_key.startswith(processor_prefixes):
+                state_dict[full_key] = value
 
-    after_second = model.state_dict()
-    for key, value in after_pipeline.items():
-        assert torch.equal(after_second[key], value), f"{key} drifted across the second load"
-    # The parity-skip guard held: no checkpoint metadata was re-derived onto the module.
-    assert not hasattr(module, "_ckpt_model_name_to_index")
+    module._ckpt_model_name_to_index = {
+        dataset_name: data_indices.name_to_index
+        for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
+    }
+
+
+def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A resume performs no pipeline load; the hook corrects the dict Lightning loads.
+
+    With ``update_ds_stats_on_ckpt_load.tendencies=True`` the tendency processors must
+    come from the live model, not the checkpoint. The pipeline only resolves the file
+    (``torch.load`` is never called), the model keeps its own weights until ``fit()``,
+    and the hook applies ``apply_checkpoint_corrections`` to Lightning's dict. The
+    result is compared bit for bit against the legacy hook at origin/main 4842e8bb8.
+    """
+    old_model = _TendencyModel(["6h", "12h", "18h"], offset=10.0)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"data": _PicklableIndex({"t2m": 0})}},
+    }
+    ckpt_path = tmp_path / "run_A" / "last.ckpt"
+    ckpt_path.parent.mkdir()
+    torch.save(checkpoint, ckpt_path)
+
+    real_load = torch.load
+    loads: list[object] = []
+
+    def _spy_load(*args: object, **kwargs: object) -> object:
+        loads.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _spy_load)
+
+    module = _lightning_module_wrapping(_TendencyModel(["6h", "12h"], offset=1.0), tendencies=True)
+    before = {key: value.clone() for key, value in module.state_dict().items()}
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": _LOCAL_SOURCE, "path": str(ckpt_path)},
+                    "loading": {"_target_": _WARM_START},
+                },
+                "update_ds_stats_on_ckpt_load": {"states": False, "tendencies": True},
+            },
+        },
+    )
+
+    executed = asyncio.run(build_checkpoint_pipeline(cfg).execute(CheckpointContext(model=module, config=cfg)))
+
+    # No pipeline load: the file was only resolved, the model is untouched.
+    assert loads == []
+    assert executed.checkpoint_path == ckpt_path.resolve()
+    assert executed.checkpoint_data is None
+    assert not getattr(module, "weights_initialized", False)
+    for key, value in before.items():
+        assert torch.equal(module.state_dict()[key], value)
+
+    # Lightning's ckpt_path load: read the file, run the hook on that dict, load it.
+    lightning_dict = real_load(executed.checkpoint_path, weights_only=False, map_location="cpu")
+    BaseTrainingModule.on_load_checkpoint(module, lightning_dict)
+    module.load_state_dict(lightning_dict["state_dict"], strict=True)
+
+    # The legacy path, on an identical module and a fresh read of the same file.
+    reference = _lightning_module_wrapping(_TendencyModel(["6h", "12h"], offset=1.0), tendencies=True)
+    legacy_dict = real_load(ckpt_path, weights_only=False, map_location="cpu")
+    _legacy_on_load_checkpoint(reference, legacy_dict)
+    reference.load_state_dict(legacy_dict["state_dict"], strict=True)
+
+    resumed = module.state_dict()
+    for key, value in reference.state_dict().items():
+        assert torch.equal(resumed[key], value), f"{key} differs from the legacy hook path"
+    # And the tendency processors really are the live model's, not the checkpoint's stale 10.x.
+    assert torch.equal(
+        resumed["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
+        torch.tensor([1.0]),
+    )
+    assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}
 
 
 # --- metadata round-trip through a weights-only load ------------------
@@ -289,20 +405,25 @@ def test_deprecated_key_replacement_config_builds_and_validates(deprecated_key: 
         assert stage_names[0].endswith("Source")
     if "loading" in checkpoint_block:
         assert any(name.endswith("Loader") for name in stage_names)
+    else:
+        # Source without a loading block is a resume: the source runs resolve-only and
+        # Trainer.fit(ckpt_path=) performs the load, as the removed keys used to.
+        assert not any(name.endswith("Loader") for name in stage_names)
     if "modifiers" in checkpoint_block:
         assert any(name.endswith("Stage") for name in stage_names)
 
     # Non-tautological attribute checks: the advice configures the intended behaviour.
     if deprecated_key == "training.run_id":
-        source = pipeline.stages[0]
+        source = pipeline.stages[0].source
         assert source.run_id == "abc"
         assert source.fork is False
     elif deprecated_key == "training.fork_run_id":
-        source = pipeline.stages[0]
+        source = pipeline.stages[0].source
         assert source.run_id == "abc"
         assert source.fork is True
     elif deprecated_key == "system.input.warm_start":
-        assert isinstance(pipeline.stages[0], LocalSource)
+        assert isinstance(pipeline.stages[0], ResolveOnlySource)
+        assert isinstance(pipeline.stages[0].source, LocalSource)
     elif deprecated_key == "training.transfer_learning":
         loader = pipeline.stages[1]
         assert type(loader).__name__ == "TransferLearningLoader"
@@ -337,5 +458,7 @@ def test_preset_composes_with_checkpoint_source_overlay(preset: str) -> None:
     CheckpointPipelineSchema(**checkpoint_block)
 
     pipeline = build_checkpoint_pipeline(cfg)
-    assert type(pipeline.stages[0]).__name__ == "RunIdSource"
-    assert pipeline.stages[0].run_id == "abc123"
+    # Source only: a resume, so the RunIdSource runs resolve-only for Trainer.fit(ckpt_path=).
+    assert isinstance(pipeline.stages[0], ResolveOnlySource)
+    assert type(pipeline.stages[0].source).__name__ == "RunIdSource"
+    assert pipeline.stages[0].source.run_id == "abc123"

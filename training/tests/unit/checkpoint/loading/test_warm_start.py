@@ -9,18 +9,20 @@
 
 """Tests for WarmStartLoader.
 
-Warm start loads weights (strict) + parity at model-build, exactly like the
-other strategies. The optimizer / scheduler / loop-progress restore is owned by
-Lightning's ``ckpt_path`` resume at fit time (the pipeline runs before those
-objects exist), signalled by :attr:`WarmStartLoader.restores_training_state`.
+Warm start is a marker: selecting it means ``Trainer.fit(ckpt_path=)`` performs
+the one and only load of the checkpoint (weights, optimizer, scheduler and loop
+progress together) and the pipeline only resolves the source to a local file. The
+builder never emits this stage, so ``process`` refuses to run.
 """
+
+import inspect
 
 import pytest
 import torch
 import torch.nn as nn
 
 from anemoi.training.checkpoint.base import CheckpointContext
-from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+from anemoi.training.checkpoint.loading.base import LoadingStrategy
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 
 
@@ -31,73 +33,31 @@ class SimpleModel(nn.Module):
 
 
 def test_warm_start_declares_restores_training_state() -> None:
-    """Warm start is the strategy whose optimizer/loop restore is owned by Lightning ckpt_path."""
+    """The attribute the builder and the trainer read to route the load through Lightning."""
     assert WarmStartLoader.restores_training_state is True
+    assert LoadingStrategy.restores_training_state is False
+
+
+def test_warm_start_keeps_its_constructor_signature() -> None:
+    """``loading=warm_start`` configs carry no parameters; the class must keep accepting none."""
+    assert "strict" not in inspect.signature(WarmStartLoader.__init__).parameters
+    assert isinstance(WarmStartLoader(), LoadingStrategy)
 
 
 @pytest.mark.asyncio
-async def test_warm_start_restores_model_weights() -> None:
+async def test_warm_start_process_refuses_to_run() -> None:
+    """A hand-built pipeline that routes a checkpoint through the marker fails loudly, untouched."""
     model = SimpleModel()
-    saved_weight = torch.randn(5, 10)
-    checkpoint_data = {"state_dict": {"linear.weight": saved_weight, "linear.bias": torch.randn(5)}}
-
+    before = {key: value.clone() for key, value in model.state_dict().items()}
+    checkpoint_data = {"state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)}}
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
 
-    assert torch.equal(result.model.linear.weight, saved_weight)
-    assert result.model.weights_initialized is True
-    assert result.metadata["loading_strategy"] == "warm_start"
-
-
-@pytest.mark.asyncio
-async def test_warm_start_loads_without_optimizer_in_context() -> None:
-    """At model-build the optimizer does not exist yet; warm start must still load weights.
-
-    Optimizer / scheduler / loop-progress restore is deferred to Lightning's
-    ``ckpt_path``, so the loader neither requires nor touches an optimizer — even
-    when the checkpoint carries ``optimizer_states``.
-    """
-    model = SimpleModel()
-    checkpoint_data = {
-        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "optimizer_states": [{"irrelevant": True}],
-    }
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)  # no optimizer in context
-
-    assert result.optimizer is None
-    assert result.model.weights_initialized is True
-
-
-@pytest.mark.asyncio
-async def test_warm_start_surfaces_training_state_on_context() -> None:
-    """Warm start records the extracted training progress on ``context.metadata``.
-
-    Observational only: Lightning's ``ckpt_path`` owns the live restore, but the
-    extracted epoch/global_step are surfaced on the context for inspection/tooling.
-    """
-    model = SimpleModel()
-    checkpoint_data = {
-        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "epoch": 42,
-        "global_step": 10000,
-    }
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    result = await WarmStartLoader().process(context)
-
-    assert result.metadata["epoch"] == 42
-    assert result.metadata["global_step"] == 10000
-
-
-@pytest.mark.asyncio
-async def test_warm_start_requires_exact_match() -> None:
-    """Warm start expects the same architecture: a shape/key mismatch raises."""
-    model = SimpleModel()
-    # Wrong shape and a missing key → strict load fails.
-    checkpoint_data = {"state_dict": {"linear.weight": torch.randn(3, 3)}}
-
-    context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
-    with pytest.raises(CheckpointIncompatibleError):
+    with pytest.raises(
+        RuntimeError,
+        match=r"WarmStartLoader is a marker: resume loads happen in Trainer\.fit\(ckpt_path=\)",
+    ):
         await WarmStartLoader().process(context)
+
+    for key, value in before.items():
+        assert torch.equal(model.state_dict()[key], value)
+    assert not getattr(model, "weights_initialized", False)

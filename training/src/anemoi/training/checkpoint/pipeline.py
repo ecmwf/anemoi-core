@@ -342,9 +342,10 @@ class CheckpointPipeline:
 
         if has_source and not has_loader:
             suggestions.append(
-                "You have a source stage but no loading strategy. "
-                "Consider adding a loading stage (WeightsOnlyLoader, TransferLearningLoader, etc.) "
-                "to specify how to apply the checkpoint.",
+                "You have a source stage but no loading strategy. In a training run this is a "
+                "resume: Trainer.fit(ckpt_path=) loads the checkpoint. Add a loading stage "
+                "(WeightsOnlyLoader, TransferLearningLoader, ColdStartLoader) to start fresh "
+                "training state from the checkpoint instead.",
             )
 
         if has_modifier and not (has_source or has_loader):
@@ -464,9 +465,18 @@ class CheckpointPipeline:
         ``weights_initialized`` is advisory for other readers, but the pipeline
         treats it as a gate here: a configured source with no applied weights is
         a hard error, not a warning.
+
+        A resume is the exception: a resolve-only source publishes the file for
+        ``Trainer.fit(ckpt_path=)`` and marks the context, so the weights arrive
+        at ``fit()`` and are not missing.
         """
+        from anemoi.training.checkpoint.sources.base import CHECKPOINT_LOAD_OWNER
+
         has_source = any(self._stage_role(stage) == "source" for stage in self.stages)
         if not has_source:
+            return
+
+        if context.metadata.get(CHECKPOINT_LOAD_OWNER) == "trainer":
             return
 
         model = context.model

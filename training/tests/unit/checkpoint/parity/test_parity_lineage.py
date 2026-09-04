@@ -195,14 +195,16 @@ def _skip_restore_namespace(loading: dict | None) -> SimpleNamespace:
     [
         ({"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"}, True),
         ({"_target_": "anemoi.training.checkpoint.loading.strategies.WarmStartLoader"}, False),
-        ({"_target_": "nonexistent.LoaderClass"}, False),
+        ({"_target_": "nonexistent.LoaderClass"}, True),
     ],
 )
 def test_skip_lightning_restore_matches_loading_strategy(loading: dict, expected: bool) -> None:
     ns = _skip_restore_namespace(loading)
 
-    # An unresolvable _target_ must be caught (ImportError/ValueError) and yield
-    # False rather than propagating, so the resume path is not suppressed here.
+    # An unresolvable _target_ must be caught (ImportError/ValueError) rather than
+    # propagating. It does not count as a resume: treating it as one would let the
+    # builder skip the loader and silently resume past a typo, whereas building the
+    # loader stage raises a CheckpointConfigError naming the target before fit().
     assert AnemoiTrainer._skip_lightning_restore(ns) is expected
 
 

@@ -9,7 +9,10 @@
 
 """Tests for checkpoint pipeline orchestrator."""
 
+from __future__ import annotations
+
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
@@ -18,6 +21,9 @@ from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import CheckpointPipeline
 from anemoi.training.checkpoint import PipelineStage
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class MockStage(PipelineStage):
@@ -339,3 +345,54 @@ class TestComposition:
             pipeline = CheckpointPipeline([self._source(), self._source(), self._loader()])
         assert len(pipeline) == 3
         assert any("Multiple checkpoint sources" in record.getMessage() for record in caplog.records)
+
+
+# --- a resolve-only source is not "random weights" ---------------------------------
+
+
+def _write_checkpoint(tmp_path: Path) -> Path:
+    import torch
+
+    ckpt = tmp_path / "model.ckpt"
+    torch.save({"state_dict": {"weight": torch.zeros(2, 2), "bias": torch.zeros(2)}}, ckpt)
+    return ckpt
+
+
+@pytest.mark.asyncio
+async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
+    """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
+
+    The post-execution check must not mistake that for a loading failure, and the
+    health check must agree.
+    """
+    import torch
+
+    from anemoi.training.checkpoint.sources.base import ResolveOnlySource
+    from anemoi.training.checkpoint.sources.local import LocalSource
+    from anemoi.training.checkpoint.validation import validate_pipeline_health
+
+    ckpt = _write_checkpoint(tmp_path)
+    model = torch.nn.Linear(2, 2)
+    pipeline = CheckpointPipeline([ResolveOnlySource(LocalSource(path=ckpt))])
+
+    result = await pipeline.execute(CheckpointContext(model=model))
+
+    assert result.checkpoint_path == ckpt.resolve()
+    assert result.checkpoint_data is None
+    assert not getattr(model, "weights_initialized", False)
+    assert validate_pipeline_health(result) is True
+
+
+@pytest.mark.asyncio
+async def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
+    """Positive control: a source that loaded data with no loader to apply it is still refused."""
+    import torch
+
+    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+    from anemoi.training.checkpoint.sources.local import LocalSource
+
+    ckpt = _write_checkpoint(tmp_path)
+    pipeline = CheckpointPipeline([LocalSource(path=ckpt)])
+
+    with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
+        await pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))

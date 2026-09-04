@@ -1,5 +1,6 @@
-# Loading strategy — resume an interrupted run. Loads weights (exact match) at
-# model-build time; the optimizer, scheduler and training progress (epoch,
-# global_step) are restored by Lightning's ckpt_path at trainer.fit(). Requires a
-# LocalSource or RunIdSource (Lightning's resume needs a local checkpoint file).
+# Loading strategy — resume an interrupted run. The checkpoint is loaded once, by
+# Trainer.fit(ckpt_path=): weights, optimizer, scheduler and training progress
+# (epoch, global_step) together. The pipeline only resolves the source to a local
+# file (a remote download is kept until training finishes) and runs any modifiers.
+# Selecting no loading strategy at all has the same effect.
 _target_: anemoi.training.checkpoint.loading.strategies.WarmStartLoader

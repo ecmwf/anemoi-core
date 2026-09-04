@@ -283,9 +283,19 @@ def _check_stage_completion(context: CheckpointContext, issues: list[str]) -> No
 
 
 def _check_source_loaded_weights(context: CheckpointContext, issues: list[str]) -> None:
-    """If a Source stage ran, the model must report loaded weights."""
+    """If a Source stage ran, the model must report loaded weights.
+
+    A resume is exempt: a resolve-only source marks the context
+    (``metadata["checkpoint_load_owner"] == "trainer"``) because the weights
+    arrive at ``Trainer.fit(ckpt_path=)``, not from a pipeline stage.
+    """
     source_ran = any("source" in key.lower() for key in context.metadata if key.startswith("stage_"))
     if not source_ran:
+        return
+
+    from anemoi.training.checkpoint.sources.base import CHECKPOINT_LOAD_OWNER
+
+    if context.metadata.get(CHECKPOINT_LOAD_OWNER) == "trainer":
         return
 
     model = context.model
