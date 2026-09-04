@@ -177,3 +177,42 @@ async def test_local_source_explicit_path_loads(tmp_path: Path) -> None:
     result = await LocalSource(path=ckpt).process(context)
     assert result.checkpoint_path == ckpt
     assert "state_dict" in result.checkpoint_data
+
+
+@pytest.mark.asyncio
+async def test_run_source_resolve_publishes_path_without_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve`` finds the run checkpoint, publishes its canonical path, and loads nothing.
+
+    This is the step a resume runs: ``Trainer.fit(ckpt_path=)`` performs the load.
+    """
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    root = tmp_path / "job" / "checkpoints"
+    ckpt = _write_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
+
+    def _no_load(*_args: object, **_kwargs: object) -> None:
+        msg = "resolve must not load the checkpoint"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(torch, "load", _no_load)
+
+    context = CheckpointContext(config=_config(root))
+    path = await RunIdSource(run_id="run_A").resolve(context)
+
+    assert path == ckpt.resolve()
+    assert context.checkpoint_path == path
+    assert context.checkpoint_data is None
+    assert context.metadata["lineage_resolution"] == "resume"
+
+
+@pytest.mark.asyncio
+async def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing checkpoint on a non-zero rank resolves to None; rank 0 owns the error."""
+    monkeypatch.setenv("RANK", "1")
+    context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+
+    assert await RunIdSource(run_id="run_missing").resolve(context) is None
+    assert context.checkpoint_path is None

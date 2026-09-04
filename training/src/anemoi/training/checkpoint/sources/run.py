@@ -122,16 +122,18 @@ class RunIdSource(CheckpointSource):
         lineage_id = (fork_run_server2server or run_id) if fork else (parent_run_server2server or run_id)
         return Path(Path(root).parent, lineage_id) / "last.ckpt"
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the run checkpoint path and load it via :class:`LocalSource`.
+    async def resolve(self, context: CheckpointContext) -> Path | None:
+        """Resolve the run checkpoint path and publish it on the context.
 
-        Returns the context unchanged when ``run_id`` is unset. On a missing
-        checkpoint, raises ``RuntimeError`` on rank 0 and defers (warns,
-        pass-through) on other ranks — mirroring the legacy resolver.
+        Returns ``None`` (context untouched) when ``run_id`` is unset. On a
+        missing or unreadable checkpoint, raises ``RuntimeError`` on rank 0 and
+        defers (warns, returns ``None``) on other ranks — mirroring the legacy
+        resolver. The path is canonicalised through :meth:`LocalSource.resolve`
+        so it is the same file an explicit local checkpoint would resolve to.
         """
         if self.run_id is None:
             LOGGER.debug("RunIdSource: no run_id set; pass-through.")
-            return context
+            return None
 
         path = self.resolve_path(
             context.config,
@@ -146,7 +148,7 @@ class RunIdSource(CheckpointSource):
                 msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
-            return context
+            return None
 
         # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
         # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
@@ -156,12 +158,22 @@ class RunIdSource(CheckpointSource):
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
-            return context
+            return None
 
         resolution = "fork" if self.fork else "resume"
         LOGGER.info("RunIdSource: resolved checkpoint path (%s): %s", resolution, path)
         context.checkpoint_path = path
         context.update_metadata(resolved_checkpoint_path=str(path), lineage_resolution=resolution)
+        return await LocalSource().resolve(context)
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Resolve the run checkpoint path and load it via :class:`LocalSource`.
+
+        Returns the context unchanged when ``run_id`` is unset or the error was
+        deferred to rank 0 (see :meth:`resolve`).
+        """
+        if await self.resolve(context) is None:
+            return context
 
         # Delegate the actual torch.load + format detection to LocalSource so the
         # load path is identical to an explicit local checkpoint.

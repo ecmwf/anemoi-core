@@ -483,7 +483,7 @@ def test_init_writes_resolved_run_id_back_into_config(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Remote sources record no local checkpoint path (http.py)
+# Remote sources publish their kept download as the local checkpoint path (http.py)
 # ---------------------------------------------------------------------------
 
 
@@ -493,16 +493,21 @@ async def _fake_download(url: str, dest: Path, max_retries: int, timeout: int) -
     torch.save({"state_dict": {"weight": torch.zeros(2, 2)}}, dest)
 
 
-def test_http_source_leaves_checkpoint_path_unset() -> None:
+def test_http_source_publishes_kept_download_as_checkpoint_path() -> None:
     context = CheckpointContext()
 
     with patch("anemoi.training.checkpoint.utils.download_with_retry", new=_fake_download):
         result = asyncio.run(HTTPSource(url="https://models.example.int/model.ckpt").process(context))
 
-    # The temp download is cleaned up and no local path is recorded, so a trainer
-    # reading last_checkpoint from this context would get None (no warm resume).
-    assert result.checkpoint_path is None
-    assert result.checkpoint_data is not None
+    try:
+        # The download is kept and recorded as the local path, so a trainer reading
+        # last_checkpoint from this context can hand it to Trainer.fit(ckpt_path=).
+        assert result.checkpoint_path is not None
+        assert result.checkpoint_path.exists()
+        assert result.temporary_files == [result.checkpoint_path]
+        assert result.checkpoint_data is not None
+    finally:
+        result.checkpoint_path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------

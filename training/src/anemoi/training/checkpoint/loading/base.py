@@ -493,9 +493,9 @@ def apply_checkpoint_format_migrations(
     When the ledger is incomplete the checkpoint is migrated properly:
     ``Migrator.sync`` runs every migration the checkpoint is missing — all of the
     ones anemoi-models ships, not only the two this module can name by hand. That
-    needs the checkpoint's file, so it applies to on-disk sources (``LocalSource``,
-    ``RunIdSource``). Sources that keep no file behind — ``HTTPSource`` and
-    ``S3Source`` delete their download before returning — fall back to the
+    needs the checkpoint's file; every source publishes one on
+    ``context.checkpoint_path`` (``HTTPSource`` / ``S3Source`` keep their
+    download). A checkpoint handed over without a file falls back to the
     in-memory ``chunking_fix`` call, screened for applicability first.
 
     Parameters
@@ -540,11 +540,11 @@ def apply_checkpoint_format_migrations(
 def _apply_chunking_fix_in_memory(checkpoint: dict[str, Any]) -> dict[str, Any]:
     """Apply ``chunking_fix`` to a checkpoint that has no migratable file behind it.
 
-    The narrow fallback for sources that hand over a dict and nothing else. Only
-    ``chunking_fix`` is reachable this way, so a checkpoint arriving over HTTP or
-    S3 that needs some *other* migration cannot be fully migrated here — that is a
-    real limitation of the file-based ``Migrator.sync`` API and is logged as such
-    rather than hidden.
+    The narrow fallback for a checkpoint handed over as a dict and nothing else
+    (a context built without a source). Only ``chunking_fix`` is reachable this
+    way, so such a checkpoint that needs some *other* migration cannot be fully
+    migrated here — that is a real limitation of the file-based ``Migrator.sync``
+    API and is logged as such rather than hidden.
     """
     migrate = _load_chunking_fix_migration()
     if migrate is None:

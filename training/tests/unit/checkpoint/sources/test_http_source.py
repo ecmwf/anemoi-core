@@ -183,13 +183,18 @@ class TestHTTPSourceProcess:
             await source.process(context)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_temp_file_cleaned_up_on_success(
+    async def test_download_is_kept_and_published_on_success(
         self,
         mock_download: AsyncMock,
         source: HTTPSource,
         simple_state_dict: dict,
     ) -> None:
-        """Temp file should not remain after successful processing."""
+        """The download stays on disk and its path is on the context.
+
+        A resume hands that path to ``Trainer.fit(ckpt_path=)`` after the pipeline
+        returns, so the file must outlive the source stage; the trainer deletes it
+        once training has finished, via ``context.temporary_files``.
+        """
         created_paths: list[Path] = []
 
         async def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
@@ -200,18 +205,23 @@ class TestHTTPSourceProcess:
         mock_download.side_effect = _track_and_save
 
         context = CheckpointContext()
-        await source.process(context)
+        try:
+            result = await source.process(context)
 
-        assert len(created_paths) == 1
-        assert not created_paths[0].exists(), "Temp file should be deleted after success"
+            assert len(created_paths) == 1
+            assert created_paths[0].exists(), "The download must be kept for Trainer.fit(ckpt_path=)"
+            assert result.checkpoint_path == created_paths[0]
+            assert result.temporary_files == [created_paths[0]]
+        finally:
+            created_paths[0].unlink(missing_ok=True)
 
     @patch(_DOWNLOAD_TARGET)
-    async def test_temp_file_cleaned_up_on_failure(
+    async def test_download_is_kept_and_published_on_load_failure(
         self,
         mock_download: AsyncMock,
         source: HTTPSource,
     ) -> None:
-        """Temp file should not remain even when loading fails."""
+        """A download that fails to load is kept too, so it can be inspected."""
         created_paths: list[Path] = []
 
         async def _track_and_corrupt(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
@@ -222,12 +232,40 @@ class TestHTTPSourceProcess:
         mock_download.side_effect = _track_and_corrupt
 
         context = CheckpointContext()
+        try:
+            with pytest.raises(CheckpointLoadError):
+                await source.process(context)
 
-        with pytest.raises(CheckpointLoadError):
+            assert len(created_paths) == 1
+            assert created_paths[0].exists()
+            assert context.checkpoint_path == created_paths[0]
+            assert context.temporary_files == [created_paths[0]]
+        finally:
+            created_paths[0].unlink(missing_ok=True)
+
+    @patch(_DOWNLOAD_TARGET)
+    async def test_failed_download_leaves_no_file_behind(
+        self,
+        mock_download: AsyncMock,
+        source: HTTPSource,
+    ) -> None:
+        """Only a completed download is kept; a failed one is removed with its error."""
+        created_paths: list[Path] = []
+
+        async def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+            created_paths.append(dest)
+            msg = "connection reset"
+            raise CheckpointSourceError(msg, url)
+
+        mock_download.side_effect = _track_and_fail
+
+        context = CheckpointContext()
+        with pytest.raises(CheckpointSourceError):
             await source.process(context)
 
         assert len(created_paths) == 1
-        assert not created_paths[0].exists(), "Temp file should be deleted after failure"
+        assert not created_paths[0].exists()
+        assert context.temporary_files == []
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")

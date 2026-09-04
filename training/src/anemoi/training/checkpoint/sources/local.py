@@ -22,14 +22,10 @@ Example
 
 from __future__ import annotations
 
-import asyncio
 import logging
-import pickle
 from pathlib import Path
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
-
-import torch
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 
@@ -67,30 +63,33 @@ class LocalSource(CheckpointSource):
     def __init__(self, path: str | Path | None = None) -> None:
         self.path = path
 
-    async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Load checkpoint data from a local file.
+    async def resolve(self, context: CheckpointContext) -> Path:
+        """Resolve the configured or context path to an existing, canonical file.
+
+        Applies ``expanduser().resolve()`` and publishes the result on
+        ``context.checkpoint_path``, so what the trainer later hands to
+        ``Trainer.fit(ckpt_path=)`` is the file that was checked, independent of
+        ``~`` or the working directory.
 
         Parameters
         ----------
         context : CheckpointContext
-            Pipeline context with ``checkpoint_path`` set to a local
-            file path (str or Path).
+            Pipeline context; ``checkpoint_path`` is used when no explicit
+            ``path`` was configured.
 
         Returns
         -------
-        CheckpointContext
-            Context with ``checkpoint_data``, ``checkpoint_format``,
-            and source metadata populated.
+        Path
+            The canonical checkpoint file.
 
         Raises
         ------
+        CheckpointConfigError
+            If neither ``path`` nor ``context.checkpoint_path`` is set
         CheckpointNotFoundError
             If the checkpoint file does not exist
-        CheckpointLoadError
-            If the file cannot be loaded by PyTorch
         """
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError
-        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
         from anemoi.training.checkpoint.exceptions import CheckpointNotFoundError
 
         if self.path is not None:
@@ -105,14 +104,35 @@ class LocalSource(CheckpointSource):
         if not path.exists():
             raise CheckpointNotFoundError(path)
 
+        context.checkpoint_path = path
+        return path
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        """Resolve and load checkpoint data from a local file.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context with ``checkpoint_path`` set to a local
+            file path (str or Path).
+
+        Returns
+        -------
+        CheckpointContext
+            Context with ``checkpoint_path``, ``checkpoint_data``,
+            ``checkpoint_format``, and source metadata populated.
+
+        Raises
+        ------
+        CheckpointNotFoundError
+            If the checkpoint file does not exist
+        CheckpointLoadError
+            If the file cannot be loaded by PyTorch
+        """
+        path = await self.resolve(context)
+
         LOGGER.info("Loading checkpoint from local path: %s", path)
-
-        try:
-            raw_data = await asyncio.to_thread(torch.load, path, weights_only=False, map_location="cpu")
-        except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
-            raise CheckpointLoadError(path, e) from e
-
-        self._load_and_populate(context, raw_data)
+        await self._load_from_path(context, path)
 
         context.update_metadata(
             source_type="local",

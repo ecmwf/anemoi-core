@@ -490,7 +490,7 @@ def test_checkpoint_path_pointing_nowhere_falls_back_in_memory(
     use_migrator: object,
     spy_chunking_migration: MagicMock,
 ) -> None:
-    """A path that is not a file (HTTP/S3 delete their download) uses the fallback."""
+    """A path that is not a file (a download removed underneath us) uses the fallback."""
     migrator = use_migrator(_FakeMigrator(registered=()))
     context = CheckpointContext(
         model=_Model(),

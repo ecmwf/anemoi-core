@@ -43,6 +43,31 @@ async def test_http_source_uses_download_with_retry() -> None:
 
 
 @pytest.mark.asyncio
+async def test_http_source_resolve_keeps_download_without_loading() -> None:
+    """``resolve`` downloads to a kept temporary file, publishes it, and loads nothing.
+
+    That is what a resume needs: a local file for ``Trainer.fit(ckpt_path=)``. The
+    file is registered on ``context.temporary_files`` for the trainer to delete.
+    """
+    source = HTTPSource(url="https://example.com/model.ckpt")
+    context = CheckpointContext()
+
+    async def fake_download(url: str, dest: Path, **kwargs: object) -> None:  # noqa: ARG001
+        torch.save({"state_dict": {}}, dest)
+
+    with patch("anemoi.training.checkpoint.utils.download_with_retry", side_effect=fake_download):
+        path = await source.resolve(context)
+
+    try:
+        assert path.exists()
+        assert context.checkpoint_path == path
+        assert context.temporary_files == [path]
+        assert context.checkpoint_data is None
+    finally:
+        path.unlink(missing_ok=True)
+
+
+@pytest.mark.asyncio
 async def test_http_source_wraps_errors_as_checkpoint_source_error() -> None:
     """Network errors must surface as CheckpointSourceError."""
     source = HTTPSource(url="https://example.com/model.ckpt")

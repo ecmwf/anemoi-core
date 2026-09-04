@@ -477,6 +477,10 @@ class AnemoiTrainer(ABC):
         executed = asyncio.run(pipeline.execute(context))
         loaded_model = executed.model
 
+        # Downloads a source kept on disk (so Lightning can read them at fit) are
+        # deleted by :meth:`_remove_temporary_checkpoints` once training finishes.
+        self._temporary_checkpoint_files = list(executed.temporary_files)
+
         # Trainer-side parity until the dataset/units validators move into the
         # pipeline: when weights were loaded, keep the current config's data
         # indices and run the transfer-learning compatibility checks.
@@ -485,6 +489,15 @@ class AnemoiTrainer(ABC):
             self._validate_transfer_learning_datasets(loaded_model)
             self._validate_transfer_learning_units(loaded_model)
         return loaded_model
+
+    def _remove_temporary_checkpoints(self) -> None:
+        """Delete the checkpoint downloads the source stage kept for ``Trainer.fit(ckpt_path=)``."""
+        from anemoi.training.checkpoint.sources.base import remove_temporary_file
+
+        for path in getattr(self, "_temporary_checkpoint_files", []):
+            remove_temporary_file(path)
+            LOGGER.info("Removed temporary checkpoint %s", path)
+        self._temporary_checkpoint_files = []
 
     @cached_property
     def _run_identity(self) -> tuple[str | None, str | None]:
@@ -878,7 +891,10 @@ class AnemoiTrainer(ABC):
 
         LOGGER.debug("Starting training..")
 
-        trainer.fit(**self.fit_parameters)
+        try:
+            trainer.fit(**self.fit_parameters)
+        finally:
+            self._remove_temporary_checkpoints()
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))

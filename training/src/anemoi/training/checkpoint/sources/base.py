@@ -32,28 +32,55 @@ Callers that want scheme-based routing should perform their own
 dispatch (e.g., by inspecting ``urlparse(uri).scheme``) before
 selecting a ``_target_``.
 
+Acquisition is two steps. :meth:`CheckpointSource.resolve` makes the checkpoint
+reachable as a local file and publishes its path on the context (a download is
+kept on disk); :meth:`CheckpointSource.process` is resolve followed by the
+``torch.load``. A resume runs resolve only, because ``Trainer.fit(ckpt_path=)``
+performs the load itself.
+
 Example
 -------
 >>> class LocalSource(CheckpointSource):
+...     async def resolve(self, context: CheckpointContext) -> Path:
+...         context.checkpoint_path = Path(context.checkpoint_path).expanduser().resolve()
+...         return context.checkpoint_path
+...
 ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
-...         raw_data = torch.load(context.checkpoint_path, weights_only=False, map_location="cpu")
-...         self._load_and_populate(context, raw_data)
+...         path = await self.resolve(context)
+...         await self._load_from_path(context, path)
 ...         return context
 """
 
 from __future__ import annotations
 
+import asyncio
+import atexit
 import logging
+import pickle
 from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
+import torch
+
 from anemoi.training.checkpoint.base import PipelineStage
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
+
+
+def remove_temporary_file(path: Path) -> None:
+    """Delete a download a source kept on disk; a file that is already gone is fine."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as exc:
+        LOGGER.warning("Could not remove temporary checkpoint %s: %s", path, exc)
+    else:
+        LOGGER.debug("Removed temporary checkpoint %s", path)
 
 
 class CheckpointSource(PipelineStage):
@@ -64,10 +91,11 @@ class CheckpointSource(PipelineStage):
     a specific source type (local file, cloud storage, HTTP endpoint,
     etc.) and populating the context for downstream stages.
 
-    Subclasses must implement the ``process`` method to handle their
-    specific source type. The ``_load_and_populate`` convenience method
-    is provided to standardise how raw checkpoint data is attached to
-    the context with format detection.
+    Subclasses implement ``resolve`` (make the checkpoint reachable as a
+    local file and publish its path) and ``process`` (resolve, then load).
+    The ``_load_from_path`` and ``_load_and_populate`` convenience methods
+    standardise the load and how raw checkpoint data is attached to the
+    context with format detection.
 
     Parameters
     ----------
@@ -76,24 +104,64 @@ class CheckpointSource(PipelineStage):
     Examples
     --------
     >>> class S3Source(CheckpointSource):
-    ...     def __init__(self, bucket: str, key: str):
-    ...         self.bucket = bucket
-    ...         self.key = key
+    ...     def __init__(self, url: str):
+    ...         self.url = url
+    ...
+    ...     async def resolve(self, context: CheckpointContext) -> Path:
+    ...         path = await self._download_to_temp(self.url)
+    ...         self._keep_download(context, path)
+    ...         context.checkpoint_path = path
+    ...         return path
     ...
     ...     async def process(self, context: CheckpointContext) -> CheckpointContext:
-    ...         raw_data = await self._download_from_s3()
-    ...         return self._load_and_populate(context, raw_data)
+    ...         path = await self.resolve(context)
+    ...         await self._load_from_path(context, path)
+    ...         return context
     """
+
+    async def resolve(self, context: CheckpointContext) -> Path | None:
+        """Make the checkpoint reachable as a local file and publish its path, without loading it.
+
+        Sets ``context.checkpoint_path`` to the resolved file and returns it. A
+        source that downloads keeps the file and registers it with
+        :meth:`_keep_download` so the trainer deletes it after training. Returns
+        ``None`` when there is nothing to resolve on this rank (an error deferred
+        to rank 0), in which case ``process`` leaves the context untouched.
+
+        This is the step a resume runs on its own: ``Trainer.fit(ckpt_path=)`` loads
+        the file, so the pipeline only has to produce it.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current pipeline context. May carry ``checkpoint_path`` or source
+            configuration in ``config``.
+
+        Returns
+        -------
+        Path or None
+            The local checkpoint file, or ``None`` when deferred.
+
+        Raises
+        ------
+        NotImplementedError
+            If the source only implements ``process``; such a source cannot be
+            resumed from, because it has no local file to hand Lightning.
+        """
+        msg = (
+            f"{type(self).__name__} does not implement resolve(); a resume needs a source that can "
+            "hand Trainer.fit(ckpt_path=) a local checkpoint file"
+        )
+        raise NotImplementedError(msg)
 
     @abstractmethod
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Acquire checkpoint data from source and populate context.
 
         Implementations should:
-        1. Validate that required source information is available
-        2. Fetch/load raw checkpoint data from the source
-        3. Use ``_load_and_populate`` to attach data to context
-        4. Add source-specific metadata for tracking
+        1. Call ``resolve`` to obtain the local checkpoint file
+        2. Call ``_load_from_path`` to load it onto the context
+        3. Add source-specific metadata for tracking
 
         Parameters
         ----------
@@ -116,6 +184,55 @@ class CheckpointSource(PipelineStage):
         CheckpointLoadError
             If the fetched data cannot be parsed as a checkpoint
         """
+
+    async def _load_from_path(self, context: CheckpointContext, path: Path) -> None:
+        """Load the checkpoint file at ``path`` onto the context.
+
+        Loads with ``weights_only=False`` (Anemoi checkpoints carry non-tensor
+        metadata such as ``hyper_parameters``) and ``map_location="cpu"``, in a
+        worker thread, then delegates to :meth:`_load_and_populate`.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current pipeline context (mutated in place)
+        path : Path
+            The local checkpoint file
+
+        Raises
+        ------
+        CheckpointLoadError
+            If the file cannot be loaded by PyTorch
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+
+        try:
+            raw_data = await asyncio.to_thread(torch.load, path, weights_only=False, map_location="cpu")
+        except (OSError, RuntimeError, EOFError, ValueError, pickle.UnpicklingError) as e:
+            raise CheckpointLoadError(path, e) from e
+
+        self._load_and_populate(context, raw_data)
+
+    def _keep_download(self, context: CheckpointContext, path: Path) -> None:
+        """Register a download kept on disk for ``Trainer.fit(ckpt_path=)``.
+
+        The trainer deletes every path in ``context.temporary_files`` once
+        training has finished; ``atexit`` is the backstop for a job that never
+        reaches that point.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Current pipeline context (mutated in place)
+        path : Path
+            The downloaded checkpoint file
+        """
+        context.temporary_files.append(path)
+        atexit.register(remove_temporary_file, path)
+        LOGGER.info(
+            "Checkpoint downloaded to %s; kept until training finishes so Trainer.fit(ckpt_path=) can read it",
+            path,
+        )
 
     def _load_and_populate(
         self,

@@ -924,3 +924,77 @@ def test_non_warm_start_allows_remote_source(source_target: str) -> None:
         },
     )
     reject_unsupported_warm_start(cfg)  # must not raise
+
+
+# --- Downloads a source kept for Trainer.fit(ckpt_path=) are deleted after training ---
+
+
+def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path) -> None:
+    """The trainer keeps the list of downloads the source stage left on disk."""
+    from anemoi.training.checkpoint.base import CheckpointContext
+    from anemoi.training.checkpoint.sources.base import CheckpointSource
+
+    kept = tmp_path / "download.ckpt"
+    torch.save({"state_dict": {}}, kept)
+
+    class _KeepingSource(CheckpointSource):
+        async def resolve(self, context: CheckpointContext) -> Path:
+            self._keep_download(context, kept)
+            context.checkpoint_path = kept
+            return kept
+
+        async def process(self, context: CheckpointContext) -> CheckpointContext:
+            await self._load_from_path(context, await self.resolve(context))
+            return context
+
+    model = torch.nn.Linear(2, 2)
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": f"{__name__}._KeepingSource"},
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+        },
+    )
+    # Hydra resolves ``_target_`` through sys.modules; expose the local class.
+    import sys
+
+    sys.modules[__name__]._KeepingSource = _KeepingSource  # type: ignore[attr-defined]
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices={"data": DummyIndex()},
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert trainer._temporary_checkpoint_files == [kept]
+    assert kept.exists(), "the download must survive the pipeline for Trainer.fit(ckpt_path=)"
+
+
+def test_remove_temporary_checkpoints_deletes_the_recorded_downloads(tmp_path: Path) -> None:
+    """After training the kept downloads are removed; a missing one is not an error."""
+    present = tmp_path / "present.ckpt"
+    present.write_bytes(b"x")
+    gone = tmp_path / "gone.ckpt"
+
+    trainer = SimpleNamespace(_temporary_checkpoint_files=[present, gone])
+    AnemoiTrainer._remove_temporary_checkpoints(trainer)
+
+    assert not present.exists()
+    assert trainer._temporary_checkpoint_files == []
+
+
+def test_remove_temporary_checkpoints_without_a_pipeline_run_is_a_noop() -> None:
+    """A keyless run never recorded downloads; cleanup must still be safe to call."""
+    trainer = SimpleNamespace()
+    AnemoiTrainer._remove_temporary_checkpoints(trainer)
+    assert trainer._temporary_checkpoint_files == []

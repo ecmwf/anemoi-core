@@ -549,19 +549,30 @@ async def test_http_source_without_checksum_loads(tmp_path: Path) -> None:
     assert result.checkpoint_data is not None
 
 
-async def test_http_source_cleans_up_temp_file_on_load_error() -> None:
-    """A corrupt download raises CheckpointLoadError and removes the temp file."""
+async def test_http_source_keeps_download_on_load_error() -> None:
+    """A corrupt download raises CheckpointLoadError; the file is kept and its path published.
+
+    Downloads outlive the source stage (a resume hands them to ``Trainer.fit(ckpt_path=)``)
+    and are deleted by the trainer through ``context.temporary_files``.
+    """
     recorded: list[Path] = []
+    context = CheckpointContext()
 
     source = HTTPSource(url="https://example.com/model.ckpt")
-    with (
-        patch("anemoi.training.checkpoint.utils.download_with_retry", _garbage_download_stub(recorded)),
-        pytest.raises(CheckpointLoadError),
-    ):
-        await source.process(CheckpointContext())
+    try:
+        with (
+            patch("anemoi.training.checkpoint.utils.download_with_retry", _garbage_download_stub(recorded)),
+            pytest.raises(CheckpointLoadError),
+        ):
+            await source.process(context)
 
-    assert recorded, "download stub was not invoked"
-    assert not recorded[0].exists()
+        assert recorded, "download stub was not invoked"
+        assert recorded[0].exists()
+        assert context.checkpoint_path == recorded[0]
+        assert context.temporary_files == [recorded[0]]
+    finally:
+        for path in recorded:
+            path.unlink(missing_ok=True)
 
 
 # ---------------------------------------------------------------------------
