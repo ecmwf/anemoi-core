@@ -210,11 +210,15 @@ def _legacy_on_load_checkpoint(module: _StepStub, checkpoint: dict) -> None:
     """``BaseTrainingModule.on_load_checkpoint`` as it stands at origin/main 4842e8bb8.
 
     Reproduced from that revision's ``train/methods/base.py`` (edge-perm migration,
-    then ``_update_checkpoint_state_dict_for_load``, then ``_ckpt_model_name_to_index``),
-    minus the task-state and datamodule steps that need a trainer. This is the reference
-    a resume must match bit for bit.
+    then ``_update_checkpoint_state_dict_for_load``, then ``_ckpt_model_name_to_index``,
+    then ``_ckpt_variables_metadata``), minus the task-state and datamodule steps that
+    need a trainer. This is the reference a resume must match bit for bit. Note the
+    edge-perm migration is a no-op for a model without a ``StaticGraphProvider``, so
+    what this pins is the processor refresh and the metadata restoration.
     """
     import importlib
+
+    from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
     edge_perm = importlib.import_module("anemoi.models.migrations.scripts.1779202136_trainable_edge_perm_fix").migrate
     edge_perm(checkpoint, model=module)
@@ -241,6 +245,10 @@ def _legacy_on_load_checkpoint(module: _StepStub, checkpoint: dict) -> None:
         dataset_name: data_indices.name_to_index
         for dataset_name, data_indices in checkpoint["hyper_parameters"]["data_indices"].items()
     }
+    module._ckpt_variables_metadata = extract_variables_metadata_from_checkpoint(
+        checkpoint,
+        module._ckpt_model_name_to_index,
+    )
 
 
 def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
@@ -317,6 +325,7 @@ def test_resume_is_one_lightning_load_and_matches_the_legacy_hook(
         torch.tensor([1.0]),
     )
     assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}
+    assert module._ckpt_variables_metadata == reference._ckpt_variables_metadata
 
 
 # --- metadata round-trip through a weights-only load ------------------

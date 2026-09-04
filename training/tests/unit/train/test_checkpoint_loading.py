@@ -20,8 +20,10 @@ from omegaconf import OmegaConf
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -933,7 +935,7 @@ def test_resume_from_s3_keeps_the_download_for_lightning(monkeypatch: pytest.Mon
         torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, target)
 
     fake_s3 = ModuleType("anemoi.utils.remote.s3")
-    fake_s3.download_file = fake_download  # type: ignore[attr-defined]
+    fake_s3.download_file = fake_download
     monkeypatch.setitem(sys.modules, "anemoi.utils.remote.s3", fake_s3)
     loads = _spy_torch_load(monkeypatch)
     trainer = _PipelineTrainer(
@@ -1013,23 +1015,26 @@ def test_non_warm_start_allows_remote_source(source_target: str) -> None:
 # --- Downloads a source kept for Trainer.fit(ckpt_path=) are deleted after training ---
 
 
-def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path) -> None:
-    """The trainer keeps the list of downloads the source stage left on disk."""
-    from anemoi.training.checkpoint.base import CheckpointContext
-    from anemoi.training.checkpoint.sources.base import CheckpointSource
+class _KeepingSource(CheckpointSource):
+    """A source that keeps a download at ``_KeepingSource.kept`` (set per test via monkeypatch)."""
 
+    kept: Path
+
+    async def resolve(self, context: CheckpointContext) -> Path:
+        self._keep_download(context, self.kept)
+        context.checkpoint_path = self.kept
+        return self.kept
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        await self._load_from_path(context, await self.resolve(context))
+        return context
+
+
+def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trainer keeps the list of downloads the source stage left on disk."""
     kept = tmp_path / "download.ckpt"
     torch.save({"state_dict": {}}, kept)
-
-    class _KeepingSource(CheckpointSource):
-        async def resolve(self, context: CheckpointContext) -> Path:
-            self._keep_download(context, kept)
-            context.checkpoint_path = kept
-            return kept
-
-        async def process(self, context: CheckpointContext) -> CheckpointContext:
-            await self._load_from_path(context, await self.resolve(context))
-            return context
+    monkeypatch.setattr(_KeepingSource, "kept", kept, raising=False)
 
     model = torch.nn.Linear(2, 2)
     cfg = OmegaConf.create(
@@ -1045,10 +1050,6 @@ def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path) ->
             },
         },
     )
-    # Hydra resolves ``_target_`` through sys.modules; expose the local class.
-    import sys
-
-    sys.modules[__name__]._KeepingSource = _KeepingSource  # type: ignore[attr-defined]
     trainer = SimpleNamespace(
         config=cfg,
         data_indices={"data": DummyIndex()},
@@ -1082,3 +1083,147 @@ def test_remove_temporary_checkpoints_without_a_pipeline_run_is_a_noop() -> None
     trainer = SimpleNamespace()
     AnemoiTrainer._remove_temporary_checkpoints(trainer)
     assert trainer._temporary_checkpoint_files == []
+
+
+def test_keep_download_registers_the_atexit_backstop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kept download is registered with atexit so a job that never reaches fit() still cleans up."""
+    import atexit
+
+    from anemoi.training.checkpoint.sources.base import remove_temporary_file
+
+    registered: list[tuple[object, tuple]] = []
+    monkeypatch.setattr(atexit, "register", lambda func, *args: registered.append((func, args)))
+    kept = tmp_path / "download.ckpt"
+    kept.write_bytes(b"x")
+    monkeypatch.setattr(_KeepingSource, "kept", kept, raising=False)
+
+    context = CheckpointContext()
+    _KeepingSource()._keep_download(context, kept)
+
+    assert registered == [(remove_temporary_file, (kept,))]
+    assert context.temporary_files == [kept]
+
+
+def _training_config_for_train() -> DictConfig:
+    """The config keys ``AnemoiTrainer.train`` reads before and after ``trainer.fit``."""
+    return OmegaConf.create(
+        {
+            "training": {
+                "deterministic": False,
+                "precision": "32",
+                "max_epochs": 1,
+                "max_steps": None,
+                "num_sanity_val_steps": 0,
+                "accum_grad_batches": 1,
+                "gradient_clip": {"val": 0.0, "algorithm": "value"},
+            },
+            "diagnostics": {
+                "debug": {"anomaly_detection": False},
+                "log": {"interval": 1},
+                "enable_progress_bar": False,
+                "print_memory_summary": False,
+            },
+            "system": {"hardware": {"num_gpus_per_node": 1, "num_nodes": 1}},
+            "dataloader": {"limit_batches": {"training": 1, "validation": 1}},
+            "model": {},
+        },
+    )
+
+
+@pytest.mark.parametrize("fit_raises", [False, True])
+def test_train_removes_kept_downloads_after_fit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fit_raises: bool,
+) -> None:
+    """``train()`` deletes the kept downloads once ``fit`` returns, and also when it raises."""
+    import anemoi.training.train.train as train_module
+
+    kept = tmp_path / "download.ckpt"
+    kept.write_bytes(b"x")
+    fit_calls: list[dict] = []
+
+    class _FakeTrainer:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def fit(self, **kwargs: object) -> None:
+            fit_calls.append(kwargs)
+            if fit_raises:
+                msg = "boom"
+                raise RuntimeError(msg)
+
+    monkeypatch.setattr(train_module.pl, "Trainer", _FakeTrainer)
+    monkeypatch.setattr(train_module, "prepare_compilation", lambda model, *_args: model)
+    trainer = SimpleNamespace(
+        config=_training_config_for_train(),
+        accelerator="cpu",
+        callbacks=[],
+        strategy=None,
+        profiler=None,
+        logger=False,
+        model=torch.nn.Linear(2, 2),
+        fit_parameters={"ckpt_path": kept},
+        _temporary_checkpoint_files=[kept],
+    )
+    trainer._remove_temporary_checkpoints = AnemoiTrainer._remove_temporary_checkpoints.__get__(trainer)
+
+    if fit_raises:
+        with pytest.raises(RuntimeError, match="boom"):
+            AnemoiTrainer.train(trainer)
+    else:
+        AnemoiTrainer.train(trainer)
+
+    assert fit_calls == [{"ckpt_path": kept}]
+    assert not kept.exists()
+    assert trainer._temporary_checkpoint_files == []
+
+
+@pytest.mark.parametrize(
+    ("loading", "expect_ckpt_path"),
+    [
+        (None, True),
+        (f"{_LOADERS}.WarmStartLoader", True),
+        (f"{_LOADERS}.WeightsOnlyLoader", False),
+    ],
+)
+def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
+    tmp_path: Path,
+    loading: str | None,
+    expect_ckpt_path: bool,
+) -> None:
+    """``Trainer.fit(ckpt_path=)`` receives ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
+    resolved = tmp_path / "last.ckpt"
+    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
+    if loading is not None:
+        checkpoint["loading"] = {"_target_": loading}
+    trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {"checkpoint": checkpoint}}),
+        model=torch.nn.Linear(2, 2),
+        datamodule=object(),
+        last_checkpoint=resolved,
+    )
+    trainer._skip_lightning_restore = AnemoiTrainer._skip_lightning_restore.__get__(trainer)
+
+    params = AnemoiTrainer.fit_parameters.func(trainer)
+
+    assert params["ckpt_path"] == (resolved if expect_ckpt_path else None)
+    assert params["model"] is trainer.model
+
+
+def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lightning holds the dict it passed in; a replacement from the corrections must land in that object."""
+    import anemoi.training.train.methods.base as methods_base
+
+    replacement = {
+        "state_dict": {"replaced": torch.ones(1)},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+    monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", lambda *_args, **_kwargs: replacement)
+    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "stale" not in checkpoint["state_dict"]
+    assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))

@@ -42,6 +42,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
+from anemoi.training.checkpoint.sources.base import is_rank_zero
 from anemoi.training.checkpoint.sources.local import LocalSource
 
 if TYPE_CHECKING:
@@ -50,11 +51,6 @@ if TYPE_CHECKING:
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
-
-# Launcher rank variables, in the exact priority order of
-# ``lightning_fabric.utilities.rank_zero._get_rank()`` — matching this set keeps
-# the rank-0 missing-checkpoint gate at parity with the legacy guard.
-_RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 
 class RunIdSource(CheckpointSource):
@@ -144,7 +140,7 @@ class RunIdSource(CheckpointSource):
         )
 
         if not path.exists():
-            if _is_rank_zero():
+            if is_rank_zero():
                 msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
@@ -154,7 +150,7 @@ class RunIdSource(CheckpointSource):
         # missing one: only rank 0 raises, other ranks defer, so a distributed run fails
         # cleanly on rank 0 instead of every rank raising out of the shared torch.load.
         if not os.access(path, os.R_OK):
-            if _is_rank_zero():
+            if is_rank_zero():
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
@@ -215,23 +211,3 @@ def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None
     if bool(OmegaConf.select(source, "fork", default=False)):
         return None, run_id
     return run_id, None
-
-
-def _is_rank_zero() -> bool:
-    """Best-effort rank-0 detection without coupling to Lightning.
-
-    Reads the launcher rank variables in ``lightning_fabric``'s priority order
-    (``_RANK_ENV_VARS``). A process with no rank variable set (single-process /
-    unit test) is treated as rank 0, and a malformed value — non-integer or
-    negative — is treated conservatively as rank 0 so the missing-checkpoint
-    error is never silently swallowed.
-    """
-    for var in _RANK_ENV_VARS:
-        value = os.environ.get(var)
-        if value is not None and value.strip():
-            try:
-                parsed = int(value)
-            except ValueError:
-                return True
-            return parsed <= 0
-    return True

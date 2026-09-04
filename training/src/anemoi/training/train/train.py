@@ -503,7 +503,6 @@ class AnemoiTrainer(ABC):
 
         for path in getattr(self, "_temporary_checkpoint_files", []):
             remove_temporary_file(path)
-            LOGGER.info("Removed temporary checkpoint %s", path)
         self._temporary_checkpoint_files = []
 
     @cached_property

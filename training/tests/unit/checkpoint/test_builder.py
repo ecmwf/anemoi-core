@@ -328,3 +328,40 @@ def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
     if loading is not None:
         checkpoint["loading"] = {"_target_": loading}
     assert resumes_via_lightning(OmegaConf.create({"training": {"checkpoint": checkpoint}})) is expected
+
+
+def test_resume_that_resolves_nothing_fails_on_rank_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A resume whose source finds no checkpoint must not start from scratch in silence.
+
+    The shipped ``source=run`` preset carries ``run_id: null``; without ``+run_id=`` the
+    RunIdSource resolves nothing. That is a configuration error on rank 0, not a fresh run.
+    """
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    cfg = OmegaConf.create(
+        {
+            "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": None}}},
+            "system": {"output": {"checkpoints": {"root": str(tmp_path / "ckpts")}}},
+        },
+    )
+    pipeline = build_checkpoint_pipeline(cfg)
+
+    with pytest.raises(CheckpointConfigError, match="resolved no checkpoint file"):
+        asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+
+
+def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-zero ranks defer to rank 0's error, as the sources do, so the job fails once."""
+    monkeypatch.setenv("RANK", "1")
+    cfg = OmegaConf.create(
+        {
+            "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": "missing"}}},
+            "system": {"output": {"checkpoints": {"root": str(tmp_path / "ckpts")}}},
+        },
+    )
+    pipeline = build_checkpoint_pipeline(cfg)
+
+    executed = asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+
+    assert executed.checkpoint_path is None
+    assert executed.metadata["checkpoint_load_owner"] == "trainer"

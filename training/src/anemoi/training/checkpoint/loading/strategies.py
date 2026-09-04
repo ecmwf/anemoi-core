@@ -25,19 +25,20 @@ LOGGER = logging.getLogger(__name__)
 
 
 class WeightsOnlyLoader(LoadingStrategy):
-    """Load only model weights, discarding optimizer and scheduler state.
+    """Load only model weights; training state starts fresh.
 
     This is the simplest loading strategy: extract the state dict from
-    checkpoint data, load it into the model, and explicitly discard any
-    optimizer/scheduler state.
+    checkpoint data and load it into the model. The optimizer, scheduler and
+    loop progress in the checkpoint are not used (the trainer withholds
+    ``ckpt_path`` from Lightning after a pipeline load).
 
     Behavior
     --------
     - Loads weights with ``strict=self.strict`` (default ``True``)
     - **Leaves training-progress metadata untouched** (``epoch``,
-      ``global_step``, ``best_metric``). A prior pipeline stage that set
-      these values keeps them. If you want explicit zero-reset semantics,
-      use :class:`ColdStartLoader`.
+      ``global_step``). A prior pipeline stage that set these values keeps
+      them. If you want explicit zero-reset semantics, use
+      :class:`ColdStartLoader`.
 
     Composes naturally inside larger pipelines where another stage owns
     training-progress state. For top-level "fresh training from pretrained
@@ -54,7 +55,7 @@ class WeightsOnlyLoader(LoadingStrategy):
         self.strict = strict
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Load weights into model, discard optimizer/scheduler.
+        """Load weights into the model.
 
         Parameters
         ----------
@@ -82,7 +83,7 @@ class WeightsOnlyLoader(LoadingStrategy):
 
         context.metadata["loading_strategy"] = "weights_only"
 
-        LOGGER.info("Loaded weights only (strict=%s), optimizer/scheduler discarded", self.strict)
+        LOGGER.info("Loaded weights only (strict=%s); training state starts fresh", self.strict)
 
         return context
 

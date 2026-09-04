@@ -52,7 +52,8 @@ async def test_http_source_resolve_keeps_download_without_loading() -> None:
     source = HTTPSource(url="https://example.com/model.ckpt")
     context = CheckpointContext()
 
-    async def fake_download(url: str, dest: Path, **kwargs: object) -> None:  # noqa: ARG001
+    async def fake_download(url: str, dest: Path, **kwargs: object) -> None:
+        del url, kwargs
         torch.save({"state_dict": {}}, dest)
 
     with patch("anemoi.training.checkpoint.utils.download_with_retry", side_effect=fake_download):

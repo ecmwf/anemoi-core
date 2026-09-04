@@ -69,7 +69,9 @@ class CheckpointContext:
     Parameters
     ----------
     checkpoint_path : Path, optional
-        Local path to checkpoint file (if fetched from remote source)
+        Local path to the checkpoint file. A source's ``resolve`` step publishes
+        it (a canonical local path, or a kept download); the trainer hands it to
+        ``Trainer.fit(ckpt_path=)`` on a resume.
     checkpoint_data : dict, optional
         Loaded checkpoint data dictionary containing model weights,
         optimizer state, training metadata, etc.

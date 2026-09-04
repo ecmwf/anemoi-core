@@ -252,7 +252,8 @@ class TestHTTPSourceProcess:
         """Only a completed download is kept; a failed one is removed with its error."""
         created_paths: list[Path] = []
 
-        async def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:  # noqa: ARG001
+        async def _track_and_fail(url: str, dest: Path, **kwargs: Any) -> Path:
+            del kwargs
             created_paths.append(dest)
             msg = "connection reset"
             raise CheckpointSourceError(msg, url)
@@ -275,8 +276,15 @@ class TestHTTPSourceProcess:
         mock_download: AsyncMock,
         simple_state_dict: dict,
     ) -> None:
-        """Checksum mismatch should raise CheckpointValidationError."""
-        mock_download.side_effect = _make_download_side_effect(simple_state_dict).side_effect
+        """Checksum mismatch raises CheckpointValidationError and leaves no file behind."""
+        created_paths: list[Path] = []
+        save = _make_download_side_effect(simple_state_dict).side_effect
+
+        async def _track_and_save(url: str, dest: Path, **kwargs: Any) -> Path:
+            created_paths.append(dest)
+            return await save(url, dest, **kwargs)
+
+        mock_download.side_effect = _track_and_save
         mock_checksum.return_value = "wrong_checksum"
 
         source = HTTPSource(url=_TEST_URL, expected_checksum="correct_checksum")
@@ -284,6 +292,11 @@ class TestHTTPSourceProcess:
 
         with pytest.raises(CheckpointValidationError, match="Checksum mismatch"):
             await source.process(context)
+
+        # A rejected download is removed with its error, and never registered for later cleanup.
+        assert len(created_paths) == 1
+        assert not created_paths[0].exists()
+        assert context.temporary_files == []
 
     @patch(_DOWNLOAD_TARGET)
     @patch("anemoi.training.checkpoint.utils.calculate_checksum")

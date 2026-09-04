@@ -72,6 +72,33 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+#: Launcher rank variables, in the exact priority order of
+#: ``lightning_fabric.utilities.rank_zero._get_rank()`` — matching this set keeps
+#: the rank-0 missing-checkpoint gate at parity with the legacy guard.
+RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
+
+
+def is_rank_zero() -> bool:
+    """Best-effort rank-0 detection without coupling to Lightning.
+
+    Reads the launcher rank variables in ``lightning_fabric``'s priority order
+    (:data:`RANK_ENV_VARS`). A process with no rank variable set (single-process /
+    unit test) is treated as rank 0, and a malformed value — non-integer or
+    negative — is treated conservatively as rank 0 so a missing-checkpoint error
+    is never silently swallowed.
+    """
+    import os
+
+    for var in RANK_ENV_VARS:
+        value = os.environ.get(var)
+        if value is not None and value.strip():
+            try:
+                parsed = int(value)
+            except ValueError:
+                return True
+            return parsed <= 0
+    return True
+
 
 def remove_temporary_file(path: Path) -> None:
     """Delete a download a source kept on disk; a file that is already gone is fine."""
@@ -80,7 +107,7 @@ def remove_temporary_file(path: Path) -> None:
     except OSError as exc:
         LOGGER.warning("Could not remove temporary checkpoint %s: %s", path, exc)
     else:
-        LOGGER.debug("Removed temporary checkpoint %s", path)
+        LOGGER.info("Removed temporary checkpoint %s", path)
 
 
 class CheckpointSource(PipelineStage):
@@ -294,16 +321,34 @@ class ResolveOnlySource(CheckpointSource):
         return await self.source.resolve(context)
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
-        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``; load nothing."""
+        """Resolve the checkpoint file for ``Trainer.fit(ckpt_path=)``; load nothing.
+
+        Raises
+        ------
+        CheckpointConfigError
+            On rank 0, if the source resolved no file: a resume with nothing to
+            hand Lightning would otherwise start from scratch without a word.
+            Other ranks defer, as the sources do, so the job fails once, on rank 0.
+        """
         path = await self.resolve(context)
         context.update_metadata(**{CHECKPOINT_LOAD_OWNER: "trainer"})
-        if path is None:
-            LOGGER.debug(
-                "%s: nothing resolved on this rank; Trainer.fit(ckpt_path=) owns the load",
-                type(self.source).__name__,
-            )
-        else:
+        if path is not None:
             LOGGER.info("Resume checkpoint resolved to %s; Trainer.fit(ckpt_path=) performs the load", path)
+            return context
+
+        if is_rank_zero():
+            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+            msg = (
+                f"Resume configured, but {type(self.source).__name__} resolved no checkpoint file to hand "
+                "Trainer.fit(ckpt_path=). Check the training.checkpoint.source configuration (a RunIdSource "
+                "needs run_id), or add a loading strategy if you meant to start fresh training state."
+            )
+            raise CheckpointConfigError(msg)
+        LOGGER.warning(
+            "%s resolved no checkpoint on this rank; deferring the error to rank 0",
+            type(self.source).__name__,
+        )
         return context
 
     def __repr__(self) -> str:
