@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import shutil
+import sys
 from collections.abc import Generator
 from pathlib import Path
 from textwrap import dedent
@@ -45,6 +46,10 @@ root_folder = here.parent.parent.parent.parent.parent
 
 
 def get_migration_template() -> str:
+    """Return the migration script template.
+
+    This is used to generate a new migration script.
+    """
     return dedent("""\
         {% for import in imports %}
         {{import}}
@@ -148,7 +153,7 @@ class ConfigGenerator(Command):
         migration_sync.add_argument(
             "--output",
             "-o",
-            default="./migrated-config.yaml",
+            default=None,
             type=Path,
             help="Path to the migrated config dump.",
         )
@@ -330,11 +335,11 @@ class ConfigGenerator(Command):
         from difflib import unified_diff
 
         original_config, migrated_config, executed_migrations = ConfigMigrator().sync(config_path)
-        original_conifg_lines = original_config.to_yaml().split("\n")
+        original_config_lines = original_config.to_yaml().split("\n")
         migrated_config_content = migrated_config.to_yaml()
         migrated_config_lines = migrated_config_content.split("\n")
 
-        console = Console(force_terminal=not no_color, highlight=False)
+        console = Console(force_terminal=not no_color, highlight=False, file=sys.stderr)
         prefix = "Executed"
         if dry_run:
             prefix = "Would execute"
@@ -345,8 +350,11 @@ class ConfigGenerator(Command):
         for migration in executed_migrations:
             console.print(f"  [green]+ MIGRATE [bold]{migration.name}[/bold][/green]")
 
-        print("\n".join(unified_diff(original_conifg_lines, migrated_config_lines)))  # noqa: T201
-        if output is not None and not dry_run:
+        console.print("\n".join(unified_diff(original_config_lines, migrated_config_lines)))
+        if output is None:
+            print(migrated_config_content)  # noqa: T201
+            return
+        if not dry_run:
             output.write_text(migrated_config_content)
 
     def create_config_migration(self, name: str, final: bool = False) -> None:
