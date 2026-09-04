@@ -1,7 +1,13 @@
 # Modifier stages — a list applied in order after a loading strategy, composed
 # under training.checkpoint.modifiers. Freezing changes which parameters have
-# requires_grad; dot-notation is supported (e.g. "processor.0").
+# requires_grad.
+#
+# Paths are resolved with torch.nn.Module.get_submodule, relative to
+# submodule_root. `model.model` is the graph model that owns encoder /
+# processor / decoder; encoder and decoder are keyed by dataset name, which is
+# `data` unless dataloader.training defines named datasets.
 - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-  submodules_to_freeze: []   # e.g. [encoder, "processor.0"]
-  strict: false              # raise if a named submodule is not found
-  validate_gradients: true   # assert frozen params accumulate no gradient
+  submodule_root: model.model   # root the paths below resolve against
+  submodules_to_freeze: []      # e.g. [encoder.data, processor, "processor.proc.0"]
+  strict: false                 # raise if a named submodule is not found
+  validate_gradients: true      # verify the frozen submodules hold no trainable params

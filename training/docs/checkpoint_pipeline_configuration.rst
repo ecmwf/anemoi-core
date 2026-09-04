@@ -166,7 +166,8 @@ training (add a modifier after any loading strategy):
          strict: false
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodules_to_freeze: [encoder]
+           submodule_root: model.model
+           submodules_to_freeze: [encoder.data]
 
 Load weights from S3 or a URL
 =============================
@@ -592,7 +593,8 @@ fixed during training (it sets ``requires_grad=False``):
      checkpoint:
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
-           submodules_to_freeze: [encoder, "processor.0"]
+           submodule_root: model.model
+           submodules_to_freeze: [encoder.data, "processor.proc.0"]
            strict: false
            validate_gradients: true
 
@@ -604,16 +606,29 @@ fixed during training (it sets ``requires_grad=False``):
       -  Default
       -  Meaning
 
+   -  -  ``submodule_root``
+      -  ``""``
+      -  The module the paths below are resolved against, itself in dot
+         notation. For a training run set it to ``model.model``: the pipeline
+         hands the stage the LightningModule, and the graph model that owns
+         ``encoder`` / ``processor`` / ``decoder`` is two hops below it. The
+         default ``""`` means the model itself, for callers that pass a bare
+         module.
+
    -  -  ``submodules_to_freeze``
       -  ``[]``
-      -  Names of the parts to freeze, in **dot notation**. ``encoder`` freezes
-         the submodule called ``encoder``; ``processor.0`` reaches one level
-         deeper. Names are exact — there are no wildcards.
+      -  Names of the parts to freeze, in **dot notation**, relative to
+         ``submodule_root``. Names are exact — there are no wildcards.
+         ``encoder`` and ``decoder`` are keyed by dataset name
+         (``encoder.data`` on a single-dataset run), and the processor's layers
+         live under ``proc`` (``processor.proc.0``).
 
    -  -  ``strict``
       -  ``false``
       -  If ``true``, a name that does not exist raises an error. If ``false``,
-         it logs a warning and continues with the rest.
+         it logs a warning and continues with the rest. Either way, a config
+         where **no** name resolves is refused: freezing nothing is never
+         intentional, and it used to pass silently.
 
    -  -  ``validate_gradients``
       -  ``true``
@@ -622,8 +637,9 @@ fixed during training (it sets ``requires_grad=False``):
 
 .. tip::
 
-   To find the right names, print your model's submodules
-   (``print(dict(model.named_modules()).keys())``) and copy the dotted paths.
+   To find the right names, print the submodules of the root you configured
+   (``print(dict(model.model.model.named_modules()).keys())`` for
+   ``submodule_root: model.model``) and copy the dotted paths.
 
 Freezing is the only modifier shipped today. Adding more (adapters, LoRA,
 quantisation) is exactly the extensibility story in the next section.

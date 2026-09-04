@@ -756,12 +756,27 @@ decoder.
           _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
         modifiers:
           - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
+            submodule_root: model.model
             submodules_to_freeze:
                - encoder.global
                - processor
                - decoder.global
             strict: false
             validate_gradients: true
+
+.. important::
+
+   ``submodule_root`` is required to reach these modules. Paths are resolved
+   with ``torch.nn.Module.get_submodule`` relative to that root, and
+   ``model.model`` is the graph model that owns ``encoder`` / ``processor`` /
+   ``decoder`` — two attribute hops below the LightningModule the pipeline
+   passes around. Without it nothing resolves.
+
+   ``encoder`` and ``decoder`` are keyed by **dataset name**, so
+   ``encoder.global`` above assumes a dataset named ``global``. On a
+   single-dataset configuration that name is ``data``, giving ``encoder.data``
+   and ``decoder.data``. Use the keys of your own
+   ``dataloader.training`` datasets.
 
 .. note::
 
