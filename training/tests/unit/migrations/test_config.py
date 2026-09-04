@@ -9,32 +9,32 @@
 
 from textwrap import dedent
 
+from anemoi.training.migrations.config import Config
 from anemoi.training.migrations.nodes import NodeContainer
-from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_config(config_from_content: ConfigFromContent) -> None:
+def test_config() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     foo_node = config["foo"]
     assert isinstance(foo_node, NodeContainer)
     assert isinstance(foo_node["bar"], NodeContainer)
     assert foo_node["bar"]["baz"].value == "value"
 
 
-def test_add_comment_around(config_from_content: ConfigFromContent) -> None:
+def test_add_comment_around() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     assert isinstance(config["foo"], NodeContainer)
     config["foo"]["bar"].set_comments(before="<<<", after=">>>")
 
@@ -49,38 +49,38 @@ def test_add_comment_around(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_select(config_from_content: ConfigFromContent) -> None:
+def test_select() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     node = config.select(("foo", "bar"))
     assert node.yaml_node.value == {"baz": "value"}
 
 
-def test_select_missing(config_from_content: ConfigFromContent) -> None:
+def test_select_missing() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     node = config.select(("foo", "bar2"), create_missing=True)
     assert node.yaml_node.value == {}
 
 
-def test_set_comment(config_from_content: ConfigFromContent) -> None:
+def test_set_comment() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.set_comments(before="Hello!", after="End!")
 
     expected_output = dedent("""\
@@ -93,7 +93,7 @@ def test_set_comment(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_drop_key(config_from_content: ConfigFromContent) -> None:
+def test_drop_key() -> None:
     content = dedent("""\
     foo:
       bar:
@@ -101,7 +101,7 @@ def test_drop_key(config_from_content: ConfigFromContent) -> None:
         old: old value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.drop_key("foo.bar.old")
     expected_output = dedent("""\
     foo:
@@ -111,7 +111,7 @@ def test_drop_key(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_drop_key_remove_empty(config_from_content: ConfigFromContent) -> None:
+def test_drop_key_remove_empty() -> None:
     content = dedent("""\
     foo:
       bar:
@@ -119,7 +119,7 @@ def test_drop_key_remove_empty(config_from_content: ConfigFromContent) -> None:
         old: old value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.drop_key("foo.bar.old", remove_empty=True)
     expected_output = dedent("""\
     foo:
@@ -129,14 +129,14 @@ def test_drop_key_remove_empty(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_add_key(config_from_content: ConfigFromContent) -> None:
+def test_add_key() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.add_key("foo.bar.new", "new value")
     assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
@@ -151,14 +151,14 @@ def test_add_key(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_add_key_nested_commented(config_from_content: ConfigFromContent) -> None:
+def test_add_key_nested_commented() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.add_key("foo.bar2.baz", "value 2")
     assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar2"]
@@ -175,14 +175,14 @@ def test_add_key_nested_commented(config_from_content: ConfigFromContent) -> Non
     assert config.to_yaml() == expected_output
 
 
-def test_rename_key(config_from_content: ConfigFromContent) -> None:
+def test_rename_key() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.rename_key("foo.bar.baz", "foo.bar.new")
     assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
@@ -197,14 +197,14 @@ def test_rename_key(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_rename_no_cleanup(config_from_content: ConfigFromContent) -> None:
+def test_rename_no_cleanup() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.rename_key("foo.bar.baz", "foo.new")
     assert isinstance(config["foo"], NodeContainer)
     bar_node = config["foo"]["bar"]
@@ -219,14 +219,14 @@ def test_rename_no_cleanup(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_rename_cleanup(config_from_content: ConfigFromContent) -> None:
+def test_rename_cleanup() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.rename_key("foo.bar.baz", "foo.new", remove_empty=True)
     assert isinstance(config["foo"], NodeContainer)
     assert "new" in config["foo"]
@@ -237,14 +237,14 @@ def test_rename_cleanup(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_rename_cleanup_list(config_from_content: ConfigFromContent) -> None:
+def test_rename_cleanup_list() -> None:
     content = dedent("""\
     foo:
       bar:
         - baz: value
     """)
 
-    config = config_from_content(content)
+    config = Config(content)
     config.rename_key("foo.bar.0.baz", "foo.new", remove_empty=True)
     assert isinstance(config["foo"], NodeContainer)
     assert "new" in config["foo"]
@@ -255,7 +255,7 @@ def test_rename_cleanup_list(config_from_content: ConfigFromContent) -> None:
     assert config.to_yaml() == expected_output
 
 
-def test_rename_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_rename_interpolation() -> None:
     content = dedent("""\
     x: value
     foo:
@@ -265,7 +265,7 @@ def test_rename_interpolation(config_from_content: ConfigFromContent) -> None:
     other: ${foo.x}
     nested: ${other}
     """)
-    config = config_from_content(content)
+    config = Config(content)
     config.rename_key("foo.x", "foo.y")
     assert config["foo"]["bar"]["baz"].value == "${foo.y}"
     assert config["other"].value == "${foo.y}"

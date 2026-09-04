@@ -9,11 +9,11 @@
 
 from textwrap import dedent
 
+from anemoi.training.migrations.config import Config
 from anemoi.training.migrations.interpolations import Interpolation
-from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_interpolation() -> None:
     content = dedent("""\
     baz: value
     foo:
@@ -21,7 +21,7 @@ def test_interpolation(config_from_content: ConfigFromContent) -> None:
     other: ${baz}
     nested: ${other}
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert interpolations.references == {
         ("baz",): {Interpolation(("foo", "bar"), "baz"), Interpolation(("other",), "baz")},
@@ -34,26 +34,26 @@ def test_interpolation(config_from_content: ConfigFromContent) -> None:
     }
 
 
-def test_unknown_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_unknown_interpolation() -> None:
     content = dedent("""\
     baz: value
     foo:
       bar: ${unknown}
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert len(interpolations.references) == 0
     assert len(interpolations.reverse_refs) == 0
 
 
-def test_multiple_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_multiple_interpolation() -> None:
     content = dedent("""\
     baz: value
     other: value 2
     foo:
       bar: this is ${baz} and ${other}
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert interpolations.references == {
         ("baz",): {Interpolation(("foo", "bar"), "baz")},
@@ -64,7 +64,7 @@ def test_multiple_interpolation(config_from_content: ConfigFromContent) -> None:
     }
 
 
-def test_list_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_list_interpolation() -> None:
     content = dedent("""\
     baz: value
     other: value 2
@@ -73,7 +73,7 @@ def test_list_interpolation(config_from_content: ConfigFromContent) -> None:
         - this is ${baz}
         - this is ${other}
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert interpolations.references == {
         ("baz",): {Interpolation(("foo", "bar", 0), "baz")},
@@ -85,7 +85,7 @@ def test_list_interpolation(config_from_content: ConfigFromContent) -> None:
     }
 
 
-def test_update_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_update_interpolation() -> None:
     content = dedent("""\
     baz: value
     foo:
@@ -93,7 +93,7 @@ def test_update_interpolation(config_from_content: ConfigFromContent) -> None:
     other: ${baz}
     nested: ${other}
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert interpolations.references == {
         ("baz",): {Interpolation(("foo", "bar"), "baz"), Interpolation(("other",), "baz")},
@@ -119,7 +119,7 @@ def test_update_interpolation(config_from_content: ConfigFromContent) -> None:
     assert len(interpolations.reverse_refs) == 0
 
 
-def test_relative_interpolation(config_from_content: ConfigFromContent) -> None:
+def test_relative_interpolation() -> None:
     content = dedent("""\
     x: value
     foo:
@@ -127,7 +127,7 @@ def test_relative_interpolation(config_from_content: ConfigFromContent) -> None:
         baz: ${..x}
       x: test
     """)
-    node = config_from_content(content)
+    node = Config(content)
     interpolations = node._interpolation_handler
     assert interpolations.references == {
         ("foo", "x"): {Interpolation(("foo", "bar", "baz"), "..x")},
