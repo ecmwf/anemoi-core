@@ -157,11 +157,6 @@ class ConfigGenerator(Command):
             type=Path,
             help="Path to the migrated config dump.",
         )
-        migration_sync.add_argument(
-            "--dry-run",
-            action="store_true",
-            help="Perform a dry-run, without saving the updated config.",
-        )
         migration_sync.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
         help_msg = "Generate a config migration script."
@@ -328,7 +323,6 @@ class ConfigGenerator(Command):
         self,
         config_path: Path,
         output: Path | None,
-        dry_run: bool = False,
         no_color: bool = False,
     ) -> None:
         """Migrate a config dump."""
@@ -341,8 +335,6 @@ class ConfigGenerator(Command):
 
         console = Console(force_terminal=not no_color, highlight=False, file=sys.stderr)
         prefix = "Executed"
-        if dry_run:
-            prefix = "Would execute"
         if len(executed_migrations):
             console.print(f"{prefix}", len(executed_migrations), "operation(s):")
         if not len(executed_migrations):
@@ -354,8 +346,7 @@ class ConfigGenerator(Command):
         if output is None:
             print(migrated_config_content)  # noqa: T201
             return
-        if not dry_run:
-            output.write_text(migrated_config_content)
+        output.write_text(migrated_config_content)
 
     def create_config_migration(self, name: str, final: bool = False) -> None:
         """Create a new migration script."""
