@@ -40,6 +40,7 @@ import logging
 import os
 from pathlib import Path
 from typing import TYPE_CHECKING
+from typing import Any
 
 from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.checkpoint.sources.base import is_rank_zero
@@ -82,6 +83,69 @@ class RunIdSource(CheckpointSource):
         self.fork = fork
         self.parent_run_server2server = parent_run_server2server
         self.fork_run_server2server = fork_run_server2server
+
+    @classmethod
+    def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
+        """``fork=False`` resumes ``run_id``; ``fork=True`` forks from it (``run_id`` stays ``None``).
+
+        A fork lets a fresh experiment-tracker id be minted; a resume reuses the
+        run's own.
+
+        Parameters
+        ----------
+        source_cfg : Any
+            The source configuration block.
+
+        Returns
+        -------
+        tuple[str | None, str | None]
+            ``(run_id, fork_run_id)``; at most one is set.
+        """
+        from omegaconf import OmegaConf
+
+        run_id = OmegaConf.select(source_cfg, "run_id", default=None)
+        if run_id is None:
+            return None, None
+        if bool(OmegaConf.select(source_cfg, "fork", default=False)):
+            return None, run_id
+        return run_id, None
+
+    @classmethod
+    def with_run_lineage(
+        cls,
+        source_cfg: Any,
+        parent_run_server2server: str | None,
+        fork_run_server2server: str | None,
+    ) -> Any:
+        """Merge the runtime lineage ids; a value already in the config is never clobbered.
+
+        Parameters
+        ----------
+        source_cfg : Any
+            The source configuration block.
+        parent_run_server2server : str or None
+            Runtime server-to-server resume lineage id.
+        fork_run_server2server : str or None
+            Runtime server-to-server fork lineage id.
+
+        Returns
+        -------
+        Any
+            The configuration with the non-``None`` ids merged in.
+        """
+        from omegaconf import OmegaConf
+
+        overrides = {
+            key: value
+            for key, value in (
+                ("parent_run_server2server", parent_run_server2server),
+                ("fork_run_server2server", fork_run_server2server),
+            )
+            if value is not None
+        }
+        if not overrides:
+            return source_cfg
+        return OmegaConf.merge(source_cfg, overrides)
 
     @staticmethod
     def resolve_path(
@@ -198,13 +262,13 @@ class RunIdSource(CheckpointSource):
 def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None]:
     """Resolve ``(run_id, fork_run_id)`` from a configured ``training.checkpoint.source``.
 
-    ``RunIdSource`` is the single source of truth for run lineage: ``fork=False``
-    resumes ``run_id`` (so ``run_id`` is set, ``fork_run_id`` None); ``fork=True``
-    forks from it (so ``fork_run_id`` is set and ``run_id`` stays None, letting a
-    fresh MLflow id be minted). Any other source — or no source — carries no run
-    identity and returns ``(None, None)``. This replaces the trainer re-deriving the
-    identity: the trainer reads it here and never mutates the config to communicate it
-    to the logger / paths.
+    The source class decides: ``RunIdSource`` (and any subclass of it) expresses a
+    resume or a fork through :meth:`RunIdSource.run_identity`; every other source,
+    or no source, carries no run identity and yields ``(None, None)``. The class is
+    resolved from ``_target_``, not matched by name, so a subclass is treated like
+    its parent. This replaces the trainer re-deriving the identity: the trainer
+    reads it here and never mutates the config to communicate it to the logger or
+    the output paths.
 
     Parameters
     ----------
@@ -214,19 +278,14 @@ def run_identity_from_config(config: DictConfig) -> tuple[str | None, str | None
     Returns
     -------
     tuple[str | None, str | None]
-        ``(run_id, fork_run_id)`` — at most one is set.
+        ``(run_id, fork_run_id)``; at most one is set.
     """
     from omegaconf import OmegaConf
 
+    from anemoi.training.checkpoint.sources.base import source_class_from_config
+
     source = OmegaConf.select(config, "training.checkpoint.source", default=None)
-    if source is None:
+    source_cls = source_class_from_config(source)
+    if source_cls is None:
         return None, None
-    target = OmegaConf.select(source, "_target_", default="") or ""
-    if not target.endswith("RunIdSource"):
-        return None, None
-    run_id = OmegaConf.select(source, "run_id", default=None)
-    if run_id is None:
-        return None, None
-    if bool(OmegaConf.select(source, "fork", default=False)):
-        return None, run_id
-    return run_id, None
+    return source_cls.run_identity(source)

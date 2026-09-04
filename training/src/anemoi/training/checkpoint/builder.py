@@ -54,29 +54,23 @@ def _inject_run_lineage(
     parent_run_server2server: str | None,
     fork_run_server2server: str | None,
 ) -> Any:
-    """Merge runtime server-to-server lineage onto a ``RunIdSource`` config.
+    """Merge runtime server-to-server lineage onto a source config that accepts it.
 
     The lineage ids are logger-derived at runtime and cannot be expressed in the
-    static Hydra config, so the trainer passes them to the builder. Only a
-    ``RunIdSource`` target accepts them, and only non-``None`` values are merged, so
-    an explicitly-configured value is never clobbered and other source types are
-    left untouched (which would otherwise fail instantiation with an unknown
-    keyword argument).
+    static Hydra config, so the trainer passes them to the builder. Which sources
+    accept them is the source class's business
+    (:meth:`~anemoi.training.checkpoint.sources.base.CheckpointSource.with_run_lineage`):
+    ``RunIdSource`` and its subclasses merge the non-``None`` values, every other
+    source returns its config untouched, so instantiation never fails with an
+    unknown keyword argument. An unresolvable ``_target_`` is left for the pipeline
+    build to report.
     """
-    target = OmegaConf.select(source, "_target_", default="") or ""
-    if not target.endswith("RunIdSource"):
+    from anemoi.training.checkpoint.sources.base import source_class_from_config
+
+    source_cls = source_class_from_config(source)
+    if source_cls is None:
         return source
-    overrides = {
-        key: value
-        for key, value in (
-            ("parent_run_server2server", parent_run_server2server),
-            ("fork_run_server2server", fork_run_server2server),
-        )
-        if value is not None
-    }
-    if not overrides:
-        return source
-    return OmegaConf.merge(source, overrides)
+    return source_cls.with_run_lineage(source, parent_run_server2server, fork_run_server2server)
 
 
 def loader_restores_training_state(cfg: DictConfig) -> bool:

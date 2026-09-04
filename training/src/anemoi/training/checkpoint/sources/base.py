@@ -100,6 +100,48 @@ def is_rank_zero() -> bool:
     return True
 
 
+def source_class_from_config(source_cfg: Any) -> type[CheckpointSource] | None:
+    """Resolve a ``training.checkpoint.source`` block to its source class.
+
+    Reads ``_target_`` and imports it with :func:`hydra.utils.get_class`, so a
+    subclass (``class EcmwfRunSource(RunIdSource)``) is recognised through
+    inheritance rather than by what its name ends in. Returns ``None`` for a
+    missing, empty or unimportable target, or one that is not a
+    :class:`CheckpointSource`; the pipeline build reports those with a
+    ``CheckpointConfigError`` naming the target, so callers only need a neutral
+    answer here.
+
+    Parameters
+    ----------
+    source_cfg : Any
+        The source configuration (a mapping with ``_target_``), or ``None``.
+
+    Returns
+    -------
+    type[CheckpointSource] or None
+        The configured source class, when it resolves.
+    """
+    if source_cfg is None:
+        return None
+    from omegaconf import OmegaConf
+
+    target = (
+        OmegaConf.select(source_cfg, "_target_", default="")
+        if OmegaConf.is_config(source_cfg)
+        else source_cfg.get("_target_", "")
+    ) or ""
+    if not target:
+        return None
+
+    from hydra.utils import get_class
+
+    try:
+        cls = get_class(target)
+    except (ImportError, ValueError):
+        return None
+    return cls if isinstance(cls, type) and issubclass(cls, CheckpointSource) else None
+
+
 def remove_temporary_file(path: Path) -> None:
     """Delete a download a source kept on disk; a file that is already gone is fine."""
     try:
@@ -145,6 +187,58 @@ class CheckpointSource(PipelineStage):
     ...         await self._load_from_path(context, path)
     ...         return context
     """
+
+    @classmethod
+    def run_identity(cls, source_cfg: Any) -> tuple[str | None, str | None]:
+        """The ``(run_id, fork_run_id)`` this source configuration expresses.
+
+        Most sources carry no run identity: an explicit file or a remote object
+        says nothing about which experiment-tracker run the job belongs to.
+        :class:`~anemoi.training.checkpoint.sources.run.RunIdSource` overrides this.
+
+        Parameters
+        ----------
+        source_cfg : Any
+            The source configuration block.
+
+        Returns
+        -------
+        tuple[str | None, str | None]
+            ``(run_id, fork_run_id)``; at most one is set. ``(None, None)`` here.
+        """
+        del source_cfg
+        return None, None
+
+    @classmethod
+    def with_run_lineage(
+        cls,
+        source_cfg: Any,
+        parent_run_server2server: str | None,
+        fork_run_server2server: str | None,
+    ) -> Any:
+        """Merge runtime server-to-server lineage into the source configuration.
+
+        The lineage ids are logger-derived at run time and cannot be written in
+        the static config. Only a source that resolves a run accepts them;
+        everything else returns its configuration unchanged, so instantiation
+        never fails on an unknown keyword.
+
+        Parameters
+        ----------
+        source_cfg : Any
+            The source configuration block.
+        parent_run_server2server : str or None
+            Runtime server-to-server resume lineage id.
+        fork_run_server2server : str or None
+            Runtime server-to-server fork lineage id.
+
+        Returns
+        -------
+        Any
+            The configuration to instantiate; unchanged here.
+        """
+        del parent_run_server2server, fork_run_server2server
+        return source_cfg
 
     async def resolve(self, context: CheckpointContext) -> Path | None:
         """Make the checkpoint reachable as a local file and publish its path, without loading it.

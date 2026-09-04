@@ -27,6 +27,7 @@ from anemoi.training.checkpoint.builder import resumes_via_lightning
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
 from anemoi.training.checkpoint.sources.base import CheckpointSource
+from anemoi.training.checkpoint.sources.run import RunIdSource
 
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
@@ -432,3 +433,47 @@ def test_load_checkpoint_defaults_to_acquiring() -> None:
     names = [type(s).__name__ for s in build_checkpoint_pipeline(cfg).stages]
 
     assert names == ["RunIdSource", "WeightsOnlyLoader"]
+
+
+# --- stage identity is decided by the source class, not by what its name ends in ---
+
+
+class SiteRunSource(RunIdSource):
+    """A site-specific subclass whose ``_target_`` does not end in ``RunIdSource``.
+
+    Stands in for a user's ``EcmwfRunSource(RunIdSource)``: a string match on the
+    target name would treat it as an ordinary source, drop the runtime lineage on the
+    floor and report no run identity, so the job would resume with a fresh MLflow id
+    and no error.
+    """
+
+
+_SITE_RUN_SOURCE = f"{__name__}.SiteRunSource"
+
+
+def test_builder_injects_server2server_into_a_run_source_subclass() -> None:
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": _SITE_RUN_SOURCE, "run_id": "abc"}}}})
+    pipeline = build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
+
+    source = pipeline.stages[0].source
+    assert isinstance(source, SiteRunSource)
+    assert source.parent_run_server2server == "remote-parent"
+
+
+def test_run_identity_is_read_from_a_run_source_subclass() -> None:
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    cfg = OmegaConf.create(
+        {"training": {"checkpoint": {"source": {"_target_": _SITE_RUN_SOURCE, "run_id": "abc", "fork": True}}}},
+    )
+    assert run_identity_from_config(cfg) == (None, "abc")
+
+
+def test_unresolvable_source_target_carries_no_identity_and_is_left_for_the_build_to_report() -> None:
+    """The helpers answer neutrally; the pipeline build raises the CheckpointConfigError."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": "no.such.Source", "run_id": "abc"}}}})
+    assert run_identity_from_config(cfg) == (None, None)
+    with pytest.raises(CheckpointConfigError):
+        build_checkpoint_pipeline(cfg, parent_run_server2server="remote-parent")
