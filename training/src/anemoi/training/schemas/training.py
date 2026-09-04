@@ -25,7 +25,7 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
