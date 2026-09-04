@@ -320,6 +320,11 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     AnemoiTrainer(cfg).train()
     checkpoint_dir = get_single_checkpoint_dir(cfg)
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
+    # What the resume reads back: RunIdSource resolves the run's last.ckpt. At on_train_start
+    # Lightning reports the epoch and step recorded in that file (the epoch that wrote it, not
+    # the number of epochs finished), so pin those values rather than a hand-computed epoch.
+    parent = torch.load(checkpoint_dir / "last.ckpt", map_location="cpu", weights_only=False)
+    parent_epoch, parent_global_step = parent["epoch"], parent["global_step"]
 
     # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
     # key was removed): a RunIdSource (fork=false) resolves the run's last.ckpt and a
@@ -341,9 +346,10 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
     trainer.callbacks.append(start)
     trainer.train()
 
-    batches_per_epoch = int(cfg.dataloader.limit_batches.training)
-    assert start.epoch == 2, f"resumed run started at epoch {start.epoch}, expected the parent's 2"
-    assert start.global_step == 2 * batches_per_epoch, f"resumed run started at step {start.global_step}"
+    assert start.epoch == parent_epoch, f"resumed run started at epoch {start.epoch}, checkpoint has {parent_epoch}"
+    assert (
+        start.global_step == parent_global_step
+    ), f"resumed run started at step {start.global_step}, checkpoint has {parent_global_step}"
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
     assert (
