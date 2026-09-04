@@ -95,7 +95,7 @@ class Node:
         """The resolved OmegaConf value."""
         return OmegaConf.to_object(self.cfg)
 
-    def set_comments(self, before: str | None = None, inline: str | None = None) -> None:
+    def set_comments(self, before: str | None = None, inline: str | None = None, after: str | None = None) -> None:
         """Adds comments in the config.
 
         Parameters
@@ -104,6 +104,8 @@ class Node:
             Comment to add before the node.
         inline : str | None, default None
             Comment to add inline.
+        after : str | None, default None
+            Comment to add after.
         """
         if before is not None:
             if self.yaml_node.comment_before is not None:
@@ -111,8 +113,18 @@ class Node:
             self.yaml_node.comment_before = before
         if inline is not None:
             if self.yaml_node.comment is not None:
-                inline = f"{inline} {self.yaml_node.comment}"
+                inline = f"{self.yaml_node.comment} {inline}"
             self.yaml_node.comment = inline
+
+        if after is not None:
+            if self.yaml_node.comment_after is not None:
+                after = f"{self.yaml_node.comment_after}\n{after}"
+            try:
+                self.yaml_node.comment_after = after
+            except ValueError:
+                if self.yaml_node.comment is not None:
+                    after = f"{self.yaml_node.comment} {after}"
+                self.yaml_node.comment = after
 
     def __getitem__(self, key: str | int) -> Node:
         """Gets the key while asserting that this node is a NodeContainer.
