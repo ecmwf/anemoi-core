@@ -91,6 +91,14 @@ class Node:
         """The parent node."""
         return self._parent
 
+    @cached_property
+    def root(self) -> NodeContainer:
+        """The root node."""
+        node = self.parent
+        for _ in range(len(self.prefix) - 1):
+            node = node.parent
+        return node
+
     @property
     def value(self) -> Any:
         """The raw value."""
@@ -99,7 +107,9 @@ class Node:
     @property
     def resolved_value(self) -> Any:
         """The resolved OmegaConf value."""
-        return OmegaConf.to_object(self.cfg)
+        if isinstance(self.cfg, (DictConfig, ListConfig)):
+            return OmegaConf.to_object(self.cfg)
+        return self.cfg
 
     def __getitem__(self, key: str | int) -> Node:
         """Gets the key while asserting that this node is a NodeContainer.
@@ -120,6 +130,11 @@ class Node:
         if not isinstance(self, NodeContainer) or not self._is_key_valid(key):
             msg = f"key {key} not in Node."
             raise ValueError(msg)
+
+        if self.is_interpolation(key) and not isinstance(self.cfg[key], str):
+            # This allows to select items through interpolations.
+            # Use the interpolation handler to find the correct reference.
+            return self.root.select(self._interpolation_handler.interpolation_of((*self.prefix, key)))
 
         if isinstance(self.cfg[key], ListConfig):
             cls = NodeList
