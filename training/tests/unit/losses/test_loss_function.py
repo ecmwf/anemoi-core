@@ -16,6 +16,7 @@ import numpy as np
 import pytest
 import torch
 from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pytest_mock import MockerFixture
 
 from anemoi.training.losses import CRPS
@@ -35,6 +36,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.resolve_config import resolve_subgrid
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
@@ -48,9 +50,8 @@ losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSEL
 
 
 def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
-    mock_method = SimpleNamespace(output_mask={"data": output_mask})
-    multi_cfg = {"data": cfg}
-    BaseTrainingModule._resolve_subgrid(mock_method, multi_cfg)
+    multi_cfg = OmegaConf.create({"data": cfg})
+    resolve_subgrid(multi_cfg, {"data": output_mask})
     return multi_cfg["data"]
 
 
@@ -885,6 +886,51 @@ def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
     target = torch.randn(bs, 1, 1, n_total, nvars)
     result = loss(pred, target)
     assert result.numel() == 1
+
+
+def test_build_loss_configs_resolves_spectral_subgrid_through_module() -> None:
+    """``subgrid: output_mask`` must be resolved.
+
+    Test if this is indeed the case when a combined+spectral loss config
+    is processed through the training module's own config path.
+    """
+    training_loss = OmegaConf.create(
+        {
+            "datasets": {
+                "data": {
+                    "_target_": "anemoi.training.losses.combined.CombinedLoss",
+                    "loss_weights": [0.5, 0.5],
+                    "ignore_nans": False,
+                    "losses": [
+                        {
+                            "_target_": "anemoi.training.losses.MSELoss",
+                            "scalers": ["node_weights"],
+                        },
+                        {
+                            "_target_": "anemoi.training.losses.FourierCorrelationLoss",
+                            "transform": "fft2d",
+                            "x_dim": 4,
+                            "y_dim": 2,
+                            "subgrid": "output_mask",
+                        },
+                    ],
+                },
+            },
+        },
+    )
+
+    mask_tuple = (0, 8)
+    mock_self = SimpleNamespace(
+        config=OmegaConf.create({"training": {"training_loss": training_loss}}),
+        output_mask={"data": SimpleNamespace(as_tuple=lambda: mask_tuple)},
+    )
+
+    loss_configs = BaseTrainingModule._build_loss_configs(mock_self)
+
+    sub_losses = loss_configs["data"]["losses"]
+
+    assert tuple(sub_losses[1]["subgrid"]) == mask_tuple
+    assert "subgrid" not in sub_losses[0]
 
 
 def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture) -> None:
