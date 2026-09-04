@@ -34,6 +34,7 @@ INTERPOLATION_PATTERN = re.compile(r"\$\{([^}]*)\}", flags=re.ASCII)
 
 
 def get_interpolations(value: str) -> list[str]:
+    """Use OmegaConf parser to return all interpolations in the given str."""
     interpolations: list[str] = []
 
     def node_interpolation_callback(inter_key: str, _: set[int] | None) -> OGNode | None:
@@ -49,6 +50,24 @@ def get_interpolations(value: str) -> list[str]:
 
 
 def replace_interpolation(value: str, interpo: str, replace: str) -> str:
+    """Replaces the occurence of an interpolation with a new interpolation value.
+
+    This uses a regexp because OmegaConf doesn't provide a way to manipulate interpolations.
+
+    Parameters
+    ----------
+    value : str
+        Content to replace
+    interpo : str
+        Old interpolation value to replace
+    replace : str
+        New interpolation value to return
+
+    Returns
+    -------
+    str
+        The content with changed interpolation values.
+    """
     for match in INTERPOLATION_PATTERN.finditer(value):
         if match.group(1).strip() == interpo:
             start, end = match.span()
@@ -85,8 +104,13 @@ def count_leading(niddle: str, haystack: str) -> int:
 
 
 class Interpolation(NamedTuple):
+    """An interpolation."""
+
     parts: tuple[str | int, ...]
-    exact_ref: str  # used for relative interpolations
+    """The absolute path in config tree that the interpolation refers to."""
+    exact_ref: str
+    """The value used in the config for the interpolation. May be different than parts
+    for relative interpolations."""
 
 
 class InterpolationHandler:
@@ -98,13 +122,17 @@ class InterpolationHandler:
         self.reverse_refs: dict[tuple[str | int, ...], set[Interpolation]] = defaultdict(set)
 
     def parse_config(self) -> None:
+        """Parses the config and updates all interpolation references."""
         self._parse_config_impl(self.ref_node, self.ref_node.prefix)
 
     def update(self, node: Node) -> None:
+        """Updates the interpolation references for a given node."""
         self._parse_config_impl(node, node.prefix)
 
     def rename(self, old_parts: Sequence[str], target: str) -> None:
-        """Changes the interpolation after renaming.
+        """Change an interpolation to another one.
+
+        This also updates the tracked interpolation references.
 
         Parameters
         ----------
@@ -119,7 +147,7 @@ class InterpolationHandler:
             changes.append(
                 (node, reference[-1], replace_interpolation(node[reference[-1]].value, exact_ref, target)),
             )
-        # Updating the nodes after the previous for loop because node.set triggers
+        # Updating the nodes after the previous for-loop because node.set triggers
         # self._parse_node which updates self.references.
         for node, key, new_value in changes:
             node[key] = new_value
