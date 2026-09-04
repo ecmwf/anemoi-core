@@ -532,7 +532,7 @@ class BaseGraphModel(nn.Module):
 
     def predict_step(
         self,
-        batch: dict[str, torch.Tensor],
+        x: dict[str, torch.Tensor],
         target: dict[str, torch.Tensor],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
@@ -548,7 +548,7 @@ class BaseGraphModel(nn.Module):
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        x : dict[str, torch.Tensor]
             Input batched data (before pre-processing).
         target : dict[str, torch.Tensor]
             Target batched data (before pre-processing).
@@ -609,7 +609,7 @@ class BaseGraphModel(nn.Module):
         ```
         """
         with torch.no_grad():
-            dataset_names = list(batch.keys())
+            dataset_names = list(x.keys())
 
             # Handle distributed processing
             grid_shard_sizes: DatasetShardSizes | None = None
@@ -626,13 +626,8 @@ class BaseGraphModel(nn.Module):
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
 
-            # Wrap into a Batch (no coords available at inference today; the
-            # static-grid path inside the model uses the node-attribute buffers).
-            # Sharding is carried by the batch so the model can read it off the views.
-            forward_batch = Batch(data=x, shard_sizes=grid_shard_sizes or {})
-
             # Perform forward pass
-            y_hat = self.forward(forward_batch, model_comm_group=model_comm_group, **kwargs)
+            y_hat = self.forward(x, model_comm_group=model_comm_group, **kwargs)
 
             # Apply post-processing
             for dataset_name in dataset_names:

@@ -208,27 +208,70 @@ class AnemoiModelInterface(torch.nn.Module):
         # Use the forward method of the model directly
         self.forward = self.model.forward
 
-    def _prepare_data(self, data: torch.Tensor, dataset_name: str):
-        """Prepare the input data for the model."""
+    def _prepare_data(self, data: torch.Tensor, dataset_name: str, is_input: bool) -> dict[str, torch.Tensor]:
+        """Prepare the input data for the model.
+
+        Parameters
+        ----------
+        data : torch.Tensor
+            The input data tensor.
+        dataset_name : str
+            The name of the dataset.
+        is_input : bool
+            Whether the data is input (True) or target/output (False).
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            The prepared data specification for the model.
+        """
+        coordinates = self.model._graph_data[dataset_name].x  * 180.0 / torch.pi
+        var_indices = self.model.data_indices[dataset_name].model
+        variables = var_indices.input.ordered_names if is_input else var_indices.output.ordered_names
+
         spec = {
-            "latitudes": None,
-            "longitudes": None,
-            "variables": [],
-            "layout": (),
+            "latitudes": coordinates[:, 0],
+            "longitudes": coordinates[:, 1],
+            "variables": variables,
+            "layouts": ("time", "ensemble", "grid", "variables"),
         }
         if data is not None:
             spec["data"] = data
+            assert spec["data"].ndim == len(spec["layouts"]), "Data tensor dimensionality does not match the specified layout."
+        else:
+            spec["data"] = None
 
         return spec
+    
+    def prepare_input_spec(self, data: torch.Tensor | dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {
+            dataset_name: self._prepare_data(ds_data, dataset_name, True) for dataset_name, ds_data in data.items()
+        }
 
-    def prepare_batch(self, batch: dict[str, torch.Tensor]):
-        """Prepare the model for inference."""
-        return Batch({dataset_name: self._prepare_data(data, dataset_name) for dataset_name, data in batch.items()})
+    def prepare_target_spec(self, data: torch.Tensor | dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        if data is not None:
+            return {
+                dataset_name: self._prepare_data(None, dataset_name, False) for dataset_name in target.keys()
+            }
+
+        return {
+            dataset_name: self._prepare_data(None, dataset_name, False) for dataset_name in self.data_indices.keys()
+        }
+
+    def get_batch(self, data: dict[str, torch.Tensor]) -> Batch:
+        new_batch = {}
+        for dataset_name, ds_data in data.items():
+        
+            new_batch[dataset_name] = {
+                "data": ds_data.get("data", None),
+                "coordinates": torch.cat([ds_data["latitudes"].unsqueeze(-1), ds_data["longitudes"].unsqueeze(-1)], dim=-1),
+            }
+        return new_batch
 
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
-        target: dict[str, torch.Tensor],
+        target: dict[str, torch.Tensor] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -253,10 +296,13 @@ class AnemoiModelInterface(torch.nn.Module):
         dict[str, torch.Tensor]
             Predicted data.
         """
+        x = self.prepare_input_spec(batch) # TODO: move to anemoi-inference
+        target_template = self.prepare_target_spec(target) # TODO: move to anemoi-inference
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
-            "batch": self.prepare_batch(batch),
-            "target": self.prepare_batch(target),
+            "x": self.get_batch(x),
+            "target": self.get_batch(target_template),
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,
