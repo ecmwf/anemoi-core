@@ -120,3 +120,16 @@ async def test_local_source_handles_empty_file(tmp_path: Path) -> None:
     context = CheckpointContext(checkpoint_path=empty)
     with pytest.raises(Exception):  # noqa: B017, PT011  # CheckpointLoadError or CheckpointValidationError
         await source.process(context)
+
+
+@pytest.mark.asyncio
+async def test_local_source_resolves_a_relative_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A relative path is published absolute, so a later chdir cannot invalidate what Lightning receives."""
+    ckpt = tmp_path / "last.ckpt"
+    torch.save({"state_dict": {"layer.weight": torch.zeros(2, 2)}}, ckpt)
+    monkeypatch.chdir(tmp_path)
+
+    result = await LocalSource().process(CheckpointContext(checkpoint_path="last.ckpt"))
+
+    assert Path(result.checkpoint_path).is_absolute()
+    assert Path(result.checkpoint_path).is_file()

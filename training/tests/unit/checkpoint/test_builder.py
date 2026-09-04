@@ -365,3 +365,18 @@ def test_resume_that_resolves_nothing_defers_on_other_ranks(tmp_path: Path, monk
 
     assert executed.checkpoint_path is None
     assert executed.metadata["checkpoint_load_owner"] == "trainer"
+
+
+@pytest.mark.parametrize(("template", "required_key"), [("local", "path"), ("run", "run_id")])
+def test_source_presets_declare_their_required_key(template: str, required_key: str) -> None:
+    """A source preset names the value the user has to supply.
+
+    ``local.yaml`` shipped with only ``_target_`` and a comment claiming the path came
+    from the pipeline context. Nothing supplies it (only ``RunIdSource`` ever sets
+    ``context.checkpoint_path``, and it builds its own bare ``LocalSource``), so
+    selecting the preset alone could only fail. Declaring the key null makes the
+    requirement discoverable in the file, like its sibling already did.
+    """
+    template_cfg = _load_template("source", template)
+    assert required_key in template_cfg
+    assert template_cfg[required_key] is None
