@@ -33,6 +33,17 @@ def test_node() -> None:
     assert baz_node.cfg == "value"
 
 
+def test_root() -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+    config = Config(content)
+    node = config["foo"]["bar"]["baz"]
+    assert node.root == config
+
+
 def test_node_add_item() -> None:
     content = dedent("""\
     foo:
@@ -79,3 +90,17 @@ def test_node_list() -> None:
         _extra_bar_node = bar_node[2]
     bar_node.append({"baz": "value 3"})
     assert bar_node[2].yaml_node.value == {"baz": "value 3"}
+
+
+def test_resolved_value() -> None:
+    content = dedent("""\
+    baz: val
+    foo:
+      bar: ${baz}
+      other: ${nested}
+    nested:
+      key: val
+    """)
+    config = Config(content)
+    assert config["foo"]["bar"].resolved_value == "val"
+    assert config["foo"]["other"].resolved_value == {"key": "val"}

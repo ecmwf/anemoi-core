@@ -135,3 +135,14 @@ def test_relative_interpolation() -> None:
     assert interpolations.reverse_refs == {
         ("foo", "bar", "baz"): {Interpolation(("foo", "x"), "..x")},
     }
+
+
+def test_interpolation_of() -> None:
+    content = dedent("""\
+    baz:
+      key: val
+    foo:
+      bar: ${baz.key}
+    """)
+    config = Config(content)
+    assert config._interpolation_handler.interpolation_of(("foo", "bar")) == ("baz", "key")
