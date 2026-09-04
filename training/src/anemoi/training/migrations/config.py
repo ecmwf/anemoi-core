@@ -22,6 +22,11 @@ from anemoi.training.migrations.nodes import NodeDict
 
 
 class Config(NodeDict):
+    """The entry point for the config tree.
+
+    This is a proxy for a NodeDict that can be initialized via a config content.
+    """
+
     def __init__(self, content: str) -> None:
         self._content = content
         self._cfg = OmegaConf.create(self._content)
@@ -30,11 +35,27 @@ class Config(NodeDict):
 
     @classmethod
     def from_path(cls, path: Path | str) -> Self:
+        """Create the config from its path of the filesystem.
+
+        Parameters
+        ----------
+        path : Path | str
+            The path to the yaml config file
+
+        Returns
+        -------
+        Self
+            The Config instance.
+        """
         content = Path(path).read_text()
         return cls(content)
 
     @property
     def prefix(self) -> tuple[()]:
+        """The config prefix.
+
+        The config object doesn't have any prefix as it is the root of the config tree.
+        """
         return ()
 
     @cached_property
@@ -53,9 +74,11 @@ class Config(NodeDict):
 
     @property
     def parent(self) -> NodeDict:
+        # The parent of the root node is itself.
         return self
 
     def to_yaml(self) -> str:
+        """Export the config into yaml."""
         return self.yaml.to_yaml().decode()
 
     def __repr__(self) -> str:
