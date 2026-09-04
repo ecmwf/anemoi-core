@@ -269,3 +269,26 @@ def test_rename_interpolation() -> None:
     config.rename_key("foo.x", "foo.y")
     assert config["foo"]["bar"]["baz"].value == "${foo.y}"
     assert config["other"].value == "${foo.y}"
+
+
+def test_select_through_interpolation() -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    other:
+      key: ${foo}
+    """)
+    config = Config(content)
+    assert config.select("other.key.bar.baz").value == "value"
+    assert config.select("other.key.bar.baz").prefix == ("foo", "bar", "baz")
+
+
+def test_select_through_interpolation_resolving_to_str() -> None:
+    content = dedent("""\
+    foo: "val"
+    other:
+      key: "${foo} or ${foo}"
+    """)
+    config = Config(content)
+    assert config.select("other.key").resolved_value == "val or val"
