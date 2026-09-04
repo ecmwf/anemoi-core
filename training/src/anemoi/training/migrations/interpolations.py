@@ -117,12 +117,12 @@ class InterpolationHandler:
         for reference, exact_ref in self.references[tuple(old_parts)]:
             node = self.ref_node.select(reference[:-1])
             changes.append(
-                (node, reference[-1], replace_interpolation(node.get(reference[-1]).value, exact_ref, target)),
+                (node, reference[-1], replace_interpolation(node[reference[-1]].value, exact_ref, target)),
             )
         # Updating the nodes after the previous for loop because node.set triggers
         # self._parse_node which updates self.references.
         for node, key, new_value in changes:
-            node.set(key, new_value)
+            node[key] = new_value
 
     def _parse_node(self, node: NodeContainer, prefix: Sequence[str | int], key: str | int) -> None:
         parts = (*prefix, key)

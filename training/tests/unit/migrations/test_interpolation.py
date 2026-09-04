@@ -104,7 +104,7 @@ def test_update_interpolation(config_from_content: ConfigFromContent) -> None:
         ("other",): {Interpolation(("baz",), "baz")},
         ("nested",): {Interpolation(("other",), "other")},
     }
-    node["foo"].set("bar", "normal str")
+    node["foo"]["bar"] = "normal str"
     node["nested"] = "${baz}"
     assert interpolations.references == {
         ("baz",): {Interpolation(("other",), "baz"), Interpolation(("nested",), "baz")},
