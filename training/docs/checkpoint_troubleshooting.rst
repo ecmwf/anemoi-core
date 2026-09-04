@@ -106,31 +106,48 @@ always produces a valid order, so this almost always means a hand-assembled
 pipeline in code. Reorder the stages, or remove the extra loading strategy
 (there can be only one).
 
-Warm start with a remote source
-===============================
+Resume has nothing to resume from
+=================================
 
-**Message** (example):
+**Messages** (examples):
 
 .. code:: text
 
-   CheckpointConfigError: Warm start restores optimizer and epoch state via
-   Lightning's ckpt_path, which requires a checkpoint reachable as a local file.
-   The configured training.checkpoint.source (S3Source) does not provide one ...
+   CheckpointConfigError: Warm start resumes through Trainer.fit(ckpt_path=), which
+   needs a checkpoint to read, but no training.checkpoint.source is configured. ...
 
-**What it means:** ``WarmStartLoader`` resumes the optimizer and epoch through
-PyTorch Lightning, which reads the checkpoint from disk. ``S3Source`` and
-``HTTPSource`` do not provide a local file, so the resume could not happen.
-Anemoi refuses rather than silently dropping your optimizer/epoch state.
+   CheckpointConfigError: Resume configured, but RunIdSource resolved no checkpoint
+   file to hand Trainer.fit(ckpt_path=). Check the training.checkpoint.source
+   configuration (a RunIdSource needs run_id), or add a loading strategy if you
+   meant to start fresh training state.
+
+   CheckpointConfigError: RunIdSource requires a run_id:
+   training.checkpoint.source.run_id is unset. ...
+
+**What it means:** a ``training.checkpoint.source`` with no ``loading`` block,
+or with ``WarmStartLoader``, is a resume. PyTorch Lightning reads the file the
+source resolves and restores weights, optimizer, scheduler and loop progress in
+one pass at ``fit()``; the pipeline loads nothing itself, its job is to make the
+checkpoint reachable as a local file. Each message names the step that had
+nothing to hand over: no source at all, a source that resolved no file (rank 0
+raises, the other ranks defer to it), or the ``RunIdSource`` preset used with
+its ``run_id`` left at ``null``.
+
+Any source works for a resume. ``LocalSource`` and ``RunIdSource`` resolve an
+existing path; ``S3Source`` and ``HTTPSource`` download the checkpoint to a
+node-local temporary file that is handed to Lightning and deleted when training
+finishes. Remote sources are no longer refused for warm start.
 
 **How to fix it:** either
 
--  use ``LocalSource`` (an explicit ``path``) or ``RunIdSource`` (a run id) for
-   warm start, or
--  download the remote checkpoint to a local file first and point ``LocalSource``
-   at it, or
--  if you only need the *weights* (not the optimizer/epoch), switch
-   ``training.checkpoint.loading`` to ``WeightsOnlyLoader`` /
-   ``TransferLearningLoader`` / ``ColdStartLoader``, which work with any source.
+-  add the source: ``training/checkpoint/source=run
+   +training.checkpoint.source.run_id=<id>`` for a run, or
+   ``training/checkpoint/source=local +training.checkpoint.source.path=<file>``
+   for a file, or
+-  pass the run id the ``run`` preset ships as ``null``, or
+-  if you meant to start fresh training state from those weights, add a loading
+   strategy (``WeightsOnlyLoader`` / ``TransferLearningLoader`` /
+   ``ColdStartLoader``).
 
 Could not build a stage from config
 ===================================
@@ -318,6 +335,47 @@ recognises (non-standard structure or unusual key names).
    checkpoint = torch.load("checkpoint.ckpt", map_location="cpu")
    print("Top-level keys:", list(checkpoint.keys())[:10])
    print("Detected format:", detect_checkpoint_format("checkpoint.ckpt"))
+
+Checkpoint is behind the installed anemoi-models (warning)
+==========================================================
+
+**Message** (example):
+
+.. code:: text
+
+   WARNING Checkpoint is behind the installed anemoi-models by 2 migration(s):
+   1778688800_glu_mlp_implementation, 1779202136_trainable_edge_perm_fix. Loading it
+   anyway; most migrations do not affect the load. If this run fails with a
+   checkpoint-format error, migrate it first: `anemoi-models migration sync
+   /runs/abc/last.ckpt` (note: this rewrites the checkpoint in place and writes a
+   full-size backup beside it).
+
+**What it means:** every checkpoint anemoi writes carries a ledger of the
+migrations the writing version knew about. This one is missing some that the
+installed ``anemoi-models`` ships, so an older version wrote it. The load is
+not refused: the loading strategy (or, on a resume, ``on_load_checkpoint``)
+checks the ledger, names what is missing, and carries on. Most migrations do
+not change how a checkpoint loads. The one that does for old checkpoints,
+``chunking_fix``, is applied in memory when the checkpoint's processor declares
+the geometry it rewrites and skipped otherwise, so autoencoder weights, which
+have no processor, are left untouched. A checkpoint with no ledger at all
+predates migration tracking and gets that same in-memory fallback.
+
+**What to do next:**
+
+#. Nothing, if the run proceeds. The warning is there to explain a later
+   failure, not to demand action.
+
+#. If the run fails with a checkpoint-format error (a ``TypeError`` from
+   ``preserve_anemoi_metadata`` naming ``anemoi-models migration sync`` is the
+   usual one, for a checkpoint from before multi-dataset support), migrate the
+   file on disk with the command the warning prints, then run again. The command
+   rewrites the checkpoint in place and leaves a full-size backup beside it, so
+   check the disk space first.
+
+#. For a remote source (``S3Source`` / ``HTTPSource``) there is no file to
+   rewrite in place: download the checkpoint, migrate the copy, and load it
+   with ``LocalSource`` (or upload the migrated copy).
 
 *********************************
  Source and download errors
