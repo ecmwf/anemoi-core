@@ -145,12 +145,54 @@ class LoadingStrategy(PipelineStage):
 
         Raises
         ------
+        CheckpointLoadError
+            If the source stage deferred its error to rank 0 on this rank.
         CheckpointValidationError
             If no valid state dict can be found in checkpoint data
         """
         from anemoi.training.checkpoint.formats import extract_state_dict
 
+        self._abort_if_source_deferred(context)
         return extract_state_dict(context.checkpoint_data)
+
+    @staticmethod
+    def _abort_if_source_deferred(context: CheckpointContext) -> None:
+        """Fail with the real reason when the source deferred its error to rank 0.
+
+        A source that cannot reach its checkpoint raises on rank 0 and passes
+        through on every other rank, so a distributed run fails with one
+        actionable message instead of N. But the pass-through leaves
+        ``checkpoint_data`` unset, and the loading stage then reported
+        "checkpoint data is not a dictionary ... might indicate a corrupted or
+        incompatible checkpoint file" — about a file it never opened. In an
+        aggregated SLURM log that misleading message is what most ranks print,
+        burying rank 0's correct one.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context, carrying ``source_deferred`` when a source stage
+            deferred on this rank.
+
+        Raises
+        ------
+        CheckpointLoadError
+            Always, when the source deferred. The message names rank 0 as the
+            place to look.
+        """
+        if not context.metadata.get("source_deferred"):
+            return
+
+        from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+
+        reason = context.metadata.get("source_deferred_reason", "the checkpoint could not be acquired")
+        msg = (
+            f"The checkpoint source could not provide a checkpoint on this rank ({reason}), so there is "
+            "nothing to load. This is not a corrupted checkpoint: the source deferred the error to rank 0, "
+            "which reports the actionable message. Look at rank 0's log."
+        )
+        LOGGER.error(msg)
+        raise CheckpointLoadError(context.checkpoint_path or "<deferred to rank 0>", RuntimeError(msg))
 
     def _preserve_anemoi_metadata(
         self,

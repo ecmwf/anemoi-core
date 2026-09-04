@@ -26,6 +26,7 @@ from anemoi.training.checkpoint.builder import build_checkpoint_pipeline
 from anemoi.training.checkpoint.builder import resumes_via_lightning
 from anemoi.training.checkpoint.exceptions import CheckpointConfigError
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
+from anemoi.training.checkpoint.sources.base import CheckpointSource
 
 _FREEZING_TARGET = "anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage"
 _RUN_SOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
@@ -329,14 +330,35 @@ def test_resumes_via_lightning(loading: str | None, expected: bool) -> None:
     assert resumes_via_lightning(OmegaConf.create({"training": {"checkpoint": checkpoint}})) is expected
 
 
-def test_resume_that_resolves_nothing_fails_on_rank_zero(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+class _NothingSource(CheckpointSource):
+    """A source whose resolve step finds nothing on every rank."""
+
+    async def resolve(self, context: CheckpointContext) -> Path | None:
+        del context
+        return None
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        return context
+
+
+def test_resume_that_resolves_nothing_fails_on_rank_zero(monkeypatch: pytest.MonkeyPatch) -> None:
     """A resume whose source finds no checkpoint must not start from scratch in silence.
 
-    The shipped ``source=run`` preset carries ``run_id: null``; without ``+run_id=`` the
-    RunIdSource resolves nothing. That is a configuration error on rank 0, not a fresh run.
+    A source that resolves ``None`` on rank 0 (a deferral is a non-zero-rank event) is
+    a configuration error, not a fresh run: the marker would otherwise let the
+    pipeline's weights check through and Lightning would receive ``ckpt_path=None``.
     """
     for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
         monkeypatch.delenv(var, raising=False)
+    cfg = OmegaConf.create({"training": {"checkpoint": {"source": {"_target_": f"{__name__}._NothingSource"}}}})
+    pipeline = build_checkpoint_pipeline(cfg)
+
+    with pytest.raises(CheckpointConfigError, match=r"resolved no checkpoint file"):
+        asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
+
+
+def test_resume_with_the_run_preset_and_no_run_id_names_the_key(tmp_path: Path) -> None:
+    """The shipped ``source=run`` preset carries ``run_id: null``; forgetting ``+run_id=`` is named as such."""
     cfg = OmegaConf.create(
         {
             "training": {"checkpoint": {"source": {"_target_": _RUN_SOURCE, "run_id": None}}},
@@ -345,7 +367,7 @@ def test_resume_that_resolves_nothing_fails_on_rank_zero(tmp_path: Path, monkeyp
     )
     pipeline = build_checkpoint_pipeline(cfg)
 
-    with pytest.raises(CheckpointConfigError, match="resolved no checkpoint file"):
+    with pytest.raises(CheckpointConfigError, match="requires a run_id"):
         asyncio.run(pipeline.execute(CheckpointContext(model=_EncoderNet(), config=cfg)))
 
 

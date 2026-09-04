@@ -93,12 +93,20 @@ async def test_run_source_fork_loads_parent_checkpoint(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_source_no_run_id_is_passthrough(tmp_path: Path) -> None:
-    """No run_id -> no-op pass-through (nothing resolved)."""
+async def test_run_source_no_run_id_raises_naming_the_key(tmp_path: Path) -> None:
+    """No run_id names the missing key instead of passing through.
+
+    The shipped preset ships ``run_id: null``, so selecting
+    ``training/checkpoint/source=run`` and forgetting the id is the most likely
+    first mistake with this source. Passing through left ``checkpoint_data``
+    unset, and the loading stage then reported a corrupted or incompatible
+    checkpoint file — for a file that was never opened. That fires on a single
+    GPU, with no distributed setup involved.
+    """
     context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
-    result = await RunIdSource().process(context)
-    assert result.checkpoint_path is None
-    assert result.checkpoint_data is None
+
+    with pytest.raises(CheckpointConfigError, match="requires a run_id"):
+        await RunIdSource().process(context)
 
 
 @pytest.mark.asyncio
@@ -216,3 +224,45 @@ async def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeyp
 
     assert await RunIdSource(run_id="run_missing").resolve(context) is None
     assert context.checkpoint_path is None
+
+
+@pytest.mark.parametrize("unreadable", [False, True], ids=["missing", "unreadable"])
+async def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable: bool,
+) -> None:
+    """A rank that defers to rank 0 must not claim the checkpoint is corrupted.
+
+    Both deferral paths pass through with no checkpoint_data. The loading stage
+    then read that as "checkpoint data is not a dictionary ... might indicate a
+    corrupted or incompatible checkpoint file" — about a file it never opened. On
+    a 4-GPU resume that is what three of the four ranks print, burying rank 0's
+    correct message in an aggregated log.
+    """
+    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+    from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+    if unreadable and hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root bypasses file permission bits, so a chmod-000 file stays readable")
+
+    root = tmp_path / "job" / "checkpoints"
+    context = CheckpointContext(config=_config(root), model=torch.nn.Linear(2, 2))
+    monkeypatch.setattr("anemoi.training.checkpoint.sources.run.is_rank_zero", lambda: False)
+
+    if unreadable:
+        run_dir = root.parent / "run-x"
+        run_dir.mkdir(parents=True)
+        ckpt = run_dir / "last.ckpt"
+        ckpt.write_bytes(b"weights")
+        ckpt.chmod(0o000)
+
+    try:
+        result = await RunIdSource(run_id="run-x").process(context)
+        assert result.metadata["source_deferred"] is True
+
+        with pytest.raises(CheckpointLoadError, match="rank 0"):
+            await WeightsOnlyLoader().process(result)
+    finally:
+        if unreadable:
+            ckpt.chmod(0o600)

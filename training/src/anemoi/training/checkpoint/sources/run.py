@@ -121,15 +121,32 @@ class RunIdSource(CheckpointSource):
     async def resolve(self, context: CheckpointContext) -> Path | None:
         """Resolve the run checkpoint path and publish it on the context.
 
-        Returns ``None`` (context untouched) when ``run_id`` is unset. On a
-        missing or unreadable checkpoint, raises ``RuntimeError`` on rank 0 and
-        defers (warns, returns ``None``) on other ranks — mirroring the legacy
-        resolver. The path is canonicalised through :meth:`LocalSource.resolve`
-        so it is the same file an explicit local checkpoint would resolve to.
+        Returns ``None`` (context untouched) on a rank that defers. On a missing or
+        unreadable checkpoint, raises ``RuntimeError`` on rank 0 and defers (warns,
+        returns ``None``) on other ranks — mirroring the legacy resolver. A deferring
+        rank records ``source_deferred`` on the context so a loading stage can say
+        "rank 0 is reporting the real error" instead of failing with a message about
+        a corrupted file. The path is canonicalised through
+        :meth:`LocalSource.resolve` so it is the same file an explicit local
+        checkpoint would resolve to.
+
+        Raises
+        ------
+        CheckpointConfigError
+            If ``run_id`` is unset. The shipped preset ships ``run_id: null``, so
+            selecting ``training/checkpoint/source=run`` and forgetting the id is
+            the most likely first mistake; passing through left the loader to
+            report a corrupted checkpoint for a file that was never opened.
         """
         if self.run_id is None:
-            LOGGER.debug("RunIdSource: no run_id set; pass-through.")
-            return None
+            from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+            msg = (
+                "RunIdSource requires a run_id: training.checkpoint.source.run_id is unset. "
+                "The config group ships it as null, so pass it explicitly, e.g. "
+                "training/checkpoint/source=run +training.checkpoint.source.run_id=<id>."
+            )
+            raise CheckpointConfigError(msg, config_path="training.checkpoint.source.run_id")
 
         path = self.resolve_path(
             context.config,
@@ -144,6 +161,7 @@ class RunIdSource(CheckpointSource):
                 msg = f"Could not find checkpoint for run '{self.run_id}': {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not found at %s; deferring the error to rank 0.", path)
+            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not found: {path}")
             return None
 
         # An unreadable checkpoint (e.g. wrong permissions) is handled the same way as a
@@ -154,6 +172,7 @@ class RunIdSource(CheckpointSource):
                 msg = f"Checkpoint for run '{self.run_id}' is not readable: {path}"
                 raise RuntimeError(msg)
             LOGGER.warning("RunIdSource: checkpoint not readable at %s; deferring the error to rank 0.", path)
+            context.update_metadata(source_deferred=True, source_deferred_reason=f"checkpoint not readable: {path}")
             return None
 
         resolution = "fork" if self.fork else "resume"
@@ -165,8 +184,8 @@ class RunIdSource(CheckpointSource):
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Resolve the run checkpoint path and load it via :class:`LocalSource`.
 
-        Returns the context unchanged when ``run_id`` is unset or the error was
-        deferred to rank 0 (see :meth:`resolve`).
+        Returns the context unchanged when the error was deferred to rank 0 (see
+        :meth:`resolve`); an unset ``run_id`` raises there.
         """
         if await self.resolve(context) is None:
             return context

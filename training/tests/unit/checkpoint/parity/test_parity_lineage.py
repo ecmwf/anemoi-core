@@ -351,7 +351,7 @@ def test_builder_malformed_source_target_raises_config_error() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Acquisition-layer rank-0 gate (run.py:_is_rank_zero)
+# Acquisition-layer rank-0 gate (sources/base.py:is_rank_zero, used by run.py)
 # ---------------------------------------------------------------------------
 
 
