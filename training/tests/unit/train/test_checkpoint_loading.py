@@ -1321,3 +1321,54 @@ def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.Log
         BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
     assert "behind the installed anemoi-models" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_load_via_checkpoint_pipeline_works_inside_a_running_event_loop(tmp_path: Path) -> None:
+    """Building the model from an already-async context must not raise.
+
+    The pipeline runs inside a ``cached_property``, so ``asyncio.run`` there raised
+    ``RuntimeError: asyncio.run() cannot be called from a running event loop`` for
+    anyone constructing the trainer from a Jupyter kernel, an asyncio job launcher,
+    or an ``async def test_`` (which this repo's ``asyncio_mode = auto`` makes a
+    one-line trap). ``CheckpointPipeline.execute_sync`` exists precisely to detect a
+    running loop and offload to a thread; it had no caller.
+
+    Being an ``async def`` test IS the reproduction: pytest-asyncio runs it in a live
+    loop, so the old call raises here and the new one does not.
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
+
+    run_id = "run_async"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": _RUNSOURCE, "run_id": run_id},
+                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader", "strict": False},
+                },
+            },
+            "system": {"output": {"checkpoints": {"root": str(ckpt_dir)}}},
+        },
+    )
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices={"data": DummyIndex()},
+        start_from_checkpoint=True,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert result is model
+    for key, value in new_state.items():
+        assert torch.equal(result.state_dict()[key], value)

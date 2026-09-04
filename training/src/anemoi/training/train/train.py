@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 
-import asyncio
 import datetime
 import logging
 from abc import ABC
@@ -481,7 +480,13 @@ class AnemoiTrainer(ABC):
             load_checkpoint=self.start_from_checkpoint,
         )
 
-        executed = asyncio.run(pipeline.execute(context))
+        # execute_sync, not asyncio.run: this runs inside a cached_property, and
+        # asyncio.run raises "cannot be called from a running event loop" whenever the
+        # trainer is constructed from an already-async context (a Jupyter kernel, an
+        # asyncio job launcher, or an `async def test_` under this repo's
+        # asyncio_mode = auto). execute_sync detects a running loop and offloads to a
+        # thread; with no loop running it is the identical call.
+        executed = pipeline.execute_sync(context)
         loaded_model = executed.model
 
         # The file the source stage resolved is what Lightning's ckpt_path reads on a
