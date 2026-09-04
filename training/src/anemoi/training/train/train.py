@@ -317,8 +317,11 @@ class AnemoiTrainer(ABC):
         loaded_datasets = []
         initialized_datasets = []
 
-        # Check if checkpoint has multi-dataset format
-        if not isinstance(model._ckpt_model_name_to_index, dict):
+        # The loader restores this from hyper_parameters.data_indices; an inference
+        # checkpoint or a raw state_dict save carries none, so there is nothing to
+        # compare against (the units check below treats its metadata the same way).
+        ckpt_name_to_index = getattr(model, "_ckpt_model_name_to_index", None)
+        if not isinstance(ckpt_name_to_index, dict):
             return
 
         # Opt-in: allow fine-tuning into a model with FEWER variables (the current data is a
@@ -327,11 +330,10 @@ class AnemoiTrainer(ABC):
 
         # Validate each dataset in current config against checkpoint
         for dataset_name, data_indices in self.data_indices.items():
-            if dataset_name in model._ckpt_model_name_to_index:
+            if dataset_name in ckpt_name_to_index:
                 # Dataset found in checkpoint - validate variables match
-                ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
                 data_indices.compare_variables(
-                    ckpt_name_to_index,
+                    ckpt_name_to_index[dataset_name],
                     data_indices.name_to_index,
                     allow_subset=allow_subset,
                 )
@@ -345,7 +347,7 @@ class AnemoiTrainer(ABC):
                 initialized_datasets.append(dataset_name)
 
         # Check for datasets in checkpoint but not in config
-        ignored_datasets = [name for name in model._ckpt_model_name_to_index if name not in self.data_indices]
+        ignored_datasets = [name for name in ckpt_name_to_index if name not in self.data_indices]
         if ignored_datasets:
             for ignored_dataset in ignored_datasets:
                 LOGGER.warning(

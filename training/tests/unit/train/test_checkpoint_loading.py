@@ -262,6 +262,28 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
     assert len(era5_index.compare_called_with) == 0
 
 
+def test_validate_transfer_learning_skips_a_checkpoint_without_dataset_metadata() -> None:
+    """A checkpoint that carried no ``data_indices`` leaves nothing to compare, not an AttributeError.
+
+    ``preserve_anemoi_metadata`` sets ``_ckpt_model_name_to_index`` only when the
+    checkpoint carries ``hyper_parameters.data_indices``; an inference checkpoint or a
+    raw state_dict save (the documented S3 + weights-only recipe) does not. The
+    validator runs for every loader, so it has to read the attribute defensively, as
+    the units check already does.
+    """
+    era5_index = DummyIndexWithCompare()
+    era5_index.name_to_index = {"t2m": 0}
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
+    model = torch.nn.Linear(2, 2)  # a real module: no attribute, and nn.Module raises AttributeError on access
+
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+
+    assert era5_index.compare_called_with == []
+
+
 def test_validate_transfer_learning_remove_dataset() -> None:
     """Test removing a dataset during transfer learning (Scenario A+B → A)."""
     # Setup: checkpoint has ERA5 + CERRA, config has only ERA5
