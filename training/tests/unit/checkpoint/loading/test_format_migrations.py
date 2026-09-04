@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Regression tests for LoadingStrategy._apply_format_migrations.
+"""Regression tests for the format-migration step of ``apply_checkpoint_corrections``.
 
 Old checkpoints carrying the pre-chunking attention-head layout must be
 rewritten before any ``load_state_dict`` attempt, and up-to-date ones must be
@@ -132,7 +132,7 @@ def test_apply_format_migrations_replaces_checkpoint_data(
     """Helper reassigns context.checkpoint_data to the migrated dict."""
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt())
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     fake_chunking_migration.assert_called_once()
     assert context.checkpoint_data["_migration_applied"] is True
@@ -142,7 +142,7 @@ def test_no_checkpoint_data_is_noop() -> None:
     """No checkpoint_data → silent no-op (no ImportError, no crash)."""
     context = CheckpointContext(model=_Model(), checkpoint_data=None)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert context.checkpoint_data is None
 
@@ -154,7 +154,7 @@ def test_apply_trainable_edge_perm_migration_runs_model_dependent_migration(
     model = _Model()
     context = CheckpointContext(model=model, checkpoint_data=_ckpt())
 
-    WeightsOnlyLoader()._apply_trainable_edge_perm_migration(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     fake_edge_perm_migration.assert_called_once()
     _, called_model = fake_edge_perm_migration.call_args.args
@@ -181,7 +181,7 @@ def test_edge_perm_migration_noop_without_model() -> None:
     ckpt = _ckpt()
     context = CheckpointContext(model=None, checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_trainable_edge_perm_migration(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert context.checkpoint_data is ckpt
 
@@ -198,7 +198,7 @@ def test_missing_migration_module_is_noop(monkeypatch: pytest.MonkeyPatch) -> No
     ckpt = _ckpt()
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert context.checkpoint_data is ckpt
 
@@ -218,7 +218,7 @@ def test_incomplete_checkpoint_shape_is_swallowed(monkeypatch: pytest.MonkeyPatc
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
     # Should not propagate the KeyError
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     # And should leave the checkpoint untouched
     assert context.checkpoint_data is ckpt
@@ -243,7 +243,7 @@ def test_unexpected_migration_error_propagates(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(TypeError):
         # buggy_migrate(_ckpt) is missing _extra → TypeError from the call itself
-        WeightsOnlyLoader()._apply_format_migrations(context)
+        WeightsOnlyLoader()._apply_corrections(context)
 
 
 # ---------------------------------------------------------------------------
@@ -294,7 +294,7 @@ def test_ledger_recorded_migration_is_not_reapplied(spy_chunking_migration: Magi
     ckpt["migrations"] = _ledger("1762857428_chunking_fix")
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     spy_chunking_migration.assert_not_called()
     assert context.checkpoint_data is ckpt
@@ -311,7 +311,7 @@ def test_empty_ledger_still_migrates(spy_chunking_migration: MagicMock) -> None:
     ckpt["migrations"] = []
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     spy_chunking_migration.assert_called_once()
     assert context.checkpoint_data["_migration_applied"] is True
@@ -342,7 +342,7 @@ def test_processor_without_usable_geometry_is_not_migrated(
     ckpt = _ckpt(processor)
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert spy_chunking_migration.call_count == 0, f"migration ran for {shape}"
     assert context.checkpoint_data is ckpt
@@ -353,7 +353,7 @@ def test_raw_state_dict_save_is_not_migrated(spy_chunking_migration: MagicMock) 
     ckpt = _ckpt_without_hparams()
     context = CheckpointContext(model=_Model(), checkpoint_data=ckpt)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     spy_chunking_migration.assert_not_called()
     assert context.checkpoint_data is ckpt
@@ -435,7 +435,7 @@ def test_on_disk_checkpoint_with_incomplete_ledger_is_migrated_by_sync(
     migrator = use_migrator(_FakeMigrator(registered=()))
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert migrator.sync_calls == [ckpt_file]
     assert context.checkpoint_data["_synced"] is True
@@ -460,7 +460,7 @@ def test_sync_incompatible_checkpoint_raises_checkpoint_incompatible_error(
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
 
     with pytest.raises(CheckpointIncompatibleError, match="cannot be migrated"):
-        WeightsOnlyLoader()._apply_format_migrations(context)
+        WeightsOnlyLoader()._apply_corrections(context)
 
 
 def test_sync_rejecting_a_non_training_checkpoint_falls_back_in_memory(
@@ -479,7 +479,7 @@ def test_sync_rejecting_a_non_training_checkpoint_falls_back_in_memory(
     use_migrator(_FakeMigrator(sync_error=ValueError("You can only migrate training checkpoint")))
     context = CheckpointContext(model=_Model(), checkpoint_data=_ckpt(), checkpoint_path=ckpt_file)
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     spy_chunking_migration.assert_called_once()
     assert context.checkpoint_data["_migration_applied"] is True
@@ -498,7 +498,7 @@ def test_checkpoint_path_pointing_nowhere_falls_back_in_memory(
         checkpoint_path=tmp_path / "already-deleted.ckpt",
     )
 
-    WeightsOnlyLoader()._apply_format_migrations(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert migrator.sync_calls == []
     spy_chunking_migration.assert_called_once()

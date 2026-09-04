@@ -122,7 +122,7 @@ def test_model_output_idx_reinjected_during_refresh() -> None:
         ),
     )
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     refreshed = context.checkpoint_data["state_dict"]
     assert torch.equal(refreshed["model.model_output_idx"], model.model.state_dict()["model_output_idx"])

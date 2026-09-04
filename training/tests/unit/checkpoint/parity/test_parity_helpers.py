@@ -10,10 +10,11 @@
 """Edge-case coverage for the shared Lightning-parity helpers in ``loading.base``.
 
 These context-free functions are the single home for the checkpoint-load parity
-steps, shared between the pipeline loading strategies (via their ``_*`` wrappers)
-and ``AnemoiLightningModule.on_load_checkpoint``. The tests here drive the guard
-and error-tolerance branches that the existing suites do not reach, plus the
-end-to-end ordering of the shared functions inside two concrete loaders.
+steps, shared between the pipeline loading strategies (via
+``apply_checkpoint_corrections``) and ``BaseTrainingModule.on_load_checkpoint``.
+The tests here drive the guard and error-tolerance branches that the existing
+suites do not reach, plus the end-to-end ordering of the shared functions inside
+two concrete loaders.
 """
 
 from __future__ import annotations
@@ -117,8 +118,12 @@ def test_edge_perm_migration_swallows_key_error(monkeypatch: pytest.MonkeyPatch)
 # --- refresh_checkpoint_processors ----------------------
 
 
-def test_refresh_processors_none_model_drops_without_inject() -> None:
-    """With ``model=None`` the processor keys are dropped and nothing is re-injected."""
+def test_refresh_processors_none_model_keeps_the_entries() -> None:
+    """With ``model=None`` nothing can be re-injected, so nothing is dropped either.
+
+    Dropping the processor entries without replacements would hand a strict load a
+    checkpoint with missing keys; the drop and the re-injection are one operation.
+    """
     checkpoint = {
         "state_dict": {
             "model.pre_processors.w": torch.zeros(2),
@@ -130,8 +135,8 @@ def test_refresh_processors_none_model_drops_without_inject() -> None:
     refresh_checkpoint_processors(checkpoint, None, update_states=True, update_tendencies=False)
 
     state_dict = checkpoint["state_dict"]
-    assert "model.pre_processors.w" not in state_dict
-    assert "model.post_processors.b" not in state_dict
+    assert torch.equal(state_dict["model.pre_processors.w"], torch.zeros(2))
+    assert torch.equal(state_dict["model.post_processors.b"], torch.zeros(1))
     assert torch.equal(state_dict["model.encoder.x"], torch.ones(3))
 
 
@@ -205,21 +210,38 @@ def test_extract_variables_metadata_none_checkpoint_is_a_safe_noop() -> None:
 # --- shared-function ordering inside concrete loaders ---
 
 
-def _install_order_recorders(loader: LoadingStrategy, model: nn.Module, calls: list[str]) -> None:
-    """Replace the six shared ``_*`` wrappers and the model load with order recorders.
+def _install_order_recorders(
+    loader: LoadingStrategy,
+    model: nn.Module,
+    calls: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replace the shared correction functions, the metadata wrappers and the model load with order recorders.
 
-    The real ``_extract_state_dict`` and ``_mark_weights_loaded`` stay live so the
-    strategy still performs an actual (recorded) ``load_state_dict`` call.
+    The three corrections are recorded at module level (``apply_checkpoint_corrections``
+    calls them by name); the metadata steps are recorded on the loader. The real
+    ``_extract_state_dict`` and ``_mark_weights_loaded`` stay live so the strategy still
+    performs an actual (recorded) ``load_state_dict`` call.
     """
-    shared_wrappers = {
-        "_apply_format_migrations": "format",
-        "_refresh_checkpoint_processors": "refresh",
-        "_apply_trainable_edge_perm_migration": "edge_perm",
+    corrections = {
+        "apply_checkpoint_format_migrations": "format",
+        "apply_trainable_edge_perm_migration": "edge_perm",
+        "refresh_checkpoint_processors": "refresh",
+    }
+    for function_name, label in corrections.items():
+
+        def _correction_recorder(checkpoint: object, *_args: object, _label: str = label, **_kwargs: object) -> object:
+            calls.append(_label)
+            return checkpoint
+
+        monkeypatch.setattr(loading_base, function_name, _correction_recorder)
+
+    metadata_wrappers = {
         "_warn_on_hparams_divergence": "warn",
         "_preserve_anemoi_metadata": "preserve",
         "_extract_variables_metadata": "extract",
     }
-    for method_name, label in shared_wrappers.items():
+    for method_name, label in metadata_wrappers.items():
 
         def _recorder(*_args: object, _label: str = label, **_kwargs: object) -> None:
             calls.append(_label)
@@ -236,22 +258,29 @@ def _install_order_recorders(loader: LoadingStrategy, model: nn.Module, calls: l
 
 
 @pytest.mark.asyncio
-async def test_weights_only_invokes_shared_parity_functions_in_order() -> None:
-    """WeightsOnlyLoader runs all six shared parity functions bracketing the load."""
+async def test_weights_only_invokes_shared_parity_functions_in_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """WeightsOnlyLoader runs the corrections (in their one order) and the metadata steps around the load.
+
+    The order inside the corrections is format migrations, edge-perm, refresh: the
+    order ``on_load_checkpoint`` has always used for ``ckpt_path`` loads, and the safe
+    one, since edge-perm takes the live model and may rebuild the dict.
+    """
     model = _MiniModel()
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
     loader = WeightsOnlyLoader()
     calls: list[str] = []
-    _install_order_recorders(loader, model, calls)
+    _install_order_recorders(loader, model, calls, monkeypatch)
 
     await loader.process(context)
 
-    assert calls == ["format", "refresh", "edge_perm", "load", "warn", "preserve", "extract"]
+    assert calls == ["format", "edge_perm", "refresh", "load", "warn", "preserve", "extract"]
 
 
 @pytest.mark.asyncio
-async def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn() -> None:
-    """TransferLearningLoader runs the shared functions but omits the hparams warning.
+async def test_transfer_learning_invokes_shared_parity_functions_without_hparams_warn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """TransferLearningLoader runs the same corrections but omits the hparams warning.
 
     This is the corrected sequence for the aspect: it is NOT identical to
     WeightsOnlyLoader because ``_warn_on_hparams_divergence`` is not invoked here.
@@ -260,9 +289,9 @@ async def test_transfer_learning_invokes_shared_parity_functions_without_hparams
     context = CheckpointContext(model=model, checkpoint_data={"state_dict": model.state_dict()})
     loader = TransferLearningLoader(skip_mismatched=True)
     calls: list[str] = []
-    _install_order_recorders(loader, model, calls)
+    _install_order_recorders(loader, model, calls, monkeypatch)
 
     await loader.process(context)
 
-    assert calls == ["format", "refresh", "edge_perm", "load", "preserve", "extract"]
+    assert calls == ["format", "edge_perm", "refresh", "load", "preserve", "extract"]
     assert "warn" not in calls

@@ -32,10 +32,9 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.checkpoint.loading.base import apply_trainable_edge_perm_migration
+from anemoi.training.checkpoint.loading.base import apply_checkpoint_corrections
 from anemoi.training.checkpoint.loading.base import extract_checkpoint_variables_metadata
 from anemoi.training.checkpoint.loading.base import preserve_anemoi_metadata
-from anemoi.training.checkpoint.loading.base import refresh_checkpoint_processors
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -446,26 +445,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             **kwargs,
         )
 
-    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        # Shared processor-refresh parity step (see checkpoint.loading.base). Guard
-        # before reading self.model so a no-op refresh (both flags off or no state
-        # dict) does not require the model to exist.
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        if not (update_cfg.states or update_cfg.tendencies):
-            return
-        if not isinstance(checkpoint.get("state_dict"), dict):
-            return
-        refresh_checkpoint_processors(
-            checkpoint,
-            self.model,
-            update_states=update_cfg.states,
-            update_tendencies=update_cfg.tendencies,
-        )
-
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
-    def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
+    def on_load_checkpoint(self, checkpoint: dict[str, Any]) -> None:
         # The task's training runtime state (e.g. rollout step) is resume state the
         # checkpoint pipeline does not apply, so restore it regardless of the
         # parity-skip guard below.
@@ -481,11 +464,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if getattr(self, "weights_initialized", False):
             return
 
-        # Migrations are idempotent and mutate the checkpoint dict in place (the
-        # return is discarded so Lightning loads from the migrated dict). Order:
-        # edge_perm before the processor refresh; chunking_fix is not applied here.
-        apply_trainable_edge_perm_migration(checkpoint, self)
-        self._update_checkpoint_state_dict_for_load(checkpoint)
+        # Lightning holds a reference to this dict and loads from it after the hook,
+        # so a replacement (the ledger-driven migration returns a new object) is
+        # written back in place rather than rebound.
+        corrected = apply_checkpoint_corrections(checkpoint, self, self.config)
+        if corrected is not checkpoint:
+            checkpoint.clear()
+            checkpoint.update(corrected)
 
         preserve_anemoi_metadata(self, checkpoint)
         extract_checkpoint_variables_metadata(self, checkpoint)

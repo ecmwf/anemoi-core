@@ -21,21 +21,19 @@ shipped (Issue #495): ``AnemoiTrainer.model`` builds and runs the pipeline at
 model-construction time, so a configured ``training.checkpoint`` loading
 strategy owns weight loading. For the weights-only, transfer-learning and
 cold-start paths Lightning never sees the checkpoint (its ``ckpt_path`` restore
-is suppressed), so each strategy must itself perform every step that
-``AnemoiLightningModule.on_load_checkpoint`` would have done — otherwise the
+is suppressed), so each strategy must itself apply every correction that
+``BaseTrainingModule.on_load_checkpoint`` would have applied — otherwise the
 loaded state dict would silently differ from the legacy path.
 
-Those parity steps live as shared, context-free functions at the bottom of this
-module (:func:`apply_checkpoint_format_migrations`,
-:func:`apply_trainable_edge_perm_migration`,
-:func:`refresh_checkpoint_processors`, :func:`preserve_anemoi_metadata`,
-:func:`extract_checkpoint_variables_metadata`,
-:func:`warn_on_hparams_divergence`). The ``LoadingStrategy._*`` methods are thin
-wrappers over them, and ``AnemoiLightningModule.on_load_checkpoint`` calls the
-same functions, so the algorithm lives in exactly one place. Warm start keeps
-Lightning's ``ckpt_path`` restore (to recover optimizer/epoch state), so
-``on_load_checkpoint`` runs the shared steps for that path while the loading
-strategies run them for the non-Lightning paths.
+Those corrections are one function, :func:`apply_checkpoint_corrections`, with
+one fixed order: format migrations, the trainable-edge-permutation migration,
+then the processor-statistics refresh. The pipeline strategies call it on the
+dict a source produced (via :meth:`LoadingStrategy._apply_corrections`);
+``BaseTrainingModule.on_load_checkpoint`` calls it on the dict Lightning is
+about to load. The metadata steps (:func:`preserve_anemoi_metadata`,
+:func:`extract_checkpoint_variables_metadata`) and the weights-only hparams
+check (:func:`warn_on_hparams_divergence`) stay separate because they read the
+checkpoint rather than change it.
 
 Example
 -------
@@ -170,51 +168,21 @@ class LoadingStrategy(PipelineStage):
         """
         preserve_anemoi_metadata(model, checkpoint_data)
 
-    def _apply_format_migrations(self, context: CheckpointContext) -> None:
-        """Bring ``context.checkpoint_data`` up to date with the migration ledger.
+    def _apply_corrections(self, context: CheckpointContext) -> None:
+        """Run :func:`apply_checkpoint_corrections` on ``context.checkpoint_data``.
 
-        Thin wrapper over :func:`apply_checkpoint_format_migrations`; reassigns the
-        (possibly migrated) checkpoint onto the context. ``context.checkpoint_path``
-        is forwarded so an on-disk checkpoint gets the full ledger-driven migration
-        rather than the in-memory ``chunking_fix`` fallback.
+        Reassigns the (possibly replaced) checkpoint onto the context.
+        ``context.checkpoint_path`` is forwarded so an on-disk checkpoint gets the
+        full ledger-driven migration rather than the in-memory ``chunking_fix``
+        fallback. A context without checkpoint data is left untouched.
         """
         if context.checkpoint_data is None:
             return
-        context.checkpoint_data = apply_checkpoint_format_migrations(
+        context.checkpoint_data = apply_checkpoint_corrections(
             context.checkpoint_data,
-            context.checkpoint_path,
-        )
-
-    def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
-        """Replace pre/post processor weights in the checkpoint with the current model's.
-
-        Thin wrapper over :func:`refresh_checkpoint_processors`; reads
-        ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``
-        defensively (a missing config layer disables the refresh).
-        """
-        if context.checkpoint_data is None:
-            return
-        update_cfg = getattr(
-            getattr(getattr(context, "config", None), "training", None),
-            "update_ds_stats_on_ckpt_load",
-            None,
-        )
-        if update_cfg is None:
-            return
-        # refresh_checkpoint_processors / _inject_model_weights operate on the inner
-        # AnemoiModelInterface: its state_dict keys lack the LightningModule's leading
-        # ``model.`` (which _inject_model_weights re-adds), so they re-inject at the
-        # correct ``model.<processor>...`` level. This matches the legacy contract
-        # (on_load_checkpoint passes ``self.model``). ``context.model`` is the
-        # LightningModule, so pass its inner ``.model``; passing the LightningModule
-        # itself double-prefixes to ``model.model.*`` and breaks the strict warm-start
-        # load. ``getattr`` keeps the no-op path safe when no model is set.
-        inner_model = getattr(context.model, "model", None)
-        refresh_checkpoint_processors(
-            context.checkpoint_data,
-            inner_model,
-            update_states=bool(getattr(update_cfg, "states", False)),
-            update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
+            context.model,
+            context.config,
+            checkpoint_path=context.checkpoint_path,
         )
 
     def _mark_weights_loaded(self, model: nn.Module) -> None:
@@ -242,16 +210,6 @@ class LoadingStrategy(PipelineStage):
         """
         model.weights_initialized = True
         LOGGER.debug("Marked model weights as initialized")
-
-    def _apply_trainable_edge_perm_migration(self, context: CheckpointContext) -> None:
-        """Apply the runtime trainable-edge-permutation migration to the checkpoint.
-
-        Thin wrapper over :func:`apply_trainable_edge_perm_migration`; reassigns the
-        (possibly rewritten) checkpoint onto the context.
-        """
-        if context.checkpoint_data is None or context.model is None:
-            return
-        context.checkpoint_data = apply_trainable_edge_perm_migration(context.checkpoint_data, context.model)
 
     def _extract_variables_metadata(self, model: nn.Module, checkpoint_data: dict[str, Any]) -> None:
         """Populate ``model._ckpt_variables_metadata`` from the checkpoint.
@@ -451,14 +409,74 @@ def _inject_model_weights(
 # Shared Lightning-parity functions.
 #
 # These context-free functions are the single home for the checkpoint-load
-# parity steps. Both the pipeline loading strategies (via the thin
-# ``LoadingStrategy._*`` wrappers above) and the trainer's Lightning hook
-# (``AnemoiLightningModule.on_load_checkpoint``) call them, so the algorithm
-# lives in exactly one place. Each caller keeps its own assignment idiom: the
-# strategies reassign ``context.checkpoint_data = apply_*_migration(...)`` while
-# ``on_load_checkpoint`` discards the return and relies on the migration
-# mutating Lightning's checkpoint dict in place (its long-standing contract).
+# corrections. :func:`apply_checkpoint_corrections` composes the three that
+# change the checkpoint; both the pipeline loading strategies (via
+# ``LoadingStrategy._apply_corrections``) and the trainer's Lightning hook
+# (``BaseTrainingModule.on_load_checkpoint``) call it, so the algorithm and its
+# order live in exactly one place.
 # ---------------------------------------------------------------------------
+
+
+def apply_checkpoint_corrections(
+    checkpoint: dict[str, Any] | None,
+    model: nn.Module | None,
+    config: Any,
+    *,
+    checkpoint_path: Any = None,
+) -> dict[str, Any] | None:
+    """Bring a checkpoint into line with the installed anemoi-models and the live model.
+
+    The one place the load-time corrections live, in one fixed order:
+
+    1. :func:`apply_checkpoint_format_migrations` — the ledger-driven path may
+       replace the dict wholesale, so it runs first;
+    2. :func:`apply_trainable_edge_perm_migration` — takes the live model;
+    3. :func:`refresh_checkpoint_processors` — driven by
+       ``config.training.update_ds_stats_on_ckpt_load``.
+
+    The edge-permutation migration runs before the refresh because it takes the
+    live model and may rebuild the state dict: run afterwards it would discard the
+    processor buffers the refresh injected. It is also the order the
+    ``on_load_checkpoint`` hook has always used for ``ckpt_path`` loads.
+
+    Called by ``BaseTrainingModule.on_load_checkpoint`` on the dict Lightning is
+    about to load (resume) and by the pipeline loading strategies on the dict a
+    source produced.
+
+    Parameters
+    ----------
+    checkpoint : dict or None
+        The loaded checkpoint. Returned unchanged when ``None``.
+    model : nn.Module or None
+        The training module. The edge-permutation migration takes it as is; the
+        processor refresh reads its inner ``.model`` (the ``AnemoiModelInterface``),
+        whose state-dict keys lack the leading ``model.`` that the refresh re-adds.
+    config : Any
+        The run config; ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``
+        is read defensively (a missing layer disables the refresh).
+    checkpoint_path : Path or str, optional
+        The checkpoint's file, when one exists, so the ledger-driven migration can run.
+
+    Returns
+    -------
+    dict or None
+        The corrected checkpoint. The same object when every step worked in place; a
+        new object only when the ledger-driven migration replaced it.
+    """
+    if checkpoint is None:
+        return checkpoint
+
+    checkpoint = apply_checkpoint_format_migrations(checkpoint, checkpoint_path)
+    checkpoint = apply_trainable_edge_perm_migration(checkpoint, model)
+
+    update_cfg = getattr(getattr(config, "training", None), "update_ds_stats_on_ckpt_load", None)
+    refresh_checkpoint_processors(
+        checkpoint,
+        getattr(model, "model", None),
+        update_states=bool(getattr(update_cfg, "states", False)),
+        update_tendencies=bool(getattr(update_cfg, "tendencies", False)),
+    )
+    return checkpoint
 
 
 def apply_checkpoint_format_migrations(
@@ -580,8 +598,12 @@ def refresh_checkpoint_processors(
     Honours ``training.update_ds_stats_on_ckpt_load.{states,tendencies}``: drops the
     matching ``model.(pre|post)_processors[_tendencies].*`` keys and re-injects them
     from ``model`` (plus any ``model_output_idx`` buffers). Mutates the state dict in
-    place. A no-op when neither flag is set, ``model`` is ``None``, or no state dict
-    is present.
+    place. A no-op when neither flag is set or no state dict is present.
+
+    The drop and the re-injection are one operation: without a model to re-inject
+    from, nothing is dropped either, so a checkpoint is never left missing the
+    processor entries a strict load needs. Dropping entries the model cannot replace
+    (a model without those processors) is legitimate and is logged as a warning.
     """
     if not (update_states or update_tendencies):
         return
@@ -597,8 +619,23 @@ def refresh_checkpoint_processors(
     if not prefixes:
         return
 
+    if model is None:
+        LOGGER.warning(
+            "Processor refresh requested (update_ds_stats_on_ckpt_load) but no model was given to "
+            "re-inject from; keeping the checkpoint's processor entries unchanged",
+        )
+        return
+
     removed = _drop_keys_with_prefix(state_dict, prefixes)
-    injected = _inject_model_weights(state_dict, model, prefixes) if model is not None else 0
+    injected = _inject_model_weights(state_dict, model, prefixes)
+    if removed and not injected:
+        LOGGER.warning(
+            "Processor refresh dropped %d checkpoint entries under %s but the model has none to "
+            "re-inject; the loaded model keeps its own processor statistics",
+            removed,
+            prefixes,
+        )
+        return
     LOGGER.debug(
         "Refreshed checkpoint processors: removed %d stale entries, injected %d from current model",
         removed,
