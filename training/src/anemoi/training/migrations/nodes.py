@@ -31,6 +31,12 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def parents_head(key: str) -> tuple[list[str], str]:
+    """Returns the parent prefix of the key, and its head."""
+    parts = key.split(".")
+    return parts[:-1], parts[-1]
+
+
 class Node:
     """Nodes are the base for the Config object.
 
@@ -95,37 +101,6 @@ class Node:
         """The resolved OmegaConf value."""
         return OmegaConf.to_object(self.cfg)
 
-    def set_comments(self, before: str | None = None, inline: str | None = None, after: str | None = None) -> None:
-        """Adds comments in the config.
-
-        Parameters
-        ----------
-        before : str | None, default None
-            Comment to add before the node.
-        inline : str | None, default None
-            Comment to add inline.
-        after : str | None, default None
-            Comment to add after.
-        """
-        if before is not None:
-            if self.yaml_node.comment_before is not None:
-                before = f"{before}\n{self.yaml_node.comment_before}"
-            self.yaml_node.comment_before = before
-        if inline is not None:
-            if self.yaml_node.comment is not None:
-                inline = f"{self.yaml_node.comment} {inline}"
-            self.yaml_node.comment = inline
-
-        if after is not None:
-            if self.yaml_node.comment_after is not None:
-                after = f"{self.yaml_node.comment_after}\n{after}"
-            try:
-                self.yaml_node.comment_after = after
-            except ValueError:
-                if self.yaml_node.comment is not None:
-                    after = f"{self.yaml_node.comment} {after}"
-                self.yaml_node.comment = after
-
     def __getitem__(self, key: str | int) -> Node:
         """Gets the key while asserting that this node is a NodeContainer.
 
@@ -175,7 +150,7 @@ class Node:
             New value to set.
         """
         if not isinstance(self, NodeContainer):
-            msg = "This node is not a NodeContainer."
+            msg = "Cannot set item from a non NodeContainer Node."
             raise TypeError(msg)
 
         self.yaml[key] = value
@@ -193,59 +168,12 @@ class Node:
             Key to delete.
         """
         if not isinstance(self, NodeContainer):
-            msg = "This node is not a NodeContainer."
+            msg = "Cannot delete item from a non NodeContainer Node."
             raise TypeError(msg)
 
         del self.yaml[key]
         del self.cfg[key]
         self._interpolation_handler.update(self)
-
-    def __repr__(self) -> str:
-        return f"Node({self.prefix_str})"
-
-
-def parents_head(key: str) -> tuple[list[str], str]:
-    """Returns the parent prefix of the key, and its head."""
-    parts = key.split(".")
-    return parts[:-1], parts[-1]
-
-
-class NodeContainer(Node, ABC):
-    """Non-leaf Node object.
-
-    They can be of two implementations: NodeDict or NodeList.
-    """
-
-    def __init__(
-        self,
-        parent: NodeContainer,
-        yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
-        cfg_parent: DictConfig,
-        interpolation_handler: InterpolationHandler,
-        key: Any,
-        prefix: Sequence[str | int] = (),
-    ):
-        self._parent = parent
-        self.yaml_parent = yr_parent
-        self.cfg_parent = cfg_parent
-        self._interpolation_handler = interpolation_handler
-        self.key = key
-        self._prefix = prefix
-
-    @abstractmethod
-    def _is_key_valid(self, key: str | int) -> bool:
-        """Whether this node contains the given key.
-
-        Parameters
-        ----------
-        key : str | int
-            The key to check.
-
-        Returns
-        -------
-        bool
-            Whether the key is valid.
-        """
 
     def is_interpolation(self, key: str | int) -> bool:
         """Whether the key is an OmegaConf interpolation.
@@ -260,13 +188,10 @@ class NodeContainer(Node, ABC):
         bool
             Whether the key is an interpolation.
         """
+        if not isinstance(self, NodeContainer):
+            msg = "Only NodeContainers can have interpolations."
+            raise TypeError(msg)
         return OmegaConf.is_interpolation(self.cfg, key)
-
-    def __contains__(self, key: str | int) -> bool:
-        return self._is_key_valid(key)
-
-    def __len__(self) -> int:
-        return len(self.value)
 
     def has_key(self, parts: str | Sequence[str | int]) -> bool:
         """Whether this node tree contains the given sequence of keys.
@@ -381,6 +306,84 @@ class NodeContainer(Node, ABC):
         self.add_key(end, value)
         self._interpolation_handler.rename(parts, end)
         self.drop_key(start, remove_empty)
+
+    def set_comments(self, before: str | None = None, inline: str | None = None, after: str | None = None) -> None:
+        """Adds comments in the config.
+
+        Parameters
+        ----------
+        before : str | None, default None
+            Comment to add before the node.
+        inline : str | None, default None
+            Comment to add inline.
+        after : str | None, default None
+            Comment to add after.
+        """
+        if before is not None:
+            if self.yaml_node.comment_before is not None:
+                before = f"{before}\n{self.yaml_node.comment_before}"
+            self.yaml_node.comment_before = before
+        if inline is not None:
+            if self.yaml_node.comment is not None:
+                inline = f"{self.yaml_node.comment} {inline}"
+            self.yaml_node.comment = inline
+
+        if after is not None:
+            if self.yaml_node.comment_after is not None:
+                after = f"{self.yaml_node.comment_after}\n{after}"
+            try:
+                self.yaml_node.comment_after = after
+            except ValueError:
+                if self.yaml_node.comment is not None:
+                    after = f"{self.yaml_node.comment} {after}"
+                self.yaml_node.comment = after
+
+    def __repr__(self) -> str:
+        return f"Node({self.prefix_str})"
+
+
+class NodeContainer(Node, ABC):
+    """Non-leaf Node object.
+
+    They can be of two implementations: NodeDict or NodeList.
+    """
+
+    def __init__(
+        self,
+        parent: NodeContainer,
+        yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
+        cfg_parent: DictConfig,
+        interpolation_handler: InterpolationHandler,
+        key: Any,
+        prefix: Sequence[str | int] = (),
+    ):
+        self._parent = parent
+        self.yaml_parent = yr_parent
+        self.cfg_parent = cfg_parent
+        self._interpolation_handler = interpolation_handler
+        self.key = key
+        self._prefix = prefix
+
+    @abstractmethod
+    def _is_key_valid(self, key: str | int) -> bool:
+        """Whether this node contains the given key.
+
+        Parameters
+        ----------
+        key : str | int
+            The key to check.
+
+        Returns
+        -------
+        bool
+            Whether the key is valid.
+        """
+
+    def __contains__(self, key: str | int) -> bool:
+        return self._is_key_valid(key)
+
+    def __len__(self) -> int:
+        return len(self.value)
 
 
 class NodeDict(NodeContainer):
