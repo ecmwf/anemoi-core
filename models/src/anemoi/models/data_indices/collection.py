@@ -153,10 +153,15 @@ class IndexCollection:
             When True, tolerate the current data being a strict subset of the checkpoint's
             variables (fine-tuning into a model with FEWER variables, e.g. issue #838), as
             long as the shared variables keep the same relative order. The dropped variables
-            are logged and the check passes instead of raising: the variable-dependent
-            encoder/decoder layers are re-initialised for the reduced set by the loading
-            strategy, so their checkpoint ordering does not need to match. Default False
-            preserves the strict behaviour used by the sanity checks and normal training.
+            are logged and the check passes instead of raising, so the checkpoint's
+            variable ordering does not need to match. Default False preserves the strict
+            behaviour used by the sanity checks and normal training.
+
+            This relaxes the *check* only. The variable-dependent encoder/decoder layers
+            are re-initialised for the reduced set only by a loading strategy that skips
+            shape-mismatched parameters — ``TransferLearningLoader``, or
+            ``WeightsOnlyLoader`` / ``ColdStartLoader`` with ``skip_mismatched: true``. A
+            plain weights load still treats the shape difference as an error.
 
         Raises
         ------

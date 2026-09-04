@@ -237,6 +237,48 @@ shape.
 be reported in the run metadata as ``skipped_params``), or adjust your model so
 the shapes match.
 
+Size mismatch on a weights-only or cold-start load
+==================================================
+
+**Message** (example):
+
+.. code:: text
+
+   CheckpointLoadError: ... size mismatch for model.model.decoder...: copying a param
+   with shape torch.Size([100, ...]) from checkpoint, the shape in current model is
+   torch.Size([90, ...]).
+
+**What it means:** the checkpoint was trained on a different set of variables
+from the dataset you are training on, so the variable-dependent layers have a
+different width. ``strict: false`` does **not** cover this: PyTorch reports a
+size mismatch whether or not ``strict`` is set, because ``strict`` governs the
+key set rather than tensor shapes.
+
+**How to fix it**, in order of likelihood:
+
+#. It is the wrong checkpoint. Check the run id or path first; this error is
+   the main thing that catches that mistake.
+
+#. The reduction is deliberate (fine-tuning onto fewer variables, issue #838).
+   Set both:
+
+   .. code:: yaml
+
+      training:
+        allow_variable_subset: True     # relaxes the variable-order and units checks
+        checkpoint:
+          loading:
+            _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
+            skip_mismatched: true       # skips the shape-mismatched parameters
+
+   ``ColdStartLoader`` takes the same option. The skipped parameters stay at
+   their initialised values, are logged at WARNING, and are listed in the run
+   metadata as ``skipped_params``. Read that list: nothing downstream will
+   notice that those parts of the model are untrained.
+
+#. You want the broader tolerance of ``TransferLearningLoader``, which also
+   drops keys the current model does not have at all.
+
 Warm start architecture mismatch
 ================================
 

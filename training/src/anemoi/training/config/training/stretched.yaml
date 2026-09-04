@@ -25,7 +25,10 @@ check_variables_compatibility:
 
 # Fine-tuning into a model with FEWER variables (issue #838): set True to accept a
 # checkpoint whose variable set is a superset of the current dataset's (shared variables
-# must keep the same relative order); variable-dependent layers are re-initialised.
+# must keep the same relative order). This relaxes the variable-order and units checks
+# only. To also load such a checkpoint, the loading strategy must skip shape-mismatched
+# parameters: TransferLearningLoader, or WeightsOnlyLoader / ColdStartLoader with
+# skip_mismatched: true.
 allow_variable_subset: False
 
 # run in deterministic mode ; slows down
