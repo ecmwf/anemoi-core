@@ -284,10 +284,11 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
     def __init__(
         self,
         mask_node_attr_name: str,
+        name: str | None = None,
         norm: str | None = None,
         dtype: str = "float32",
     ) -> None:
-        super().__init__(norm, dtype)
+        super().__init__(name, norm, dtype)
         assert isinstance(
             mask_node_attr_name, str
         ), f"{self.__class__.__name__} requires a string for 'mask_node_attr_name' variable."
@@ -331,6 +332,7 @@ class SphericalAreaWeights(BaseAreaWeights):
 
     def __init__(
         self,
+        name: str | None = None,
         norm: str | None = None,
         radius: float = 1.0,
         centre: np.ndarray = np.array([0, 0, 0]),
@@ -343,7 +345,7 @@ class SphericalAreaWeights(BaseAreaWeights):
         assert (
             isinstance(radius, float) or isinstance(radius, int)
         ) and radius > 0, f"radius must be a positive value, but radius={radius}"
-        super().__init__(norm, dtype)
+        super().__init__(name, norm, dtype)
         self.radius = radius
         self.centre = centre
         self.fill_value = fill_value
@@ -418,12 +420,13 @@ class CosineLatWeightedAttribute(BaseLatWeightedAttribute):
 
     def __init__(
         self,
+        name: str | None = None,
         min_value: float = 1e-3,
         max_value: float = 1,
         norm: str | None = None,
         dtype: str = "float32",
     ) -> None:
-        super().__init__(norm, dtype)
+        super().__init__(name, norm, dtype)
         self.min_value = min_value
         self.max_value = max_value
 
