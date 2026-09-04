@@ -11,19 +11,19 @@ from textwrap import dedent
 
 import pytest
 
+from anemoi.training.migrations.config import Config
 from anemoi.training.migrations.nodes import Node
 from anemoi.training.migrations.nodes import NodeContainer
 from anemoi.training.migrations.nodes import NodeList
-from anemoi.training.migrations.testing import ConfigFromContent
 
 
-def test_node(config_from_content: ConfigFromContent) -> None:
+def test_node() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
-    node = config_from_content(content)["foo"]
+    node = Config(content)["foo"]
     assert isinstance(node, NodeContainer)
     assert node.yaml_node.value == {"bar": {"baz": "value"}}
     assert isinstance(node["bar"], NodeContainer)
@@ -33,27 +33,27 @@ def test_node(config_from_content: ConfigFromContent) -> None:
     assert baz_node.cfg == "value"
 
 
-def test_node_add_item(config_from_content: ConfigFromContent) -> None:
+def test_node_add_item() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
     """)
-    node = config_from_content(content)["foo"]
+    node = Config(content)["foo"]
     assert isinstance(node, NodeContainer)
     node["new"] = "new value"
     assert node["new"].yaml_node.value == "new value"
     assert node["new"].cfg == "new value"
 
 
-def test_node_del_item(config_from_content: ConfigFromContent) -> None:
+def test_node_del_item() -> None:
     content = dedent("""\
     foo:
       bar:
         baz: value
         old: old value
     """)
-    node = config_from_content(content)["foo"]
+    node = Config(content)["foo"]
     assert isinstance(node, NodeContainer)
     bar_node = node["bar"]
     assert isinstance(bar_node, NodeContainer)
@@ -62,14 +62,14 @@ def test_node_del_item(config_from_content: ConfigFromContent) -> None:
         _old_val = bar_node["old"]
 
 
-def test_node_list(config_from_content: ConfigFromContent) -> None:
+def test_node_list() -> None:
     content = dedent("""\
     foo:
       bar:
         - baz: value 1
         - baz: value 2
     """)
-    node = config_from_content(content)["foo"]
+    node = Config(content)["foo"]
     assert isinstance(node, NodeContainer)
     bar_node = node["bar"]
     assert isinstance(bar_node, NodeList)
