@@ -49,7 +49,6 @@ if TYPE_CHECKING:
 
     import torch.nn as nn
     from omegaconf import DictConfig
-    from torch.optim import Optimizer
 
 
 @dataclass
@@ -63,7 +62,7 @@ class CheckpointContext:
 
     The context supports:
     - Checkpoint data management (path and loaded data)
-    - Model and optimizer state tracking
+    - Model tracking
     - Metadata accumulation for debugging and logging
     - Configuration passing for stage behavior
 
@@ -77,10 +76,6 @@ class CheckpointContext:
     model : nn.Module, optional
         PyTorch model being modified by the pipeline. Can be either
         AnemoiModelInterface (pure PyTorch) or extracted from Task (Lightning).
-    optimizer : Optimizer, optional
-        Optional optimizer to restore state to (for warm starts)
-    scheduler : Any, optional
-        Optional learning rate scheduler to restore state to
     metadata : dict
         Dictionary of accumulated metadata from pipeline stages.
         Each stage can add information here for tracking.
@@ -116,8 +111,6 @@ class CheckpointContext:
     checkpoint_path: Path | None = None
     checkpoint_data: dict[str, Any] | None = None
     model: nn.Module | None = None
-    optimizer: Optimizer | None = None
-    scheduler: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
@@ -127,8 +120,7 @@ class CheckpointContext:
     def __post_init__(self):
         """Coerce ``checkpoint_path`` to a ``Path`` after initialization.
 
-        Structural-coherence checks (optimizer-without-model, scheduler-without-
-        optimizer, format/pl_module) live in
+        Structural-coherence checks (format/pl_module) live in
         :func:`anemoi.training.checkpoint.validation.validate_pipeline_health`,
         the single post-run validation home — they are not duplicated here.
         """

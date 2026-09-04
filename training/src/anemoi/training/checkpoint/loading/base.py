@@ -67,8 +67,7 @@ class LoadingStrategy(PipelineStage):
 
     Loading strategies form the orchestration layer of the checkpoint
     pipeline. They receive a context with loaded checkpoint data and
-    apply it to the model (and optionally optimiser/scheduler) according
-    to a specific strategy.
+    apply it to the model according to a specific strategy.
 
     Subclasses must implement the ``process`` method. Several convenience
     methods are provided for common operations:
@@ -105,9 +104,8 @@ class LoadingStrategy(PipelineStage):
            (``checkpoint_data``, ``model``)
         2. Extract the state dict from checkpoint data
         3. Apply weights to the model according to the strategy
-        4. Optionally restore optimiser/scheduler state
-        5. Preserve Anemoi metadata and mark weights as loaded
-        6. Update context metadata with loading results
+        4. Preserve Anemoi metadata and mark weights as loaded
+        5. Update context metadata with loading results
 
         Parameters
         ----------

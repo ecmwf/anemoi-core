@@ -123,18 +123,6 @@ def complex_state_dict(complex_model: ComplexModel) -> dict:
 
 
 @pytest.fixture
-def sample_optimizer(simple_model: SimpleModel) -> torch.optim.Adam:
-    """Create a sample optimizer for testing."""
-    return torch.optim.Adam(simple_model.parameters(), lr=1e-3)
-
-
-@pytest.fixture
-def sample_scheduler(sample_optimizer: torch.optim.Adam) -> torch.optim.lr_scheduler.StepLR:
-    """Create a sample scheduler for testing."""
-    return torch.optim.lr_scheduler.StepLR(sample_optimizer, step_size=10)
-
-
-@pytest.fixture
 def lightning_checkpoint(sample_state_dict: dict) -> dict:
     """Create a mock Lightning checkpoint."""
     return {

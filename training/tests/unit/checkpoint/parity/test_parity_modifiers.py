@@ -336,20 +336,6 @@ def test_stage_role_returns_none_for_unrecognized_stage() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_health_check_flags_scheduler_without_optimizer() -> None:
-    model = nn.Linear(2, 2)
-    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lambda _epoch: 1.0)
-
-    ctx = CheckpointContext(model=model, optimizer=optimizer, scheduler=scheduler)
-    ctx.optimizer = None
-    ctx.update_metadata(stage_0_X="completed")
-
-    with pytest.raises(CheckpointValidationError) as excinfo:
-        validate_pipeline_health(ctx)
-    assert any("Scheduler" in error and "optimizer is None" in error for error in excinfo.value.validation_errors)
-
-
 def test_health_check_flags_config_validation_error() -> None:
     ctx = CheckpointContext()
     ctx.update_metadata(stage_0_X="completed", validation_config_status="error")

@@ -72,15 +72,9 @@ Fields:
    -  -  ``model``
       -  The model being loaded into / modified. Set by you before execution.
 
-   -  -  ``optimizer`` / ``scheduler``
-      -  Optional handles. Note: in the trainer flow these do not exist yet when
-         the pipeline runs (see :ref:`cp_dev_warmstart`), so loaders treat them
-         as best-effort. They are retained on the context so a custom pipeline
-         *can* carry and modify them if it owns those objects.
-
    -  -  ``checkpoint_path``
       -  Local path to the checkpoint file, if there is one. A source sets this;
-         the trainer reads it afterwards to hand to Lightning for warm start.
+         the trainer reads it afterwards to hand to Lightning on a resume.
 
    -  -  ``checkpoint_data``
       -  The loaded checkpoint dictionary.

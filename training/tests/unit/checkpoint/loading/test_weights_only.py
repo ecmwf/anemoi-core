@@ -44,25 +44,6 @@ async def test_weights_only_loads_state_dict() -> None:
 
 
 @pytest.mark.asyncio
-async def test_weights_only_discards_optimizer() -> None:
-    """Optimizer state must be explicitly set to None."""
-    model = SimpleModel()
-    optimizer = torch.optim.Adam(model.parameters())
-
-    checkpoint_data = {
-        "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "optimizer_states": [{"some": "state"}],
-    }
-
-    loader = WeightsOnlyLoader()
-    context = CheckpointContext(model=model, optimizer=optimizer, checkpoint_data=checkpoint_data)
-    result = await loader.process(context)
-
-    assert result.optimizer is None
-    assert result.scheduler is None
-
-
-@pytest.mark.asyncio
 async def test_weights_only_sets_metadata() -> None:
     model = SimpleModel()
     checkpoint_data = {"state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)}}

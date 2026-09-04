@@ -51,8 +51,6 @@ async def test_cold_start_resets_training_state() -> None:
 
     assert result.metadata.get("epoch", 0) == 0
     assert result.metadata.get("global_step", 0) == 0
-    assert result.optimizer is None
-    assert result.scheduler is None
 
 
 @pytest.mark.asyncio

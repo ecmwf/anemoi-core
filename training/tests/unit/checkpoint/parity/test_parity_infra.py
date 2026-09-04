@@ -316,17 +316,6 @@ async def test_pre_execution_validation_degrades_on_import_error() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_scheduler_without_optimizer_is_flagged() -> None:
-    """A scheduler present without an optimizer is flagged."""
-    context = CheckpointContext(model=nn.Linear(2, 2), optimizer=None, scheduler=object())
-    context.update_metadata(stage_0_Loading="completed")
-
-    with pytest.raises(CheckpointValidationError) as exc:
-        validate_pipeline_health(context)
-
-    assert "Scheduler present but optimizer is None" in exc.value.validation_errors
-
-
 def test_non_string_stage_value_is_flagged() -> None:
     """A stage_N_ metadata entry with a non-string value is flagged."""
     context = CheckpointContext(model=nn.Linear(2, 2))

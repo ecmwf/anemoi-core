@@ -173,18 +173,6 @@ class TestValidatePipelineHealth:
             validate_pipeline_health(ctx)
         assert any("model is None" in e for e in excinfo.value.validation_errors)
 
-    def test_optimizer_without_model_is_error(self) -> None:
-        model = nn.Linear(2, 2)
-        optimizer = __import__("torch").optim.SGD(model.parameters(), lr=0.1)
-        # Construct a context with optimizer present but model cleared, so
-        # we have to bypass the consistency warning by editing post-init.
-        ctx = CheckpointContext(model=model, optimizer=optimizer)
-        ctx.model = None
-        ctx.update_metadata(stage_0_X="completed")
-        with pytest.raises(CheckpointValidationError) as excinfo:
-            validate_pipeline_health(ctx)
-        assert any("Optimizer" in e and "model is None" in e for e in excinfo.value.validation_errors)
-
     def test_pl_module_with_wrong_format_is_error(self) -> None:
         ctx = CheckpointContext(
             pl_module=object(),

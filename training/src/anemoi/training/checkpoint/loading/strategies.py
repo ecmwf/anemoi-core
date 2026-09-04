@@ -34,7 +34,6 @@ class WeightsOnlyLoader(LoadingStrategy):
     Behavior
     --------
     - Loads weights with ``strict=self.strict`` (default ``True``)
-    - Clears ``context.optimizer`` and ``context.scheduler`` to ``None``
     - **Leaves training-progress metadata untouched** (``epoch``,
       ``global_step``, ``best_metric``). A prior pipeline stage that set
       these values keeps them. If you want explicit zero-reset semantics,
@@ -65,7 +64,7 @@ class WeightsOnlyLoader(LoadingStrategy):
         Returns
         -------
         CheckpointContext
-            Context with weights loaded and optimizer/scheduler cleared.
+            Context with weights loaded.
         """
         self._apply_corrections(context)
 
@@ -80,10 +79,6 @@ class WeightsOnlyLoader(LoadingStrategy):
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
         self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
-
-        # Discard optimizer/scheduler — weights-only means fresh training state
-        context.optimizer = None
-        context.scheduler = None
 
         context.metadata["loading_strategy"] = "weights_only"
 
@@ -151,10 +146,6 @@ class TransferLearningLoader(LoadingStrategy):
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
         self._extract_variables_metadata(context.model, context.checkpoint_data)
         self._mark_weights_loaded(context.model)
-
-        # Discard optimizer/scheduler — transfer learning means fresh training state
-        context.optimizer = None
-        context.scheduler = None
 
         context.metadata["loading_strategy"] = "transfer_learning"
         context.metadata["transferred_params"] = list(filtered.keys())

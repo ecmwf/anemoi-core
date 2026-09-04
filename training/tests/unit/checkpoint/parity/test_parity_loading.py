@@ -11,7 +11,7 @@
 
 These tests close genuine assertion gaps in the loading strategies
 (``WeightsOnlyLoader``, ``TransferLearningLoader``, ``WarmStartLoader``,
-``ColdStartLoader``), the ``TrainingState`` dataclass, ``filter_state_dict``
+``ColdStartLoader``), ``filter_state_dict``
 and the shared ``apply_trainable_edge_perm_migration`` parity helper.
 
 They exercise the real strategy code paths on small CPU modules with
@@ -36,7 +36,6 @@ from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading import base as loading_base
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
-from anemoi.training.checkpoint.loading.state import TrainingState
 from anemoi.training.checkpoint.loading.strategies import ColdStartLoader
 from anemoi.training.checkpoint.loading.strategies import TransferLearningLoader
 from anemoi.training.checkpoint.loading.strategies import WarmStartLoader
@@ -238,24 +237,17 @@ async def test_cold_start_sets_loading_strategy_label() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cold_start_loads_weights_and_clears_optimizer_scheduler() -> None:
+async def test_cold_start_loads_weights() -> None:
     torch.manual_seed(0)
     model = _LinearModel()
     original_weight = model.linear.weight.detach().clone()
     ckpt_state = _exact_state_dict(model)
 
-    context = CheckpointContext(
-        model=model,
-        checkpoint_data={"state_dict": ckpt_state},
-        optimizer=object(),
-        scheduler=object(),
-    )
+    context = CheckpointContext(model=model, checkpoint_data={"state_dict": ckpt_state})
     result = await ColdStartLoader().process(context)
 
     assert not torch.equal(result.model.linear.weight, original_weight)
     assert torch.equal(result.model.linear.weight, ckpt_state["linear.weight"])
-    assert result.optimizer is None
-    assert result.scheduler is None
 
 
 # ---------------------------------------------------------------------------
@@ -342,28 +334,6 @@ async def test_transfer_learning_skipped_params_maps_keys_to_reason_strings() ->
 
 
 @pytest.mark.asyncio
-async def test_transfer_learning_discards_optimizer() -> None:
-    target = _SharedModel()
-    source_state = {"shared.weight": torch.full((5, 10), 1.0), "shared.bias": torch.full((5,), 2.0)}
-
-    context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state}, optimizer=object())
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
-
-    assert result.optimizer is None
-
-
-@pytest.mark.asyncio
-async def test_transfer_learning_discards_scheduler() -> None:
-    target = _SharedModel()
-    source_state = {"shared.weight": torch.full((5, 10), 1.0), "shared.bias": torch.full((5,), 2.0)}
-
-    context = CheckpointContext(model=target, checkpoint_data={"state_dict": source_state}, scheduler=object())
-    result = await TransferLearningLoader(skip_mismatched=True).process(context)
-
-    assert result.scheduler is None
-
-
-@pytest.mark.asyncio
 async def test_transfer_learning_sets_loading_strategy_label() -> None:
     target = _SharedModel()
     source_state = {"shared.weight": torch.full((5, 10), 1.0), "shared.bias": torch.full((5,), 2.0)}
@@ -436,85 +406,6 @@ def test_edge_perm_migration_noop_when_checkpoint_none() -> None:
 
     assert result is None
     resolve.assert_not_called()
-
-
-# ---------------------------------------------------------------------------
-# TrainingState
-# ---------------------------------------------------------------------------
-
-
-def test_training_state_from_checkpoint_extracts_all_fields() -> None:
-    checkpoint = {
-        "epoch": 42,
-        "global_step": 10000,
-        "best_metric": 0.95,
-        "metrics_history": {"loss": [1.0]},
-        "state_dict": {"layer.weight": "..."},
-    }
-    state = TrainingState.from_checkpoint(checkpoint)
-
-    assert state.epoch == 42
-    assert state.global_step == 10000
-    assert state.best_metric == 0.95
-    assert state.metrics_history == {"loss": [1.0]}
-
-
-def test_training_state_from_checkpoint_defaults_when_missing() -> None:
-    state = TrainingState.from_checkpoint({"state_dict": {"layer.weight": "..."}})
-
-    assert state.epoch == 0
-    assert state.global_step == 0
-    assert state.best_metric is None
-    assert state.metrics_history == {}
-
-
-def test_training_state_to_dict_serializes_all_fields() -> None:
-    state = TrainingState(epoch=5, global_step=500, best_metric=0.5, metrics_history={"loss": [1]})
-
-    assert state.to_dict() == {
-        "epoch": 5,
-        "global_step": 500,
-        "best_metric": 0.5,
-        "metrics_history": {"loss": [1]},
-    }
-
-
-@pytest.mark.parametrize("epoch", [0, 7])
-def test_training_state_apply_to_always_writes_epoch(epoch: int) -> None:
-    context = CheckpointContext()
-
-    TrainingState(epoch=epoch).apply_to(context)
-
-    assert context.metadata["epoch"] == epoch
-
-
-@pytest.mark.parametrize("global_step", [0, 500])
-def test_training_state_apply_to_always_writes_global_step(global_step: int) -> None:
-    context = CheckpointContext()
-
-    TrainingState(global_step=global_step).apply_to(context)
-
-    assert context.metadata["global_step"] == global_step
-
-
-def test_training_state_apply_to_writes_best_metric_only_when_not_none() -> None:
-    populated = CheckpointContext()
-    TrainingState(best_metric=0.95).apply_to(populated)
-    assert populated.metadata["best_metric"] == 0.95
-
-    empty = CheckpointContext()
-    TrainingState(best_metric=None).apply_to(empty)
-    assert "best_metric" not in empty.metadata
-
-
-def test_training_state_apply_to_writes_metrics_history_only_when_non_empty() -> None:
-    populated = CheckpointContext()
-    TrainingState(metrics_history={"loss": [1]}).apply_to(populated)
-    assert populated.metadata["metrics_history"] == {"loss": [1]}
-
-    empty = CheckpointContext()
-    TrainingState(metrics_history={}).apply_to(empty)
-    assert "metrics_history" not in empty.metadata
 
 
 # ---------------------------------------------------------------------------

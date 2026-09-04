@@ -220,7 +220,7 @@ def validate_pipeline_health(
 
     The function inspects ``context.metadata`` (for stage execution markers
     and the pre-execution validation status) and the context's structural
-    fields (model/optimizer/scheduler/format coherence).
+    fields (model/format coherence).
 
     Parameters
     ----------
@@ -311,12 +311,6 @@ def _check_source_loaded_weights(context: CheckpointContext, issues: list[str]) 
 
 def _check_structural_invariants(context: CheckpointContext, issues: list[str]) -> None:
     """Catch mutually-incoherent combinations of context fields."""
-    if context.optimizer is not None and context.model is None:
-        issues.append("Optimizer present but model is None")
-
-    if context.scheduler is not None and context.optimizer is None:
-        issues.append("Scheduler present but optimizer is None")
-
     if context.pl_module is not None and context.checkpoint_format not in (None, "lightning"):
         issues.append(
             f"pl_module set but checkpoint_format is {context.checkpoint_format!r}, expected 'lightning'",
