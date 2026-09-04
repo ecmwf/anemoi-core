@@ -23,8 +23,11 @@ builder — no mocking of the code under test.
 from __future__ import annotations
 
 import asyncio
+import logging
+from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Never
+from unittest.mock import MagicMock
 
 import pytest
 import torch
@@ -471,3 +474,72 @@ def test_preset_composes_with_checkpoint_source_overlay(preset: str) -> None:
     assert isinstance(pipeline.stages[0], ResolveOnlySource)
     assert type(pipeline.stages[0].source).__name__ == "RunIdSource"
     assert pipeline.stages[0].source.run_id == "abc123"
+
+
+# --- the resume hook, like the pipeline, never runs chunking_fix on autoencoder weights ---
+
+
+@pytest.fixture
+def spy_chunking_migration(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
+    """Observe ``chunking_fix`` at its resolver, leaving the real migration ledger reachable."""
+    spy = MagicMock(side_effect=lambda ckpt: {**ckpt, "_migration_applied": True})
+    monkeypatch.setattr(
+        "anemoi.training.checkpoint.loading.base._load_chunking_fix_migration",
+        lambda: spy,
+    )
+    return spy
+
+
+def _ledger(*names: str) -> list[dict]:
+    """A checkpoint migration ledger recording ``names`` as already applied."""
+    from anemoi.models.migrations.migrator import MigrationMetadata
+
+    return [
+        {
+            "name": name,
+            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
+            "signature": f"signature-of-{name}",
+        }
+        for name in names
+    ]
+
+
+def test_resume_hook_does_not_migrate_an_autoencoder_checkpoint_behind_the_ledger(
+    caplog: pytest.LogCaptureFixture,
+    spy_chunking_migration: MagicMock,
+) -> None:
+    """On a resume the hook is the only correction pass, so the autoencoder case is pinned there too.
+
+    Same checkpoint shape as the pipeline-path test in ``test_format_migrations.py``: a
+    ``NoOpProcessor`` config and a ledger from before ``chunking_fix``. The hook warns
+    that the checkpoint is behind, never calls the migration, and hands Lightning the
+    state dict exactly as saved.
+    """
+    from anemoi.models.migrations import Migrator
+
+    recorded = [migration.name for migration in Migrator()._grouped_migrations[-1]][:2]
+    assert not any("chunking_fix" in name for name in recorded), "fixture assumes chunking_fix is not recorded"
+
+    model = _SmallNet()
+    module = _lightning_module_wrapping(model)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in model.state_dict().items()},
+        "pytorch-lightning_version": "2.6.5",
+        "migrations": _ledger(*recorded),
+        "hyper_parameters": {
+            # NoOpProcessor: declares neither num_layers nor num_chunks.
+            "config": SimpleNamespace(model=SimpleNamespace(processor=SimpleNamespace())),
+            "data_indices": {"data": _index_collection({"t2m": 0})},
+        },
+    }
+    saved = {key: value.clone() for key, value in checkpoint["state_dict"].items()}
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    spy_chunking_migration.assert_not_called()
+    assert "behind the installed anemoi-models" in caplog.text
+    assert "_migration_applied" not in checkpoint
+    for key, value in saved.items():
+        assert torch.equal(checkpoint["state_dict"][key], value), f"{key} was rewritten"
+    assert module._ckpt_model_name_to_index == {"data": {"t2m": 0}}

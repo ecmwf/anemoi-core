@@ -507,3 +507,48 @@ def test_unreadable_ledger_is_treated_as_unknown_not_current(
 
     # "Cannot tell" falls through to the in-memory path rather than reporting up to date.
     spy_chunking_migration.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Autoencoder weights (no processor) never trigger chunking_fix, whatever the
+# ledger says about it.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("recorded", "expect_warning"),
+    [
+        pytest.param(0, False, id="empty ledger"),
+        pytest.param(2, True, id="ledger from before chunking_fix"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_autoencoder_checkpoint_behind_the_ledger_is_not_migrated_on_a_pipeline_load(
+    caplog: pytest.LogCaptureFixture,
+    spy_chunking_migration: MagicMock,
+    recorded: int,
+    expect_warning: bool,
+) -> None:
+    """An old autoencoder checkpoint on a weights-only load (the case raised in review).
+
+    Its ledger says ``chunking_fix`` is outstanding, so the gate warns and falls
+    through to the in-memory fallback; the fallback must then decline, because a
+    ``NoOpProcessor`` declares no geometry to rewrite. The migration is never
+    called and the weights load exactly as saved.
+    """
+    names = _all_shipped_migration_names()[:recorded]
+    assert not any("chunking_fix" in name for name in names), "fixture assumes chunking_fix is not recorded"
+    ckpt = _ckpt(_processor())  # NoOpProcessor: no num_layers, no num_chunks
+    ckpt["migrations"] = _ledger(*names)
+    saved = {key: value.clone() for key, value in ckpt["state_dict"].items()}
+    model = _Model()
+    context = CheckpointContext(model=model, checkpoint_data=ckpt)
+
+    with caplog.at_level(logging.WARNING):
+        await WeightsOnlyLoader().process(context)
+
+    spy_chunking_migration.assert_not_called()
+    assert ("behind the installed anemoi-models" in caplog.text) is expect_warning
+    assert "_migration_applied" not in context.checkpoint_data
+    for key, value in saved.items():
+        assert torch.equal(model.state_dict()[key], value), f"{key} was not loaded as saved"
