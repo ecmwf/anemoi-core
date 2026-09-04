@@ -608,6 +608,9 @@ def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> Non
     trainer = SimpleNamespace(
         config=cfg,
         data_indices=data_indices,
+        # A configured source means the trainer is starting from a checkpoint; the
+        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        start_from_checkpoint=True,
         parent_run_server2server=None,
         fork_run_server2server=None,
         _validate_transfer_learning_datasets=lambda _model: None,
@@ -677,6 +680,9 @@ def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint
     trainer = SimpleNamespace(
         config=cfg,
         data_indices=current_data_indices,
+        # A configured source means the trainer is starting from a checkpoint; the
+        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        start_from_checkpoint=True,
         parent_run_server2server=None,
         fork_run_server2server=None,
         _validate_transfer_learning_datasets=lambda _model: None,
@@ -1052,6 +1058,7 @@ def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path, mo
     )
     trainer = SimpleNamespace(
         config=cfg,
+        start_from_checkpoint=True,
         data_indices={"data": DummyIndex()},
         parent_run_server2server=None,
         fork_run_server2server=None,

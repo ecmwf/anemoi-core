@@ -635,11 +635,21 @@ def test_training_cycle_mlflow_dry_run(
 
     cfg, url = mlflow_dry_run_config
 
-    # Generate a dry run ID and set it in the config
+    # Generate a dry run ID and attach the run to it. `training.run_id` was removed;
+    # a prepared run is now named by a resume RunIdSource. The prepared run has no
+    # checkpoint directory yet, so this also exercises the dry-run gate: the trainer
+    # must clear `start_from_checkpoint` and start fresh rather than looking for a
+    # checkpoint that was never written.
     run_id, _ = prepare_mlflow_run_id(
         config=cfg,
     )
-    cfg["training"]["run_id"] = run_id
+    cfg["training"]["checkpoint"] = {
+        "source": {
+            "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+            "run_id": run_id,
+            "fork": False,
+        },
+    }
 
     # Get training data
     get_test_archive(url)

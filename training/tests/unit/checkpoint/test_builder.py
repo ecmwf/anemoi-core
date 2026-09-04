@@ -380,3 +380,34 @@ def test_source_presets_declare_their_required_key(template: str, required_key: 
     template_cfg = _load_template("source", template)
     assert required_key in template_cfg
     assert template_cfg[required_key] is None
+
+
+def test_dry_run_suppresses_acquisition_but_keeps_modifiers() -> None:
+    """A dry run starts fresh: no source, no loader, modifiers still applied.
+
+    ``anemoi-training mlflow prepare`` mints a run id with no checkpoint directory.
+    The trainer clears ``start_from_checkpoint`` for it, and that has to reach the
+    pipeline: otherwise the source stage looks for a checkpoint that was never
+    written and the prepared run cannot be launched at all.
+    """
+    cfg = compose_test_config(source="run", loading="weights_only", modifiers=["freezing"])
+
+    names = [type(s).__name__ for s in build_checkpoint_pipeline(cfg, load_checkpoint=False).stages]
+
+    assert names == ["FreezingModifierStage"]
+
+
+def test_dry_run_suppresses_a_resume_too() -> None:
+    """The prepared run is resumed by RunIdSource; with nothing written yet there is nothing to resolve."""
+    cfg = compose_test_config(source="run")
+
+    assert build_checkpoint_pipeline(cfg, load_checkpoint=False).stages == []
+
+
+def test_load_checkpoint_defaults_to_acquiring() -> None:
+    """Positive control: the same config builds the full pipeline by default."""
+    cfg = compose_test_config(source="run", loading="weights_only")
+
+    names = [type(s).__name__ for s in build_checkpoint_pipeline(cfg).stages]
+
+    assert names == ["RunIdSource", "WeightsOnlyLoader"]

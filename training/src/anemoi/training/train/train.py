@@ -26,7 +26,6 @@ from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from packaging import version
 from pytorch_lightning.loggers.logger import Logger
-from pytorch_lightning.utilities.rank_zero import rank_zero_only
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
@@ -473,6 +472,11 @@ class AnemoiTrainer(ABC):
             self.config,
             parent_run_server2server=getattr(self, "parent_run_server2server", None),
             fork_run_server2server=getattr(self, "fork_run_server2server", None),
+            # The MLflow dry-run gate clears ``start_from_checkpoint`` when the parent
+            # run was minted by `anemoi-training mlflow prepare` and has no checkpoint
+            # directory yet. That has to reach the pipeline, or the source stage looks
+            # for a checkpoint that was never written and the run cannot launch at all.
+            load_checkpoint=self.start_from_checkpoint,
         )
 
         executed = asyncio.run(pipeline.execute(context))
@@ -757,12 +761,23 @@ class AnemoiTrainer(ABC):
         LOGGER.info("Checkpoints path: %s", self.config.system.output.checkpoints)
         LOGGER.info("Plots path: %s", self.config.system.output.plots)
 
-    @rank_zero_only
     def _check_dry_run(self) -> None:
         """Check if the run ID is dry, e.g. without a checkpoint.
 
-        If the run ID is dry, the training will not be started.
-        This is used to check the run can be restarted from the checkpoint.
+        A run is dry when its MLflow parent was minted by
+        ``anemoi-training mlflow prepare`` and no checkpoint directory exists yet.
+        There is nothing to resume from, so the run starts from scratch instead of
+        failing to launch.
+
+        Runs on **every** rank, deliberately. ``start_from_checkpoint`` now decides
+        whether the checkpoint pipeline acquires anything, so a rank-0-only answer
+        would have rank 0 start fresh while every other rank looked for a checkpoint
+        that does not exist — a rank-0-succeeds, others-crash split. There is no
+        process group yet at trainer construction to broadcast over, and the two
+        inputs are rank-independent anyway (an MLflow tag and a directory on the
+        shared filesystem). The MLflow logger this reads is already built on every
+        rank by :meth:`_get_server2server_lineage`, so the extra cost is one
+        ``is_dir`` call per rank.
         """
         self.dry_run = False
         if self.logger and self.logger.logger_name == "mlflow":

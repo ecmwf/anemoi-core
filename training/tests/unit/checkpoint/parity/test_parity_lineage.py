@@ -148,15 +148,25 @@ def _dry_run_namespace(
     )
 
 
-def test_check_dry_run_is_skipped_on_non_zero_rank(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_check_dry_run_reaches_the_same_answer_on_every_rank(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The dry-run decision must not be rank-dependent.
+
+    It used to be ``@rank_zero_only``, which was harmless while
+    ``start_from_checkpoint`` only fed ``last_checkpoint``. Now it decides whether
+    the checkpoint pipeline acquires anything at all, so a rank-0-only answer would
+    have rank 0 start fresh while every other rank looked for a checkpoint that was
+    never written — rank 0 succeeds, the rest crash. There is no process group yet
+    at trainer construction to broadcast over, and both inputs (an MLflow tag, a
+    directory on the shared filesystem) are rank-independent, so every rank simply
+    computes it.
+    """
     monkeypatch.setattr(rank_zero_only, "rank", 1)
     ns = _dry_run_namespace(fork_run_id=None, parent_dry_run=True, start_from_checkpoint=True)
 
     AnemoiTrainer._check_dry_run(ns)
 
-    # The @rank_zero_only decorator skips the whole body on rank > 0.
-    assert not hasattr(ns, "dry_run")
-    assert ns.start_from_checkpoint is True
+    assert ns.dry_run is True
+    assert ns.start_from_checkpoint is False
 
 
 def test_check_dry_run_suppresses_start_from_checkpoint_for_dry_parent(monkeypatch: pytest.MonkeyPatch) -> None:

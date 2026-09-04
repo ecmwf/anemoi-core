@@ -191,6 +191,7 @@ def build_checkpoint_pipeline(
     *,
     parent_run_server2server: str | None = None,
     fork_run_server2server: str | None = None,
+    load_checkpoint: bool = True,
 ) -> CheckpointPipeline:
     """Assemble a :class:`CheckpointPipeline` from a training configuration.
 
@@ -221,6 +222,13 @@ def build_checkpoint_pipeline(
     fork_run_server2server : str, optional
         Runtime server-to-server fork lineage id, merged into a ``RunIdSource``
         source config as above for the fork path.
+    load_checkpoint : bool, optional
+        Whether a checkpoint should be acquired and applied at all (default
+        ``True``). Pass ``False`` when the run must start from scratch despite a
+        configured source — the MLflow dry-run gate, where the parent run was
+        minted by ``anemoi-training mlflow prepare`` and has no checkpoint yet.
+        Only the source and loading stages are suppressed; modifier stages still
+        apply, so a freezing-only configuration is unaffected.
 
     Returns
     -------
@@ -242,15 +250,21 @@ def build_checkpoint_pipeline(
     # Lightning then discards.
     resume = resumes_via_lightning(cfg)
 
+    # A second, independent reason not to acquire anything: the caller says the run
+    # starts from scratch (the MLflow dry-run gate). Modifier stages run either way:
+    # they change the model, not the checkpoint.
+    if not load_checkpoint:
+        LOGGER.info("Checkpoint acquisition and loading suppressed by the caller; modifier stages still apply")
+
     stage_configs: list[Any] = []
 
     source = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_SOURCE}", default=None)
-    if source is not None:
+    if source is not None and load_checkpoint:
         source = _inject_run_lineage(source, parent_run_server2server, fork_run_server2server)
         stage_configs.append(_resolve_only(source) if resume else source)
 
     loading = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_LOADING}", default=None)
-    if loading is not None and not resume:
+    if loading is not None and not resume and load_checkpoint:
         stage_configs.append(loading)
 
     modifiers = OmegaConf.select(cfg, f"{_TRAINING}.{_CHECKPOINT}.{_MODIFIERS}", default=None)
