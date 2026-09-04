@@ -267,5 +267,5 @@ def test_rename_interpolation(config_from_content: ConfigFromContent) -> None:
     """)
     config = config_from_content(content)
     config.rename_key("foo.x", "foo.y")
-    assert config["foo"].get("bar").get("baz").value == "${foo.y}"
+    assert config["foo"]["bar"]["baz"].value == "${foo.y}"
     assert config["other"].value == "${foo.y}"
