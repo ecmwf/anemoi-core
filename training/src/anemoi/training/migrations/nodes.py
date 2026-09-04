@@ -31,61 +31,13 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class NodeBase(ABC):
-    @property
-    @abstractmethod
-    def prefix(self) -> Sequence[str | int]: ...
+class Node:
+    """Nodes are the base for the Config object.
 
-    @property
-    @abstractmethod
-    def prefix_str(self) -> str: ...
+    A Config object is a tree that can be accessed by successive __getitem__ calls which returs Node objects.
+    A pure Node object represent a leaf in the tree. Otherwise, it is a ContainerNode.
+    """
 
-    @property
-    @abstractmethod
-    def yaml(self) -> yamlrocks.YAMLRocksDocumentView: ...
-
-    @property
-    @abstractmethod
-    def yaml_node(self) -> yamlrocks.YAMLRocksNode: ...
-
-    @property
-    @abstractmethod
-    def cfg(self) -> Any: ...
-
-    @property
-    def value(self) -> Any:
-        return self.yaml_node.value
-
-    @property
-    @abstractmethod
-    def parent(self) -> NodeContainer: ...
-
-    def set_comments(
-        self,
-        before: str | None = None,
-        inline: str | None = None,
-        after: str | None = None,
-    ) -> None:
-        if before is not None:
-            if self.yaml_node.comment_before is not None:
-                before = f"{before}\n{self.yaml_node.comment_before}"
-            self.yaml_node.comment_before = before
-        if inline is not None:
-            if self.yaml_node.comment is not None:
-                inline = f"{inline} {self.yaml_node.comment}"
-            self.yaml_node.comment = inline
-        if after is not None:
-            if self.yaml_node.comment_after is not None:
-                after = f"{self.yaml_node.comment_after}\n{after}"
-            try:
-                self.yaml_node.comment_after = after
-            except ValueError:
-                if self.yaml_node.comment is not None:
-                    after = f"{self.yaml_node.comment}\n# {after}"
-                self.yaml_node.comment = after
-
-
-class Node(NodeBase):
     def __init__(
         self,
         parent: NodeContainer,
@@ -105,32 +57,68 @@ class Node(NodeBase):
 
     @cached_property
     def prefix(self) -> Sequence[str | int]:
+        """The node prefix."""
         return (*self._prefix, self.key)
 
     @cached_property
     def prefix_str(self) -> str:
+        """The node prefix as a dot-joined string."""
         return ".".join(map(str, self.prefix))
 
     @property
     def yaml(self) -> yamlrocks.YAMLRocksDocumentView:
+        """The yamlrocks object."""
         return self.yaml_parent[self.key]
 
     @property
     def yaml_node(self) -> yamlrocks.YAMLRocksNode:
+        """The yamlrocks node."""
         return self.yaml_parent.node[self.key]
 
     @property
     def cfg(self) -> Any:
+        """The OmegaConf instance."""
         return self.cfg_parent[self.key]
 
     @property
     def parent(self) -> NodeContainer:
+        """The parent node."""
         return self._parent
 
-    def get(self, key: str | int) -> Node:
+    @property
+    def value(self) -> Any:
+        """The raw value."""
+        return self.yaml_node.value
+
+    @property
+    def resolved_value(self) -> Any:
+        """The resolved OmegaConf value."""
+        return OmegaConf.to_object(self.cfg)
+
+    def set_comments(self, before: str | None = None, inline: str | None = None) -> None:
+        """Adds comments in the config.
+
+        Parameters
+        ----------
+        before : str | None, default None
+            Comment to add before the node.
+        inline : str | None, default None
+            Comment to add inline.
+        """
+        if before is not None:
+            if self.yaml_node.comment_before is not None:
+                before = f"{before}\n{self.yaml_node.comment_before}"
+            self.yaml_node.comment_before = before
+        if inline is not None:
+            if self.yaml_node.comment is not None:
+                inline = f"{inline} {self.yaml_node.comment}"
+            self.yaml_node.comment = inline
+
+    def __getitem__(self, key: str | int) -> Node:
         """Gets the key while asserting that this node is a NodeContainer.
 
-        If it isnt't, raises a TypeError at runtime.
+        If it isnt't, raises a TypeError at runtime. This allows chaining __getitem__
+        without typing errors while still being type safe.
 
         Parameters
         ----------
@@ -142,83 +130,7 @@ class Node(NodeBase):
         Node
             The requeted node.
         """
-        if not isinstance(self, NodeContainer):
-            msg = "This node is not a NodeContainer."
-            raise TypeError(msg)
-        return self[key]
-
-    def set(self, key: str | int, value: Any) -> None:
-        """Sets the key while asserting that this node is a NodeContainer.
-
-        If it isnt't, raises a TypeError at runtime.
-
-        Parameters
-        ----------
-        key : str | int
-            Key to set.
-        value : Any
-            New value to set.
-        """
-        if not isinstance(self, NodeContainer):
-            msg = "This node is not a NodeContainer."
-            raise TypeError(msg)
-        self[key] = value
-
-    def delete(self, key: str | int) -> None:
-        """Deletes the key while asserting that this node is a NodeContainer.
-
-        If it isnt't, raises a TypeError at runtime.
-
-        Parameters
-        ----------
-        key : str | int
-            Key to delete.
-        """
-        if not isinstance(self, NodeContainer):
-            msg = "This node is not a NodeContainer."
-            raise TypeError(msg)
-        del self[key]
-
-    def __repr__(self) -> str:
-        return f"Node({self.prefix_str})"
-
-
-def parse_key(key: str) -> tuple[list[str], str]:
-    parts = key.split(".")
-    return parts[:-1], parts[-1]
-
-
-class NodeContainer(Node, ABC):
-    def __init__(
-        self,
-        parent: NodeContainer,
-        yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
-        cfg_parent: DictConfig,
-        interpolation_handler: InterpolationHandler,
-        key: Any,
-        prefix: Sequence[str | int] = (),
-    ):
-        self._parent = parent
-        self.yaml_parent = yr_parent
-        self.cfg_parent = cfg_parent
-        self._interpolation_handler = interpolation_handler
-        self.key = key
-        self._prefix = prefix
-
-    @abstractmethod
-    def _is_key_valid(self, key: str | int) -> bool: ...
-
-    def is_interpolation(self, key: str | int) -> bool:
-        return OmegaConf.is_interpolation(self.cfg, key)
-
-    def __contains__(self, key: str | int) -> bool:
-        return self._is_key_valid(key)
-
-    def __len__(self) -> int:
-        return len(self.value)
-
-    def __getitem__(self, key: str | int) -> Node:
-        if not self._is_key_valid(key):
+        if not isinstance(self, NodeContainer) or not self._is_key_valid(key):
             msg = f"key {key} not in Node."
             raise ValueError(msg)
 
@@ -239,23 +151,148 @@ class NodeContainer(Node, ABC):
         )
 
     def __setitem__(self, key: str | int, value: Any) -> None:
+        """Sets the key while asserting that this node is a NodeContainer.
+
+        If it isnt't, raises a TypeError at runtime.
+
+        Parameters
+        ----------
+        key : str | int
+            Key to set.
+        value : Any
+            New value to set.
+        """
+        if not isinstance(self, NodeContainer):
+            msg = "This node is not a NodeContainer."
+            raise TypeError(msg)
+
         self.yaml[key] = value
         self.cfg[key] = value
         self._interpolation_handler.update(self)
 
     def __delitem__(self, key: str | int) -> None:
+        """Deletes the key while asserting that this node is a NodeContainer.
+
+        If it isnt't, raises a TypeError at runtime.
+
+        Parameters
+        ----------
+        key : str | int
+            Key to delete.
+        """
+        if not isinstance(self, NodeContainer):
+            msg = "This node is not a NodeContainer."
+            raise TypeError(msg)
+
         del self.yaml[key]
         del self.cfg[key]
         self._interpolation_handler.update(self)
 
-    def has_key(self, parts: Sequence[str | int]) -> bool:
+    def __repr__(self) -> str:
+        return f"Node({self.prefix_str})"
+
+
+def parents_head(key: str) -> tuple[list[str], str]:
+    """Returns the parent prefix of the key, and its head."""
+    parts = key.split(".")
+    return parts[:-1], parts[-1]
+
+
+class NodeContainer(Node, ABC):
+    """Non-leaf Node object.
+
+    They can be of two implementations: NodeDict or NodeList.
+    """
+
+    def __init__(
+        self,
+        parent: NodeContainer,
+        yr_parent: yamlrocks.YAMLRocksDocument | yamlrocks.YAMLRocksDocumentView,
+        cfg_parent: DictConfig,
+        interpolation_handler: InterpolationHandler,
+        key: Any,
+        prefix: Sequence[str | int] = (),
+    ):
+        self._parent = parent
+        self.yaml_parent = yr_parent
+        self.cfg_parent = cfg_parent
+        self._interpolation_handler = interpolation_handler
+        self.key = key
+        self._prefix = prefix
+
+    @abstractmethod
+    def _is_key_valid(self, key: str | int) -> bool:
+        """Whether this node contains the given key.
+
+        Parameters
+        ----------
+        key : str | int
+            The key to check.
+
+        Returns
+        -------
+        bool
+            Whether the key is valid.
+        """
+
+    def is_interpolation(self, key: str | int) -> bool:
+        """Whether the key is an OmegaConf interpolation.
+
+        Parameters
+        ----------
+        key : str | int
+            The dot-delimited key to check.
+
+        Returns
+        -------
+        bool
+            Whether the key is an interpolation.
+        """
+        return OmegaConf.is_interpolation(self.cfg, key)
+
+    def __contains__(self, key: str | int) -> bool:
+        return self._is_key_valid(key)
+
+    def __len__(self) -> int:
+        return len(self.value)
+
+    def has_key(self, parts: str | Sequence[str | int]) -> bool:
+        """Whether this node tree contains the given sequence of keys.
+
+        Parameters
+        ----------
+        parts : str | Sequence[str | int]
+            The parts of the key to chek.
+
+        Returns
+        -------
+        bool
+            Whether the parts is a valid path in the tree.
+        """
         try:
             self.select(parts)
         except (TypeError, ValueError):
             return False
         return True
 
-    def select(self, parts: Sequence[str | int], create_missing: bool = False) -> Node:
+    def select(self, parts: str | Sequence[str | int], create_missing: bool = False) -> Node:
+        """Select a node in the tree given a sequence of keys.
+
+        Parameters
+        ----------
+        parts : str | Sequence[str | int]
+            The sequence of the keys to select.
+        create_missing : bool, default False
+            Whether to create new nodes if the key is missing. If true, will always create
+            a DictNode when missing.
+
+        Returns
+        -------
+        Node
+            The selected node.
+        """
+        if isinstance(parts, str):
+            parts = parts.split(".")
         node = self
         for part in parts:
             if not isinstance(node, NodeContainer):
@@ -267,7 +304,17 @@ class NodeContainer(Node, ABC):
         return node
 
     def drop_key(self, keys: str, remove_empty: bool = False) -> None:
-        parents, key = parse_key(keys)
+        """Drop a dot-delimited path in the tree.
+
+        Parameters
+        ----------
+        keys : str
+            The dot-delimited path in the tree to remove.
+        remove_empty : bool, default False
+            Whether to also remove the parent nodes if they have a len of 0 after droping
+            the key.
+        """
+        parents, key = parents_head(keys)
         parent_node = self.select(parents)
 
         if not isinstance(parent_node, NodeContainer):
@@ -287,7 +334,16 @@ class NodeContainer(Node, ABC):
         del parent_node[parts[head_key_k]]
 
     def add_key(self, keys: str, value: Any) -> None:
-        parents, key = parse_key(keys)
+        """Adds a dot-delimited path in the tree.
+
+        Parameters
+        ----------
+        keys : str
+            The dot-delimited path in the tree to add.
+        value : Any
+            The default value for this new key.
+        """
+        parents, key = parents_head(keys)
         parent_node = self.select(parents, create_missing=True)
         if not isinstance(parent_node, NodeContainer):
             msg = f"Cannot add node {keys}. Not a container node."
@@ -295,6 +351,18 @@ class NodeContainer(Node, ABC):
         parent_node[key] = value
 
     def rename_key(self, start: str, end: str, remove_empty: bool = False) -> None:
+        """Renames or moves a dot-delimited key to a new key.
+
+        Parameters
+        ----------
+        start : str
+            The dot-delimited path in the tree to rename/move.
+        end : str
+            The new dot-delimited path in the tree.
+        remove_empty : bool, default False
+            Whether to also remove the parent nodes if they have a len of 0 after renaming
+            the key.
+        """
         parts = start.split(".")
         start_node = self.select(parts)
         value = start_node.value
@@ -304,6 +372,8 @@ class NodeContainer(Node, ABC):
 
 
 class NodeDict(NodeContainer):
+    """A dict implementation of NodeContainer."""
+
     def _is_key_valid(self, key: str | int) -> bool:
         return key in self.cfg
 
@@ -315,6 +385,8 @@ class NodeDict(NodeContainer):
 
 
 class NodeList(NodeContainer):
+    """A list implementation of NodeContainer."""
+
     def _is_key_valid(self, key: str | int) -> bool:
         return len(self.cfg) > int(key)
 
