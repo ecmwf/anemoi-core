@@ -486,7 +486,11 @@ larger pipelines.
      checkpoint:
        loading:
          _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
-         strict: false   # false = tolerate small key differences; true = require an exact match
+         strict: false   # false = tolerate extra/missing KEYS; true = require an exact key set
+         # strict says nothing about tensor SHAPES — a size mismatch raises either way.
+         # To load a checkpoint whose variable-dependent layers changed shape, add
+         # skip_mismatched: true, and set training.allow_variable_subset so the
+         # variable-order check accepts the reduction too.
 
 For the common "fine-tune from pretrained" case, prefer **cold start** below,
 which is weights-only *plus* an explicit reset of the training clock.

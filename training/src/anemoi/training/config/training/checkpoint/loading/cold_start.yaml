@@ -2,3 +2,6 @@
 # resets training progress (epoch/global_step) to zero, recording provenance.
 _target_: anemoi.training.checkpoint.loading.strategies.ColdStartLoader
 strict: false
+# skip_mismatched: false   # true = load a checkpoint whose variable-dependent layers
+                           # have a different shape, leaving those parameters at their
+                           # initialised values. See weights_only.yaml.

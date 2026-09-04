@@ -15,10 +15,14 @@ import logging
 from typing import TYPE_CHECKING
 from typing import NoReturn
 
+import torch
+
 from anemoi.training.checkpoint.exceptions import CheckpointLoadError
 from anemoi.training.checkpoint.loading.base import LoadingStrategy
 
 if TYPE_CHECKING:
+    from typing import Any
+
     from anemoi.training.checkpoint.base import CheckpointContext
 
 LOGGER = logging.getLogger(__name__)
@@ -44,15 +48,33 @@ class WeightsOnlyLoader(LoadingStrategy):
     training-progress state. For top-level "fresh training from pretrained
     weights" use :class:`ColdStartLoader` instead.
 
+    ``strict`` governs the *key set*. It cannot express tolerance of a shape
+    change: PyTorch records a size mismatch in ``error_msgs`` outside its
+    ``if strict:`` block, so ``strict=False`` still raises on one. That is what
+    ``skip_mismatched`` is for, and the two are independent.
+
     Parameters
     ----------
     strict : bool, optional
         Whether to require an exact match between checkpoint keys and
         model keys (default: True). Missing keys raise ``CheckpointLoadError``.
+    skip_mismatched : bool, optional
+        Whether to load a checkpoint whose variable-dependent layers have a
+        different shape from the model's, skipping those parameters and leaving
+        them at their initialised values (default: ``False`` — a shape mismatch
+        is an error). Use it to fine-tune onto a dataset with fewer variables,
+        together with ``training.allow_variable_subset``.
+
+        Only shape mismatches are skipped, never keys the model does not have —
+        that is ``strict``'s job, and silently dropping them would make
+        ``strict=True`` unfalsifiable. Skipped parameters are logged at WARNING
+        and recorded in ``context.metadata["skipped_params"]``, because with them
+        gone nothing else would notice that part of the model is still random.
     """
 
-    def __init__(self, strict: bool = True) -> None:
+    def __init__(self, strict: bool = True, skip_mismatched: bool = False) -> None:
         self.strict = strict
+        self.skip_mismatched = skip_mismatched
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
         """Load weights into the model.
@@ -71,10 +93,15 @@ class WeightsOnlyLoader(LoadingStrategy):
 
         state_dict = self._extract_state_dict(context)
 
-        try:
-            context.model.load_state_dict(state_dict, strict=self.strict)
-        except RuntimeError as e:
-            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
+        skipped = self._shape_mismatched_keys(context.model, state_dict) if self.skip_mismatched else {}
+        if skipped:
+            state_dict = {key: value for key, value in state_dict.items() if key not in skipped}
+            self._load_skipping(context, state_dict, skipped)
+        else:
+            try:
+                context.model.load_state_dict(state_dict, strict=self.strict)
+            except RuntimeError as e:
+                raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
 
         self._warn_on_hparams_divergence(context)
         self._preserve_anemoi_metadata(context.model, context.checkpoint_data)
@@ -86,6 +113,105 @@ class WeightsOnlyLoader(LoadingStrategy):
         LOGGER.info("Loaded weights only (strict=%s); training state starts fresh", self.strict)
 
         return context
+
+    @staticmethod
+    def _shape_mismatched_keys(model: Any, state_dict: dict[str, Any]) -> dict[str, str]:
+        """Keys present in both model and checkpoint whose tensor shapes differ.
+
+        Deliberately narrower than
+        :func:`~anemoi.training.checkpoint.loading.utils.filter_state_dict`, which
+        also drops keys the target lacks. Those are exactly what ``strict``
+        governs, so dropping them here would silently override the user's choice.
+
+        Parameters
+        ----------
+        model : torch.nn.Module
+            The model being loaded into.
+        state_dict : dict
+            The checkpoint's state dict.
+
+        Returns
+        -------
+        dict[str, str]
+            Key to a human-readable reason, in the same format
+            ``filter_state_dict`` uses so the two report identically.
+        """
+        target = model.state_dict()
+        return {
+            key: f"Shape mismatch: {value.shape} vs {target[key].shape}"
+            for key, value in state_dict.items()
+            if key in target
+            and isinstance(value, torch.Tensor)
+            and isinstance(target[key], torch.Tensor)
+            and value.shape != target[key].shape
+        }
+
+    def _load_skipping(
+        self,
+        context: CheckpointContext,
+        state_dict: dict[str, Any],
+        skipped: dict[str, str],
+    ) -> None:
+        """Load a state dict with the shape-mismatched parameters already removed.
+
+        The removed keys read as *missing* to PyTorch, so the load itself has to be
+        non-strict. When ``strict`` was requested its guarantee is re-applied here
+        instead, over the keys that were not deliberately skipped — otherwise
+        ``skip_mismatched`` would quietly disable ``strict`` altogether.
+
+        Parameters
+        ----------
+        context : CheckpointContext
+            Pipeline context, used for the checkpoint path in error messages and
+            to record the skipped parameters.
+        state_dict : dict
+            The checkpoint state dict, already filtered.
+        skipped : dict[str, str]
+            Key to reason for every parameter removed.
+
+        Raises
+        ------
+        CheckpointIncompatibleError
+            If nothing at all could be loaded, or if ``strict`` and there are
+            missing/unexpected keys beyond the skipped ones.
+        CheckpointLoadError
+            If the load fails for any other reason.
+        """
+        from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
+
+        if not state_dict:
+            msg = (
+                "Every parameter in the checkpoint was skipped for a shape mismatch, so nothing "
+                f"would be loaded and the model would train from random weights. Skipped: {skipped}. "
+                "This is almost always the wrong checkpoint rather than a deliberate reduction."
+            )
+            raise CheckpointIncompatibleError(msg)
+
+        try:
+            incompatible = context.model.load_state_dict(state_dict, strict=False)
+        except RuntimeError as e:
+            raise CheckpointLoadError(context.checkpoint_path or "<in-memory checkpoint>", e) from e
+
+        if self.strict:
+            unexpected = list(incompatible.unexpected_keys)
+            missing = [key for key in incompatible.missing_keys if key not in skipped]
+            if missing or unexpected:
+                msg = (
+                    "strict=True and the checkpoint key set does not match the model's: "
+                    f"missing={missing}, unexpected={unexpected}. (Shape-mismatched parameters were "
+                    "skipped as configured and are not counted here.)"
+                )
+                raise CheckpointIncompatibleError(msg)
+
+        context.metadata["skipped_params"] = skipped
+        LOGGER.warning(
+            "Loaded %d parameter(s); SKIPPED %d for a shape mismatch, which stay at their initialised "
+            "values: %s. Verify this is the reduction you intended — nothing downstream will notice "
+            "that these are untrained.",
+            len(state_dict),
+            len(skipped),
+            ", ".join(sorted(skipped)),
+        )
 
 
 class TransferLearningLoader(LoadingStrategy):

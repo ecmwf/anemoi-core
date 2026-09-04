@@ -3,3 +3,9 @@
 # architecture.
 _target_: anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader
 strict: false
+# skip_mismatched: false   # true = load a checkpoint whose variable-dependent layers
+                           # have a different shape, leaving those parameters at their
+                           # initialised values. `strict` cannot express this: PyTorch
+                           # raises on a size mismatch regardless of it. Pair with
+                           # training.allow_variable_subset. Skipped params are logged
+                           # at WARNING and recorded in metadata.skipped_params.
