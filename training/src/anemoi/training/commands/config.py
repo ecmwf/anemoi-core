@@ -180,8 +180,8 @@ class ConfigGenerator(Command):
     def run(self, args: argparse.Namespace) -> None:
 
         if args.subcommand == "migration" and args.migration_subcommand == "sync":
-            LOGGER.info("Migrating config %s in %s.", args.path, args.output, args.dry_run, args.no_color)
-            self.migrate_config(args.path, args.output)
+            LOGGER.info("Migrating config %s in %s.", args.path, args.output)
+            self.migrate_config(args.path, args.output, args.no_color)
             return
         if args.subcommand == "migration" and args.migration_subcommand == "create":
             LOGGER.info("Creating migration script %s.", args.name)
