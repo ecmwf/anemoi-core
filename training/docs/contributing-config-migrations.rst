@@ -4,6 +4,58 @@
  Contributing Config Migration
 ##############################
 
+If your PR changes the configuration structure, you will need to provide a configuration
+migration.
+
+*********************
+ Creating a migration
+*********************
+
+Run:
+
+.. code:: bash
+
+    anemoi-training config migration create NAME [--final]
+
+This command will create a new migration script that will look like:
+
+.. code:: bash
+
+    from anemoi.utils.migrations import MigrationMetadata
+
+    from anemoi.training.migrations.config import Config
+
+    # DO NOT CHANGE -->
+    metadata = MigrationMetadata(
+        versions={
+            "migration": "1.0.0",
+            "anemoi-training": "%NEXT_ANEMOI_TRAINING_VERSION%",
+        },
+    )
+    # <-- END DO NOT CHANGE
+
+
+    def migrate(config: Config) -> Config:
+        """Migrate the config.
+
+        Parameters
+        ----------
+        config : Config
+            The config object to migrated.
+
+        Returns
+        -------
+        Config
+            The migrated config.
+        """
+        return config
+
+You will need to edit the ``migrate`` function. You can assume that the config object
+that you get as input is a valid configuration prior to the changes in your PR. The
+output config should be updated to reflect the changes in your PR.
+
+See below for details abaut the config object.
+
 ******************
  The Config Object
 ******************
