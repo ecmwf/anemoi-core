@@ -72,6 +72,21 @@ the UI table. It is possible to see it is a forked run because it will have a
 tag called ``forkedRun:True`` and its lineage will match the 'mlflow run_id' of
 the original run.
 
+.. note::
+
+   **Removed:** forking into an already-prepared run id. Setting the old
+   ``training.run_id`` and ``training.fork_run_id`` together used to mean "take
+   the weights from run A, but log into prepared run B", tagging the new run with
+   both ``resumedRun`` and ``forkedRun``. Run lineage now comes from a single
+   ``training.checkpoint.source``, which names either a run to resume or a run to
+   fork, never both, so that combination is no longer expressible.
+
+   The two halves are still available separately: attach a job to a run id minted
+   by ``anemoi-training mlflow prepare`` with ``fork: false`` (the prepared run has
+   no checkpoint, so training starts from scratch under that id), or fork an
+   existing run's weights into a fresh id with ``fork: true``. If you relied on
+   combining them, please open an issue describing the workflow.
+
 **Comparing Runs**
 
 To compare runs, the user just needs to select the runs they would like
