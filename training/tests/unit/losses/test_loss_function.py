@@ -727,6 +727,74 @@ def test_spectral_crps_cartesian_transform(transform: str) -> None:
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
 
 
+@pytest.mark.parametrize("coefficient_magnitude", [True, False])
+def test_spectral_crps_scores_the_selected_coefficient_values(
+    coefficient_magnitude: bool,
+    mocker: MockerFixture,
+) -> None:
+    pred_spec = torch.tensor(
+        [[[[[1.0 + 2.0j], [-2.0 + 1.0j]], [[-1.0 - 1.0j], [3.0 + 4.0j]], [[2.0 - 2.0j], [1.0j]]]]],
+        dtype=torch.complex128,
+    )
+    target_spec = torch.tensor(
+        [[[[[1.0 - 1.0j], [2.0 + 2.0j]]]]],
+        dtype=torch.complex128,
+    )
+    loss = SpectralCRPSLoss(
+        transform="fft2d",
+        x_dim=1,
+        y_dim=1,
+        alpha=0.7,
+        coefficient_magnitude=coefficient_magnitude,
+    )
+    mocker.patch.object(loss, "_to_spectral_flat", side_effect=[pred_spec, target_spec])
+
+    pred_for_score = torch.abs(pred_spec) if coefficient_magnitude else pred_spec
+    target_for_score = torch.abs(target_spec) if coefficient_magnitude else target_spec
+    expected = loss._kernel_crps(
+        einops.rearrange(pred_for_score, "b t e m v -> b t v m e"),
+        einops.rearrange(target_for_score, "b t 1 m v -> b t v m 1"),
+    ).sum(dim=-1)[0, 0]
+    actual = loss(
+        torch.empty(1, 1, 3, 1, 1, dtype=torch.float64),
+        torch.empty(1, 1, 1, 1, 1, dtype=torch.float64),
+        squash=False,
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_spectral_crps_coefficient_magnitude_has_finite_zero_gradient() -> None:
+    pred = torch.zeros(1, 1, 3, 4, 2, dtype=torch.float64, requires_grad=True)
+    target = torch.zeros(1, 1, 1, 4, 2, dtype=torch.float64)
+    loss = SpectralCRPSLoss(
+        transform="fft2d",
+        x_dim=2,
+        y_dim=2,
+        coefficient_magnitude=True,
+    )
+
+    score = loss(pred, target)
+    score.backward()
+
+    assert torch.isfinite(score)
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_spectral_crps_factory_sets_coefficient_magnitude() -> None:
+    loss = _make_loss(
+        "anemoi.training.losses.SpectralCRPSLoss",
+        transform="fft2d",
+        x_dim=2,
+        y_dim=2,
+        coefficient_magnitude=True,
+    )
+
+    assert isinstance(loss, SpectralCRPSLoss)
+    assert loss.coefficient_magnitude is True
+
+
 def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
     from scipy.sparse import eye
 

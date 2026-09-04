@@ -120,3 +120,15 @@ def test_optimizer_config_group_can_be_overridden() -> None:
         cfg = compose(config_name="config", overrides=["training/optimization/optimizer=zero"])
 
     assert cfg.training.optimization.optimizer._target_ == "torch.distributed.optim.ZeroRedundancyOptimizer"
+
+
+@pytest.mark.parametrize("config_name", ["temporal_downscaler", "temporal_downscaler_ensemble"])
+def test_temporal_downscaler_tendency_scalers_use_output_timestep(config_name: str) -> None:
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(config_name=config_name, overrides=["task.output_timestep=2H"])
+
+    OmegaConf.resolve(cfg)
+
+    scalers = cfg.training.scalers.datasets.data
+    assert scalers.stdev_tendency.timestep == "2H"
+    assert scalers.var_tendency.timestep == "2H"

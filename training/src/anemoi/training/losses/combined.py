@@ -29,6 +29,7 @@ class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
     # CombinedLoss builds child losses itself, so it needs the full scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(

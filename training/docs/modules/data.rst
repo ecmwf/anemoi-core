@@ -67,13 +67,13 @@ API Reference
 Dataset Readers
 ---------------
 
-.. automodule:: anemoi.training.data.dataset
+.. automodule:: anemoi.training.data.data_reader
    :members:
    :no-undoc-members:
    :show-inheritance:
 
-Multi-Dataset
--------------
+Multi-Dataset API
+-----------------
 
 .. automodule:: anemoi.training.data.multidataset
    :members:

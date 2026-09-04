@@ -368,9 +368,91 @@ def test_on_save_checkpoint_persists_rollout_step() -> None:
     assert checkpoint["task_state"]["rollout"]["last_increased_epoch"] == 1
 
 
-def test_on_load_checkpoint_restores_rollout_step() -> None:
-    """on_load_checkpoint recovers rollout.step so resume continues from the right value."""
+def test_on_load_checkpoint_overrides_configured_rollout_start(caplog: pytest.LogCaptureFixture) -> None:
+    """A full resume uses the checkpoint rollout state instead of rollout.start."""
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 2, "maximum": 5})
+
+    checkpoint = {
+        "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {},
+    }
+    caplog.set_level(logging.INFO)
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert task.rollout.step == 4
+    assert task.rollout._last_increased_epoch == 3
+    assert "Restored rollout step from checkpoint: 4 (task was initialized at step 2)." in caplog.messages
+
+
+def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFixture) -> None:
+    """Training startup reports the final task rollout step."""
+    module, _ = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 0, "maximum": 2})
+    caplog.set_level(logging.INFO)
+
+    BaseTrainingModule.on_train_start(module)
+
+    assert caplog.messages == ["Effective task rollout step: 2."]
+
+
+@pytest.mark.asyncio
+async def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> None:
+    """Loading only weights starts the rollout schedule at rollout.start.
+
+    A weights-only load goes through the checkpoint pipeline at model build and never
+    calls ``on_load_checkpoint`` (the trainer withholds ``ckpt_path``), so the task's
+    runtime state in the checkpoint is never applied: the rollout schedule starts
+    where the config says, not where the checkpoint stopped.
+    """
+    from anemoi.training.checkpoint.base import CheckpointContext
+    from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 2, "maximum": 5})
+    module.model = torch.nn.Linear(2, 2)
+    checkpoint = {
+        "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+        "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
+    }
+
+    await WeightsOnlyLoader(strict=True).process(CheckpointContext(model=module, checkpoint_data=checkpoint))
+
+    assert task.rollout.step == 2
+    assert task.rollout._last_increased_epoch == -1
+
+    task.on_train_epoch_end(0)
+    assert task.rollout.step == 2
+    assert task.rollout._last_increased_epoch == -1
+
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+    assert task.rollout._last_increased_epoch == 1
+
+
+class _RecordingDataModule:
+    """Record the time window selected whenever the dataset is refreshed."""
+
+    def __init__(self, task: Forecaster) -> None:
+        self._task = task
+        self.epoch = 0
+        self.offsets = task.get_offsets("training")
+
+    def set_epoch(self, epoch: int) -> None:
+        self.epoch = epoch
+        self.sync_dataset_state()
+
+    def sync_dataset_state(self) -> None:
+        self.offsets = self._task.get_offsets("training")
+
+
+def test_on_load_checkpoint_synchronizes_dataloader_time_window() -> None:
+    """Datasets are resized for the restored rollout before workers start."""
     module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    datamodule = _RecordingDataModule(task)
+    # Simulate a dataset synchronized while the task still has rollout.start.
+    datamodule.set_epoch(2)
+    assert len(datamodule.offsets) == 2
+    module._trainer = SimpleNamespace(datamodule=datamodule)
 
     checkpoint = {
         "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
@@ -379,8 +461,8 @@ def test_on_load_checkpoint_restores_rollout_step() -> None:
     }
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
-    assert task.rollout.step == 3
-    assert task.rollout._last_increased_epoch == 1
+    assert len(datamodule.offsets) == 4
+    assert datamodule.epoch == 2
 
 
 def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
@@ -411,6 +493,31 @@ def test_rollout_step_not_spuriously_incremented_on_resume() -> None:
     assert resumed_task.rollout.step == 4
     resumed_task.on_train_epoch_end(3)
     assert resumed_task.rollout.step == 5
+
+
+def test_rollout_schedule_continues_at_configured_interval_after_resume() -> None:
+    """A restored rollout still waits for the configured number of completed epochs."""
+    rollout_cfg = {"start": 1, "epoch_increment": 2, "maximum": 5}
+    module, task = _make_module_with_forecaster_task(rollout_cfg)
+
+    task.on_train_epoch_end(0)
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 2
+
+    checkpoint: dict = {}
+    BaseTrainingModule.on_save_checkpoint(module, checkpoint)
+    checkpoint["hyper_parameters"] = {"data_indices": {"data": DummyIndex()}}
+    checkpoint["state_dict"] = {}
+
+    resumed_module, resumed_task = _make_module_with_forecaster_task(rollout_cfg)
+    BaseTrainingModule.on_load_checkpoint(resumed_module, checkpoint)
+
+    resumed_task.on_train_epoch_end(1)
+    assert resumed_task.rollout.step == 2
+    resumed_task.on_train_epoch_end(2)
+    assert resumed_task.rollout.step == 2
+    resumed_task.on_train_epoch_end(3)
+    assert resumed_task.rollout.step == 3
 
 
 def test_on_load_checkpoint_without_task_state_leaves_rollout_at_start() -> None:
@@ -1150,6 +1257,7 @@ def _training_config_for_train() -> DictConfig:
             "diagnostics": {
                 "debug": {"anomaly_detection": False},
                 "log": {"interval": 1},
+                "enable_checkpointing": True,
                 "enable_progress_bar": False,
                 "print_memory_summary": False,
             },
@@ -1299,7 +1407,7 @@ def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resum
     from (``trainer.ckpt_path``), and the load proceeds: metadata is still restored.
     """
     module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt")
+    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
     checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
 
     with caplog.at_level(logging.WARNING):

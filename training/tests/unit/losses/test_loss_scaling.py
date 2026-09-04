@@ -232,9 +232,9 @@ std_dev_scaler = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScale
 
 var_scaler = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "6h"}
 
-std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12h"}
+std_dev_scaler_12h = {"_target_": "anemoi.training.losses.scalers.StdevTendencyScaler", "timestep": "12H"}
 
-var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12h"}
+var_scaler_12h = {"_target_": "anemoi.training.losses.scalers.VarTendencyScaler", "timestep": "12H"}
 
 no_tend_scaler = {"_target_": "anemoi.training.losses.scalers.NoTendencyScaler"}
 

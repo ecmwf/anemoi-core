@@ -4,7 +4,7 @@ defaults:
 - diagnostics: evaluation_multi
 - system: example
 - graph: multi
-- model: graphtransformer
+- model: graphtransformer_multi
 - task: forecaster
 - training: multi
 - _self_

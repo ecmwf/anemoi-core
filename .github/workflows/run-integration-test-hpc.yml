@@ -1,0 +1,41 @@
+name: run-integration-test-hpc
+
+# Reusable workflow: run a single expensive integration test on HPC, reusing the
+# shared clone + virtualenv that the caller's build-env job created under
+# $PERM/TESTING/integration-venvs/${{ github.run_id }}.
+on:
+  workflow_call:
+    inputs:
+      pytest_cmd:
+        required: true
+        type: string
+      timeout_minutes:
+        required: true
+        type: number
+      sbatch_options:
+        required: true
+        type: string
+
+jobs:
+  run:
+    runs-on: hpc
+    timeout-minutes: ${{ inputs.timeout_minutes }}
+    steps:
+      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            env | grep SLURM # helps with debugging
+            set -eux
+            module load python3/3.12.9-01
+            # Reuse the shared clone + virtualenv built by the build-env job.
+            WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
+            cd "$WORKDIR/anemoi-core"
+            source "$WORKDIR/venv/bin/activate"
+            # Inject the MLflow URL here (not via job-level env:, which does not
+            # propagate to the sbatch job); secrets are valid inside this template.
+            export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
+            export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
+            ${{ inputs.pytest_cmd }}
+            deactivate
+          sbatch_options: ${{ inputs.sbatch_options }}
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}

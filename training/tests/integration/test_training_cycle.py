@@ -13,6 +13,8 @@ from copy import deepcopy
 from pathlib import Path
 
 import pytest
+import pytorch_lightning as pl
+import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from omegaconf import open_dict
@@ -31,28 +33,53 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
-def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
+TASK_SPECIFIC_TIMESTEP_KEYS = {
+    "offset-forecaster": {"input_offsets", "output_offsets", "rollout_shift", "advance_map"},
+}
+
+
+def assert_keys_exist(data: dict, schema: dict, path: str = "root", skip_keys: set[str] | None = None) -> None:
     """Recursively check that the metadata dictionary conforms to the expected schema.
 
     This is a simplified schema validation that only checks for the presence of expected keys.
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
+    if skip_keys is None:
+        task = data.get("task")
+        all_task_keys = set().union(*TASK_SPECIFIC_TIMESTEP_KEYS.values())
+        skip_keys = all_task_keys - TASK_SPECIFIC_TIMESTEP_KEYS.get(task, set())
+
     for key, subschema in schema.items():
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
                 assert ds in data, f"{path}: dataset '{ds}' missing"
-                assert_keys_exist(data[ds], subschema, f"{path}.{ds}")
+                assert_keys_exist(data[ds], subschema, f"{path}.{ds}", skip_keys)
+            continue
+
+        if key in skip_keys:
             continue
 
         assert key in data, f"{path}: missing key '{key}'"
 
         if isinstance(subschema, dict):
             assert isinstance(data[key], dict), f"{path}.{key} should be dict"
-            assert_keys_exist(data[key], subschema, f"{path}.{key}")
+            assert_keys_exist(data[key], subschema, f"{path}.{key}", skip_keys)
 
         if subschema is list:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
+
+
+def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
+    """Return the single run-id checkpoint directory produced by a training run."""
+    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
+    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
+
+    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
+    assert (
+        len(run_dirs) == 1
+    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
+    return run_dirs[0]
 
 
 @skip_if_offline
@@ -274,21 +301,24 @@ def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, lis
 
 @skip_if_offline
 @pytest.mark.slow
+class _RecordTrainingStart(pl.Callback):
+    """Record the epoch and global step a run starts training at."""
+
+    epoch: int | None = None
+    global_step: int | None = None
+
+    def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
+        del pl_module
+        self.epoch = trainer.current_epoch
+        self.global_step = trainer.global_step
+
+
 def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
     cfg, url = gnn_config
     get_test_archive(url)
 
     AnemoiTrainer(cfg).train()
-    output_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
-
-    assert output_dir.exists(), f"Checkpoint directory not found at: {output_dir}"
-
-    run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
-    assert (
-        len(run_dirs) == 1
-    ), f"Expected exactly one run_id directory, found {len(run_dirs)}: {[d.name for d in run_dirs]}"
-
-    checkpoint_dir = run_dirs[0]
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
     assert len(list(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))) == 2, "Expected 2 checkpoints after first run"
 
     # Resume the run via the checkpoint pipeline surface (the legacy ``training.run_id``
@@ -305,7 +335,15 @@ def test_restart_training(gnn_config: tuple[DictConfig, str], get_test_archive: 
         }
     cfg.training.max_epochs = 3
     trainer = AnemoiTrainer(cfg)
+    # The resumed run must start where the parent stopped, not at epoch 0: a from-scratch
+    # 3-epoch run would reach the same final global step and checkpoint count.
+    start = _RecordTrainingStart()
+    trainer.callbacks.append(start)
     trainer.train()
+
+    batches_per_epoch = int(cfg.dataloader.limit_batches.training)
+    assert start.epoch == 2, f"resumed run started at epoch {start.epoch}, expected the parent's 2"
+    assert start.global_step == 2 * batches_per_epoch, f"resumed run started at step {start.global_step}"
 
     expected_global_step = int(cfg.training.max_epochs * cfg.dataloader.limit_batches.training)
     assert (
@@ -705,6 +743,52 @@ def test_config_validation_temporal_downscaler_ensemble(
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_offset_forecaster(
+    offset_forecaster_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = offset_forecaster_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_config(offset_forecaster_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = offset_forecaster_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Train the tendency transport path with irregular inputs and two forecast lead times."""
+    cfg, url = offset_forecaster_tendency_transport_config
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    assert trainer.task.name == "offset-forecaster"
+    assert trainer.datamodule.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
+    assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = offset_forecaster_tendency_transport_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_evaluator(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
@@ -730,3 +814,74 @@ def test_evaluator(
     }
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_restart_training_with_rollout(
+    gnn_config_with_rollout: tuple[DictConfig, str, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = gnn_config_with_rollout
+    get_test_archive(url)
+    weights_only_cfg = deepcopy(cfg)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
+    assert (
+        trainer.task.rollout.step == 3
+    ), f"Expected rollout step after 2 epochs to be 1+2=3, got {trainer.task.rollout.step}"
+
+    # Resume training from the checkpoint and verify the rollout counter is restored
+    # correctly and continues to increment on further epochs.
+    checkpoint_dir = get_single_checkpoint_dir(cfg)
+    checkpoint_path = sorted(checkpoint_dir.glob("anemoi-by_epoch-*.ckpt"))[-1]
+    checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    assert checkpoint["AnemoiDatasetsDataModule"]["epoch"] == 1
+
+    # Start a new training run from the model weights. The configured rollout
+    # must determine both the task steps and the dataset time window.
+    last_checkpoint_path = checkpoint_dir / "last.ckpt"
+    with open_dict(weights_only_cfg):
+        weights_only_cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.local.LocalSource",
+                "path": str(last_checkpoint_path),
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+        }
+    weights_only_cfg.training.max_epochs = 1
+    weights_only_cfg.task.rollout = {
+        "start": 4,
+        "epoch_increment": 0,
+        "maximum": 4,
+    }
+    weights_only_cfg.diagnostics.enable_checkpointing = False
+    weights_only_cfg.dataloader.limit_batches.validation = 0
+    weights_only_trainer = AnemoiTrainer(weights_only_cfg)
+    weights_only_trainer.train()
+
+    assert weights_only_trainer.task.rollout.step == 4
+    assert weights_only_trainer.datamodule.ds_train.rollout == 4
+
+    # Resume the run: a RunIdSource with no loading block hands last.ckpt to
+    # Lightning's ckpt_path, which restores the task state along with everything else.
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+                "fork": False,
+            },
+        }
+    cfg.training.max_epochs = 4
+    resumed_trainer = AnemoiTrainer(cfg)
+    resumed_trainer.train()
+
+    # After two additional epochs the counter loaded from the checkpoint (3) must have advanced
+    # to the maximum specified in the beginning.
+    assert resumed_trainer.task.rollout.step == 4, (
+        "Expected rollout step after resuming for 2 more epochs to be 4 (maximum rollout step), "
+        f"got {resumed_trainer.task.rollout.step}"
+    )

@@ -14,6 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -164,6 +165,35 @@ def test_loss_variable_mapper_propagates_needs_shard_layout_info() -> None:
 def test_loss_variable_mapper_rejects_non_base_loss() -> None:
     with pytest.raises(TypeError, match="Expected BaseLoss"):
         LossVariableMapper(loss=object())  # type: ignore[arg-type]
+
+
+def test_loss_variable_mapper_preserves_wrapped_loss_reduction_default() -> None:
+    data_indices = IndexCollection(
+        DictConfig({"forcing": [], "diagnostic": [], "target": []}),
+        {"a": 0, "b": 1},
+    )
+    loss = LossVariableMapper(
+        loss=CRPS(alpha=0.7),
+        predicted_variables=["a", "b"],
+        target_variables=["a", "b"],
+        data_indices=data_indices,
+    )
+    pred = torch.tensor(
+        [[[[[0.0, 1.0]], [[2.0, 0.0]], [[1.0, 4.0]]]]],
+        dtype=torch.float64,
+    )
+    target = torch.tensor([[[[[1.0, 2.0]]]]], dtype=torch.float64)
+    loss_kwargs = {
+        "pred_layout": IndexSpace.MODEL_OUTPUT,
+        "target_layout": IndexSpace.DATA_OUTPUT,
+    }
+
+    scalar_loss = loss(pred, target, **loss_kwargs)
+    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
+    summed_loss = loss(pred, target, squash_mode="sum", **loss_kwargs)
+
+    torch.testing.assert_close(scalar_loss, per_variable_loss.mean())
+    torch.testing.assert_close(summed_loss, per_variable_loss.sum())
 
 
 # =============================================================================

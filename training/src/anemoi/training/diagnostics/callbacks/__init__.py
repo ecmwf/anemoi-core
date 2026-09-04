@@ -82,6 +82,11 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
         Diagnostics configuration (``config.diagnostics``).
     checkpoint_paths_cfg : DictConfig
         Checkpoint paths configuration (``config.system.output.checkpoints``).
+
+    Returns
+    -------
+    list[AnemoiCheckpoint]
+        Configured checkpoint callbacks, or an empty list when checkpointing is disabled.
     """
     if not diagnostics_cfg.enable_checkpointing:
         return []
@@ -93,7 +98,9 @@ def _get_checkpoint_callback(diagnostics_cfg: DictConfig, checkpoint_paths_cfg: 
         # https://pytorch-lightning.readthedocs.io/en/stable/common/checkpointing_basic.html#contents-of-a-checkpoint
         "save_weights_only": False,
         "auto_insert_metric_name": False,
-        # save after every validation epoch, if we've improved
+        # Save after validation, before on_train_epoch_end advances the rollout
+        # and dataloader epoch. On resume, Lightning completes that hook before
+        # the first new training worker starts.
         "save_on_train_epoch_end": False,
         "enable_version_counter": False,
     }

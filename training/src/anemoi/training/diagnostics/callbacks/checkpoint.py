@@ -18,6 +18,7 @@ import torch
 import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from anemoi.training.utils.checkpoint import check_classes
 from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
@@ -45,6 +46,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
         self._tracker_metadata = None
         self._tracker_name = None
 
+        # when checkpointing by time, round to
+        # the nearest N steps
+        # This reduces broadcasts by a factor
+        # of self._time_check_every_n_steps
+        self._time_check_every_n_steps = 50
+
     @staticmethod
     def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
         # Get the model from the DataParallel wrapper, for single and multi-gpu cases
@@ -71,6 +78,23 @@ class AnemoiCheckpoint(ModelCheckpoint):
         }
 
         return self._model_metadata
+
+    def on_train_batch_end(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        outputs: STEP_OUTPUT,
+        batch: any,
+        batch_idx: int,
+    ) -> None:
+        # when using time-based checkpointing there is a broadcast each iteration
+        # This can get quite expensive when sharding to a large number of GPUs
+        # per model
+        # To minimise the cost, we round the time interval up to the next N steps
+        # This reduces broadcasts by a factor of N
+        if self._train_time_interval is not None and trainer.global_step % self._time_check_every_n_steps != 0:
+            return
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
     def _adjust_epoch_progress(self, trainer: pl.Trainer) -> None:
         """Adjust the epoch progress when saving a mid-epoch checkpoint.

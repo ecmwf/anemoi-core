@@ -81,9 +81,9 @@ resolved checkpoint is applied:
    ``training.checkpoint`` surface above (see
    :ref:`checkpoint_pipeline_configuration`).
 
-**************************
+***********************************
  Checkpointing and weight averaging
-**************************
+***********************************
 
 Checkpointing callbacks (:class:`~anemoi.training.diagnostics.callbacks.checkpoint.AnemoiCheckpoint`)
 and weight-averaging callbacks (SWA / EMA) are **automatically disabled**

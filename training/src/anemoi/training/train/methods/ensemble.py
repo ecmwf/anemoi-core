@@ -100,12 +100,21 @@ class EnsembleTraining(BaseTrainingModule):
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
-        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy:
+        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
+        # Defaults are the single-device values used by SingleDeviceStrategy,
+        # which does not set up communication groups. A ``None`` process group
+        # makes the ensemble gather a no-op (see gather_tensor).
         self.ens_comm_group = None
-        self.ens_comm_group_id = None
-        self.ens_comm_group_rank = None
-        self.ens_comm_num_groups = None
-        self.ens_comm_group_size = None
+        self.ens_comm_group_id = 0
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_size = 1
+
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = 0
+        self.ens_comm_subgroup_rank = 0
+        self.ens_comm_subgroup_num_groups = 1
+        self.ens_comm_subgroup_size = 1
 
     def set_ens_comm_group(
         self,

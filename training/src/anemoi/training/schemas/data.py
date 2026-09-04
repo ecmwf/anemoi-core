@@ -36,23 +36,7 @@ class DatasetDataSchema(PydanticBaseModel):
 
 
 class DataSchema(PydanticBaseModel):
-    """A class used to represent the overall configuration of the dataset(s).
-
-    Attributes
-    ----------
-    format : str
-        The format of the data.
-    resolution : str
-        The resolution of the data.
-    frequency : str
-        The frequency of the data.
-    timestep : str
-        The timestep of the data.
-    datasets : dict[str, DatasetDataSchema] | None
-        "Dictionary mapping dataset names to their configurations."
-    num_features : int, optional
-        The number of features in the forecast state. To be set in the code.
-    """
+    """A class used to represent the overall configuration of the dataset(s)."""
 
     format: str = Field(example=None)
     "Format of the data."
@@ -60,5 +44,3 @@ class DataSchema(PydanticBaseModel):
     "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
-    num_features: int | None
-    "Number of features in the forecast state. To be set in the code."

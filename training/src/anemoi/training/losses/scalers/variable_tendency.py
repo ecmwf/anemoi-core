@@ -18,6 +18,8 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.utils.enums import TensorDim
+from anemoi.utils.dates import as_timedelta
+from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
 
@@ -72,7 +74,7 @@ class BaseTendencyScaler(BaseScaler):
                     "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
                     timestep,
                 )
-            self.timestep = timestep
+            self.timestep = frequency_to_string(as_timedelta(timestep))
             self.statistics_tendencies = statistics_tendencies.get(self.timestep)
             assert self.statistics_tendencies is not None, f"No tendency statistics for timestep '{self.timestep}'."
         else:

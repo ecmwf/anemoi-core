@@ -47,6 +47,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
 if TYPE_CHECKING:
@@ -189,9 +190,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = {
-            name: instantiate(config.model.output_mask, nodes=graph_data[name]) for name in self.dataset_names
-        }
+        self.output_mask = build_output_masks(get_multiple_datasets_config(config.model.output_mask), graph_data)
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -468,6 +467,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if corrected is not checkpoint:
             checkpoint.clear()
             checkpoint.update(corrected)
+
+        # Anemoi constructs the task and datasets from the config before Lightning
+        # restores their checkpoint state. Now that the checkpoint rollout is restored,
+        # update any constructed datasets so workers load the required input and target
+        # time steps. Checkpoint conversion loads the module without creating a Trainer
+        # or datamodule, so only synchronize if a datamodule is attached.
+        if trainer is not None and trainer.datamodule is not None:
+            trainer.datamodule.sync_dataset_state()
 
         preserve_anemoi_metadata(self, checkpoint)
         extract_checkpoint_variables_metadata(self, checkpoint)
@@ -808,6 +815,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y_pred:
+                err_msg = (
+                    f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "
+                    f"you have defined a loss function over it."
+                )
+                raise ValueError(err_msg)
+
             dataset_loss, dataset_metrics, y_preds[dataset_name] = self.compute_dataset_loss_metrics(
                 y_pred[dataset_name],
                 y[dataset_name],
@@ -1165,9 +1179,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         super().lr_scheduler_step(scheduler, metric)
 
+    def on_train_start(self) -> None:
+        """Log the effective task state after checkpoint restoration."""
+        super().on_train_start()
+        self.task.log_training_state()
+
     def on_train_epoch_end(self) -> None:
         self.task.on_train_epoch_end(current_epoch=self.current_epoch)
+        # Default epoch checkpoints are saved at validation end, before this
+        # hook. On resume Lightning finishes the saved epoch here, advancing the
+        # dataloader before newly created workers derive the seed for that epoch.
         self.trainer.datamodule.set_epoch(self.current_epoch + 1)
+        super().on_train_epoch_end()
 
     def configure_optimizers(
         self,
