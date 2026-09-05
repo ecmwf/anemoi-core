@@ -127,6 +127,11 @@ def gather_ensemble(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Process
     ``mgroup`` must be the ensemble communication subgroup (``ens_comm_subgroup``),
     so its size is ``num_gpus_per_ensemble // num_gpus_per_model``. With no
     subgroup, the tensor and its gradient pass through unchanged.
+
+    The subgroup contains ranks at the same model shard position across ensemble members.
+    This routine supplies the ensemble-sharding gradient correction.
+    The strategy's existing parameter hooks separately compensate for
+    model sharding where required.
     """
     return _GatherEnsembleParallelSection.apply(input_, dim, sizes, mgroup)
 
