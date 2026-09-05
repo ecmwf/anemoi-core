@@ -24,10 +24,19 @@ jobs:
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
 
-            python3 -m pytest -q models/tests/distributed/test_communication_primitives.py \
+            python3 -m pytest -q \
+              models/tests/distributed/test_communication_primitives.py \
+              models/tests/distributed/test_ensemble.py \
               --distributed \
               --distributed-backend=all \
               --distributed-world-size=2
+
+            # Run the combined model and ensemble sharding checks on CPUs.
+            OMP_NUM_THREADS=1 python3 -m pytest -q \
+              models/tests/distributed/test_ensemble.py \
+              --distributed \
+              --distributed-backend=gloo \
+              --distributed-world-size=4
 
             deactivate
             rm -rf $REPO_NAME

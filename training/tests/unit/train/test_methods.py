@@ -2226,12 +2226,6 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     forecaster.grid_dim = -2
     forecaster.grid_shard_sizes = {"data": None}
 
-    monkeypatch.setattr(
-        "anemoi.training.train.methods.ensemble.gather_tensor",
-        lambda input_, *_args, **_kwargs: input_,
-        raising=True,
-    )
-
     captured: dict[str, Any] = {}
 
     def _prepare_tensors_stub(
