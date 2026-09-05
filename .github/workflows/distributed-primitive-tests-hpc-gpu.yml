@@ -24,7 +24,9 @@ jobs:
             pip install --upgrade pip
             pip install -e ./training[all,tests] -e ./models[all,tests] -e ./graphs[all,tests]
 
-            python3 -m pytest -q models/tests/distributed/test_communication_primitives.py \
+            python3 -m pytest -q \
+              models/tests/distributed/test_communication_primitives.py \
+              models/tests/distributed/test_ensemble.py \
               --distributed \
               --distributed-backend=all \
               --distributed-world-size=2
