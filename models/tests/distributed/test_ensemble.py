@@ -18,19 +18,33 @@ from distributed_runner import run_distributed_test
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.graph import gather_ensemble
+from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import shard_tensor
 
 
 class EnsembleModel(torch.nn.Module):
-    """Small nonlinear model with parameters upstream of the ensemble gather."""
+    """Small nonlinear model with parameters before and after grid sharding."""
 
-    def __init__(self, device: torch.device) -> None:
+    def __init__(self, device: torch.device, model_group: dist.ProcessGroup | None = None) -> None:
         super().__init__()
+        self.model_group = model_group
         self.weight = torch.nn.Parameter(torch.tensor([[0.7], [-0.3]], device=device, dtype=torch.float64))
         self.trainable_bias = torch.nn.Parameter(torch.tensor([0.2], device=device, dtype=torch.float64))
 
+        if model_group is not None:
+            # Apply the strategy's model-sharding scaling rule to the weight,
+            # which only sees a grid shard. The bias is added before sharding,
+            # so shard_tensor's backward gathers its full-grid contribution.
+            self.weight.register_hook(lambda grad: grad * model_group.size())
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return torch.tanh(x @ self.weight + self.trainable_bias)
+        x = x + self.trainable_bias
+        if self.model_group is not None:
+            sizes = get_balanced_partition_sizes(x.size(2), self.model_group.size())
+            x = shard_tensor(x, dim=2, sizes=sizes, mgroup=self.model_group)
+        return torch.tanh(x @ self.weight)
 
 
 def ensemble_loss(prediction: torch.Tensor) -> torch.Tensor:
@@ -45,25 +59,38 @@ def _test_gather_ensemble_rank(
     device: torch.device,
     group: dist.ProcessGroup,
     data_parallel: bool,
+    model_group_size: int,
     use_checkpoint: bool,
 ) -> None:
     num_data_groups = 2 if data_parallel else 1
     ensemble_group_size = world_size // num_data_groups
+    ensemble_subgroup_size = ensemble_group_size // model_group_size
     data_group_id = rank // ensemble_group_size
-    ensemble_rank = rank % ensemble_group_size
-    ensemble_group = group
-    if data_parallel:
-        for start in range(0, world_size, ensemble_group_size):
-            ranks = list(range(start, start + ensemble_group_size))
-            subgroup = dist.new_group(ranks=ranks)
-            if rank in ranks:
-                ensemble_group = subgroup
+    ensemble_rank = (rank % ensemble_group_size) // model_group_size
+    model_rank = rank % model_group_size
+
+    model_group = None
+    if model_group_size > 1:
+        model_groups = [
+            dist.new_group(ranks=list(range(start, start + model_group_size)))
+            for start in range(0, world_size, model_group_size)
+        ]
+        model_group = model_groups[rank // model_group_size]
+
+    ensemble_subgroup = group
+    if data_parallel or model_group_size > 1:
+        ensemble_subgroups = [
+            dist.new_group(ranks=list(range(start + offset, start + ensemble_group_size, model_group_size)))
+            for start in range(0, world_size, ensemble_group_size)
+            for offset in range(model_group_size)
+        ]
+        ensemble_subgroup = ensemble_subgroups[data_group_id * model_group_size + model_rank]
 
     members_per_rank = 2
     generator = torch.Generator().manual_seed(71)
     inputs = torch.randn(
         num_data_groups,
-        members_per_rank * ensemble_group_size,
+        members_per_rank * ensemble_subgroup_size,
         3,
         2,
         dtype=torch.float64,
@@ -73,17 +100,24 @@ def _test_gather_ensemble_rank(
     reference_prediction = reference(inputs)
     ensemble_loss(reference_prediction).backward()
 
-    model = EnsembleModel(device)
+    model = EnsembleModel(device, model_group=model_group)
     ddp = DistributedDataParallel(model, device_ids=[device.index] if device.type == "cuda" else None)
     member_start = ensemble_rank * members_per_rank
     local_input = inputs[data_group_id : data_group_id + 1, member_start : member_start + members_per_rank]
+    grid_shard_sizes = get_balanced_partition_sizes(inputs.size(2), model_group_size)
 
     def gather_and_score(prediction: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         gathered = gather_ensemble(
             prediction.clone(),
             dim=1,
-            sizes=[members_per_rank] * ensemble_group_size,
-            mgroup=ensemble_group,
+            sizes=[members_per_rank] * ensemble_subgroup_size,
+            mgroup=ensemble_subgroup,
+        )
+        gathered = gather_tensor(
+            gathered.clone(),
+            dim=2,
+            sizes=grid_shard_sizes,
+            mgroup=model_group,
         )
         return ensemble_loss(gathered), gathered
 
@@ -102,21 +136,25 @@ def _test_gather_ensemble_rank(
 
 
 @pytest.mark.distributed
-@pytest.mark.parametrize("data_parallel", [False, True])
-@pytest.mark.parametrize("use_checkpoint", [False, True])
+@pytest.mark.parametrize("data_parallel", [False, True], ids=["data_groups_1", "data_groups_2"])
+@pytest.mark.parametrize("model_group_size", [1, 2], ids=["model_shards_1", "model_shards_2"])
+@pytest.mark.parametrize("use_checkpoint", [False, True], ids=["no_checkpoint", "checkpoint"])
 def test_gather_ensemble_matches_unsharded_parameter_gradients(
     data_parallel: bool,
+    model_group_size: int,
     use_checkpoint: bool,
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    if data_parallel and distributed_world_size % 2:
-        pytest.skip("Two data-parallel groups require an even world size.")
+    num_data_groups = 2 if data_parallel else 1
+    if distributed_world_size % (num_data_groups * model_group_size):
+        pytest.skip("World size must be divisible by the number of data groups times the model group size.")
     run_distributed_test(
         _test_gather_ensemble_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
         data_parallel=data_parallel,
+        model_group_size=model_group_size,
         use_checkpoint=use_checkpoint,
     )
 
