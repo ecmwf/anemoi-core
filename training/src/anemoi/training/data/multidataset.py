@@ -398,10 +398,25 @@ class MultiDataset(IterableDataset):
         return x
 
     def lead_hours_of(self, index: int) -> float:
-        """Forecast lead (hours) of sample ``index`` from the fake-hindcast mapping of ``lead_dataset``."""
+        """Forecast lead (hours) of sample ``index`` from the fake-hindcast mapping of ``lead_dataset``.
+
+        The reader's ``data`` may be wrapped (e.g. ``Select`` for variable selection) above the
+        ``Subset`` that owns the fake-hindcast mapping; walk down the ``forward`` chain to the first
+        object that exposes ``fake_hindcasts`` (the Subset, whose mapping is keyed by the fake dates
+        that ``reader.dates`` returns).
+        """
         reader = self.datasets[self.lead_dataset]
         fake_date = reader.dates[index]
-        _, _, step = reader.data.fake_date_to_date_step(fake_date)
+        ds = reader.data
+        for _ in range(32):
+            try:
+                ds.fake_hindcasts
+                break
+            except AttributeError:
+                ds = ds.forward
+        else:
+            raise AttributeError(f"no fake_hindcasts mapping found under dataset {reader.data!r}")
+        _, _, step = ds.fake_date_to_date_step(fake_date)
         return float(step)
 
     def __iter__(self) -> dict[str, torch.Tensor]:
