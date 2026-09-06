@@ -282,11 +282,11 @@ def _apply_scalers(
         if key not in scalers or []:
             error_msg = f"Scaler {key!r} not found in valid scalers: {list(scalers.keys())}"
             raise ValueError(error_msg)
-        if key in ["stdev_tendency", "var_tendency"]:
+        if key in ["stdev_tendency", "var_tendency"] and data_indices is not None:
             for var_key, idx in data_indices.model.output.name_to_index.items():
                 if idx in data_indices.model.output.prognostic:
                     scaling = scalers[key][1][idx]
-                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
+                    LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.4g", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
 
 
