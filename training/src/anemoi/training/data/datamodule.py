@@ -188,6 +188,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             shuffle=shuffle,
             grid_indices=self.grid_indices,
             label=label,
+            emit_lead_hours=bool(self.config.dataloader.get("emit_lead_hours", False)),
         )
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

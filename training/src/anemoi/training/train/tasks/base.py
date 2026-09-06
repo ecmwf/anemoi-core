@@ -801,6 +801,8 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         for dataset_name in batch:
+            if dataset_name not in self.model.pre_processors:  # side-channel keys such as lead_hours
+                continue
             batch[dataset_name] = self.model.pre_processors[dataset_name](batch[dataset_name])  # normalized in-place
         return batch
 
@@ -1082,9 +1084,50 @@ class BaseGraphModule(pl.LightningModule, ABC):
         scheduler = self._create_scheduler(optimizer)
         return [optimizer], [scheduler]
 
+    def _build_param_groups(self, groups_cfg: Any) -> list[dict[str, Any]]:
+        """Per-module learning rates (fine-scale epic, 2026-09-06), config-gated and absent by default.
+
+        ``training.optimizer_param_groups`` is a list of ``{name, patterns, lr}``: every trainable
+        parameter whose qualified name contains one of a group's patterns joins that group (first
+        match wins, in list order); the rest form the default group at the optimizer's own ``lr``.
+        The cosine scheduler (timm) keeps one base value per group, so each group follows the same
+        warmup/cosine shape scaled to its own peak. Every group must be non-empty: a typo in a
+        pattern must fail here, not train silently at the wrong rate.
+        """
+        groups = []
+        for g in groups_cfg:
+            patterns = list(g["patterns"]) if not isinstance(g["patterns"], str) else [g["patterns"]]
+            groups.append({"name": str(g["name"]), "patterns": patterns, "lr": float(g["lr"]), "params": []})
+        default = {"name": "default", "params": []}
+        for name, p in self.named_parameters():
+            if not p.requires_grad:
+                continue
+            for g in groups:
+                if any(pat in name for pat in g["patterns"]):
+                    g["params"].append(p)
+                    break
+            else:
+                default["params"].append(p)
+        out = []
+        for g in groups:
+            if not g["params"]:
+                raise ValueError(f"optimizer_param_groups: group '{g['name']}' matched no trainable parameter")
+            n = sum(p.numel() for p in g["params"])
+            LOGGER.info("optimizer param group '%s': %d tensors, %d params, lr=%.3e", g["name"], len(g["params"]), n, g["lr"])
+            out.append({"params": g["params"], "lr": g["lr"], "name": g["name"]})
+        n = sum(p.numel() for p in default["params"])
+        LOGGER.info("optimizer param group 'default': %d tensors, %d params (optimizer lr)", len(default["params"]), n)
+        if default["params"]:
+            out.append(default)
+        return out
+
     def _create_optimizer_from_config(self, opt_cfg: Any) -> torch.optim.Optimizer:
         """Instantiate optimizer directly via Hydra config (_target_ style)."""
-        params = filter(lambda p: p.requires_grad, self.parameters())
+        groups_cfg = self.config.training.get("optimizer_param_groups", None)
+        if groups_cfg:
+            params = self._build_param_groups(groups_cfg)
+        else:
+            params = filter(lambda p: p.requires_grad, self.parameters())
 
         # Convert schema to dict if needed
         if hasattr(opt_cfg, "model_dump"):

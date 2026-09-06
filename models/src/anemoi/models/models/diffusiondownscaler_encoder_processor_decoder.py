@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 import logging
 from collections.abc import Mapping
 from typing import Callable
@@ -524,6 +525,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        lead_hours: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Forward pass for downscaling with two separate inputs.
@@ -677,6 +679,29 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         # that D = c_skip * y_noised + c_out * (decoder + branch). A zero-initialised head makes
         # this an exact no-op until trained.
         if hres_branch is not None:
+            # Optional lead-time conditioning of the branch only (2026-09-06). The embedding is
+            # expanded to the data nodes and sharded exactly like c_data, then ADDED to it inside
+            # the branch; the trunk's conditioning is untouched. A branch built with the option
+            # refuses to run without a lead (never a silent zero); a branch without it ignores
+            # any lead passed by a caller.
+            lead_cond_rows = None
+            lead_embed = getattr(hres_branch, "lead_embed", None)
+            if lead_embed is not None:
+                if lead_hours is None:
+                    raise ValueError(
+                        "hres_branch.lead_cond is configured but no lead_hours was supplied to forward(); "
+                        "the training batch must carry 'lead_hours' and inference must pass lead_hours=."
+                    )
+                lead_t = torch.as_tensor(lead_hours, device=c_data.device, dtype=noise_cond_base.dtype).reshape(-1)
+                if lead_t.numel() == 1 and batch_size > 1:
+                    lead_t = lead_t.expand(batch_size)
+                assert lead_t.numel() == batch_size, f"lead_hours has {lead_t.numel()} entries for batch {batch_size}"
+                lead_vec = lead_embed(lead_t).to(noise_cond_base.dtype)  # (batch, cond_dim)
+                lead_5d = lead_vec[:, None, None, None, :].expand(batch_size, 1, ensemble_size, 1, cond_dim)
+                c_lead = self._make_noise_emb(
+                    lead_5d, repeat=self.node_attributes[dataset_name].num_nodes[self._graph_name_data]
+                )
+                lead_cond_rows = shard_tensor(c_lead, 0, c_data_shard_sizes, model_comm_group)
             x_out = x_out + hres_branch(
                 x_data_raw,
                 x_out,
@@ -686,6 +711,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
                 model_comm_group=model_comm_group,
                 cond=c_data,
                 inputs_sharded=bool(in_out_sharded["out_hres"]),
+                lead_cond_rows=lead_cond_rows,
             )
 
         # Assemble output
@@ -701,6 +727,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         sigma: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        lead_hours: Optional[torch.Tensor] = None,
     ) -> dict[str, torch.Tensor]:
         """Forward pass with pre-conditioning for downscaling.
 
@@ -735,6 +762,7 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            lead_hours=lead_hours,
         )
 
         D_x = {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
@@ -1142,11 +1170,20 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         x_dict = {"in_lres": x_in_lres_upsampled, "in_hres": x_in_hres}
         y_dict = {"out_hres": y_init}
 
+        # lead-time conditioning (2026-09-06): bound into the denoising function so every sampler
+        # step sees the same lead; ignored by models without the option.
+        lead_hours = kwargs.pop("lead_hours", None)
+        denoising_fn = (
+            self.fwd_with_preconditioning
+            if lead_hours is None
+            else functools.partial(self.fwd_with_preconditioning, lead_hours=lead_hours)
+        )
+
         result_dict = sampler_instance.sample(
             x_dict,
             y_dict,
             sigmas,
-            self.fwd_with_preconditioning,
+            denoising_fn,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
             dtype=x_in_lres_upsampled.dtype,

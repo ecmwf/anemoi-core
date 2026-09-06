@@ -231,10 +231,13 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         x: dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
+        lead_hours: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         """Forward pass for training.
 
         Follows the forecaster pattern: all inputs/outputs are dicts keyed by dataset name.
+        ``lead_hours`` (batch,) is the forecast lead of each sample; only a lead-conditioned
+        hres_branch consumes it (2026-09-06).
         """
         return self.model.model.fwd_with_preconditioning(
             x,
@@ -242,6 +245,7 @@ class GraphDiffusionDownscaler(BaseGraphModule):
             sigma,
             model_comm_group=self.model_comm_group,
             grid_shard_sizes=self.grid_shard_sizes,
+            lead_hours=lead_hours,
         )
 
     def _compute_loss(
@@ -340,8 +344,9 @@ class GraphDiffusionDownscaler(BaseGraphModule):
         # Add noise to targets (dict-based, like forecaster)
         y_noised = self._noise_target(target_dict, sigma)
 
-        # Forward pass with preconditioning
-        y_pred = self(x_dict, y_noised, sigma)  # dict: {target_ds: (bs, time, ens, latlon, nvar)}
+        # Forward pass with preconditioning (lead_hours present only when
+        # dataloader.emit_lead_hours is set; see MultiDataset.get_sample)
+        y_pred = self(x_dict, y_noised, sigma, lead_hours=batch.get("lead_hours"))  # dict: {target_ds: (bs, time, ens, latlon, nvar)}
 
         # Compute loss and metrics
         loss, metrics_next, y_pred_out = checkpoint(

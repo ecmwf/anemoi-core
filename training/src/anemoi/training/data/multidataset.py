@@ -41,6 +41,8 @@ class MultiDataset(IterableDataset):
         timestep: str = "6h",
         shuffle: bool = True,
         label: str = "multi",
+        emit_lead_hours: bool = False,
+        lead_dataset: str = "out_hres",
     ) -> None:
         """Initialize multi-dataset with synchronized datasets.
 
@@ -64,6 +66,10 @@ class MultiDataset(IterableDataset):
         self.label = label
         self.shuffle = shuffle
         self.timestep = timestep
+        # fine-scale epic, 2026-09-06: optionally add the forecast lead (hours) of every sample as
+        # the side-channel key "lead_hours" (read from the fake-hindcast mapping of lead_dataset)
+        self.emit_lead_hours = bool(emit_lead_hours)
+        self.lead_dataset = lead_dataset
         self.dataset_names = list(data_readers.keys())
         self.grid_indices = grid_indices
 
@@ -386,7 +392,17 @@ class MultiDataset(IterableDataset):
             start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
             x[name] = dataset.get_sample(time_indices, slice(start, end))
 
+        if self.emit_lead_hours:
+            x["lead_hours"] = torch.tensor(self.lead_hours_of(index), dtype=torch.float32)
+
         return x
+
+    def lead_hours_of(self, index: int) -> float:
+        """Forecast lead (hours) of sample ``index`` from the fake-hindcast mapping of ``lead_dataset``."""
+        reader = self.datasets[self.lead_dataset]
+        fake_date = reader.dates[index]
+        _, _, step = reader.data.fake_date_to_date_step(fake_date)
+        return float(step)
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

@@ -60,7 +60,35 @@ CONFIG_KEYS = (
     "detach_inputs",
     "zero_init_head",
     "layer_kernels",
+    "lead_cond",
 )
+
+
+class LeadEmbedding(nn.Module):
+    """Forecast lead time -> additive conditioning vector for the branch (fine-scale epic, 2026-09-06).
+
+    The branch's correction was measured to be roughly constant with lead time (arm F: finest-band
+    ratio 1.045 at 24 h, 0.953 at 120 h), because nothing tells the branch the lead. This module maps
+    the lead (hours) to a vector of the branch's conditioning width, which is ADDED to the noise
+    conditioning the branch already receives; the trunk never sees it. The last layer is
+    zero-initialised, so a warm start from a checkpoint without it reproduces that checkpoint exactly.
+
+    ``u = clamp(lead_hours / lead_scale, 0, clamp_max)``: with ``lead_scale`` = the longest training
+    lead (72 h) and ``clamp_max`` = 1, every lead beyond the training window is conditioned as the
+    72 h lead (a stated, conservative extrapolation), never as an unseen value.
+    """
+
+    def __init__(self, cond_dim: int, lead_scale: float = 72.0, hidden: int = 32, clamp_max: float = 1.0) -> None:
+        super().__init__()
+        self.lead_scale = float(lead_scale)
+        self.clamp_max = float(clamp_max)
+        self.net = nn.Sequential(nn.Linear(1, hidden), nn.GELU(), nn.Linear(hidden, cond_dim))
+        nn.init.constant_(self.net[-1].weight, 0.0)
+        nn.init.constant_(self.net[-1].bias, 0.0)
+
+    def forward(self, lead_hours: torch.Tensor) -> torch.Tensor:
+        u = (lead_hours.reshape(-1, 1).to(self.net[0].weight.dtype) / self.lead_scale).clamp(0.0, self.clamp_max)
+        return self.net(u)
 
 
 def default_layer_kernels(num_channels: int, cond_dim: int) -> DotDict:
@@ -132,9 +160,12 @@ class LocalHresBranch(nn.Module):
         graph_attention_backend: str = "triton",
         detach_inputs: bool = False,
         zero_init_head: bool = True,
+        lead_cond: Optional[dict] = None,
     ) -> None:
         super().__init__()
         assert num_layers % num_chunks == 0, "hres_branch: num_layers must be divisible by num_chunks"
+        # optional lead-time conditioning (absent by default: no module, no random numbers drawn)
+        self.lead_embed = LeadEmbedding(cond_dim, **dict(lead_cond)) if lead_cond else None
         self.detach_inputs = bool(detach_inputs)
         self.num_channels = int(num_channels)
         if layer_kernels is None:
@@ -179,6 +210,7 @@ class LocalHresBranch(nn.Module):
         model_comm_group: Optional[ProcessGroup],
         cond: Optional[torch.Tensor],
         inputs_sharded: bool,
+        lead_cond_rows: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Return the branch correction on the same node layout as ``x_dec`` (or ``x_raw`` if ``x_dec`` is None).
 
@@ -192,6 +224,10 @@ class LocalHresBranch(nn.Module):
         if self.detach_inputs:
             x_dec = x_dec.detach() if x_dec is not None else None
             cond = cond.detach() if cond is not None else None
+        # lead-time conditioning, same row layout as ``cond``; added AFTER the detach so the
+        # branch's own embedding always receives its gradient
+        if lead_cond_rows is not None:
+            cond = lead_cond_rows if cond is None else cond + lead_cond_rows.to(cond.dtype)
         # single-input mode (deterministic local downscaler): no decoder output to concatenate
         h_in = x_raw if x_dec is None else torch.cat([x_raw, x_dec.to(x_raw.dtype)], dim=-1)
 
