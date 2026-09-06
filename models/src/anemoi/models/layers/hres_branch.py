@@ -164,8 +164,6 @@ class LocalHresBranch(nn.Module):
     ) -> None:
         super().__init__()
         assert num_layers % num_chunks == 0, "hres_branch: num_layers must be divisible by num_chunks"
-        # optional lead-time conditioning (absent by default: no module, no random numbers drawn)
-        self.lead_embed = LeadEmbedding(cond_dim, **dict(lead_cond)) if lead_cond else None
         self.detach_inputs = bool(detach_inputs)
         self.num_channels = int(num_channels)
         if layer_kernels is None:
@@ -192,6 +190,10 @@ class LocalHresBranch(nn.Module):
         if zero_init_head:
             nn.init.constant_(self.head.weight, 0.0)
             nn.init.constant_(self.head.bias, 0.0)
+        # optional lead-time conditioning (absent by default: no module, no random numbers drawn).
+        # Built LAST on purpose: its random init then consumes the RNG after every other tensor,
+        # so the fresh init of all pre-existing tensors is unchanged by the option (gate 1a).
+        self.lead_embed = LeadEmbedding(cond_dim, **dict(lead_cond)) if lead_cond else None
         LOGGER.info(
             "LocalHresBranch: in=%d out=%d width=%d layers=%d heads=%d chunks=%d edge_dim=%d "
             "shard_strategy=%s detach_inputs=%s zero_init_head=%s",
