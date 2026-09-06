@@ -284,9 +284,7 @@ def _apply_scalers(
             raise ValueError(error_msg)
         if key in ["stdev_tendency", "var_tendency"]:
             for var_key, idx in data_indices.model.output.name_to_index.items():
-                if idx in data_indices.model.output.prognostic and data_indices.data.output.name_to_index.get(
-                    var_key,
-                ):
+                if idx in data_indices.model.output.prognostic:
                     scaling = scalers[key][1][idx]
                     LOGGER.info("Parameter %s is being scaled by statistic_tendencies by %.2f", var_key, scaling)
         loss_function.add_scaler(*scalers[key], name=key)
