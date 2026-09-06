@@ -1125,9 +1125,19 @@ class BaseGraphModule(pl.LightningModule, ABC):
         """Instantiate optimizer directly via Hydra config (_target_ style)."""
         groups_cfg = self.config.training.get("optimizer_param_groups", None)
         if groups_cfg:
-            params = self._build_param_groups(groups_cfg)
-        else:
-            params = filter(lambda p: p.requires_grad, self.parameters())
+            # Hydra's instantiate would wrap the list of group dicts (which hold tensors) in its own
+            # config containers and AdamW would refuse them, so the class is called directly here.
+            from hydra.utils import get_class
+
+            cfg = opt_cfg.model_dump(by_alias=True) if hasattr(opt_cfg, "model_dump") else OmegaConf.to_container(opt_cfg, resolve=True)
+            cfg = dict(cfg)
+            target = cfg.pop("_target_")
+            cfg.pop("_partial_", None)
+            cfg.pop("_convert_", None)
+            cfg.setdefault("lr", self.lr)
+            LOGGER.info("optimizer %s with %d parameter groups, default kwargs %s", target, len(groups_cfg) + 1, cfg)
+            return get_class(target)(self._build_param_groups(groups_cfg), **cfg)
+        params = filter(lambda p: p.requires_grad, self.parameters())
 
         # Convert schema to dict if needed
         if hasattr(opt_cfg, "model_dump"):
