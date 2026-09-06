@@ -191,9 +191,13 @@ class LocalHresBranch(nn.Module):
             nn.init.constant_(self.head.weight, 0.0)
             nn.init.constant_(self.head.bias, 0.0)
         # optional lead-time conditioning (absent by default: no module, no random numbers drawn).
-        # Built LAST on purpose: its random init then consumes the RNG after every other tensor,
-        # so the fresh init of all pre-existing tensors is unchanged by the option (gate 1a).
-        self.lead_embed = LeadEmbedding(cond_dim, **dict(lead_cond)) if lead_cond else None
+        # Built inside a forked RNG so the global random stream is exactly what it would be without
+        # the option: every tensor constructed after this point keeps its fresh init (gate 2 by the
+        # letter; the 2026-09-06 probe showed four later-built tensors shifting otherwise).
+        self.lead_embed = None
+        if lead_cond:
+            with torch.random.fork_rng(devices=[]):
+                self.lead_embed = LeadEmbedding(cond_dim, **dict(lead_cond))
         LOGGER.info(
             "LocalHresBranch: in=%d out=%d width=%d layers=%d heads=%d chunks=%d edge_dim=%d "
             "shard_strategy=%s detach_inputs=%s zero_init_head=%s",
