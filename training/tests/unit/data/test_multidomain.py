@@ -12,8 +12,8 @@ import numpy as np
 import pytest
 from pytest_mock import MockFixture
 
-from anemoi.training.data.multidomain import MultiDomainDataset
-from anemoi.training.data.multidomain import MultiDomainSampler
+from anemoi.training.data.datasets import MultiDomainDataset
+from anemoi.training.data.datasets.multidomain import MultiDomainSampler
 
 
 class TestMultiDomain:
