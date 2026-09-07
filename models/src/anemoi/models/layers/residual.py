@@ -584,6 +584,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
             x_last_truncate_subset = self._apply_truncation(
                 x_last_truncate_subset, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
             )
+            x_last = x_last.clone()
             x_last[..., self._truncation_input_idx] = x_last_truncate_subset
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
