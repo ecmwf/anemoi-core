@@ -18,10 +18,11 @@ from torch.utils.data import DataLoader
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
-from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.datasets import AnemoiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
@@ -46,15 +47,20 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self.config = config
         self.task = task
 
-        self.train_dataloader_config = get_multiple_datasets_config(self.config.dataloader.training)
-        self.valid_dataloader_config = get_multiple_datasets_config(self.config.dataloader.validation)
-        self.test_dataloader_config = get_multiple_datasets_config(self.config.dataloader.test)
+        # TODO(dieter): this breaks old configs, decide what to do about that
+        self.train_dataloader_config = {k: v for k, v in self.config.dataloader.training.items() if k != "datasets"}
+        self.valid_dataloader_config = {k: v for k, v in self.config.dataloader.validation.items() if k != "datasets"}
+        self.test_dataloader_config = {k: v for k, v in self.config.dataloader.test.items() if k != "datasets"}
 
-        self.dataset_names = list(self.train_dataloader_config.keys())
+        self.train_dataloader_datareader_config = get_multiple_datasets_config(self.config.dataloader.training)
+        self.valid_dataloader_datareader_config = get_multiple_datasets_config(self.config.dataloader.validation)
+        self.test_dataloader_datareader_config = get_multiple_datasets_config(self.config.dataloader.test)
+
+        self.dataset_names = list(self.train_dataloader_datareader_config.keys())
         LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
 
         # Set training end dates if not specified for each dataset
-        for name, dataset_config in self.train_dataloader_config.items():
+        for name, dataset_config in self.train_dataloader_datareader_config.items():
             if dataset_config.end is None:
                 msg = f"No end date specified for training dataset {name}."
                 raise ValueError(msg)
@@ -109,30 +115,49 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return indices
 
     @cached_property
-    def ds_train(self) -> MultiDataset:
+    def ds_train(self) -> AnemoiDataset:
         """Create multi-dataset for training."""
-        return self._get_dataset(self.train_dataloader_config, shuffle=True, label="training")
+        return self._get_dataset(
+            self.train_dataloader_config,
+            self.train_dataloader_datareader_config,
+            shuffle=True,
+            label="training",
+        )
 
     @cached_property
-    def ds_valid(self) -> MultiDataset:
+    def ds_valid(self) -> AnemoiDataset:
         """Create multi-dataset for validation."""
-        return self._get_dataset(self.valid_dataloader_config, shuffle=False, label="validation")
+        return self._get_dataset(
+            self.valid_dataloader_config,
+            self.valid_dataloader_datareader_config,
+            shuffle=False,
+            label="validation",
+        )
 
     @cached_property
-    def ds_test(self) -> MultiDataset:
+    def ds_test(self) -> AnemoiDataset:
         """Create multi-dataset for testing."""
-        return self._get_dataset(self.test_dataloader_config, shuffle=False, label="test")
+        return self._get_dataset(
+            self.test_dataloader_config,
+            self.test_dataloader_datareader_config,
+            shuffle=False,
+            label="test",
+        )
 
     def _get_dataset(
         self,
         config: dict[str, dict],
+        datareader_config: dict[str, dict],
         shuffle: bool = True,
         label: str = "generic",
-    ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+    ) -> AnemoiDataset:
+        data_readers = {
+            name: create_dataset(data_reader, task=self.task) for name, data_reader in datareader_config.items()
+        }
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
 
-        return MultiDataset(
+        return instantiate_with_runtime_kwargs(
+            config,
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
@@ -186,7 +211,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return False
         return persistent_workers
 
-    def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
+    def _get_dataloader(self, ds: AnemoiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 

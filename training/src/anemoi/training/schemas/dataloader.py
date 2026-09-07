@@ -11,6 +11,7 @@
 import datetime
 from pathlib import Path
 from typing import Any
+from typing import Literal
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -20,7 +21,6 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
-from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -122,6 +122,13 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
+class MultiDatasetSchema(BaseModel):
+    """Configuration for a MultiDataset."""
+
+    target_: Literal["anemoi.training.data.datasets.MultiDataset"] = Field(..., alias="_target_")
+    datasets: dict[str, NativeDatasetSchema | TrajectoryDatasetSchema]
+
+
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -138,11 +145,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    training: MultiDatasetSchema
     "Training DatasetSchema."
-    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    validation: MultiDatasetSchema
     "Validation DatasetSchema."
-    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    test: MultiDatasetSchema
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."

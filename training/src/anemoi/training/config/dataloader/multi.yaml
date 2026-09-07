@@ -44,6 +44,7 @@ limit_batches:
 # ============
 
 training:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     era5:
       dataset_config:
@@ -64,6 +65,7 @@ training:
 
 # Multi-dataset validation with same datasets, different time period
 validation:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     era5:
       dataset_config:
@@ -84,6 +86,7 @@ validation:
 
 # Multi-dataset test with same datasets, different time period
 test:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     era5:
       dataset_config:

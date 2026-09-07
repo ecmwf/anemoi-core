@@ -17,8 +17,8 @@ import numpy as np
 import torch
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.datasets import AnemoiDataset
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed

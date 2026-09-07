@@ -50,6 +50,7 @@ limit_batches:
 dataset: ${system.input.dataset}
 
 training:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:
@@ -59,6 +60,7 @@ training:
       end: 2020
 
 validation:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:
@@ -68,6 +70,7 @@ validation:
       end: 2021
 
 test:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:

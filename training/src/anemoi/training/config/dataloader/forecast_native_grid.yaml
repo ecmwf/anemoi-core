@@ -29,6 +29,7 @@ trajectory_sampling:
   stride: null  # null = window size (non-overlapping)
 
 training:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:
@@ -42,6 +43,7 @@ training:
         sampling: ${dataloader.trajectory_sampling}
 
 validation:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:
@@ -55,6 +57,7 @@ validation:
         sampling: ${dataloader.trajectory_sampling}
 
 test:
+  _target_: anemoi.training.data.datasets.MultiDataset
   datasets:
     data:
       dataset_config:
