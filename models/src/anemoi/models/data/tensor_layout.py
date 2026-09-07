@@ -54,6 +54,18 @@ class TensorLayout:
 
     _AXIS = ("batch", "time", "ensemble", "grid", "variables")
 
+    @classmethod
+    def from_tuple(cls, *args) -> "TensorLayout":
+        """Create a TensorLayout from a tuple of axis names."""
+        axis_positions = {name: i for i, name in enumerate(args)}
+        return cls(
+            batch=axis_positions.get("batch"),
+            time=axis_positions.get("time"),
+            ensemble=axis_positions.get("ensemble"),
+            grid=axis_positions.get("grid", -2),
+            variables=axis_positions.get("variables", -1),
+        )
+
     @property
     def dims(self) -> set[str]:
         """Set of logical axes defined by this layout."""

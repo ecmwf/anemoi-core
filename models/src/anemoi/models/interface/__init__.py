@@ -20,6 +20,7 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.tensor_layout import TensorLayout
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -233,11 +234,11 @@ class AnemoiModelInterface(torch.nn.Module):
             "latitudes": coordinates[:, 0],
             "longitudes": coordinates[:, 1],
             "variables": variables,
-            "layouts": ("time", "ensemble", "grid", "variables"),
+            "layout": ("time", "ensemble", "grid", "variables"),
         }
         if data is not None:
             spec["data"] = data
-            assert spec["data"].ndim == len(spec["layouts"]), "Data tensor dimensionality does not match the specified layout."
+            assert spec["data"].ndim == len(spec["layout"]), "Data tensor dimensionality does not match the specified layout."
         else:
             spec["data"] = None
 
@@ -259,14 +260,22 @@ class AnemoiModelInterface(torch.nn.Module):
         }
 
     def get_batch(self, data: dict[str, torch.Tensor]) -> Batch:
-        new_batch = {}
+        new_batch = dict(data={}, coordinates={}, layouts={}, variables={}, statistics={})
         for dataset_name, ds_data in data.items():
-        
-            new_batch[dataset_name] = {
-                "data": ds_data.get("data", None),
-                "coordinates": torch.cat([ds_data["latitudes"].unsqueeze(-1), ds_data["longitudes"].unsqueeze(-1)], dim=-1),
-            }
-        return new_batch
+            new_batch["data"][dataset_name] = ds_data.get("data", None)
+            new_batch["coordinates"][dataset_name] = torch.cat([
+                ds_data["latitudes"].unsqueeze(-1), ds_data["longitudes"].unsqueeze(-1)
+            ], dim=-1)
+            new_batch["layouts"][dataset_name] = TensorLayout.from_tuple(*ds_data["layout"])
+            new_batch["variables"][dataset_name] = ds_data["variables"]
+            new_batch["statistics"][dataset_name] = ds_data.get("statistics", self.statistics[dataset_name])
+
+            if new_batch["layouts"][dataset_name].batch is None: 
+                if new_batch["data"][dataset_name] is not None: # it refers to the target template
+                    new_batch["data"][dataset_name] = new_batch["data"][dataset_name].unsqueeze(0)
+                new_batch["layouts"][dataset_name] = TensorLayout.from_tuple("batch", *ds_data["layout"])
+
+        return Batch(**new_batch)
 
     def predict_step(
         self,
@@ -299,10 +308,17 @@ class AnemoiModelInterface(torch.nn.Module):
         x = self.prepare_input_spec(batch) # TODO: move to anemoi-inference
         target_template = self.prepare_target_spec(target) # TODO: move to anemoi-inference
 
+        # Convert to batch
+        x = self.get_batch(x)
+        target = self.get_batch(target_template)
+
+        # Check for data spec
+        assert all(d.layout.batch is not None for d in x.values())
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
-            "x": self.get_batch(x),
-            "target": self.get_batch(target_template),
+            "x": x,
+            "target": target,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,

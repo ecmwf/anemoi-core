@@ -623,11 +623,15 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
+            processed_batch = x
             for dataset_name in dataset_names:
-                x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
+                processed_batch = processed_batch.update_source(
+                    dataset_name,
+                    pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
+                )
 
             # Perform forward pass
-            y_hat = self.forward(x, model_comm_group=model_comm_group, **kwargs)
+            y_hat = self.forward(processed_batch, model_comm_group=model_comm_group, **kwargs)
 
             # Apply post-processing
             for dataset_name in dataset_names:
