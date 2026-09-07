@@ -63,6 +63,12 @@ class GridsMaskSchema(BaseModel):
     "Position of the grids to consider as True."
 
 
+class GeographicAreaMaskSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.attributes.GeographicAreaMask"] = Field(..., alias="_target_")
+    "Mask dataset nodes by west/south/east/north degree bounds."
+    area: list[float] = Field(min_length=4, max_length=4)
+
+
 class NonmissingAnemoiDatasetVariableSchema(BaseModel):
     target_: Literal["anemoi.graphs.nodes.attributes.NonmissingAnemoiDatasetVariable"] = Field(..., alias="_target_")
     (
@@ -79,6 +85,7 @@ SingleAttributeSchema = (
     | SphericalAreaWeightSchema
     | CutOutMaskSchema
     | GridsMaskSchema
+    | GeographicAreaMaskSchema
     | NonmissingAnemoiDatasetVariableSchema
 )
 

@@ -85,7 +85,46 @@ class TemporalDownscalerSchema(BaseModel):
     "Whether to include the right boundary in the output."
 
 
+class QueryForecastingSchema(BaseModel):
+    """Configuration for query-first direct forecasting."""
+
+    target_: Literal["anemoi.training.tasks.QueryForecasting"] = Field(
+        ...,
+        alias="_target_",
+    )
+    lead_times: list[str] = Field(min_length=1)
+    input_history: str
+    samples_per_epoch: PositiveInt
+    reference_provenance: str
+    target_variables: list[str] | None = None
+    input_variables: list[str] | None = None
+    source_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    field_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    history_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
+    max_input_times: PositiveInt = 4
+    input_context_margin_degrees: float = Field(default=0.0, ge=0.0)
+    global_context_sources: list[str] = Field(default_factory=list)
+    target_regions: list[list[float]] = Field(default_factory=list)
+    target_regions_by_provenance: dict[str, list[list[float]]] = Field(
+        default_factory=dict,
+    )
+    variable_weights: dict[str, float] = Field(default_factory=dict)
+    provenance_weights: dict[str, float] = Field(default_factory=dict)
+    loss_weights: dict[str, float] = Field(default_factory=dict)
+    spatial_weighting: Literal["uniform", "cosine_latitude"] = "uniform"
+    aliases: dict[str, str] = Field(default_factory=dict)
+    availability_policy: Literal["retrospective"] = "retrospective"
+    availability_lag: dict[str, str] = Field(default_factory=dict)
+    validation_seed: int = 17
+    validation_samples: PositiveInt = 16
+    seed: int = 42
+
+
 TaskSchema = Annotated[
-    ForecasterSchema | OffsetForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema
+    | OffsetForecasterSchema
+    | AutoencoderTaskSchema
+    | TemporalDownscalerSchema
+    | QueryForecastingSchema,
     Discriminator("target_"),
 ]

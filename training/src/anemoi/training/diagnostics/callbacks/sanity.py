@@ -53,6 +53,8 @@ class CheckVariableOrder(pl.callbacks.Callback):
         _ : pl.LightningModule
             Not used
         """
+        if getattr(trainer.datamodule.task, "name", None) == "query-forecasting":
+            return
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
         self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
@@ -84,6 +86,8 @@ class CheckVariableOrder(pl.callbacks.Callback):
         _ : pl.LightningModule
             Not used
         """
+        if getattr(trainer.datamodule.task, "name", None) == "query-forecasting":
+            return
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
         self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
@@ -98,6 +102,8 @@ class CheckVariableOrder(pl.callbacks.Callback):
         _ : pl.LightningModule
             Not used
         """
+        if getattr(trainer.datamodule.task, "name", None) == "query-forecasting":
+            return
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
         self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)

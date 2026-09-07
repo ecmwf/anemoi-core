@@ -1,0 +1,124 @@
+num_channels: 128
+cpu_offload: false
+keep_batch_sharded: false
+post_processors: []
+
+model:
+  _target_: anemoi.models.models.QueryForecaster
+  hidden_nodes_name: hidden
+  latent_skip: true
+
+query:
+  metadata_hidden_dim: 64
+  adapter_node_chunk_size: 4096
+  processor_mesh_resolution: 4
+  encoder_neighbours: 12
+  decoder_neighbours: 4
+  decoder_chunk_size: 512
+  stretched_grid:
+    enabled: true
+    context_source: ERA5  # Set to IFS after enabling IFS and disabling ERA5 if desired.
+    area: [-15.0, 55.0, 35.0, 72.0]
+    global_resolution: 3
+    local_resolution: 6
+    margin_radius_km: 100.0
+
+layer_kernels:
+  LayerNorm: {_target_: torch.nn.LayerNorm}
+  Linear: {_target_: torch.nn.Linear}
+  Activation: {_target_: torch.nn.GELU}
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: false
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: false
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  trainable_size: 0
+  sub_graph_edge_attributes: [edge_length]
+  num_channels: ${model.num_channels}
+  num_layers: 4
+  num_chunks: 1
+  mlp_hidden_ratio: 4
+  mlp_implementation: mlp
+  num_heads: 4
+  qk_norm: false
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: true
+  layer_kernels: ${model.layer_kernels}
+  graph_attention_backend: pyg
+  edge_pre_mlp: false
+
+encoders:
+  shared:
+    source_datasets: [ARRA, CARA2, ERA5, IFS, ICON-FORCE, MEPS]
+    dataset_fusing_strategy: not_supported
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: 0
+      sub_graph_edge_attributes: [edge_length]
+      num_chunks: 1
+      mlp_hidden_ratio: 4
+      mlp_implementation: mlp
+      num_heads: 4
+      qk_norm: false
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: true
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: edges
+      graph_attention_backend: pyg
+      edge_pre_mlp: false
+
+# Required by the base schema; QueryForecaster applies a coverage-weighted mean.
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.MeanAggregator
+
+decoders:
+  shared:
+    target_datasets: [ARRA, CARA2, ERA5, IFS, ICON-FORCE, MEPS]
+    target_node_features: [coordinates]
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: 0
+      sub_graph_edge_attributes: [edge_length]
+      num_chunks: 1
+      mlp_hidden_ratio: 4
+      mlp_implementation: mlp
+      num_heads: 4
+      initialise_data_extractor_zero: false
+      qk_norm: false
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: true
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: edges
+      graph_attention_backend: pyg
+      edge_pre_mlp: false
+
+node_trainable_parameters: {hidden: 0}
+compile: null
+attributes:
+  edges: [edge_length]
+  nodes: []
+
+bounding:
+  datasets: {ARRA: [], CARA2: [], ERA5: [], IFS: [], ICON-FORCE: [], MEPS: []}
+output_mask:
+  datasets:
+    ARRA: &no_mask {_target_: anemoi.training.utils.masks.NoOutputMask}
+    CARA2: *no_mask
+    ERA5: *no_mask
+    IFS: *no_mask
+    ICON-FORCE: *no_mask
+    MEPS: *no_mask
+residual:
+  datasets:
+    ARRA: &unused_residual {_target_: anemoi.models.layers.residual.SkipConnection, step: -1}
+    CARA2: *unused_residual
+    ERA5: *unused_residual
+    IFS: *unused_residual
+    ICON-FORCE: *unused_residual
+    MEPS: *unused_residual

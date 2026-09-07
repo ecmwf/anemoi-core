@@ -182,3 +182,19 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
         ], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."
         lam_mask = nodes["_area_mask_builder"].get_mask(nodes.x)
         return lam_mask
+
+
+class GeographicAreaMask(BooleanBaseNodeAttribute):
+    """Mask dataset nodes inside ``(west, south, east, north)`` degree bounds."""
+
+    def __init__(self, area: list[float] | tuple[float, float, float, float]) -> None:
+        super().__init__()
+        if len(area) != 4:
+            raise ValueError("area must contain (west, south, east, north).")
+        self.area = area
+
+    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        west, south, east, north = torch.deg2rad(torch.tensor(self.area, device=nodes.x.device))
+        latitudes = nodes.x[:, 0]
+        longitudes = torch.atan2(torch.sin(nodes.x[:, 1]), torch.cos(nodes.x[:, 1]))
+        return (longitudes >= west) & (longitudes <= east) & (latitudes >= south) & (latitudes <= north)

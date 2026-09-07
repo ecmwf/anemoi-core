@@ -1,0 +1,14 @@
+format: zarr
+frequency: null
+
+datasets:
+  ARRA: &query_data
+    forcing: []
+    diagnostic: []
+    target: null
+    processors: {}
+  CARA2: *query_data
+  ERA5: *query_data
+  IFS: *query_data
+  ICON-FORCE: *query_data
+  MEPS: *query_data

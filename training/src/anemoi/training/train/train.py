@@ -40,6 +40,7 @@ from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
 from anemoi.training.diagnostics.logger import get_wandb_logger
+from anemoi.training.query.datamodule import QueryDataModule
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
@@ -135,6 +136,12 @@ class AnemoiTrainer(ABC):
     @cached_property
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
+        if self.task.name == "query-forecasting":
+            datamodule = QueryDataModule(self.config, self.task)
+            for name, reader in datamodule.train_readers.items():
+                LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(reader.variables))
+                LOGGER.info("Dataset '%s' - Variables: %s", name, str(reader.variables))
+            return datamodule
         datamodule = AnemoiDatasetsDataModule(self.config, self.task)
 
         # Log information for each dataset
@@ -184,11 +191,15 @@ class AnemoiTrainer(ABC):
     @cached_property
     def _dataset_names(self) -> list[str]:
         """Dataset names derived from the dataloader training config."""
+        if self.task.name == "query-forecasting":
+            return self.datamodule.dataset_names
         return list(get_multiple_datasets_config(self.config.dataloader.training).keys())
 
     @cached_property
     def graph_data(self) -> HeteroData:
         """Graph data built or loaded for the current trainer config."""
+        if self.task.name == "query-forecasting":
+            return self.datamodule.graph_data
         dataset_names = self._dataset_names
         graph_cfg = self.config.graph
         graph_path = self.config.system.input.graph
@@ -593,6 +604,13 @@ class AnemoiTrainer(ABC):
 
     def _log_information(self) -> None:
         # Log number of variables (features) per dataset
+        if self.task.name == "query-forecasting":
+            LOGGER.info(
+                "Query catalogue: %d supported target fields across %d enabled datasets.",
+                len(self.datamodule.catalogue.target_fields),
+                len(self.datamodule.dataset_names),
+            )
+            return
         for dataset_name, data in self.datamodule.ds_train.data.items():
             num_forcing_features = len(self.data_indices[dataset_name].forcing)
             num_fc_features = len(data.variables) - num_forcing_features

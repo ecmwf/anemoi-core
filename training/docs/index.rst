@@ -37,6 +37,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/hydra-intro
    user-guide/configuring
    user-guide/multi-datasets
+   user-guide/query-based-forecasting
    user-guide/training
    user-guide/evaluation
    user-guide/tasks

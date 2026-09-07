@@ -11,6 +11,7 @@ from .base import BaseGraphModel
 from .encoder_processor_decoder import AnemoiModelEncProcDec
 from .ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from .hierarchical import AnemoiModelEncProcDecHierarchical
+from .query_forecaster import QueryForecaster
 
 from .transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec  # isort: skip
 from .transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec  # isort: skip
@@ -23,4 +24,5 @@ __all__ = [
     "AnemoiTransportTendModelEncProcDec",
     "AnemoiModelEncProcDecHierarchical",
     "AnemoiEnsModelEncProcDec",
+    "QueryForecaster",
 ]

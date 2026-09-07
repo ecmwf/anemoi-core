@@ -1,0 +1,47 @@
+defaults:
+  - optimization: default
+  - weight_averaging: null
+
+run_id: null
+fork_run_id: null
+transfer_learning: false
+load_weights_only: false
+update_ds_stats_on_ckpt_load: {states: false, tendencies: false}
+check_variables_compatibility: {ignore_units: false, ignore_processing_period: false}
+submodules_to_freeze: []
+deterministic: false
+precision: 16-mixed
+accum_grad_batches: 1
+num_sanity_val_steps: 0
+gradient_clip: {val: 32.0, algorithm: value}
+
+method:
+  _target_: anemoi.training.train.methods.QueryTraining
+strategy:
+  _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+  num_gpus_per_model: 1
+  read_group_size: 1
+  use_local_synchronization: true
+  broadcast_buffers: false
+
+loss_gradient_scaling: false
+max_epochs: 1
+max_steps: 32
+
+# Required common schema entries; QueryTraining applies its masked scalar MSE directly.
+training_loss:
+  datasets:
+    ARRA: &mse {_target_: anemoi.training.losses.MSELoss, scalers: [], ignore_nans: true}
+    CARA2: *mse
+    ERA5: *mse
+    IFS: *mse
+    ICON-FORCE: *mse
+    MEPS: *mse
+scalers:
+  datasets: {ARRA: {}, CARA2: {}, ERA5: {}, IFS: {}, ICON-FORCE: {}, MEPS: {}}
+validation_metrics:
+  datasets: {ARRA: null, CARA2: null, ERA5: null, IFS: null, ICON-FORCE: null, MEPS: null}
+variable_groups:
+  datasets: {ARRA: null, CARA2: null, ERA5: null, IFS: null, ICON-FORCE: null, MEPS: null}
+metrics:
+  datasets: {ARRA: [], CARA2: [], ERA5: [], IFS: [], ICON-FORCE: [], MEPS: []}

@@ -1,0 +1,73 @@
+prefetch_factor: 2
+pin_memory: true
+persistent_workers: false
+read_group_size: 1
+
+num_workers:
+  training: 1
+  validation: 1
+  test: 0
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+limit_batches:
+  training: null
+  validation: null
+  test: null
+
+training:
+  datasets:
+    ARRA: &arra
+      enabled: false
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+    CARA2: &cara2
+      enabled: false
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+    ERA5: &era5
+      enabled: true
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+    IFS: &ifs
+      enabled: false
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+    ICON-FORCE: &icon_force
+      enabled: false
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+    MEPS: &meps
+      enabled: false
+      sampling_weight: 1.0
+      dataset_config: {dataset: ""}
+      start: null
+      end: null
+
+validation:
+  datasets:
+    ARRA: *arra
+    CARA2: *cara2
+    ERA5: *era5
+    IFS: *ifs
+    ICON-FORCE: *icon_force
+    MEPS: *meps
+test:
+  datasets:
+    ARRA: *arra
+    CARA2: *cara2
+    ERA5: *era5
+    IFS: *ifs
+    ICON-FORCE: *icon_force
+    MEPS: *meps

@@ -842,6 +842,14 @@ class TransportTrainingMethodSchema(BaseModel):
     "Hydra target for the transport training method."
 
 
+class QueryTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.QueryTraining"] = Field(
+        ...,
+        alias="_target_",
+    )
+    "Hydra target for query-based training."
+
+
 def _training_method_discriminator(v: Any) -> str:
     method = v.get("method", {}) if hasattr(v, "get") else getattr(v, "method", None)
     return method.get("_target_", "") if hasattr(method, "get") else getattr(method, "target_", "")
@@ -854,6 +862,11 @@ class SingleTrainingSchema(BaseTrainingSchema):
 
 class EnsembleTrainingSchema(BaseTrainingSchema):
     method: EnsembleTrainingMethodSchema
+    "Training method."
+
+
+class QueryTrainingSchema(BaseTrainingSchema):
+    method: QueryTrainingMethodSchema
     "Training method."
 
 
@@ -874,6 +887,7 @@ class TransportTrainingSchema(BaseTrainingSchema):
 TrainingSchema = Annotated[
     Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
     | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
+    | Annotated[QueryTrainingSchema, Tag("anemoi.training.train.methods.QueryTraining")]
     | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")],
     Discriminator(_training_method_discriminator),
 ]

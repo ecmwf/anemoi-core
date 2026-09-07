@@ -1,0 +1,30 @@
+defaults:
+  - data: query_based_forecasting
+  - dataloader: query_based_forecasting
+  - diagnostics: evaluation
+  - system: example
+  - graph: query_based_forecasting
+  - model: query_based_forecasting
+  - task: query_based_forecasting
+  - training: query_based_forecasting
+  - _self_
+
+config_validation: true
+
+system:
+  input:
+    dataset: null
+    graph: query_based_forecasting_norway_graph.pt
+  output:
+    root: query_based_forecasting_run
+  hardware:
+    num_gpus_per_model: 1
+
+diagnostics:
+  callbacks: []
+  plot:
+    callbacks: []
+  log:
+    mlflow:
+      enabled: false
+      tracking_uri: ""

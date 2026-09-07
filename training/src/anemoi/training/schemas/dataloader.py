@@ -16,6 +16,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
 from pydantic import Field
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
@@ -90,6 +91,10 @@ class NativeDatasetSchema(BaseModel):
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
+    enabled: bool = True
+    "Whether this archive participates in query sampling."
+    sampling_weight: PositiveFloat = 1.0
+    "Relative target-provenance sampling weight; archive length is not used."
 
 
 class TrajectorySamplingSchema(PydanticBaseModel):
