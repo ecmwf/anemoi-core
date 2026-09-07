@@ -129,6 +129,13 @@ class MultiDatasetSchema(BaseModel):
     datasets: dict[str, NativeDatasetSchema | TrajectoryDatasetSchema]
 
 
+class MultiDomainDatasetSchema(BaseModel):
+    """Configuration for a MultiDomainDataset."""
+
+    target_: Literal["anemoi.training.data.datasets.MultiDomainDataset"] = Field(..., alias="_target_")
+    datasets: dict[str, NativeDatasetSchema | TrajectoryDatasetSchema]
+
+
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -145,11 +152,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: MultiDatasetSchema
+    training: MultiDatasetSchema | MultiDomainDatasetSchema
     "Training DatasetSchema."
-    validation: MultiDatasetSchema
+    validation: MultiDatasetSchema | MultiDomainDatasetSchema
     "Validation DatasetSchema."
-    test: MultiDatasetSchema
+    test: MultiDatasetSchema | MultiDomainDatasetSchema
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
