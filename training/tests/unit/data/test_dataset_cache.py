@@ -81,9 +81,10 @@ class TestProcessZMQCacheServerClient:
         """Start the production process server and yield it."""
         entries = {dataset_id: tmp_path / dataset_id for dataset_id in ("dataset", "other-dataset")}
         for key, value in cache_data.items():
-            path = entries[key.dataset_id] / key.grid_id / str(key.sequence) / f"{key.position}.npy"
+            path = entries[key.dataset_id] / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
             path.parent.mkdir(parents=True, exist_ok=True)
-            np.save(path, value)
+            with path.open("wb") as target:
+                save_cache_array(target, value)
         context = multiprocessing.get_context("spawn")
         server = CacheServer({key: str(path) for key, path in entries.items()})
         server.start()
@@ -116,9 +117,10 @@ class TestProcessZMQCacheServerClient:
         key = CacheKey("other-dataset", 0, 5)
         expected = np.full((3, 5), 17, dtype=np.float32)
         cache_data[key] = expected
-        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy"
+        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
         path.parent.mkdir(parents=True, exist_ok=True)
-        np.save(path, expected)
+        with path.open("wb") as target:
+            save_cache_array(target, expected)
         client = CacheClient(self.endpoint(running_server))
         try:
             np.testing.assert_array_equal(client.fetch(key), expected)
@@ -134,20 +136,6 @@ class TestProcessZMQCacheServerClient:
         try:
             with pytest.raises(RemoteCacheMiss):
                 client.fetch(CacheKey("dataset", 0, 100))
-        finally:
-            client.close()
-
-    def test_compressed_fetch(self, running_server):
-        key = CacheKey("other-dataset", 0, 5)
-        expected = np.zeros((100, 100), dtype=np.float32)
-        path = Path(running_server.entries[key.dataset_id]) / key.grid_id / str(key.sequence) / f"{key.position}.npy.blosc"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("wb") as target:
-            save_cache_array(target, expected, "blosc")
-
-        client = CacheClient(self.endpoint(running_server))
-        try:
-            np.testing.assert_array_equal(client.fetch(key), expected)
         finally:
             client.close()
 
@@ -252,17 +240,14 @@ class TestDatasetCacheNamespace:
 
     def test_blosc_compression(self, tmp_path):
         data = np.zeros((10, 3, 2, 500), dtype=np.float32)
-        compressed = DatasetCacheNamespace(tmp_path / "compressed", "analysis:fingerprint", self.FakeReader(data), "blosc")
-        uncompressed = DatasetCacheNamespace(tmp_path / "uncompressed", "analysis:fingerprint", self.FakeReader(data))
+        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(data))
 
-        assert compressed.store(0, 3, data[3])
-        assert uncompressed.store(0, 3, data[3])
-        np.testing.assert_array_equal(compressed.local(0, 3), data[3])
+        assert namespace.store(0, 3, data[3])
+        np.testing.assert_array_equal(namespace.local(0, 3), data[3])
 
-        compressed_entry, _, _ = compressed.paths(0, 3)
-        uncompressed_entry, _, _ = uncompressed.paths(0, 3)
-        assert compressed_entry.suffixes[-2:] == [".npy", ".blosc"]
-        assert compressed_entry.stat().st_size < uncompressed_entry.stat().st_size / 2
+        entry, _, _ = namespace.paths(0, 3)
+        assert entry.suffixes[-2:] == [".npy", ".blosc"]
+        assert entry.stat().st_size < data[3].nbytes / 2
 
 
 def test_check_cache_prefers_local(tmp_path, sample_data, monkeypatch):

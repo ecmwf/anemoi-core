@@ -33,15 +33,10 @@ _BLOSC = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
 
 
 def load_cache_array(path):
-    if path.suffix == ".blosc":
-        return np.load(io.BytesIO(_BLOSC.decode(path.read_bytes())), allow_pickle=False)
-    return np.load(path, allow_pickle=False, mmap_mode="r")
+    return np.load(io.BytesIO(_BLOSC.decode(path.read_bytes())), allow_pickle=False)
 
 
-def save_cache_array(target, value, compression):
-    if compression is None:
-        np.save(target, value, allow_pickle=False)
-        return
+def save_cache_array(target, value):
     buffer = io.BytesIO()
     np.save(buffer, value, allow_pickle=False)
     target.write(_BLOSC.encode(buffer.getbuffer()))
@@ -56,10 +51,9 @@ def _is_capacity_error(error: OSError) -> bool:
 class DatasetCacheNamespace:
     """Atomic file-per-record cache for one dataset reader."""
 
-    def __init__(self, root: Path, dataset_id: str, reader, compression=None):
+    def __init__(self, root: Path, dataset_id: str, reader):
         self.dataset_id = dataset_id
         self.reader = reader
-        self.compression = compression
         self.num_sequences = int(reader.num_sequences)
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
@@ -83,9 +77,8 @@ class DatasetCacheNamespace:
 
     def paths(self, sequence, position, grid_id="all"):
         sequence, position = self.normalize(sequence, position)
-        suffix = ".npy.blosc" if self.compression == "blosc" else ".npy"
         return (
-            self.entries_path / grid_id / str(sequence) / f"{position}{suffix}",
+            self.entries_path / grid_id / str(sequence) / f"{position}.npy.blosc",
             self.markers_path / grid_id / str(sequence) / str(position),
             self.locks_path / grid_id / str(sequence) / f"{position}.lock",
         )
@@ -113,7 +106,7 @@ class DatasetCacheNamespace:
             temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
                 with temporary.open("wb") as target:
-                    save_cache_array(target, value, self.compression)
+                    save_cache_array(target, value)
                     target.flush()
                     os.fsync(target.fileno())
                 os.replace(temporary, entry)
@@ -138,13 +131,10 @@ class DatasetCacheNamespace:
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
-    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None, compression=None):
+    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None):
         super().__init__()
-        if compression not in (None, "blosc"):
-            raise ValueError(f"Unsupported dataset cache compression: {compression}")
         self.ds = ds  # must be set before any attribute access can reach __getattr__
         self.cache_root = Path(cache_root)
-        self.compression = compression
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
         self.initialized = False
@@ -180,7 +170,6 @@ class DatasetCache(pl.LightningDataModule):
                 self.cache_path,
                 dataset_id,
                 reader,
-                compression=self.compression,
             )
             reader.set_cache(self, dataset_id)
         self._datasets.add(id(dataset))
