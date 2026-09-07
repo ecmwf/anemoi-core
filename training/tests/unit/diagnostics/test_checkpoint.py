@@ -24,6 +24,7 @@ from torch import nn
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.training.diagnostics.callbacks import AnemoiCheckpoint
+from anemoi.training.diagnostics.callbacks.weight_averaging import EMAWeightAveraging
 from anemoi.training.utils.checkpoint import save_inference_checkpoint
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.utils.checkpoints import load_metadata
@@ -242,3 +243,52 @@ def test_inference_checkpoint_excludes_imputer_runtime_state(tmp_path: str, conf
     assert saved_model.imputer.loss_mask_training is None
     assert model.imputer.nan_locations is None
     assert model.imputer.loss_mask_training is None
+
+
+class TrainedDummyModule(DummyModule):
+    """DummyModule whose optimizer actually moves the inner model's weights.
+
+    ``BoringModel`` only trains ``self.layer``, which would leave the inner model untouched and
+    make the averaged and raw weights identical.
+    """
+
+    def training_step(self, batch: torch.Tensor, batch_idx: int) -> torch.Tensor:
+        del batch_idx
+        return self.model(batch).abs().mean()
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        return torch.optim.SGD(self.model.parameters(), lr=0.1)
+
+
+def test_inference_checkpoint_holds_averaged_weights(tmp_path: str, metadata: dict, config: DictConfig) -> None:
+    """With weight averaging on, the inference checkpoint must carry the averaged weights.
+
+    The lightning checkpoint keeps both: the averaged weights in "state_dict" and the raw training
+    weights in "current_model_state". The inference checkpoint is written from the live model, which
+    holds the raw weights, so it needs the swap to agree with the averaged ones.
+    """
+    dirpath = Path(tmp_path) / "averaged_inference"
+    steps = 4
+    callback = AnemoiCheckpoint(dirpath=str(dirpath), filename="{step}", save_last=True, every_n_train_steps=steps)
+
+    trainer = Trainer(
+        default_root_dir=str(dirpath),
+        accelerator="cpu",
+        callbacks=[EMAWeightAveraging(decay=0.9), callback],
+        max_steps=steps,
+        limit_train_batches=2,
+        limit_val_batches=0,
+        num_sanity_val_steps=0,
+        logger=False,
+        enable_progress_bar=False,
+        enable_model_summary=False,
+    )
+    trainer.fit(TrainedDummyModule(config=config, metadata=metadata))
+
+    saved = torch.load(dirpath / "last.ckpt", weights_only=False)
+    averaged = saved["state_dict"]["model.fc1.weight"]
+    raw = saved["current_model_state"]["model.fc1.weight"]
+    assert not torch.equal(averaged, raw), "Test is vacuous unless training moved the weights."
+
+    inference_model = torch.load(dirpath / "inference-last.ckpt", weights_only=False)
+    assert torch.equal(inference_model.fc1.weight, averaged), "Inference checkpoint holds the raw weights."
