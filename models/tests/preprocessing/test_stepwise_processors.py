@@ -10,8 +10,7 @@
 
 import torch
 
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing import Processors, StepwiseProcessors
 
 
 class DummyProcessor(torch.nn.Module):

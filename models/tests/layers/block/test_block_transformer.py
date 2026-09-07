@@ -12,16 +12,13 @@ import logging
 
 import pytest
 import torch
-from hypothesis import given
-from hypothesis import settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 from torch import nn
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
-from anemoi.models.layers.block import MLP
-from anemoi.models.layers.block import GraphConvProcessorBlock
-from anemoi.models.layers.block import TransformerProcessorBlock
+from anemoi.models.layers.block import MLP, GraphConvProcessorBlock, TransformerProcessorBlock
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.utils import load_layer_kernels
 

@@ -28,7 +28,6 @@ classifiers = [
   "Programming Language :: Python :: 3 :: Only",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
-  "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
@@ -67,9 +66,9 @@ urls.Documentation = "https://anemoi-models.readthedocs.io/"
 urls.Homepage = "https://github.com/ecmwf/anemoi-models/"
 urls.Issues = "https://github.com/ecmwf/anemoi-models/issues"
 urls.Repository = "https://github.com/ecmwf/anemoi-models/"
-# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 # Add subcommand in the `commands` directory
 scripts.anemoi-models = "anemoi.models.__main__:main"
+# Changelog = "https://github.com/ecmwf/anemoi-models/CHANGELOG.md"
 
 [tool.setuptools]
 package-data."anemoi.models" = [ "py.typed" ]

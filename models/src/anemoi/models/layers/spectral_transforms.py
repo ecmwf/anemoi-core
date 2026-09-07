@@ -15,8 +15,7 @@ import torch
 import torch.fft
 import torch.nn.functional as F
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
 

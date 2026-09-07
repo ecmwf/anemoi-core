@@ -7,12 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from dataclasses import asdict
-from dataclasses import dataclass
-from dataclasses import field
+from dataclasses import asdict, dataclass, field
 
 import pytest
 import torch
+from anemoi.utils.config import DotDict
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -21,7 +20,6 @@ from anemoi.models.layers.graph import TrainableTensor
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 
 @dataclass

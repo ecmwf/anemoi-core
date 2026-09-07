@@ -9,9 +9,7 @@
 
 import os
 
-from anemoi.utils.cli import Command
-from anemoi.utils.cli import Failed
-from anemoi.utils.cli import register_commands
+from anemoi.utils.cli import Command, Failed, register_commands
 
 __all__ = ["Command"]
 

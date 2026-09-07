@@ -12,10 +12,12 @@
 import pytest
 import torch
 
-from anemoi.models.distributed.khop_edges import _sort_edges_1hop_chunks_subgraph
-from anemoi.models.distributed.khop_edges import build_graph_partition
-from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
-from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
+from anemoi.models.distributed.khop_edges import (
+    _sort_edges_1hop_chunks_subgraph,
+    build_graph_partition,
+    sort_edge_index_by_dst,
+    sort_edges_1hop_chunks,
+)
 
 
 def _make_random_graph(num_src: int, num_dst: int, num_edges: int, seed: int = 42) -> tuple:

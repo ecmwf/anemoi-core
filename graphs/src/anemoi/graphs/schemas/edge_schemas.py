@@ -8,15 +8,10 @@
 #
 
 
-from typing import Annotated
-from typing import Literal
-
-from pydantic import Field
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
-from pydantic import model_validator
+from typing import Annotated, Literal
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field, PositiveFloat, PositiveInt, model_validator
 
 
 class KNNEdgeSchema(BaseModel):

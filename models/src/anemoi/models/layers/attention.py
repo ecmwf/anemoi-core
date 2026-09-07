@@ -13,24 +13,17 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Optional
-from typing import Union
 
 import einops
 import torch
+from anemoi.utils.config import DotDict
 from packaging import version
-from torch import Tensor
-from torch import nn
-from torch import where
+from torch import Tensor, nn, where
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.utils.config import DotDict
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo, ShardSizes, get_shard_sizes
 
 LOGGER = logging.getLogger(__name__)
 
@@ -65,14 +58,14 @@ class MultiHeadSelfAttention(nn.Module):
         num_heads: int,
         embed_dim: int,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         qkv_bias: bool = False,
         qk_norm: bool = False,
         is_causal: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -186,9 +179,9 @@ class MultiHeadSelfAttention(nn.Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        grid_shard_sizes: Union[ShardSizes, tuple[ShardSizes, ShardSizes]],
+        grid_shard_sizes: ShardSizes | tuple[ShardSizes, ShardSizes],
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         if model_comm_group:
             assert (
@@ -247,7 +240,7 @@ class MultiHeadSelfAttention(nn.Module):
         x: Tensor,
         grid_shard_sizes: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
 
         query = self.lin_q(x)
@@ -457,9 +450,9 @@ class FlashAttentionWrapper(nn.Module):
         value,
         batch_size: int,
         causal: bool = False,
-        window_size: Optional[int] = None,
+        window_size: int | None = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
@@ -531,7 +524,7 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         x: PairTensor,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         query = self.lin_q(x[1])
         key = self.lin_k(x[0])

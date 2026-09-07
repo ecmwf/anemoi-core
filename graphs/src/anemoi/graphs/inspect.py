@@ -13,12 +13,16 @@ from pathlib import Path
 
 import torch
 
-from anemoi.graphs.plotting.displots import plot_distribution_edge_attributes
-from anemoi.graphs.plotting.displots import plot_distribution_node_attributes
-from anemoi.graphs.plotting.displots import plot_distribution_node_derived_attributes
-from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_nodes_2d
-from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_subgraph_2d
-from anemoi.graphs.plotting.interactive_2d_html import plot_isolated_nodes_2d
+from anemoi.graphs.plotting.displots import (
+    plot_distribution_edge_attributes,
+    plot_distribution_node_attributes,
+    plot_distribution_node_derived_attributes,
+)
+from anemoi.graphs.plotting.interactive_2d_html import (
+    plot_interactive_nodes_2d,
+    plot_interactive_subgraph_2d,
+    plot_isolated_nodes_2d,
+)
 from anemoi.graphs.plotting.interactive_3d_html import plot_interactive_graph_3d
 from anemoi.graphs.processors.post_process import SubsetNodesInArea
 

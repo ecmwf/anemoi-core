@@ -12,8 +12,7 @@ import math
 import pytest
 import torch
 
-from anemoi.models.layers.diffusion import RandomFourierEmbeddings
-from anemoi.models.layers.diffusion import SinusoidalEmbeddings
+from anemoi.models.layers.diffusion import RandomFourierEmbeddings, SinusoidalEmbeddings
 
 
 class TestRandomFourierEmbeddings:

@@ -9,9 +9,11 @@
 
 import pytest
 
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.balanced_partition import (
+    get_balanced_partition_range,
+    get_balanced_partition_sizes,
+    get_partition_range,
+)
 
 
 @pytest.mark.parametrize(

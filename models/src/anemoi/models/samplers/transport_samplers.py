@@ -6,10 +6,8 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
-from abc import ABC
-from abc import abstractmethod
-from typing import Callable
-from typing import Optional
+from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -22,7 +20,7 @@ TransportModelFunction = Callable[
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
         dict[str, torch.Tensor],
-        Optional[ProcessGroup],
+        ProcessGroup | None,
         DatasetShardSizes | None,
     ],
     dict[str, torch.Tensor],
@@ -49,7 +47,7 @@ class EDMDiffusionSampler(ABC):
         y: dict[str, torch.Tensor],
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -79,7 +77,6 @@ class EDMDiffusionSampler(ABC):
         dict[str, torch.Tensor]
             Sampled output with shape (batch, time, ensemble, grid, vars).
         """
-        pass
 
 
 class EDMHeunSampler(EDMDiffusionSampler):
@@ -107,7 +104,7 @@ class EDMHeunSampler(EDMDiffusionSampler):
         y: dict[str, torch.Tensor],
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -220,7 +217,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         dtype: torch.dtype = torch.float64,
     ):
         self.dtype = dtype
-        pass  # No parameters needed for DPM++ 2M
+        # No parameters needed for DPM++ 2M
 
     def sample(
         self,
@@ -228,7 +225,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         y: dict[str, torch.Tensor],
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -301,12 +298,11 @@ class VectorFieldSampler(ABC):
         y: dict[str, torch.Tensor],
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Move the field along the provided time grid."""
-        pass
 
 
 class VectorFieldEulerSampler(VectorFieldSampler):
@@ -324,7 +320,7 @@ class VectorFieldEulerSampler(VectorFieldSampler):
         y: dict[str, torch.Tensor],
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -372,7 +368,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         y: dict[str, torch.Tensor],
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:

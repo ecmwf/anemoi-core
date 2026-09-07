@@ -12,14 +12,11 @@ import hypothesis.strategies as st
 import psutil
 import pytest
 import torch
-import torch.nn as nn
-from hypothesis import given
-from hypothesis import settings
+from hypothesis import given, settings
+from torch import nn
 
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
+from anemoi.models.layers.attention import MultiHeadCrossAttention, MultiHeadSelfAttention
 from anemoi.models.layers.utils import load_layer_kernels
 
 

@@ -317,7 +317,7 @@ def add_neigbours_edges(
     nx.Graph
         The graph with the added edges.
     """
-    graph_nodes_idx = list(sorted(graph.nodes))
+    graph_nodes_idx = sorted(graph.nodes)
     for neighbour_idx in neighbour_indices:
         if not self_loops and node_idx == neighbour_idx:  # no self-loops
             continue
@@ -361,7 +361,7 @@ def create_node_neighbours_list(
     list: tuple
         A list with containing node neighbour pairs in tuples
     """
-    graph_nodes_idx = list(sorted(graph.nodes))
+    graph_nodes_idx = sorted(graph.nodes)
 
     if vertex_mapping_index is None:
         vertex_mapping_index = np.arange(len(graph.nodes)).reshape(len(graph.nodes), 1)
