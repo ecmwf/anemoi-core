@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.models.data_indices.tensor import InputTensorIndex
-from anemoi.models.data_indices.tensor import OutputTensorIndex
+from anemoi.models.data_indices.tensor import InputTensorIndex, OutputTensorIndex
 
 
 class BaseIndex:

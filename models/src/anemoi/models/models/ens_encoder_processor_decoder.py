@@ -9,10 +9,10 @@
 
 
 import logging
-from typing import Optional
 
 import einops
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import Tensor
@@ -20,13 +20,14 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.models import AnemoiModelEncProcDec
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -156,7 +157,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         *,
         fcstep: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
@@ -205,7 +206,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
+        for dataset_name in x:
             if dataset_name not in self.input_datasets:
                 continue
 

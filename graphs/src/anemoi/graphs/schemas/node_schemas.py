@@ -9,16 +9,11 @@
 
 
 import logging
-from pathlib import Path  # noqa: TC003
-from typing import Annotated
-from typing import Literal
-from typing import Optional
-
-from pydantic import Field
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
+from pathlib import Path
+from typing import Annotated, Literal
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field, PositiveFloat, PositiveInt
 
 LOGGER = logging.getLogger(__name__)
 
@@ -96,7 +91,7 @@ class LimitedAreaNPZFileNodesSchema(BaseModel):
     "The grid resolution."
     reference_node_name: str  # TODO(Helen): Check that reference nodes exists in the config
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]  # TODO(Helen): Check that mask_attr_name exists in the dataset config
+    mask_attr_name: str | None  # TODO(Helen): Check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
@@ -124,7 +119,7 @@ class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
     "Refinement level of the mesh."
     reference_node_name: str  # TODO(Helen): Discuss check that reference nodes exists in the config
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
+    mask_attr_name: str | None  # TODO(Helen): Discuss check that mask_attr_name exists in the dataset config
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."
@@ -139,7 +134,7 @@ class StretchedIcosahdralNodeSchema(BaseModel):
     "Refinement level of the mesh on the local area."
     reference_node_name: str
     "Name of the reference nodes in the graph to consider for the Area Mask."
-    mask_attr_name: Optional[str]
+    mask_attr_name: str | None
     "Name of a node to attribute to mask the reference nodes, if desired. Defaults to consider all reference nodes."
     margin_radius_km: PositiveFloat = Field(example=100.0)
     "Maximum distance to the reference nodes to consider a node as valid, in kilometers. Defaults to 100 km."

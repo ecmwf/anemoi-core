@@ -12,7 +12,6 @@ from itertools import chain
 from pathlib import Path
 
 import torch
-
 from anemoi.utils.humanize import bytes
 from anemoi.utils.text import table
 

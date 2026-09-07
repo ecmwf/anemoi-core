@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
-from typing import Literal
+from typing import Any, Literal
 
 
 def _get_config_value(config: Any, name: str, default: Any) -> Any:

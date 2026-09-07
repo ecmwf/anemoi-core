@@ -12,9 +12,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges import KNNEdges
-from anemoi.graphs.edges import MutualKNNEdges
-from anemoi.graphs.edges import ReversedKNNEdges
+from anemoi.graphs.edges import KNNEdges, MutualKNNEdges, ReversedKNNEdges
 
 
 def _edge_set(edge_index: torch.Tensor) -> set:
@@ -189,8 +187,7 @@ def test_schema_validates_mutual_knn():
 
 def test_schema_rejects_invalid_mutual_knn():
     """An invalid MutualKNNEdges block fails schema validation."""
-    from pydantic import TypeAdapter
-    from pydantic import ValidationError
+    from pydantic import TypeAdapter, ValidationError
 
     from anemoi.graphs.schemas.edge_schemas import EdgeBuilderSchemas
 

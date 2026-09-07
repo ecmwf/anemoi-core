@@ -9,9 +9,8 @@
 
 from enum import Enum
 
-from pydantic import Field
-
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field
 
 
 class DefinedAggregatorMethods(str, Enum):

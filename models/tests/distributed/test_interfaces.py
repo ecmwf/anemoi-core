@@ -24,9 +24,7 @@ import torch.distributed as dist
 from distributed_runner import run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.primitives import _alltoall_op
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _resolve_group_name
+from anemoi.models.distributed.primitives import _alltoall_op, _alltoall_transpose, _resolve_group_name
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12

@@ -9,35 +9,37 @@
 
 
 import logging
-from typing import Callable
-from typing import Optional
+from collections.abc import Callable
 
 import einops
 import torch
+from anemoi.utils.config import DotDict
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    DatasetShardSizes,
+    GraphShardInfo,
+    ShardSizes,
+    get_shard_sizes,
+)
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.transport import EdmSettings
-from anemoi.models.transport import NoiseConditioningSettings
-from anemoi.models.transport import StochasticInterpolantSettings
-from anemoi.models.transport import TransportSourceBuilder
-from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport import get_transport_model_objective
-from anemoi.models.transport import reference_state_sampling_source
-from anemoi.models.transport import sampling_source_specs
-from anemoi.utils.config import DotDict
+from anemoi.models.transport import (
+    EdmSettings,
+    NoiseConditioningSettings,
+    StochasticInterpolantSettings,
+    TransportSourceBuilder,
+    TransportSourceRequest,
+    get_transport_model_objective,
+    reference_state_sampling_source,
+    sampling_source_specs,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -204,7 +206,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         x: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         self._assert_condition_shapes(condition)
         dataset_names = list(x.keys())
@@ -239,7 +241,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -258,7 +260,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x: dict[str, torch.Tensor],
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
@@ -291,7 +293,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
+        for dataset_name in x:
             if dataset_name not in self.input_datasets:
                 continue
 
@@ -404,7 +406,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -453,7 +455,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         out: dict[str, torch.Tensor],
         post_processors: dict[str, nn.Module],
         before_sampling_data: SamplingData,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
         **kwargs,
@@ -483,7 +485,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         torch.Tensor
             Post-processed output.
         """
-        for dataset_name in out.keys():
+        for dataset_name in out:
             out[dataset_name] = post_processors[dataset_name](out[dataset_name], in_place=False)
 
             if gather_out and model_comm_group is not None:
@@ -500,7 +502,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def build_sampling_source(
         self,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
     ) -> dict[str, torch.Tensor]:
@@ -531,12 +533,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
         n_step_input: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         gather_out: bool = True,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
-        pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
-        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
+        pre_processors_tendencies: dict[str, nn.Module] | None = None,
+        post_processors_tendencies: dict[str, nn.Module] | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run inference by sampling from the selected transport objective.
@@ -623,10 +625,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def sample(
         self,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run the sampler selected by the transport objective."""
@@ -773,7 +775,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
         assert set(x_t1.keys()) == set(x_t0.keys()), "x_t1 and x_t0 must have the same dataset keys."
 
-        for dataset_name in x_t1.keys():
+        for dataset_name in x_t1:
             input_post_proc = input_post_processor[dataset_name] if input_post_processor is not None else None
             if input_post_proc is not None:
                 x_t1[dataset_name] = input_post_proc(
@@ -845,7 +847,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         """
         state_outp = {}
 
-        for dataset_name in tendency.keys():
+        for dataset_name in tendency:
             state_outp[dataset_name] = post_processors_tendencies[dataset_name](
                 tendency[dataset_name],
                 in_place=False,
@@ -887,7 +889,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -924,7 +926,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def build_sampling_source(
         self,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
     ) -> dict[str, torch.Tensor]:
@@ -956,10 +958,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         out: dict[str, torch.Tensor],
         post_processors: dict[str, nn.Module],
         before_sampling_data: SamplingData,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
-        post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        post_processors_tendencies: dict[str, nn.Module] | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Convert sampled tendencies into state predictions."""
@@ -1020,7 +1022,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self,
         x: dict[str, torch.Tensor],
         grid_shard_sizes: DatasetShardSizes | None,
-        model_comm_group: Optional[ProcessGroup],
+        model_comm_group: ProcessGroup | None,
     ) -> dict[str, torch.Tensor]:
         """Project the latest input state to the variables needed as the tendency reference.
 

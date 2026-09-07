@@ -10,16 +10,14 @@
 
 import pytest
 import torch
-import torch.nn as nn
 from hydra.utils import instantiate
-from hypothesis import given
-from hypothesis import settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
+from torch import nn
 
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.block import MLP
-from anemoi.models.layers.block import TransformerMapperBlock
+from anemoi.models.layers.block import MLP, TransformerMapperBlock
 from anemoi.models.layers.utils import load_layer_kernels
 
 

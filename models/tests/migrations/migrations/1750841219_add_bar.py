@@ -8,8 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationMetadata
+from anemoi.models.migrations import CkptType, MigrationMetadata
 
 metadata = MigrationMetadata(
     versions={

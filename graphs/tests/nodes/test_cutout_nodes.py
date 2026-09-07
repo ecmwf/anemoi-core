@@ -12,8 +12,7 @@ import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
-from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes import SphericalAreaWeights, UniformWeights
 from anemoi.graphs.nodes.builders import from_file
 
 

@@ -15,12 +15,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 from torch_geometric.data import HeteroData
-from torch_geometric.data.storage import EdgeStorage
-from torch_geometric.data.storage import NodeStorage
+from torch_geometric.data.storage import EdgeStorage, NodeStorage
 
-from anemoi.graphs.plotting.prepare import compute_node_adjacencies
-from anemoi.graphs.plotting.prepare import get_edge_attribute_dims
-from anemoi.graphs.plotting.prepare import get_node_attribute_dims
+from anemoi.graphs.plotting.prepare import compute_node_adjacencies, get_edge_attribute_dims, get_node_attribute_dims
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,7 +84,7 @@ def plot_distribution_attributes(
 
     if dim_attrs == 0:
         LOGGER.warning("No edge attributes found in the graph.")
-        return None
+        return
 
     # Define the layout
     _, axs = plt.subplots(num_items, dim_attrs, figsize=(10 * num_items, 10))

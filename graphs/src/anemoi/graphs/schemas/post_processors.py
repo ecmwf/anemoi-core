@@ -9,13 +9,11 @@
 
 
 import logging
-from typing import Annotated
-from typing import Iterable
-from typing import Literal
-
-from pydantic import Field
+from collections.abc import Iterable
+from typing import Annotated, Literal
 
 from anemoi.utils.schemas import BaseModel
+from pydantic import Field
 
 LOGGER = logging.getLogger(__name__)
 

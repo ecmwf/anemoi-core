@@ -12,11 +12,13 @@ import contextlib
 import numpy as np
 import torch
 
-from anemoi.graphs.utils import concat_edges
-from anemoi.graphs.utils import current_device_context
-from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import get_edge_attributes
-from anemoi.graphs.utils import intersect_edges
+from anemoi.graphs.utils import (
+    concat_edges,
+    current_device_context,
+    get_distributed_device,
+    get_edge_attributes,
+    intersect_edges,
+)
 
 
 def test_concat_edges():

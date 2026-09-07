@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 from dataclasses import dataclass
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -17,8 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo, ShardSizes
 
 
 @dataclass(frozen=True)
@@ -57,7 +55,7 @@ class HaloInfo:
     num_halo_nodes: int
     send_indices: tuple[Tensor, ...]
     recv_counts: tuple[int, ...]
-    recv_global_ids: Optional[tuple[Tensor, ...]]
+    recv_global_ids: tuple[Tensor, ...] | None
     edge_index_local: Tensor
 
     @property

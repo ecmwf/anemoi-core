@@ -12,9 +12,9 @@ import logging
 import re
 
 import torch
+from anemoi.utils.grids import grids
 
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
-from anemoi.utils.grids import grids
 
 LOGGER = logging.getLogger(__name__)
 

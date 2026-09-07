@@ -15,17 +15,14 @@ import hashlib
 import importlib
 import logging
 import sys
-from collections.abc import Callable
-from collections.abc import MutableMapping
-from collections.abc import Sequence
+from collections.abc import Callable, MutableMapping, Sequence
 from copy import deepcopy
 from dataclasses import dataclass
 from inspect import getsource
 from os import PathLike
 from pathlib import Path
 from pickle import Unpickler
-from typing import Any
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from anemoi.models import __version__
 from anemoi.models.migrations.setup_context import MigrationContext
