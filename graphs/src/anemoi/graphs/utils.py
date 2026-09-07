@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import contextlib
 from enum import Enum
 
 import torch
@@ -30,9 +31,17 @@ def get_distributed_device() -> torch.device:
         local_rank = int(os.environ.get("SLURM_LOCALID", 0))
         device = torch.device(f"cuda:{local_rank}")
     else:
-        device = "cpu"
+        device = torch.device("cpu")
 
     return device
+
+
+def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
+    """Scoped switch of the current CUDA device; no-op for CPU."""
+    device = torch.device(device)
+    if device.type == "cuda":
+        return torch.cuda.device(device)
+    return contextlib.nullcontext()
 
 
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
@@ -41,14 +50,14 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
     Parameters
     ----------
     coords_rad : torch.Tensor
-        corrdinates in radians
+        Coordinates in radians.
     mask : torch.Tensor, optional
-        mask to remove nodes, by default None
+        Mask to remove nodes, by default None.
 
     Returns
     -------
     NearestNeighbors
-        fitted NearestNeighbour object
+        Fitted NearestNeighbour object.
     """
     assert mask is None or mask.shape == (
         coords_rad.shape[0],
@@ -57,7 +66,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
 
     nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
-    nearest_neighbour.fit(coords_rad)
+    nearest_neighbour.fit(coords_rad.cpu())
 
     return nearest_neighbour
 
@@ -70,16 +79,16 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
     Parameters
     ----------
     coords_rad : torch.Tensor
-        corrdinates in radians
+        Coordinates in radians.
     mask : torch.Tensor, optional
-        mask to remove nodes, by default None
+        Mask to remove nodes, by default None.
 
     Returns
     -------
     float
         The reference distance of the grid.
     """
-    xyz = latlon_rad_to_cartesian(coords_rad)
+    xyz = latlon_rad_to_cartesian(coords_rad).cpu()
     nearest_neighbours = get_nearest_neighbour(xyz, mask)
     dists, _ = nearest_neighbours.kneighbors(xyz, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()

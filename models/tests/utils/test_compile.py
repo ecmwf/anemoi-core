@@ -105,6 +105,54 @@ def test_compile_config_match() -> None:
     assert type(result) is DictConfig
 
 
+def test_compile_uses_training_specific_hook(mocker) -> None:
+    """Selected modules can control which part of their calculation is compiled."""
+    mocker.patch(
+        "anemoi.models.utils.compile._meets_library_versions_for_compile",
+        return_value=True,
+    )
+    cfg = OmegaConf.create(
+        {
+            "compile": [
+                {
+                    "module": "torch.nn.Linear",
+                    "options": {"dynamic": False},
+                },
+            ],
+        },
+    )
+    layer = torch.nn.Linear(2, 2)
+    unselected_layer = torch.nn.ReLU()
+    model = torch.nn.Sequential(layer, unselected_layer)
+    compile_for_training = mocker.Mock()
+    unselected_compile_for_training = mocker.Mock()
+    layer.compile_for_training = compile_for_training
+    unselected_layer.compile_for_training = unselected_compile_for_training
+    compile_forward = mocker.patch.object(layer, "compile")
+
+    mark_for_compilation(model, cfg.compile)
+
+    compile_for_training.assert_called_once_with(dynamic=False)
+    unselected_compile_for_training.assert_not_called()
+    compile_forward.assert_not_called()
+
+
+def test_compile_uses_standard_module_compile_without_hook(mocker) -> None:
+    """Selected modules without a specialised hook compile their forward call."""
+    mocker.patch(
+        "anemoi.models.utils.compile._meets_library_versions_for_compile",
+        return_value=True,
+    )
+    cfg = layer_kernel_compile_config()
+    layer = torch.nn.Linear(2, 2)
+    model = torch.nn.Sequential(layer)
+    compile_forward = mocker.patch.object(layer, "compile")
+
+    mark_for_compilation(model, cfg.compile)
+
+    compile_forward.assert_called_once_with()
+
+
 def test_compile() -> None:
 
     # Skip this test if library versions aren't met

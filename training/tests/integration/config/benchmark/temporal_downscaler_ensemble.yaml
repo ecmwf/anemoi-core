@@ -59,6 +59,9 @@ training:
             default: 1
             w: 0.1
             cp: 0.1
+        stdev_tendency:
+          _target_: anemoi.training.losses.scalers.StdevTendencyScaler
+          timestep: ${task.output_timestep}
   optimization:
     lr: 5.0e-5
     lr_scheduler:

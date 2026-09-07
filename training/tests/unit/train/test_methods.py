@@ -31,6 +31,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.scalers import NaNMaskScaler
 from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
@@ -272,6 +273,34 @@ def _wire_training_module(
     obj.output_mask = {name: NoOutputMask() for name in data_indices}
     if task is not None:
         obj.task = task
+
+
+def test_initialise_updating_scalers_uses_runtime_storage() -> None:
+    updating_scaler = NaNMaskScaler()
+    updating_spec = updating_scaler.get_scaling()
+    fixed_spec = (0, torch.ones(1))
+    loss = MSELoss()
+    metric = MSELoss()
+
+    for loss_or_metric in (loss, metric):
+        loss_or_metric.add_scaler(*updating_spec, name="nan_mask_weights")
+        loss_or_metric.add_scaler(*fixed_spec, name="fixed")
+        assert "nan_mask_weights" in dict(loss_or_metric.scaler.named_buffers())
+
+    BaseTrainingModule._initialise_updating_scalers(
+        scalers={"nan_mask_weights": updating_spec, "fixed": fixed_spec},
+        updating_scalers={"nan_mask_weights": updating_scaler},
+        loss_obj=loss,
+        metrics_dict={"metric": metric},
+    )
+
+    for loss_or_metric in (loss, metric):
+        assert "nan_mask_weights" not in dict(loss_or_metric.scaler.named_buffers())
+        assert "fixed" in dict(loss_or_metric.scaler.named_buffers())
+        torch.testing.assert_close(
+            loss_or_metric.scaler.get_scaler_tensor("nan_mask_weights"),
+            updating_spec[1],
+        )
 
 
 # Shared minimal configs
@@ -955,10 +984,10 @@ def test_single_training_loss_is_averaged_over_num_steps(
     assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
 
 
-def test_single_training_advance_input_called_once_per_step(
+def test_single_training_advance_input_called_between_rollout_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """advance_input is invoked exactly once per rollout step."""
+    """advance_input is invoked once for each rollout step except the last."""
     data_indices = _data_indices_single()
     task = Forecaster(
         multistep_input=1,
@@ -991,10 +1020,63 @@ def test_single_training_advance_input_called_once_per_step(
     batch = {"data": torch.randn(b, 2, e, g, v)}
     module._step(batch, validation_mode=False)
 
-    assert len(advance_calls) == task.num_steps
+    assert len(advance_calls) == task.num_steps - 1
     for kwargs in advance_calls:
         assert kwargs["output_mask"] is module.output_mask
         assert kwargs["grid_shard_slice"] is module.grid_shard_slice
+
+
+def test_single_training_forcing_advances_across_rollout_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each forcing variables in input are refreshed from the batch before each rollout step."""
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["force"])}
+
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 3, "maximum": 3},
+    )
+    module = _make_single_training(task, data_indices)
+
+    # Capture the model input tensor at each rollout step by wrapping forward.
+    captured: list[torch.Tensor] = []
+    real_forward = module.forward
+
+    def spy_forward(x: dict[str, torch.Tensor], *args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+        captured.append(x["data"].clone())
+        return real_forward(x, *args, **kwargs)
+
+    monkeypatch.setattr(module, "forward", spy_forward)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(
+        module,
+        "compute_loss_metrics",
+        lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred),
+    )
+
+    # Full training offsets are [-6h, 0h, 6h, 12h, 18h] -> batch time dim of 5.
+    # Forcing (variable index 1) carries a distinctive value per time step so we can
+    # verify which batch time each advanced input pulled its forcing from.
+    force_col = name_to_index["force"]
+    b, e, g, v = 1, 1, 3, len(name_to_index)
+    batch_data = torch.zeros(b, 5, e, g, v)
+    for t in range(5):
+        batch_data[:, t, ..., force_col] = 100.0 + 10.0 * t
+    batch = {"data": batch_data}
+
+    module._step(batch, validation_mode=False)
+
+    assert len(captured) == 3
+    expected_forcing = [110.0, 120.0, 130.0]
+    for step, (x_in, expected) in enumerate(zip(captured, expected_forcing, strict=True)):
+        got = x_in[:, -1, ..., force_col]
+        assert torch.all(got == expected), (
+            f"rollout step {step}: newest input forcing should be {expected} "
+            f"(refreshed from batch), got {got.unique().tolist()}."
+        )
 
 
 # ── TransportTraining EDM transport _step integration ─────────────────────────────

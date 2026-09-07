@@ -136,8 +136,7 @@ class AnemoiTrainer(ABC):
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
         datamodule = AnemoiDatasetsDataModule(self.config, self.task)
-        # Multi-dataset case: store num_features per dataset
-        self.config.data.num_features = {name: len(data.variables) for name, data in datamodule.ds_train.data.items()}
+
         # Log information for each dataset
         for name, data in datamodule.ds_train.data.items():
             LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
@@ -740,6 +739,7 @@ class AnemoiTrainer(ABC):
             # we have our own DDP-compliant sampler logic baked into the dataset
             use_distributed_sampler=False,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
         )
 

@@ -100,12 +100,21 @@ class EnsembleTraining(BaseTrainingModule):
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
-        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy:
+        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
+        # Defaults are the single-device values used by SingleDeviceStrategy,
+        # which does not set up communication groups. A ``None`` process group
+        # makes the ensemble gather a no-op (see gather_tensor).
         self.ens_comm_group = None
-        self.ens_comm_group_id = None
-        self.ens_comm_group_rank = None
-        self.ens_comm_num_groups = None
-        self.ens_comm_group_size = None
+        self.ens_comm_group_id = 0
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_size = 1
+
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = 0
+        self.ens_comm_subgroup_rank = 0
+        self.ens_comm_subgroup_num_groups = 1
+        self.ens_comm_subgroup_size = 1
 
     def set_ens_comm_group(
         self,
@@ -243,7 +252,7 @@ class EnsembleTraining(BaseTrainingModule):
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_step_kwargs in task_steps:
+        for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
 
             y = self.task.get_targets(batch, **task_step_kwargs)
@@ -259,16 +268,17 @@ class EnsembleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_pred,
-                batch,
-                **task_step_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance input state for each dataset if another step follows
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_pred,
+                    batch,
+                    **task_step_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)

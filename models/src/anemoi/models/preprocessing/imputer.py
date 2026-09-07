@@ -46,9 +46,9 @@ class BaseImputer(BasePreprocessor, ABC):
         """
         super().__init__(config, data_indices, statistics)
 
-        self.register_buffer("nan_locations", torch.empty(0, dtype=torch.bool), persistent=False)
-        # weight imputed values with zero in loss calculation
-        self.register_buffer("loss_mask_training", torch.empty(0, dtype=torch.bool), persistent=False)
+        # These masks describe the current batch or local batch shard of the rank.
+        self.nan_locations: torch.Tensor | None = None
+        self.loss_mask_training: torch.Tensor | None = None
 
     def _validate_indices(self):
         assert len(self.index_training_input) == len(self.index_inference_input) <= len(self.replacement), (
@@ -166,10 +166,12 @@ class BaseImputer(BasePreprocessor, ABC):
         ----------
         x : torch.Tensor
             Input tensor
-        index : list
+        index_x : list[int]
             List of indices for the variables to be imputed
         nan_locations : torch.Tensor
             Tensor with NaN locations
+        index_nl : list[int]
+            List of indices in the NaN mask.
 
         Returns
         -------
@@ -204,16 +206,8 @@ class BaseImputer(BasePreprocessor, ABC):
         if x.shape[-1] == self.num_training_input_vars:
             # training input
 
-            # save nan locations for input variables from training input, select first timestep whose nan locations are used for the loss mask and postprocessing
-            # if batch size and grid sharding hasn't changed, use the allocated tensor. otherwise, reregister buffer.
-            if (
-                len(self.nan_locations.shape) > 1
-                and self.nan_locations.shape[0] == nan_locations.shape[0]
-                and self.nan_locations.shape[1] == nan_locations.shape[2]
-            ):
-                self.nan_locations[:] = nan_locations[:, 0, ..., self.data_indices.data.input.full]
-            else:
-                self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
+            # Select the first timestep used by the loss mask and postprocessing.
+            self.nan_locations = nan_locations[:, 0, ..., self.data_indices.data.input.full]
 
             # data indices for training input
             index = self.index_training_input
@@ -233,6 +227,7 @@ class BaseImputer(BasePreprocessor, ABC):
 
             # save nan masks of inference input for inverse transform
             self.nan_locations = nan_locations[:, 0]
+            self.loss_mask_training = None
 
             # data indices for training input
             index = self.index_inference_input
@@ -268,6 +263,10 @@ class BaseImputer(BasePreprocessor, ABC):
                 f"Input tensor ({x.shape[-1]}) does not match the training "
                 f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
             )
+
+        if self.nan_locations is None:
+            msg = "Cannot inverse-transform before the corresponding input has been transformed."
+            raise RuntimeError(msg)
 
         assert (
             x.shape[0] == self.nan_locations.shape[0]

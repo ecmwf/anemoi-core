@@ -8,6 +8,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.19.0](https://github.com/ecmwf/anemoi-core/compare/models-0.18.0...models-0.19.0) (2026-09-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **configs:** expand configurability for models with multiple encoders/decoders ([#1229](https://github.com/ecmwf/anemoi-core/issues/1229))
+
+### Features
+
+* **configs:** Expand configurability for models with multiple encoders/decoders ([#1229](https://github.com/ecmwf/anemoi-core/issues/1229)) ([98a16a0](https://github.com/ecmwf/anemoi-core/commit/98a16a05fe28e6ef98647bca910dbeca4fcbe729))
+* **training:** Graph scores ([#1268](https://github.com/ecmwf/anemoi-core/issues/1268)) ([11e8498](https://github.com/ecmwf/anemoi-core/commit/11e8498e4b3fa38c32e80089f521387f7d2f19ec))
+
+
+### Bug Fixes
+
+* **documentation, training:** Clean-up of graph scores and fix documentation ([#1338](https://github.com/ecmwf/anemoi-core/issues/1338)) ([5aa6585](https://github.com/ecmwf/anemoi-core/commit/5aa658592332f4ccf67d70b8b11d02bc6bf16b24))
+
+
+### Performance Improvements
+
+* **models:** Keep torch off the anemoi-training CLI import path ([#1329](https://github.com/ecmwf/anemoi-core/issues/1329)) ([c0cc4ba](https://github.com/ecmwf/anemoi-core/commit/c0cc4ba6dbec000c36e77184e765c341a9d0bf9c))
+
+## [0.18.0](https://github.com/ecmwf/anemoi-core/compare/models-0.17.0...models-0.18.0) (2026-08-11)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models,training:** universal loss scalers for spectral losses ([#1253](https://github.com/ecmwf/anemoi-core/issues/1253))
+
+### Features
+
+* Create and ship py.typed ([#1249](https://github.com/ecmwf/anemoi-core/issues/1249)) ([d0cfe4c](https://github.com/ecmwf/anemoi-core/commit/d0cfe4c88198d0aa9f9acf47009e4822734731b0))
+* **models,training:** Universal loss scalers for spectral losses ([#1253](https://github.com/ecmwf/anemoi-core/issues/1253)) ([034271e](https://github.com/ecmwf/anemoi-core/commit/034271ee09348aa04dcaac60d7dfa7910965249d))
+* **models:** Allow torch compile to go through triton GT ([#1271](https://github.com/ecmwf/anemoi-core/issues/1271)) ([ec11bf2](https://github.com/ecmwf/anemoi-core/commit/ec11bf28ff72933cee5cabf63e204c76685b80b0))
+* **models:** Comm primitives tests ([#1234](https://github.com/ecmwf/anemoi-core/issues/1234)) ([21851c7](https://github.com/ecmwf/anemoi-core/commit/21851c7065f6315c2f1453b6f8890e34660aead4))
+
+
+### Bug Fixes
+
+* **models,tests:** Wrong expected shapes in graphtransformer test ([#1287](https://github.com/ecmwf/anemoi-core/issues/1287)) ([0fa84c1](https://github.com/ecmwf/anemoi-core/commit/0fa84c1f7105b526de903eaa45e975e929b6b58b))
+* **models:** Trainable edge perm migration script ([#1294](https://github.com/ecmwf/anemoi-core/issues/1294)) ([e7b0ef3](https://github.com/ecmwf/anemoi-core/commit/e7b0ef3afeebad6fedd87df9676b805bb63fbaa9))
+* **training:** Handle NaN masks correctly with sharding ([#1283](https://github.com/ecmwf/anemoi-core/issues/1283)) ([d7f6233](https://github.com/ecmwf/anemoi-core/commit/d7f623353cd901298d6727d5756c02f07c9f69ef))
+
+
+### Performance Improvements
+
+* **training:** All-to-all interface for torch.compile()  ([#1282](https://github.com/ecmwf/anemoi-core/issues/1282)) ([3de62a4](https://github.com/ecmwf/anemoi-core/commit/3de62a4e9f87d4159f8b6b4c7bc1bfb3893eb24f))
+
 ## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/models-0.16.0...models-0.17.0) (2026-07-23)
 
 
