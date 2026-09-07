@@ -35,6 +35,7 @@ weather forecasting.
    :caption: User Guide
 
    usage/create_model.rst
+   usage/multi_dataset_models.rst
 
 .. toctree::
    :maxdepth: 1
