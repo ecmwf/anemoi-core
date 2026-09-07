@@ -22,6 +22,7 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.utils.config import DotDict
 
@@ -178,7 +179,8 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
 
         if TORCH_CLUSTER_AVAILABLE:
-            edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
+            with current_device_context(self.device):
+                edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
             LOGGER.warning(TORCH_CLUSTER_INSTRUCTIONS)
