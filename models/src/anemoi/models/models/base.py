@@ -393,6 +393,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -414,6 +415,9 @@ class BaseGraphModel(nn.Module):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
+        grid_shard_sizes : DatasetShardSizes, optional
+            Sizes of inputs already sharded along the grid dimension. When provided,
+            the input is passed directly to the model without being sharded again.
         **kwargs
             Additional arguments.
 
@@ -438,8 +442,7 @@ class BaseGraphModel(nn.Module):
                 ]  # add dummy ensemble dimension as 3rd index
 
             # Handle distributed processing
-            grid_shard_sizes: DatasetShardSizes | None = None
-            if model_comm_group is not None:
+            if model_comm_group is not None and grid_shard_sizes is None:
                 grid_shard_sizes = {}
                 for dataset_name in dataset_names:
                     grid_shard_sizes[dataset_name] = get_shard_sizes(
