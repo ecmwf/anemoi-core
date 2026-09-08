@@ -724,6 +724,7 @@ class AnemoiTrainer(ABC):
                 ds=self.datamodule,
                 cache_root=self.config.system.hardware.cache_dir,
                 hostname_suffix=getattr(self.config.system.hardware, "hostname_suffix", None),
+                async_writes=getattr(self.config.system.hardware, "cache_async_writes", False),
             )
             callbacks.append(CacheSyncCallback(cache=self.datamodule))
 

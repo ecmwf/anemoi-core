@@ -9,6 +9,7 @@ import os
 import shutil
 import socket
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from multiprocessing import Value
 from pathlib import Path
@@ -95,7 +96,7 @@ class DatasetCacheNamespace:
         entry, marker, _ = self.paths(sequence, position, grid_id)
         return load_cache_array(entry) if marker.exists() and entry.exists() else None
 
-    def store(self, sequence, position, value, grid_id="all"):
+    def store(self, sequence, position, value, grid_id="all", sync=True):
         entry, marker, lock = self.paths(sequence, position, grid_id)
         with self.lock(lock):
             if marker.exists() and entry.exists():
@@ -107,8 +108,9 @@ class DatasetCacheNamespace:
             try:
                 with temporary.open("wb") as target:
                     save_cache_array(target, value)
-                    target.flush()
-                    os.fsync(target.fileno())
+                    if sync:
+                        target.flush()
+                        os.fsync(target.fileno())
                 os.replace(temporary, entry)
                 marker.touch()
                 return True
@@ -131,12 +133,13 @@ class DatasetCacheNamespace:
 class DatasetCache(pl.LightningDataModule):
     """Datamodule proxy coordinating one SSD cache per node."""
 
-    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None):
+    def __init__(self, ds, cache_root, hostname_suffix=None, proc_group=None, async_writes=False):
         super().__init__()
         self.ds = ds  # must be set before any attribute access can reach __getattr__
         self.cache_root = Path(cache_root)
         self.hostname_suffix = hostname_suffix or ""
         self.initial_proc_group = proc_group
+        self.async_writes = async_writes
         self.initialized = False
         self.namespaces, self._locations, self._connections = {}, {}, {}
         self._datasets = set()
@@ -145,6 +148,9 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_misses = Value("q", 0)
         self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
+        self.cache_writes_skipped = Value("q", 0)
+        self._writer = None
+        self._pending_write = None
 
     def __getattr__(self, name):
         if name == "ds":
@@ -305,20 +311,56 @@ class DatasetCache(pl.LightningDataModule):
         self.cache_misses.value += len(missing)
         return values, missing
 
-    def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=True):
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
-        positions = self._positions(namespace, sequence, positions)
-        grid_id = self._grid_id(grid_indices)
         try:
             for position, value in zip(positions, values):
-                namespace.store(sequence, position, value, grid_id)
+                namespace.store(sequence, position, value, grid_id, sync=sync)
         except OSError as error:
             if not _is_capacity_error(error):
                 raise
             self.cache_full.value = True
             LOGGER.warning("Dataset cache is full on node %s", self.node_id)
+
+    def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
+        namespace = self.namespaces[dataset_id]
+        positions = self._positions(namespace, sequence, positions)
+        grid_id = self._grid_id(grid_indices)
+        if not self.async_writes:
+            self._store_records(dataset_id, sequence, positions, values, grid_id)
+            return
+
+        if self._writer is None:
+            self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dataset-cache-writer")
+        if self._pending_write is not None:
+            if not self._pending_write.done():
+                with self.cache_writes_skipped.get_lock():
+                    self.cache_writes_skipped.value += len(positions)
+                return
+            self._pending_write.result()
+        copied_values = [np.array(value, copy=True) for value in values]
+        self._pending_write = self._writer.submit(
+            self._store_records,
+            dataset_id,
+            sequence,
+            positions,
+            copied_values,
+            grid_id,
+            False,
+        )
+
+    def wait_for_pending_writes(self) -> None:
+        if self._pending_write is not None:
+            self._pending_write.result()
+            self._pending_write = None
+
+    def close_writer(self) -> None:
+        if self._writer is not None:
+            self.wait_for_pending_writes()
+            self._writer.shutdown(wait=True)
+            self._writer = None
 
     def update_global_view(self):
         """Update which nodes have each cached record."""
@@ -341,6 +383,7 @@ class DatasetCache(pl.LightningDataModule):
         self._locations = locations
 
     def teardown(self, stage=None):
+        self.close_writer()
         for connection in self._connections.values():
             connection.close()
         if self.is_node_leader:

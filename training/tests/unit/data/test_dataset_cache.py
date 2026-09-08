@@ -349,3 +349,34 @@ def test_grid_shards_are_cached_separately(tmp_path, sample_data):
     values, missing = cache.check_cache(namespace.dataset_id, 0, positions, slice(2, 4))
     assert values == [None]
     assert missing == [0]
+
+
+def test_async_writes_skip_work_while_writer_is_busy(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path, async_writes=True)
+    cache.namespaces[namespace.dataset_id] = namespace
+    first_write_started = threading.Event()
+    release_first_write = threading.Event()
+    writes = []
+
+    def store_records(dataset_id, sequence, positions, values, grid_id, sync):
+        writes.append(positions)
+        if len(writes) == 1:
+            first_write_started.set()
+            assert release_first_write.wait(timeout=5)
+
+    monkeypatch.setattr(cache, "_store_records", store_records)
+    cache.store_records(namespace.dataset_id, 0, [0], sample_data[[0]])
+    assert first_write_started.wait(timeout=5)
+
+    cache.store_records(namespace.dataset_id, 0, [1], sample_data[[1]])
+
+    assert writes == [[0]]
+    assert cache.cache_writes_skipped.value == 1
+
+    release_first_write.set()
+    cache.wait_for_pending_writes()
+    cache.store_records(namespace.dataset_id, 0, [2], sample_data[[2]])
+    cache.close_writer()
+
+    assert writes == [[0], [2]]
