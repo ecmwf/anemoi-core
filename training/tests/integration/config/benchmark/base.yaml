@@ -21,10 +21,14 @@ graph:
   overwrite: False
 
 model:
-  encoder:
-    num_chunks: 2
-  decoder:
-    num_chunks: 2
+  encoders:
+    "0":
+      mapper:
+        num_chunks: 2
+  decoders:
+    "0":
+      mapper:
+        num_chunks: 2
   processor:
     num_chunks: 2
   num_channels: 512
@@ -32,6 +36,10 @@ model:
 training:
   max_epochs: 1
   num_sanity_val_steps: 0
+  optimization:
+    lr: 10e-5
+    lr_scheduler:
+      warmup_t: 1
 
 diagnostics:
   callbacks: []

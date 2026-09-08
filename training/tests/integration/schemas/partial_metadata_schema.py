@@ -36,6 +36,11 @@ PARTIAL_METADATA_SCHEMA = {
                 "input_relative_date_indices": None,
                 "output_relative_date_indices": None,
                 "timestep": None,
+                # extra entries populated by offset-forecaster only
+                "input_offsets": None,
+                "output_offsets": None,
+                "rollout_shift": None,
+                "advance_map": None,
             },
             "data_indices": {
                 "input": None,
