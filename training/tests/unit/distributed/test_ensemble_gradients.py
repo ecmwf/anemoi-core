@@ -25,6 +25,7 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.training.distributed.groups import get_my_ensemble_comm_group
 from anemoi.training.distributed.strategy import DDPEnsGroupStrategy
+from anemoi.training.distributed.strategy import register_gradient_scaling_hooks
 
 
 class _EnsembleModel(pl.LightningModule):
@@ -94,6 +95,34 @@ class _EnsembleModel(pl.LightningModule):
         # Square each member's prediction before averaging over members and grid points.
         per_member_loss = prediction.square().mean()
         return ensemble_mean_loss + 0.2 * per_member_loss
+
+
+def test_gradient_scaling_hook_exclusions_are_explicit() -> None:
+    """None scales every parameter, while model-sharding exclusions are opt-in."""
+    scale_all_model = _EnsembleModel()
+    register_gradient_scaling_hooks(scale_all_model, 3)
+    sum(parameter.sum() for parameter in scale_all_model.parameters()).backward()
+
+    for parameter in scale_all_model.parameters():
+        torch.testing.assert_close(parameter.grad, torch.full_like(parameter, 3))
+
+    model_sharding_model = _EnsembleModel()
+    register_gradient_scaling_hooks(
+        model_sharding_model,
+        3,
+        skip_grad_scaling=("trainable", "no_gradscaling"),
+    )
+    sum(parameter.sum() for parameter in model_sharding_model.parameters()).backward()
+
+    torch.testing.assert_close(model_sharding_model.weight.grad, torch.full_like(model_sharding_model.weight, 3))
+    torch.testing.assert_close(
+        model_sharding_model.trainable.grad,
+        torch.ones_like(model_sharding_model.trainable),
+    )
+    torch.testing.assert_close(
+        model_sharding_model.no_gradscaling.grad,
+        torch.ones_like(model_sharding_model.no_gradscaling),
+    )
 
 
 def _check_ensemble_gradients(rank: int, init_file: str) -> None:
