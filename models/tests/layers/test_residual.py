@@ -317,8 +317,7 @@ def test_spectral_ornstein_truncation_has_filter(anti_aliasing):
     assert hasattr(conn, "filter")
     assert hasattr(conn, "x_fsht")
     assert hasattr(conn, "x_isht")
-    # Only the anti-aliasing blend reads walias; a spare parameter would leave DDP waiting for a
-    # gradient that never arrives.
+
     assert hasattr(conn, "walias") == anti_aliasing
 
     x = torch.randn(2, 3, 1, nlat * nlon, 3)

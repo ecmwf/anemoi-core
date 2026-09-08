@@ -10,7 +10,7 @@
 """Distributed tests for residual connections that split the grid across ranks.
 
 ``SpectralOrnsteinConnection`` builds its fields from spherical harmonics, which
-need the whole globe, so it has to move data around when the grid is split up.
+need the whole globe, so it has to move data around when the grid is sharded.
 These tests check that splitting the grid changes nothing: the outputs and the
 gradients must match a single-rank run.
 
@@ -95,7 +95,7 @@ def _test_sharded_matches_unsharded(
     single-rank gradient, which is what the training strategy relies on when it
     scales gradients by the size of the model communication group.
     """
-    n_prognostic = max(4, world_size)  # the variables get split up too, so every rank needs one
+    n_prognostic = max(4, world_size)
     reference = _build_connection(n_prognostic, truncate, anti_aliasing, device)
     sharded = _build_connection(n_prognostic, truncate, anti_aliasing, device)
 
@@ -117,7 +117,7 @@ def _test_sharded_matches_unsharded(
     torch.testing.assert_close(out_sharded, out_reference[..., start:end, :], atol=ATOL, rtol=RTOL)
 
     for (name, expected), (_, actual) in zip(reference.named_parameters(), sharded.named_parameters()):
-        # Every parameter has to receive a gradient, otherwise DDP stalls on the next step.
+        # Every parameter has to receive a gradient, otherwise DDP complaints on the next step.
         assert expected.grad is not None, f"{name!r} received no gradient on the full grid."
         assert actual.grad is not None, f"{name!r} received no gradient on rank {rank}."
 
@@ -160,7 +160,7 @@ def _test_too_few_variables_rank(
     device: torch.device,
     group: dist.ProcessGroup,
 ) -> None:
-    """One variable cannot be spread over two or more ranks, and saying so beats an FFT crash."""
+    """One variable cannot be sharded over two or more ranks."""
     connection = _build_connection(n_prognostic=1, truncate=True, anti_aliasing=True, device=device)
 
     n_points = NLAT * 2 * NLAT
