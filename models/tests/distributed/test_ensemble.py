@@ -21,6 +21,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.graph import gather_ensemble
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
 
 
@@ -101,7 +102,11 @@ def _test_gather_ensemble_rank(
     ensemble_loss(reference_prediction).backward()
 
     model = EnsembleModel(device, model_group=model_group)
-    ddp = DistributedDataParallel(model, device_ids=[device.index] if device.type == "cuda" else None)
+    ddp = DistributedDataParallel(
+        model,
+        device_ids=[device.index] if device.type == "cuda" else None,
+        process_group=group,
+    )
     member_start = ensemble_rank * members_per_rank
     local_input = inputs[data_group_id : data_group_id + 1, member_start : member_start + members_per_rank]
     grid_shard_sizes = get_balanced_partition_sizes(inputs.size(2), model_group_size)
@@ -132,7 +137,10 @@ def _test_gather_ensemble_rank(
     loss.backward()
 
     for name, parameter in model.named_parameters():
-        torch.testing.assert_close(parameter.grad, reference.get_parameter(name).grad, rtol=1e-12, atol=1e-12)
+        expected_gradient = reference.get_parameter(name).grad
+        assert parameter.grad is not None, f"Missing distributed gradient for {name}"
+        assert expected_gradient is not None, f"Missing reference gradient for {name}"
+        torch.testing.assert_close(parameter.grad, expected_gradient, rtol=1e-12, atol=1e-12)
 
 
 @pytest.mark.distributed
@@ -156,6 +164,102 @@ def test_gather_ensemble_matches_unsharded_parameter_gradients(
         data_parallel=data_parallel,
         model_group_size=model_group_size,
         use_checkpoint=use_checkpoint,
+    )
+
+
+def _test_gather_ensemble_sharded_loss_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+) -> None:
+    # Each data group has two model replicas, each split across two spatial ranks.
+    model_group_size = 2
+    ensemble_subgroup_size = 2
+    ensemble_group_size = model_group_size * ensemble_subgroup_size
+    num_data_groups = world_size // ensemble_group_size
+    data_group_id = rank // ensemble_group_size
+    ensemble_rank = (rank % ensemble_group_size) // model_group_size
+    model_rank = rank % model_group_size
+
+    model_groups = [
+        dist.new_group(ranks=list(range(start, start + model_group_size)))
+        for start in range(0, world_size, model_group_size)
+    ]
+    model_group = model_groups[rank // model_group_size]
+
+    ensemble_subgroups = [
+        dist.new_group(ranks=list(range(start + offset, start + ensemble_group_size, model_group_size)))
+        for start in range(0, world_size, ensemble_group_size)
+        for offset in range(model_group_size)
+    ]
+    ensemble_subgroup = ensemble_subgroups[data_group_id * model_group_size + model_rank]
+
+    members_per_rank = 2
+    generator = torch.Generator().manual_seed(71)
+    inputs = torch.randn(
+        num_data_groups,
+        members_per_rank * ensemble_subgroup_size,
+        3,
+        2,
+        dtype=torch.float64,
+        generator=generator,
+    ).to(device)
+    reference = EnsembleModel(device)
+    reference_prediction = reference(inputs)
+    ensemble_loss(reference_prediction).backward()
+
+    model = EnsembleModel(device, model_group=model_group)
+    ddp = DistributedDataParallel(
+        model,
+        device_ids=[device.index] if device.type == "cuda" else None,
+        process_group=group,
+    )
+    member_start = ensemble_rank * members_per_rank
+    local_input = inputs[data_group_id : data_group_id + 1, member_start : member_start + members_per_rank]
+    grid_shard_sizes = get_balanced_partition_sizes(inputs.size(2), model_group_size)
+    grid_start = sum(grid_shard_sizes[:model_rank])
+    grid_slice = slice(grid_start, grid_start + grid_shard_sizes[model_rank])
+
+    def gather_and_score(prediction: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        gathered = gather_ensemble(
+            prediction.clone(),
+            dim=1,
+            sizes=[members_per_rank] * ensemble_subgroup_size,
+            mgroup=ensemble_subgroup,
+        )
+        # Keep predictions spatially sharded and normalize uneven shards by the global grid size.
+        local_loss = ensemble_loss(gathered) * (gathered.size(2) / inputs.size(2))
+        return reduce_tensor(local_loss, model_group), gathered
+
+    prediction = ddp(local_input)
+    loss, gathered = checkpoint(gather_and_score, prediction, use_reentrant=False)
+    expected_prediction = reference_prediction[data_group_id : data_group_id + 1]
+    torch.testing.assert_close(gathered, expected_prediction[:, :, grid_slice], rtol=1e-12, atol=1e-12)
+    # reduce_tensor sums loss values in float32; its backward preserves float64 gradients.
+    torch.testing.assert_close(loss, ensemble_loss(expected_prediction), rtol=1e-6, atol=1e-7)
+    loss.backward()
+
+    for name, parameter in model.named_parameters():
+        expected_gradient = reference.get_parameter(name).grad
+        assert parameter.grad is not None, f"Missing distributed gradient for {name}"
+        assert expected_gradient is not None, f"Missing reference gradient for {name}"
+        torch.testing.assert_close(parameter.grad, expected_gradient, rtol=1e-12, atol=1e-12)
+
+
+@pytest.mark.distributed
+def test_gather_ensemble_with_sharded_loss_matches_unsharded_gradients(
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Check checkpointed local loss reduction with model and ensemble sharding."""
+    if distributed_world_size < 4 or distributed_world_size % 4:
+        pytest.skip("Sharded-loss coverage requires a world size of at least four and divisible by four.")
+    run_distributed_test(
+        _test_gather_ensemble_sharded_loss_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
     )
 
 
