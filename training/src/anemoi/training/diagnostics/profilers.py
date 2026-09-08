@@ -46,6 +46,8 @@ from anemoi.training.diagnostics.mlflow.logger import AnemoiMLflowLogger
 
 LOGGER = logging.getLogger(__name__)
 
+MEMORY_PROFILER_SKIP_STEPS = 200
+
 
 def check_torch_version() -> bool:
     torch_version = torch.__version__
@@ -289,22 +291,18 @@ class BenchmarkProfiler(Profiler):
         super().__init__(config)
 
         self.config = config
-        self.warmup = self.config.diagnostics.benchmark_profiler.memory.warmup
-        if not self.warmup:
-            self.warmup = 0
-        self.num_steps = self.config.diagnostics.benchmark_profiler.memory.steps
-
-        if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
-            assert (
-                self.num_steps <= self.config.training.num_sanity_val_steps
-            ), "Sanity steps should be less than snapshot steps, to avoid memory issues"
+        self._training_epoch = -1
+        self._training_step = 0
+        self._profiled_training_epoch = None
+        self._memory_profiler_enabled = False
+        self.memory_profile_steps = 6
 
         self.dirpath = None
         self.create_output_path()
         # the profilers need to be initialised before the setup method because
         # actions like configuring callbacks would trigger the profiler
-        self.memory_profiler = DummyProfiler  # dummy profiler to be used as placeholder
-        self.time_profiler = DummyProfiler  # dummy profiler to be used as placeholder
+        self.memory_profiler = DummyProfiler()  # dummy profiler to be used as placeholder
+        self.time_profiler = DummyProfiler()  # dummy profiler to be used as placeholder
 
     @rank_zero_only
     def create_output_path(self) -> None:
@@ -341,6 +339,8 @@ class BenchmarkProfiler(Profiler):
         if self.config.diagnostics.benchmark_profiler.memory.enabled:
             import os
 
+            self.memory_profile_steps = self.config.diagnostics.benchmark_profiler.memory.steps
+
             def trace_handler(dir_name: str, stage: str | None = None) -> callable:
 
                 def handler_fn(prof: pl.profilers.Profiler) -> None:
@@ -354,35 +354,41 @@ class BenchmarkProfiler(Profiler):
 
                 return handler_fn
 
-            global_rank = int(os.environ.get("SLURM_PROCID", "0"))  # WON'T WORK WHEN RUNNING WITHOUT SLURM
-            if not (self.config.diagnostics.benchmark_profiler.memory.trace_rank0_only and global_rank != 0):
-                from pytorch_lightning.profilers.pytorch import _KINETO_AVAILABLE
-
-                assert (
-                    _KINETO_AVAILABLE
-                ), "Kineto is not available. Please ensure Kineto is avaialble to be able to use the memory profiler"
-
-                torch.profiler.profile = (
-                    PatchedProfile  # patch the profile(KinetoProfile) object to serialise the distributed info
-                )
-                self.memory_profiler = PyTorchProfiler(
-                    with_stack=True,
-                    emit_nvtx=False,
-                    profile_memory=True,
-                    export_to_chrome=True,
-                    record_shapes=True,
-                    group_by_input_shapes=True,
-                    dirpath=self.dirpath,
-                    on_trace_ready=trace_handler(self.dirpath),
-                    schedule=torch.profiler.schedule(
-                        wait=0,
-                        warmup=self.warmup,
-                        active=self.num_steps,
-                        repeat=1,
-                        skip_first=self.config.training.num_sanity_val_steps,
-                    ),
-                )
+            self._trace_handler = trace_handler
+            global_rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else int(
+                os.environ.get("RANK", os.environ.get("SLURM_PROCID", "0")),
+            )
+            self._memory_profiler_enabled = global_rank == 0
         self.time_rows_dict = None  # updated if we create a memory profile report
+
+    def _start_memory_profiler_for_epoch(self) -> None:
+        if (
+            not self._memory_profiler_enabled
+            or self._training_step < MEMORY_PROFILER_SKIP_STEPS
+            or self._profiled_training_epoch == self._training_epoch
+        ):
+            return
+
+        from pytorch_lightning.profilers.pytorch import _KINETO_AVAILABLE
+
+        assert _KINETO_AVAILABLE, "Kineto is not available. Please ensure Kineto is available to use the memory profiler"
+
+        if isinstance(self.memory_profiler, PyTorchProfiler):
+            self.memory_profiler._delete_profilers()
+
+        torch.profiler.profile = PatchedProfile
+        self.memory_profiler = PyTorchProfiler(
+            with_stack=True,
+            emit_nvtx=False,
+            profile_memory=True,
+            export_to_chrome=True,
+            record_shapes=True,
+            group_by_input_shapes=True,
+            dirpath=self.dirpath,
+            on_trace_ready=self._trace_handler(self.dirpath, stage=f"epoch_{self._training_epoch}"),
+            schedule=torch.profiler.schedule(wait=0, warmup=0, active=self.memory_profile_steps, repeat=1),
+        )
+        self._profiled_training_epoch = self._training_epoch
 
     def start(self, action_name: str) -> None:
         """Starts recording for a specific action.
@@ -392,6 +398,13 @@ class BenchmarkProfiler(Profiler):
         action_name : str
             Name of the action.
         """
+        if action_name == "run_training_epoch":
+            self._training_epoch += 1
+            self._start_memory_profiler_for_epoch()
+        elif action_name == "run_training_batch":
+            self._training_step += 1
+            self._start_memory_profiler_for_epoch()
+
         self.time_profiler.start(action_name)
         self.memory_profiler.start(action_name)
 
@@ -598,6 +611,9 @@ class BenchmarkProfiler(Profiler):
         pd.DataFrame
             Memory profiler data.
         """
+        if not isinstance(self.memory_profiler, PyTorchProfiler):
+            return ""
+
         if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
             self._save_extra_plots()
 
