@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+from dataclasses import asdict
 from datetime import timedelta
 from typing import TYPE_CHECKING
 from typing import Any
@@ -134,6 +135,18 @@ class QueryDataset(Dataset):
                 )
                 and self._bbox_mask(readers[field.dataset], area).any()
             )
+        # A provenance weight of zero is the supported way to retain a source
+        # as input context without supervising it as a target. Remove those
+        # options before the variable-first draw, otherwise a variable found
+        # only in a context source creates a zero-sum provenance distribution.
+        self.sampling_options = [
+            option
+            for option in self.sampling_options
+            if self.task.variable_weights.get(option[0].variable, 1.0) > 0
+            and self.task.provenance_weights.get(option[0].provenance, 1.0)
+            * self.sampling_weights[option[0].provenance]
+            > 0
+        ]
         self.target_fields = list({option[0] for option in self.sampling_options})
         if not self.sampling_options:
             msg = "No supported target field/lead/region combination has a matching origin and required context."
@@ -222,15 +235,25 @@ class QueryDataset(Dataset):
             variable=field.variable,
             lead_time=lead_time,
             provenance=field.provenance,
-            output_cadence=target_reader.frequency,
-            level_type=field.level_type,
-            pressure_pa=field.pressure_pa,
-            height_m=field.height_m,
-            processing=field.processing,
-            interval=(
+            unit=field.units or "unknown",
+            output_frequency=target_reader.frequency,
+            model_type={"surface": "sfc", "pressure": "pl", "model": "ml"}.get(
+                field.level_type,
+                field.level_type,
+            ),
+            level=(
+                field.pressure_pa / 100
+                if field.pressure_pa is not None
+                else field.model_level
+                if field.model_level is not None
+                else field.height_m
+            ),
+            level_unit=("hPa" if field.pressure_pa is not None else "m" if field.height_m is not None else None),
+            aggregation_type=field.aggregation_type,
+            temporal_aggregation_window=(
                 None
-                if field.interval_hours is None
-                else tuple(timedelta(hours=value) for value in field.interval_hours)
+                if field.temporal_aggregation_window_hours is None
+                else tuple(timedelta(hours=value) for value in field.temporal_aggregation_window_hours)
             ),
             bbox=bbox,
             grid=field.dataset,
@@ -239,7 +262,9 @@ class QueryDataset(Dataset):
         )
 
         inputs: dict[str, QueryInput] = {}
-        source_names = list(self.readers)
+        input_context: dict[str, Any] = {}
+        all_source_names = list(self.readers)
+        source_names = list(all_source_names)
         if self.task.source_dropout and len(source_names) > 1:
             source_names = [
                 name
@@ -269,6 +294,7 @@ class QueryDataset(Dataset):
             if not positions or not self.fields_by_dataset[source_name]:
                 continue
             positions = positions[-self.task.max_input_times :]
+            available_time_count = len(positions)
             if self.task.history_dropout and len(positions) > 1:
                 latest_position = positions[-1]
                 positions = [position for position in positions if rng.random() >= self.task.history_dropout]
@@ -276,6 +302,7 @@ class QueryDataset(Dataset):
                     positions = [latest_position]
 
             source_fields = list(self.fields_by_dataset[source_name])
+            available_field_count = len(source_fields)
             if self.task.field_dropout and len(source_fields) > 1:
                 source_fields = [field_ for field_ in source_fields if rng.random() >= self.task.field_dropout]
                 if not source_fields:
@@ -310,6 +337,8 @@ class QueryDataset(Dataset):
             metadata = []
             variable_ids = []
             provenance_ids = []
+            unit_ids = []
+            resolved_fields = []
             for time_index, position in enumerate(positions):
                 offset_hours = float(
                     (np.datetime64(reader.dates[position], "ns") - origin) / np.timedelta64(1, "h"),
@@ -330,6 +359,16 @@ class QueryDataset(Dataset):
                     provenance_ids.append(
                         self.catalogue.provenance_to_id[source_field.provenance],
                     )
+                    unit_ids.append(
+                        self.catalogue.unit_to_id[source_field.units or "unknown"],
+                    )
+                    resolved_fields.append(
+                        {
+                            **asdict(source_field),
+                            "actual_time": str(np.datetime64(reader.dates[position], "ns")),
+                            "time_offset_hours": offset_hours,
+                        },
+                    )
 
             selected_values = torch.stack(values, dim=-1)
             values_tensor = torch.zeros(
@@ -344,8 +383,20 @@ class QueryDataset(Dataset):
                 metadata=torch.from_numpy(np.stack(metadata))[None],
                 variable_ids=torch.tensor(variable_ids, dtype=torch.long)[None],
                 provenance_ids=torch.tensor(provenance_ids, dtype=torch.long)[None],
+                unit_ids=torch.tensor(unit_ids, dtype=torch.long)[None],
                 mask=mask[None],
             )
+            input_context[source_name] = {
+                "resolved_fields": resolved_fields,
+                "actual_times": [str(np.datetime64(reader.dates[position], "ns")) for position in positions],
+                "available_field_count": available_field_count,
+                "selected_field_count": len(source_fields),
+                "available_time_count": available_time_count,
+                "selected_time_count": len(positions),
+                "selected_node_count": len(grid_indices),
+                "native_node_count": int(reader.grid_size),
+                "context_bbox_degrees": context_bbox,
+            }
 
         if not inputs:
             msg = f"No source has data available at forecast origin {origin} for target {valid_time}."
@@ -390,12 +441,41 @@ class QueryDataset(Dataset):
             query_provenance_id=torch.tensor(
                 [self.catalogue.provenance_to_id[field.provenance]],
             ),
+            query_unit_id=torch.tensor(
+                [self.catalogue.unit_to_id[field.units or "unknown"]],
+            ),
             target_dataset=field.dataset,
             query=query.as_serialisable_dict(),
             output_coordinates=output_coordinates,
             target=torch.nan_to_num(target)[None],
             target_mask=target_mask[None],
             loss_weight=torch.tensor(loss_weight, dtype=torch.float32),
+            diagnostic_context={
+                "sample_index": int(index),
+                "forecast_origin": str(origin),
+                "valid_time": str(valid_time),
+                "requested_query": query.as_serialisable_dict(),
+                "resolved_query": {
+                    **query.as_serialisable_dict(),
+                    "target_dataset": field.dataset,
+                    "target_field_name": field.field_name,
+                    "target_units": field.units,
+                },
+                "target": {
+                    **asdict(field),
+                    "native_index_count": len(target_indices),
+                    "native_index_min": int(target_indices.min()),
+                    "native_index_max": int(target_indices.max()),
+                    "valid_node_count": int(target_mask.sum()),
+                    "selected_node_count": len(target_indices),
+                },
+                "inputs": input_context,
+                "configured_sources": all_source_names,
+                "dataset_sampling_weights": dict(self.sampling_weights),
+                "active_sources": list(inputs),
+                "source_dropout_sources": [name for name in all_source_names if name not in source_names],
+                "unavailable_sources": [name for name in source_names if name not in inputs],
+            },
         )
 
 

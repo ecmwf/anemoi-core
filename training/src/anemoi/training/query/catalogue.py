@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import re
 from dataclasses import asdict
 from dataclasses import dataclass
 from datetime import timedelta
@@ -53,6 +54,50 @@ def _resolution_km(value: Any) -> float | None:
     return None
 
 
+def _request_field_metadata(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    """Recover MARS semantics from older datasets without per-variable metadata."""
+    current = metadata.get("specific", {})
+    request = {}
+    while isinstance(current, dict):
+        request = current.get("attrs", {}).get("data_request", {})
+        if request:
+            break
+        current = current.get("forward")
+    result: dict[str, dict[str, Any]] = {}
+    for levtype, entries in request.get("param_level", {}).items():
+        for entry in entries:
+            if isinstance(entry, str):
+                result[entry] = {"param": entry, "levtype": levtype}
+            elif len(entry) == 2:
+                param, level = entry
+                result[f"{param}_{level}"] = {
+                    "param": param,
+                    "levtype": levtype,
+                    "levelist": level,
+                }
+    for levtype, entries in request.get("param_step", {}).items():
+        for entry in entries:
+            if len(entry) != 2:
+                continue
+            param, window = entry
+            result.setdefault(str(param), {"param": param, "levtype": levtype}).update(
+                process="accumulation",
+                period=window,
+            )
+    return result
+
+
+def _level_from_field_name(field_name: str) -> float | None:
+    match = re.match(r"^.+_(-?\d+(?:\.\d+)?)$", field_name)
+    return None if match is None else float(match.group(1))
+
+
+def _height_parameter(value: str) -> tuple[str, float] | None:
+    """Map established near-surface short names such as 2t and 10u."""
+    match = re.match(r"^(\d+(?:\.\d+)?)(t|d|u|v)$", value)
+    return None if match is None else (match.group(2), float(match.group(1)))
+
+
 @dataclass(frozen=True)
 class CatalogueField:
     dataset: str
@@ -62,9 +107,10 @@ class CatalogueField:
     units: str | None
     level_type: str
     pressure_pa: float | None
+    model_level: int | None
     height_m: float | None
-    processing: str
-    interval_hours: tuple[float, float] | None
+    aggregation_type: str
+    temporal_aggregation_window_hours: tuple[float, float] | None
     cadence_hours: float | None
     resolution_km: float | None
     spatial_support_km: float | None
@@ -76,10 +122,11 @@ class CatalogueField:
     unsupported_reason: str | None = None
 
     def matches(self, query: ForecastQuery) -> bool:
-        if (self.variable, self.provenance, self.processing) != (
+        if (self.variable, self.provenance, self.aggregation_type, self.units or "unknown") != (
             query.variable,
             query.provenance,
-            query.processing,
+            query.aggregation_type,
+            query.unit,
         ):
             return False
         if self.level_type != (query.level_type or "surface"):
@@ -97,9 +144,15 @@ class CatalogueField:
             return False
         if (self.height_m is not None or query.height_m is not None) and self.height_m != query.height_m:
             return False
-        if self.interval_hours is not None or query.interval is not None:
-            query_interval = None if query.interval is None else tuple(_hours(v) for v in query.interval)
-            if self.interval_hours != query_interval:
+        if self.model_level != query.model_level:
+            return False
+        if self.temporal_aggregation_window_hours is not None or query.temporal_aggregation_window is not None:
+            query_window = (
+                None
+                if query.temporal_aggregation_window is None
+                else tuple(_hours(v) for v in query.temporal_aggregation_window)
+            )
+            if self.temporal_aggregation_window_hours != query_window:
                 return False
         return True
 
@@ -107,7 +160,7 @@ class CatalogueField:
 class QueryCatalogue:
     """Index physical fields without weighting them by archive length."""
 
-    version = 1
+    version = 2
 
     def __init__(  # noqa: C901
         self,
@@ -127,6 +180,7 @@ class QueryCatalogue:
                 "variables_metadata",
                 {},
             )
+            request_fields = _request_field_metadata(metadata)
             # The generic Dataset API does not define target provenance. The
             # configured catalogue key is therefore the explicit product identity.
             provenance = dataset_name
@@ -159,7 +213,10 @@ class QueryCatalogue:
             for field_name in reader.variables:
                 index = reader.name_to_index[field_name]
                 field_metadata = variables_metadata.get(field_name, {})
-                mars = field_metadata.get("mars", {})
+                mars = {
+                    **request_fields.get(field_name, {}),
+                    **field_metadata.get("mars", {}),
+                }
                 variable = str(
                     mars.get("param") or field_metadata.get("param") or field_name,
                 )
@@ -167,6 +224,7 @@ class QueryCatalogue:
                 raw_level_type = mars.get("levtype") or field_metadata.get("level_type") or "sfc"
                 level = mars.get("levelist", field_metadata.get("level"))
                 pressure_pa = None
+                model_level = None
                 height_m = None
                 target_supported = True
                 input_supported = True
@@ -174,6 +232,8 @@ class QueryCatalogue:
 
                 if raw_level_type in PRESSURE_LEVEL_TYPES:
                     level_type = "pressure"
+                    if level is None:
+                        level = _level_from_field_name(field_name)
                     units = str(
                         mars.get("level_units")
                         or field_metadata.get("level_units")
@@ -193,12 +253,14 @@ class QueryCatalogue:
                         unsupported_reason = f"unsupported pressure unit {units!r}"
                 elif raw_level_type in MODEL_LEVEL_TYPES:
                     level_type = "model"
-                    target_supported = False
-                    input_supported = False
-                    unsupported_reason = (
-                        "the dataset API does not expose a dataset-specific hybrid-coordinate transform, "
-                        "its coefficients, and the matching surface-pressure field"
-                    )
+                    if level is None:
+                        level = _level_from_field_name(field_name)
+                    if level is None or not float(level).is_integer() or float(level) < 1:
+                        target_supported = False
+                        input_supported = False
+                        unsupported_reason = "model level metadata has no positive integer provenance-relative index"
+                    else:
+                        model_level = int(level)
                 elif raw_level_type in HEIGHT_LEVEL_TYPES:
                     level_type = "height"
                     units = str(mars.get("level_units") or field_metadata.get("level_units") or "m")
@@ -215,40 +277,47 @@ class QueryCatalogue:
                         input_supported = False
                         unsupported_reason = f"unsupported height unit {units!r}"
                 elif raw_level_type in SURFACE_LEVEL_TYPES:
-                    level_type = "surface"
+                    height_parameter = _height_parameter(variable)
+                    if height_parameter is None:
+                        level_type = "surface"
+                    else:
+                        variable, height_m = height_parameter
+                        level_type = "height"
                 else:
                     level_type = "layer" if raw_level_type in LAYER_LEVEL_TYPES else "unknown"
                     target_supported = False
                     input_supported = False
                     unsupported_reason = f"unsupported physical vertical coordinate {raw_level_type!r}"
 
-                processing = str(field_metadata.get("process") or "instantaneous")
-                if processing == "average":
-                    processing = "mean"
-                period = field_metadata.get("period")
+                variable = self.aliases.get(variable, variable)
+
+                aggregation_type = str(mars.get("process") or field_metadata.get("process") or "instantaneous")
+                if aggregation_type == "average":
+                    aggregation_type = "mean"
+                period = mars.get("period", field_metadata.get("period"))
                 if period is None:
-                    interval_hours = None
+                    temporal_aggregation_window_hours = None
                 elif isinstance(period, (str, int, float, timedelta, np.timedelta64)):
                     duration = _hours(period)
-                    interval_hours = (-duration, 0.0) if duration > 0 else None
+                    temporal_aggregation_window_hours = (-duration, 0.0) if duration > 0 else None
                 else:
                     step_bounds = tuple(_hours(v) for v in period)
                     # Anemoi stores GRIB startStep/endStep; represent its duration
                     # relative to the field's valid time instead of forecast init.
                     duration = step_bounds[1] - step_bounds[0] if len(step_bounds) == 2 else 0
-                    interval_hours = (-duration, 0.0) if duration > 0 else None
-                if processing not in {"instantaneous", "accumulation", "mean", "maximum", "minimum"}:
+                    temporal_aggregation_window_hours = (-duration, 0.0) if duration > 0 else None
+                if aggregation_type not in {"instantaneous", "accumulation", "mean", "maximum", "minimum"}:
                     target_supported = False
                     input_supported = False
-                    unsupported_reason = f"unsupported processing type {processing!r}"
-                elif processing != "instantaneous" and interval_hours is None:
+                    unsupported_reason = f"unsupported aggregation type {aggregation_type!r}"
+                elif aggregation_type != "instantaneous" and temporal_aggregation_window_hours is None:
                     target_supported = False
                     input_supported = False
-                    unsupported_reason = f"{processing} field has no represented interval bounds"
-                elif processing == "instantaneous" and interval_hours is not None:
+                    unsupported_reason = f"{aggregation_type} field has no temporal aggregation window"
+                elif aggregation_type == "instantaneous" and temporal_aggregation_window_hours is not None:
                     target_supported = False
                     input_supported = False
-                    unsupported_reason = "instantaneous field unexpectedly declares a represented interval"
+                    unsupported_reason = "instantaneous field unexpectedly declares a temporal aggregation window"
                 if target_supported and (
                     field_metadata.get("computed_forcing", False) or field_metadata.get("constant_in_time", False)
                 ):
@@ -272,9 +341,10 @@ class QueryCatalogue:
                     units=mars.get("units") or field_metadata.get("units"),
                     level_type=level_type,
                     pressure_pa=pressure_pa,
+                    model_level=model_level,
                     height_m=height_m,
-                    processing=processing,
-                    interval_hours=interval_hours,
+                    aggregation_type=aggregation_type,
+                    temporal_aggregation_window_hours=temporal_aggregation_window_hours,
                     cadence_hours=_hours(reader.frequency),
                     resolution_km=resolution_km,
                     spatial_support_km=field_metadata.get("spatial_support_km"),
@@ -291,8 +361,10 @@ class QueryCatalogue:
 
         self.variables = sorted({field.variable for field in self.fields})
         self.provenances = sorted({field.provenance for field in self.fields})
+        self.units = sorted({field.units or "unknown" for field in self.fields})
         self.variable_to_id = {name: index for index, name in enumerate(self.variables)}
         self.provenance_to_id = {name: index for index, name in enumerate(self.provenances)}
+        self.unit_to_id = {name: index for index, name in enumerate(self.units)}
         if self.excluded_fields:
             LOGGER.warning(
                 "Excluded %d fields from query targets because their physical semantics are incomplete. First: %s",
@@ -340,9 +412,14 @@ class QueryCatalogue:
             units=value.get("units"),
             level_type="pressure",
             pressure_pa=query.pressure_pa,
+            model_level=None,
             height_m=None,
-            processing=query.processing,
-            interval_hours=(None if query.interval is None else tuple(_hours(item) for item in query.interval)),
+            aggregation_type=query.aggregation_type,
+            temporal_aggregation_window_hours=(
+                None
+                if query.temporal_aggregation_window is None
+                else tuple(_hours(item) for item in query.temporal_aggregation_window)
+            ),
             cadence_hours=self.datasets.get(source, {}).get("frequency_hours"),
             resolution_km=query.grid_spacing_km,
             spatial_support_km=query.spatial_support_km,
@@ -365,10 +442,14 @@ class QueryCatalogue:
             for field in self.target_fields
             if field.variable == query.variable
             and field.provenance == query.provenance
-            and field.processing == query.processing
+            and field.aggregation_type == query.aggregation_type
             and field.level_type == "pressure"
-            and field.interval_hours
-            == (None if query.interval is None else tuple(_hours(item) for item in query.interval))
+            and field.temporal_aggregation_window_hours
+            == (
+                None
+                if query.temporal_aggregation_window is None
+                else tuple(_hours(item) for item in query.temporal_aggregation_window)
+            )
             and field.pressure_pa is not None
         ]
         candidates.sort(key=lambda field: field.pressure_pa)
@@ -394,49 +475,58 @@ class QueryCatalogue:
         time_offset_hours: float,
     ) -> np.ndarray:
         pressure_pa = field.pressure_pa
+        model_level = field.model_level
         height_m = field.height_m
         level_type = field.level_type or "surface"
-        interval = (
-            field.interval_hours
+        window = (
+            field.temporal_aggregation_window_hours
             if isinstance(field, CatalogueField)
-            else (None if field.interval is None else tuple(_hours(v) for v in field.interval))
+            else (
+                None
+                if field.temporal_aggregation_window is None
+                else tuple(_hours(v) for v in field.temporal_aggregation_window)
+            )
         )
         resolution = field.resolution_km if isinstance(field, CatalogueField) else field.grid_spacing_km
         support = field.spatial_support_km
-        processing = field.processing
+        aggregation_type = field.aggregation_type
         input_cadence = field.cadence_hours if isinstance(field, CatalogueField) else None
-        output_cadence = None if isinstance(field, CatalogueField) else field.output_cadence
+        output_frequency = None if isinstance(field, CatalogueField) else field.output_frequency
         values = {
             "log_pressure": (0.0 if pressure_pa is None else math.log(pressure_pa / 100000)),
-            "pressure_applies": float(level_type in {"pressure", "model"}),
+            "pressure_applies": float(level_type == "pressure"),
             "pressure_known": float(pressure_pa is not None),
+            "model_level": 0.0 if model_level is None else math.log1p(model_level) / 10,
+            "model_level_applies": float(level_type == "model"),
+            "model_level_known": float(model_level is not None),
             "height_m": 0.0 if height_m is None else height_m / 10000,
             "height_applies": float(level_type in {"height", "layer"}),
             "height_known": float(height_m is not None),
             "time_offset_hours": time_offset_hours / 168,
             "input_cadence_hours": 0.0 if input_cadence is None else _hours(input_cadence) / 24,
             "input_cadence_known": float(input_cadence is not None),
-            "output_cadence_hours": 0.0 if output_cadence is None else _hours(output_cadence) / 24,
-            "output_cadence_known": float(output_cadence is not None),
-            "interval_start_hours": 0.0 if interval is None else interval[0] / 24,
-            "interval_end_hours": 0.0 if interval is None else interval[1] / 24,
-            "interval_applies": float(interval is not None),
+            "output_frequency_hours": 0.0 if output_frequency is None else _hours(output_frequency) / 24,
+            "output_frequency_known": float(output_frequency is not None),
+            "temporal_aggregation_window_start_hours": 0.0 if window is None else window[0] / 24,
+            "temporal_aggregation_window_end_hours": 0.0 if window is None else window[1] / 24,
+            "temporal_aggregation_window_applies": float(window is not None),
             "grid_spacing_km": (0.0 if resolution is None else math.log1p(resolution) / 10),
             "grid_spacing_known": float(resolution is not None),
             "spatial_support_km": 0.0 if support is None else math.log1p(support) / 10,
             "spatial_support_known": float(support is not None),
             "level_surface": float(level_type == "surface"),
             "level_pressure": float(level_type == "pressure"),
+            "level_model": float(level_type == "model"),
             "level_height": float(level_type == "height"),
             "level_layer": float(level_type == "layer"),
             "level_unknown": float(
-                level_type not in {"surface", "pressure", "height", "layer"},
+                level_type not in {"surface", "pressure", "model", "height", "layer"},
             ),
-            "processing_instantaneous": float(processing == "instantaneous"),
-            "processing_mean": float(processing == "mean"),
-            "processing_accumulation": float(processing == "accumulation"),
-            "processing_other": float(
-                processing not in {"instantaneous", "mean", "accumulation"},
+            "aggregation_type_instantaneous": float(aggregation_type == "instantaneous"),
+            "aggregation_type_mean": float(aggregation_type == "mean"),
+            "aggregation_type_accumulation": float(aggregation_type == "accumulation"),
+            "aggregation_type_other": float(
+                aggregation_type not in {"instantaneous", "mean", "accumulation"},
             ),
         }
         return np.asarray(
@@ -450,6 +540,7 @@ class QueryCatalogue:
             "continuous_metadata": list(CONTINUOUS_METADATA),
             "variables": self.variables,
             "provenances": self.provenances,
+            "units": self.units,
             "aliases": self.aliases,
             "datasets": self.datasets,
             "fields": [asdict(field) for field in self.fields],
@@ -461,10 +552,22 @@ class QueryCatalogue:
         catalogue.readers = {}
         catalogue.aliases = snapshot.get("aliases", {})
         catalogue.datasets = snapshot.get("datasets", {})
-        catalogue.fields = [CatalogueField(**value) for value in snapshot["fields"]]
+        fields = []
+        for value in snapshot["fields"]:
+            value = dict(value)
+            value.setdefault("model_level", None)
+            value.setdefault("aggregation_type", value.pop("processing", "instantaneous"))
+            value.setdefault(
+                "temporal_aggregation_window_hours",
+                value.pop("interval_hours", None),
+            )
+            fields.append(CatalogueField(**value))
+        catalogue.fields = fields
         catalogue.excluded_fields = [field for field in catalogue.fields if not field.target_supported]
         catalogue.variables = list(snapshot["variables"])
         catalogue.provenances = list(snapshot["provenances"])
+        catalogue.units = list(snapshot.get("units", ["unknown"]))
         catalogue.variable_to_id = {name: index for index, name in enumerate(catalogue.variables)}
         catalogue.provenance_to_id = {name: index for index, name in enumerate(catalogue.provenances)}
+        catalogue.unit_to_id = {name: index for index, name in enumerate(catalogue.units)}
         return catalogue

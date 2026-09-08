@@ -21,6 +21,7 @@ from rich.tree import Tree
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -290,6 +291,12 @@ class BaseAnemoiReader:
         ignored and ``positions`` index the time axis directly.
         """
         del sequence  # analysis datasets have a single sequence
+        positions = normalize_time_indices(positions)
+        # anemoi-datasets accepts sparse Python lists, while a NumPy array in a
+        # tuple index can make its Ellipsis check perform ambiguous array
+        # equality. Contiguous selections above remain efficient slices.
+        if isinstance(positions, np.ndarray):
+            positions = positions.tolist()
         if isinstance(grid_shard_indices, slice):
             x = self.data[positions, :, :, grid_shard_indices]
         else:

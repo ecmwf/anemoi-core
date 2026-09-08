@@ -100,7 +100,7 @@ class QueryForecasting:
             "bbox_order": ["west", "south", "east", "north"],
             "coordinate_order": ["latitude", "longitude"],
             "coordinate_units": ["degrees_north", "degrees_east"],
-            "time_semantics": "lead_time, cadence, and represented interval are distinct",
+            "time_semantics": ("lead_time, output_frequency, and temporal_aggregation_window are distinct"),
             "input_offsets": [frequency_to_string(-self.input_history), "0h"],
         }
 

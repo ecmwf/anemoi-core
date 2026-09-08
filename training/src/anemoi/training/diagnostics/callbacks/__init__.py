@@ -290,10 +290,13 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
 
     # Plotting callbacks — instantiated with global plotting settings from diagnostics.plot
     plot_cfg = getattr(diagnostics_cfg, "plot", None)
-    if plot_cfg and plot_cfg.callbacks:
+    enabled_plot_callbacks = [
+        callback for callback in (plot_cfg.callbacks if plot_cfg else []) if getattr(callback, "enabled", True)
+    ]
+    if enabled_plot_callbacks:
         _check_plotting_dependencies(diagnostics_cfg)
         plotting_settings = PlottingSettings.from_plot_config(plot_cfg, context.plots_output)
-        for callback_cfg in plot_cfg.callbacks:
+        for callback_cfg in enabled_plot_callbacks:
             callback_cfg_dict = dict(callback_cfg)
             callback_cfg_dict["plotting_settings"] = plotting_settings
             trainer_callbacks.append(instantiate(callback_cfg_dict))

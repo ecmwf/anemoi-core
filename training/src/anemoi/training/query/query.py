@@ -19,64 +19,98 @@ def _duration(value: Any) -> timedelta:
     return frequency_to_timedelta(value)
 
 
+MODEL_TYPE_ALIASES = {
+    "sfc": "sfc",
+    "surface": "sfc",
+    "meanSea": "sfc",
+    "pl": "pl",
+    "pressure": "pl",
+    "isobaricInhPa": "pl",
+    "isobaricInPa": "pl",
+    "ml": "ml",
+    "model": "ml",
+    "hybrid": "ml",
+    "hybridLevel": "ml",
+    "height": "height",
+    "hl": "height",
+    "heightAboveGround": "height",
+    "heightAboveSea": "height",
+    "layer": "layer",
+    "unknown": "unknown",
+}
+
+
 @dataclass(frozen=True)
 class ForecastQuery:
     """One scalar field requested at one valid time.
 
-    Bboxes are ``(west, south, east, north)`` in degrees east/north. ``interval``
-    is relative to valid time and is distinct from both lead time and output
-    cadence. Geometry is either a registered native grid or explicit coordinates.
+    ``model_type`` describes the vertical coordinate. ``level`` is interpreted
+    with ``level_unit`` for pressure and height coordinates, and within
+    ``provenance`` for model levels. ``unit`` is the physical unit of the
+    requested value, not the vertical coordinate.
     """
 
     variable: str
     lead_time: timedelta
     provenance: str
-    output_cadence: timedelta | None = None
-    level_type: str | None = None
-    pressure_pa: float | None = None
-    height_m: float | None = None
-    processing: str = "instantaneous"
-    interval: tuple[timedelta, timedelta] | None = None
+    unit: str
+    output_frequency: timedelta | None = None
+    model_type: str = "sfc"
+    level: int | float | None = None
+    level_unit: str | None = None
+    aggregation_type: str = "instantaneous"
+    temporal_aggregation_window: tuple[timedelta, timedelta] | None = None
     bbox: tuple[float, float, float, float] | None = None
     grid: str | None = None
     grid_spacing_km: float | None = None
     spatial_support_km: float | None = None
 
     def __post_init__(self) -> None:  # noqa: C901
-        if not self.variable or not self.provenance:
-            msg = "variable and provenance must be resolved before loading a target."
+        model_type = MODEL_TYPE_ALIASES.get(self.model_type)
+        if model_type is None:
+            msg = f"Unsupported model_type {self.model_type!r}."
+            raise ValueError(msg)
+        object.__setattr__(self, "model_type", model_type)
+        if not self.variable or not self.provenance or not self.unit:
+            msg = "variable, provenance and unit must be resolved before loading a target."
             raise ValueError(msg)
         if self.lead_time < timedelta(0):
             msg = "lead_time must not be negative."
             raise ValueError(msg)
-        if self.output_cadence is not None and self.output_cadence <= timedelta(0):
-            msg = "output cadence must be positive."
+        if self.output_frequency is not None and self.output_frequency <= timedelta(0):
+            msg = "output_frequency must be positive."
+            raise ValueError(msg)
+        if model_type in {"pl", "height"} and (self.level is None or self.level_unit is None):
+            msg = f"model_type={model_type!r} requires level and level_unit."
+            raise ValueError(msg)
+        if model_type == "ml":
+            if not isinstance(self.level, int) or self.level < 1:
+                msg = "model_type='ml' requires a positive integer level."
+                raise ValueError(msg)
+            if self.level_unit not in {None, "1"}:
+                msg = "A model-level index is dimensionless; omit level_unit or use '1'."
+                raise ValueError(msg)
+        if model_type == "sfc" and (self.level is not None or self.level_unit is not None):
+            msg = "model_type='sfc' must not declare level or level_unit."
             raise ValueError(msg)
         if self.pressure_pa is not None and self.pressure_pa <= 0:
-            msg = "pressure_pa must be positive."
+            msg = "Pressure level must be positive."
             raise ValueError(msg)
-        if self.height_m is not None and self.level_type not in {"height", "layer"}:
-            msg = "height_m only applies to height or layer queries."
+        if self.aggregation_type not in {"instantaneous", "accumulation", "mean", "maximum", "minimum"}:
+            msg = f"Unsupported aggregation_type {self.aggregation_type!r}."
             raise ValueError(msg)
-        if self.level_type == "pressure" and self.pressure_pa is None:
-            msg = "Pressure queries require physical pressure, not a model-level index."
+        if self.aggregation_type != "instantaneous" and self.temporal_aggregation_window is None:
+            msg = f"aggregation_type={self.aggregation_type!r} requires temporal_aggregation_window."
             raise ValueError(msg)
-        if self.pressure_pa is not None and self.level_type != "pressure":
-            msg = "pressure_pa only applies to level_type='pressure'."
+        if self.temporal_aggregation_window is not None and self.aggregation_type == "instantaneous":
+            msg = "temporal_aggregation_window does not apply to instantaneous fields."
             raise ValueError(msg)
-        if self.processing not in {"instantaneous", "accumulation", "mean", "maximum", "minimum"}:
-            msg = f"Unsupported processing type {self.processing!r}."
-            raise ValueError(msg)
-        if self.processing != "instantaneous" and self.interval is None:
-            msg = f"processing={self.processing!r} requires explicit interval bounds."
-            raise ValueError(msg)
-        if self.interval is not None and self.processing == "instantaneous":
-            msg = "Represented intervals do not apply to instantaneous processing."
-            raise ValueError(msg)
-        if self.interval is not None and (
-            len(self.interval) != 2 or self.interval[1] <= self.interval[0] or self.interval[1] > timedelta(0)
+        if self.temporal_aggregation_window is not None and (
+            len(self.temporal_aggregation_window) != 2
+            or self.temporal_aggregation_window[1] <= self.temporal_aggregation_window[0]
+            or self.temporal_aggregation_window[1] > timedelta(0)
         ):
-            msg = "interval must have start < end <= 0 relative to valid time."
+            msg = "temporal_aggregation_window must have start < end <= 0 relative to valid time."
             raise ValueError(msg)
         if self.bbox is not None:
             west, south, east, north = self.bbox
@@ -93,80 +127,104 @@ class ForecastQuery:
                 "A kilometre spacing and bbox do not define a grid. Set grid to a registered native geometry "
                 "or supply explicit output coordinates at inference."
             )
-            raise ValueError(
-                msg,
-            )
+            raise ValueError(msg)
         if self.spatial_support_km is not None and self.spatial_support_km < 0:
             msg = "spatial_support_km must not be negative."
             raise ValueError(msg)
 
+    @property
+    def level_type(self) -> str:
+        """Compatibility name used inside the current catalogue and model."""
+        return {"sfc": "surface", "pl": "pressure", "ml": "model"}.get(self.model_type, self.model_type)
+
+    @property
+    def pressure_pa(self) -> float | None:
+        if self.model_type != "pl" or self.level is None or self.level_unit is None:
+            return None
+        unit = self.level_unit.lower()
+        if unit in {"hpa", "mbar"}:
+            return float(self.level) * 100
+        if unit == "pa":
+            return float(self.level)
+        msg = f"Unsupported pressure level_unit {self.level_unit!r}; use Pa or hPa."
+        raise ValueError(msg)
+
+    @property
+    def height_m(self) -> float | None:
+        if self.model_type not in {"height", "layer"} or self.level is None or self.level_unit is None:
+            return None
+        unit = self.level_unit.lower()
+        if unit in {"m", "metre", "meter", "metres", "meters"}:
+            return float(self.level)
+        if unit in {"km", "kilometre", "kilometer", "kilometres", "kilometers"}:
+            return float(self.level) * 1000
+        msg = f"Unsupported height level_unit {self.level_unit!r}; use m or km."
+        raise ValueError(msg)
+
+    @property
+    def model_level(self) -> int | None:
+        return int(self.level) if self.model_type == "ml" and self.level is not None else None
+
     @classmethod
-    def from_dict(  # noqa: C901
+    def from_dict(
         cls,
         value: dict[str, Any],
         default_provenance: str | None = None,
     ) -> ForecastQuery:
-        """Canonicalise the convenient user dictionary."""
+        """Canonicalise preferred query names and accepted legacy aliases."""
         provenance = value.get("provenance", default_provenance)
         if provenance is None:
             msg = "Query provenance was omitted and no reference_provenance is configured."
             raise ValueError(msg)
-
-        level_type = value.get("level_type")
-        if level_type in {"pl", "isobaricInhPa", "isobaricInPa"}:
-            level_type = "pressure"
-        elif level_type in {"ml", "hybrid", "hybridLevel"}:
-            msg = "A model-level index is not a physical query coordinate."
+        unit = value.get("unit", value.get("units"))
+        if unit is None:
+            msg = "Query unit is required; use the physical value unit or explicit 'unknown'."
             raise ValueError(msg)
-        elif level_type in {"sfc", "surface", None}:
-            level_type = "surface" if value.get("level") is None else level_type
+        model_type = value.get("model_type", value.get("level_type", "sfc"))
+        model_type = MODEL_TYPE_ALIASES.get(model_type, model_type)
+        level = value.get("level")
+        level_unit = value.get("level_unit", value.get("level_units"))
+        if model_type == "pl" and level is None and value.get("pressure_pa") is not None:
+            level, level_unit = value["pressure_pa"], "Pa"
+        if model_type in {"height", "layer"} and level is None and value.get("height_m") is not None:
+            level, level_unit = value["height_m"], "m"
+        if model_type == "ml" and level is None:
+            level = value.get("model_level")
 
-        pressure_pa = value.get("pressure_pa")
-        if level_type == "pressure" and pressure_pa is None:
-            level = value.get("level")
-            units = value.get("level_units")
-            if level is None or units is None:
-                msg = "Pressure queries require level and level_units, or pressure_pa."
-                raise ValueError(msg)
-            if units.lower() in {"hpa", "mbar"}:
-                pressure_pa = float(level) * 100
-            elif units.lower() == "pa":
-                pressure_pa = float(level)
+        window = value.get(
+            "temporal_aggregation_window",
+            value.get("interval", value.get("accumulation_interval")),
+        )
+        if window is not None:
+            if isinstance(window, str):
+                window = (-_duration(window), timedelta(0))
             else:
-                msg = f"Unsupported pressure units {units!r}; use Pa or hPa."
-                raise ValueError(msg)
-
-        interval = value.get("interval") or value.get("accumulation_interval")
-        if interval is not None:
-            if isinstance(interval, str):
-                interval = (-_duration(interval), timedelta(0))
-            else:
-                interval = tuple(_duration(item) for item in interval)
-
+                window = tuple(_duration(item) for item in window)
+        aggregation_type = value.get(
+            "aggregation_type",
+            value.get("processing", "accumulation" if value.get("accumulation_interval") else "instantaneous"),
+        )
         resolution = value.get("grid_spacing_km", value.get("resolution"))
         if isinstance(resolution, str):
             if not resolution.lower().endswith("km"):
                 msg = "Only kilometre grid spacing strings are accepted; use e.g. '2.5km'."
                 raise ValueError(msg)
             resolution = float(resolution[:-2])
-
+        frequency = value.get(
+            "output_frequency",
+            value.get("frequency", value.get("output_cadence")),
+        )
         return cls(
             variable=str(value["variable"]),
             lead_time=_duration(value["lead_time"]),
             provenance=str(provenance),
-            output_cadence=(
-                None
-                if value.get("frequency", value.get("output_cadence")) is None
-                else _duration(value.get("frequency", value.get("output_cadence")))
-            ),
-            level_type=level_type,
-            pressure_pa=pressure_pa,
-            height_m=value.get("height_m"),
-            processing=value.get(
-                "processing",
-                ("accumulation" if value.get("accumulation_interval") else "instantaneous"),
-            ),
-            interval=interval,
+            unit=str(unit),
+            output_frequency=None if frequency is None else _duration(frequency),
+            model_type=str(model_type),
+            level=level,
+            level_unit=level_unit,
+            aggregation_type=str(aggregation_type),
+            temporal_aggregation_window=window,
             bbox=(tuple(value["area"]) if value.get("area") is not None else value.get("bbox")),
             grid=value.get("grid"),
             grid_spacing_km=resolution,
@@ -176,8 +234,10 @@ class ForecastQuery:
     def as_serialisable_dict(self) -> dict[str, Any]:
         result = asdict(self)
         result["lead_time"] = f"{int(self.lead_time.total_seconds())}s"
-        if self.output_cadence is not None:
-            result["output_cadence"] = f"{int(self.output_cadence.total_seconds())}s"
-        if self.interval is not None:
-            result["interval"] = tuple(f"{int(item.total_seconds())}s" for item in self.interval)
+        if self.output_frequency is not None:
+            result["output_frequency"] = f"{int(self.output_frequency.total_seconds())}s"
+        if self.temporal_aggregation_window is not None:
+            result["temporal_aggregation_window"] = tuple(
+                f"{int(item.total_seconds())}s" for item in self.temporal_aggregation_window
+            )
         return result

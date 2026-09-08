@@ -49,6 +49,109 @@ editable Anemoi packages:
 
    anemoi-training train --config-name=multidomain
 
+Training diagnostics
+====================
+
+The query configuration contains an opt-in ``QueryDiagnosticsPlot`` block at
+``diagnostics.plot.callbacks[0]``. Enable it for a short run with:
+
+.. code-block:: bash
+
+   anemoi-training train --config-name=multidomain \
+       system.output.root=/path/to/multidomain/diagnostics \
+       system.output.plots=. \
+       diagnostics.plot.callbacks.0.enabled=true \
+       training.max_steps=4 task.samples_per_epoch=4 task.validation_samples=2 \
+       diagnostics.enable_checkpointing=false
+
+Set ``fixed_validation_cases`` to deterministic ``QueryDataset`` sample
+indices. ``max_cases`` bounds the number rendered, while ``max_points``,
+``max_edges`` and ``max_embedding_items`` cap plotting work. Expensive query
+interventions occur only during scheduled validation. ``lead_time_hours``,
+``pressure_levels_hpa``, ``target_provenances`` and ``omit_metadata`` control
+one-at-a-time interventions. Use ``null`` for automatic compatible
+level/provenance discovery and ``[]`` to disable one of those sweeps. An
+unsupported request is logged and shown as skipped; no nearest level, product
+or grid is substituted.
+
+Figures are written below ``${system.output.plots}/plots`` (therefore below the
+chosen ``system.output.root``) and logged as MLflow artifacts under
+``query_diagnostics`` when MLflow is enabled. Expected names
+include ``query_example_val_case0000_epoch000.jpg``,
+``query_stretched_2m_temperature_case0000_epoch000.jpg``,
+``query_ifs_input_case0000_epoch000.jpg``,
+``query_domain_case0000_epoch000.jpg``,
+``query_connectivity_case0000_epoch000.jpg``,
+``query_embeddings_case0000_epoch000.jpg``,
+``query_metadata_sweeps_case0000_epoch000.jpg``,
+``query_sensitivity_lead_case0000_epoch000.jpg`` and
+``query_sampler_epoch000.jpg``.
+
+The example plot checks physical inverse normalization, exact valid times,
+native-node alignment, reference masks and missing-versus-zero semantics. The
+input plots show native 2 m-temperature inputs mapped to a bounded set of
+hidden nodes through their nearest actual encoder edge, plus the exact
+normalized, zero-filled IFS value channel and separate Boolean validity mask
+immediately before the value adapter. The hidden-node temperature view is
+labelled as diagnostic mapping: the network itself first pools all input
+fields at each source node. It is never used for scoring or fed back to the
+model. The selected IFS channel maximizes missing locations inside the selected
+context for that example; excluded context and missing values are shown as
+different states. The domain/connectivity plots expose the full graph
+coordinates, requested bbox,
+actual input coverage, hidden masks, a nearest usable input distance and only a
+bounded sample of the encoder/dynamic-decoder edges. Embedding plots keep
+categorical, query and pooled-input spaces distinct and reuse the first PCA
+basis across epochs. Sensitivity maps hold the input state and output nodes
+fixed and annotate whether each change has direct training supervision. The
+sampler plot uses examples that reached the loss and separates sample counts,
+valid-target counts, loss weights and unit-specific physical errors.
+
+Diagnostics do not interpolate fields for display or scoring. Map panels use
+native unstructured coordinates and the existing coastline/border and
+projection utilities. With distributed data parallelism sampler counters are
+gathered by every rank before rank-zero rendering; the graph shown is the full
+pre-sharding graph and is labelled as such.
+
+What is actually conditioned
+----------------------------
+
+The current query adapter consumes categorical variable, configured archive
+provenance and physical-unit IDs plus the continuous vector listed in
+``anemoi.models.layers.query_adapter.CONTINUOUS_METADATA``: physical pressure
+(log-scaled) and its applicability/known flags, provenance-relative model-level
+index and flags, height and flags, lead/time offset, input frequency, output
+frequency, temporal aggregation window, grid spacing, spatial support,
+vertical-coordinate one-hot flags and aggregation-type flags. Model-level
+indices are supported as exact identities within a provenance; no cross-model
+equivalence or pressure interpolation is inferred from the integer index.
+Pressure labels in diagnostics are Pa converted to hPa for display, never
+model-level numbers. Archives without physical unit metadata use the explicit
+``unknown`` category rather than an invented unit.
+
+The training sampler chooses a supported variable/provenance/lead/region query
+before it chooses a target time and before it loads or drops input fields.
+There is no nearest-target fallback. Bbox and explicit output coordinates
+select geometry; the bbox itself and the grid name are not embedded. During
+training, ``output_coordinates`` is always supplied, so the dynamic spherical
+KNN decoder is used and the registered decoder graph selected by ``grid`` is
+not. Provenance changes the query embedding and target catalogue selection but
+does not select graph connectivity. Source masks control value pooling and
+encoder coverage; target masks and optional cosine latitude weights control the
+spatial loss. The domain plots intentionally show these effective tensors and
+edges rather than planned query fields that the forward method ignores.
+
+The public query spelling separates value units from the vertical coordinate.
+Two-metre temperature is therefore expressed as ``variable: t``,
+``model_type: height``, ``level: 2``, ``level_unit: m`` and ``unit: K``.
+Likewise, ``provenance: ICON``, ``model_type: ml`` and ``level: 1`` identifies
+ICON model level 1; ``level_unit`` is omitted because the index is
+dimensionless. ``aggregation_type`` describes instantaneous, accumulated or
+statistically aggregated values, while ``temporal_aggregation_window`` gives
+the aggregation window relative to valid time. ``output_frequency`` is the
+spacing between requested output valid times. Older names remain accepted when
+reading queries, but sampled training queries and diagnostics use these names.
+
 The default run is 32 optimizer steps. Useful overrides include
 ``task.lead_times``, ``task.input_history``, ``task.source_dropout``,
 ``task.field_dropout``, ``task.history_dropout``, ``task.variable_weights``,
@@ -76,12 +179,13 @@ in ``FIELDS_JSON``. For example, ``era5_fields.json`` may contain:
    [
      {
        "variable": "t",
-       "level_type": "pl",
+       "model_type": "pl",
        "level": 500,
-       "level_units": "hPa",
+       "level_unit": "hPa",
+       "unit": "K",
        "time_offset": "-6h"
      },
-     {"variable": "lsm", "level_type": "sfc", "time_offset": "0h"}
+     {"variable": "lsm", "model_type": "sfc", "unit": "1", "time_offset": "0h"}
    ]
 
 Create the input file with the runnable converter (repeat ``--source`` for
@@ -114,9 +218,12 @@ for the same variable and requested provenance. For example:
    {
      "variable": "u",
      "lead_time": "3h",
-     "level_type": "pl",
+     "output_frequency": "1h",
+     "model_type": "pl",
      "level": 775,
-     "level_units": "hPa",
+     "level_unit": "hPa",
+     "unit": "m s-1",
+     "aggregation_type": "instantaneous",
      "grid": "ERA5",
      "area": [-15.0, 55.0, 35.0, 72.0],
      "provenance": "ERA5",
@@ -137,9 +244,12 @@ or a registered MEPS grid:
    {
      "variable": "u",
      "lead_time": "3h",
-     "level_type": "pl",
+     "output_frequency": "1h",
+     "model_type": "pl",
      "level": 775,
-     "level_units": "hPa",
+     "level_unit": "hPa",
+     "unit": "m s-1",
+     "aggregation_type": "instantaneous",
      "grid": "MEPS",
      "area": [-15.0, 55.0, 35.0, 72.0],
      "provenance": "ICON-FORCE",

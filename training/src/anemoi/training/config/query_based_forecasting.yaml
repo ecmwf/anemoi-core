@@ -23,7 +23,40 @@ system:
 diagnostics:
   callbacks: []
   plot:
-    callbacks: []
+    settings:
+      # Query sweeps run synchronously on the validation rank; detached figure
+      # rendering is still bounded and uses the repository map utilities.
+      asynchronous: false
+      datashader: false
+      projection_kind: lambert_conformal
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.query.QueryDiagnosticsPlot
+        enabled: false
+        every_n_epochs: 1
+        max_cases: 2
+        # Deterministic QueryDataset indices, not "the first batches seen".
+        fixed_validation_cases: [0, 1]
+        changing_training_case: false
+        domain_plots: true
+        graph_plots: true
+        # Native/stretched 2 m-temperature context and exact masked IFS tensors
+        # immediately before the metadata-aware value adapter.
+        input_plots: true
+        embedding_plots: true
+        sensitivity_plots: true
+        sampler_plots: true
+        # These are exact configured training leads. Other values are labelled
+        # unsupported extrapolations rather than silently substituted.
+        lead_time_hours: [1, 3, 6]
+        # null discovers trained levels/provenances compatible with each case;
+        # [] disables that sweep.
+        pressure_levels_hpa: null
+        target_provenances: null
+        omit_metadata: [grid_spacing_km, spatial_support_km]
+        max_points: 20000
+        max_edges: 800
+        max_embedding_items: 24
+        max_sweep_values: 4
   log:
     mlflow:
       enabled: false

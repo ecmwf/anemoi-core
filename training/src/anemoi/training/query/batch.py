@@ -18,6 +18,7 @@ class QueryInput:
     metadata: torch.Tensor
     variable_ids: torch.Tensor
     provenance_ids: torch.Tensor
+    unit_ids: torch.Tensor
     mask: torch.Tensor
 
     def to(self, device: torch.device, non_blocking: bool = False) -> QueryInput:
@@ -38,12 +39,17 @@ class QueryBatch:
     query_metadata: torch.Tensor
     query_variable_id: torch.Tensor
     query_provenance_id: torch.Tensor
+    query_unit_id: torch.Tensor
     target_dataset: str
     query: dict[str, Any]
     output_coordinates: torch.Tensor | None = None
     target: torch.Tensor | None = None
     target_mask: torch.Tensor | None = None
     loss_weight: torch.Tensor | None = None
+    # Human-readable, CPU-only facts recorded by the sampler. The model never
+    # consumes this mapping; diagnostics use it instead of reverse engineering
+    # field order, valid times, units, and normalization from tensors.
+    diagnostic_context: dict[str, Any] | None = None
 
     def to(self, device: torch.device, non_blocking: bool = False) -> QueryBatch:
         values = {}

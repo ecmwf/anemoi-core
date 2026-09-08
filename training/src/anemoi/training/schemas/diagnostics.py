@@ -214,8 +214,35 @@ class BatchOutputPlotSchema(PydanticBaseModel):
     "Region of interest to restrict plots to."
 
 
+class QueryDiagnosticsPlotSchema(PydanticBaseModel):
+    """Opt-in, bounded diagnostics for query-based forecasting."""
+
+    model_config = {"extra": "allow", "populate_by_name": True}
+
+    target_: Literal["anemoi.training.diagnostics.callbacks.query.QueryDiagnosticsPlot"] = Field(alias="_target_")
+    enabled: bool = False
+    every_n_epochs: PositiveInt = 1
+    max_cases: PositiveInt = 2
+    fixed_validation_cases: list[NonNegativeInt] = Field(default_factory=lambda: [0])
+    changing_training_case: bool = False
+    domain_plots: bool = True
+    graph_plots: bool = True
+    input_plots: bool = True
+    embedding_plots: bool = True
+    sensitivity_plots: bool = True
+    sampler_plots: bool = True
+    lead_time_hours: list[float] = Field(default_factory=list)
+    pressure_levels_hpa: list[float] | None = None
+    target_provenances: list[str] | None = None
+    omit_metadata: list[str] = Field(default_factory=list)
+    max_points: PositiveInt = 20_000
+    max_edges: PositiveInt = 800
+    max_embedding_items: PositiveInt = 24
+    max_sweep_values: PositiveInt = 4
+
+
 PlotCallbacks = Annotated[
-    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema,
+    GraphFeaturePlotSchema | LossCurvePlotSchema | BatchOutputPlotSchema | QueryDiagnosticsPlotSchema,
     Field(discriminator="target_"),
 ]
 

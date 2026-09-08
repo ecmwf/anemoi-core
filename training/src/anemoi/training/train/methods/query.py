@@ -51,6 +51,9 @@ class QueryTraining(pl.LightningModule):
         self.reader_groups = None
         self.dataset_names = list(data_indices)
         self.shard_sizes = {name: [graph_data[name].num_nodes] for name in self.dataset_names}
+        self._query_diagnostics_enabled = False
+        self._query_diagnostics_capture_prediction = False
+        self._query_diagnostics_step: dict[str, Any] | None = None
         self.save_hyperparameters(ignore=["graph_data"])
 
     @property
@@ -62,6 +65,7 @@ class QueryTraining(pl.LightningModule):
             "metadata": batch.query_metadata,
             "variable_id": batch.query_variable_id,
             "provenance_id": batch.query_provenance_id,
+            "unit_id": batch.query_unit_id,
             "grid": batch.target_dataset,
         }
         return self.model(
@@ -87,8 +91,20 @@ class QueryTraining(pl.LightningModule):
         if not valid:
             msg = f"Query {batch.query} has no valid target points in its requested region."
             raise ValueError(msg)
-        loss = (((prediction - batch.target) ** 2) * spatial_weights).sum() / valid
-        loss = loss * batch.loss_weight
+        normalized_mse = (((prediction - batch.target) ** 2) * spatial_weights).sum() / valid
+        loss = normalized_mse * batch.loss_weight
+        if self._query_diagnostics_enabled:
+            target = (batch.diagnostic_context or {}).get("target", {})
+            stdev = float(target.get("stdev", 1.0))
+            self._query_diagnostics_step = {
+                "stage": stage,
+                "normalized_mse": normalized_mse.detach(),
+                "physical_rmse": normalized_mse.detach().sqrt() * stdev,
+                "valid_target_count": valid.detach(),
+                "loss_weight": batch.loss_weight.detach(),
+                "prediction": prediction.detach() if self._query_diagnostics_capture_prediction else None,
+            }
+            self._query_diagnostics_capture_prediction = False
         self.log(
             f"{stage}_query_mse",
             loss,
@@ -99,6 +115,20 @@ class QueryTraining(pl.LightningModule):
             batch_size=1,
         )
         return loss
+
+    def enable_query_diagnostics(self) -> None:
+        """Enable lightweight per-example accounting for an opt-in callback."""
+        self._query_diagnostics_enabled = True
+
+    def request_query_diagnostic_prediction(self) -> None:
+        """Retain the next already-computed prediction, detached from autograd."""
+        self._query_diagnostics_capture_prediction = True
+
+    def pop_query_diagnostics_step(self) -> dict[str, Any] | None:
+        """Return and clear the most recent detached diagnostic record."""
+        value = self._query_diagnostics_step
+        self._query_diagnostics_step = None
+        return value
 
     def training_step(self, batch: QueryBatch, _batch_idx: int) -> torch.Tensor:
         return self._step(batch, "train")
