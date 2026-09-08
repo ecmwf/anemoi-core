@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
@@ -67,12 +68,13 @@ class _TorchClusterAreaMaskBackend:
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
 
-        edge_index = radius(
-            x=self._ref_vectors,
-            y=query_vectors,
-            r=chord_threshold,
-            max_num_neighbors=1,
-        )
+        with current_device_context(self.device):
+            edge_index = radius(
+                x=self._ref_vectors,
+                y=query_vectors,
+                r=chord_threshold,
+                max_num_neighbors=1,
+            )
 
         mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
         mask[edge_index[0]] = True
