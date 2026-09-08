@@ -37,21 +37,32 @@ def register_gradient_scaling_hooks(
     model_comm_group_size: float,
     skip_grad_scaling: list[str] | None = None,
 ) -> None:
-    """Register parameter hooks for gradient reduction.
+    """Register parameter hooks to compensate DDP averaging over sharded inputs.
 
-    Here, we rescale parameters that only see a subset of the input on each rank
-    -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
-    note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
+    DDP averages gradients over all ranks, including ranks that contribute only
+    part of a model or ensemble. Scale these partial gradients by the corresponding
+    communication group size so that DDP sums their contributions.
+
+    For model sharding, the default exclusions cover parameters whose gradients
+    already span the full grid, such as trainable features added before the grid
+    split. These parameters do not need the model scaling factor.
+
+    For ensemble sharding, all parameters still see only local ensemble members.
+    Register an additional set of hooks with the ensemble subgroup size and
+    ``skip_grad_scaling=[]`` to apply the ensemble factor to every parameter
+    requiring gradients, including those excluded from model scaling.
 
     Parameters
     ----------
     model : torch.nn.Module
         The model to register hooks on.
     model_comm_group_size : float
-        The size of the model communication group for scaling.
+        Gradient scaling factor: the model communication group size or, for an
+        additional ensemble registration, the ensemble communication subgroup size.
     skip_grad_scaling : list[str] | None
         List of parameter name patterns to skip gradient scaling.
-        Defaults to ["trainable", "no_gradscaling"].
+        Defaults to ["trainable", "no_gradscaling"] for model scaling.
+        Pass an empty list for ensemble scaling.
     """
     if skip_grad_scaling is None:
         skip_grad_scaling = ["trainable", "no_gradscaling"]
@@ -303,6 +314,12 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
         )
         self.ens_comm_group_size = num_gpus_per_ensemble
 
+    def register_parameter_hooks(self) -> None:
+        """Compensate DDP averaging across model and ensemble shards."""
+        super().register_parameter_hooks()
+        # We need to compensate for ensemble sharding because every parameter sees only local ensemble members
+        register_gradient_scaling_hooks(self.model, self.ens_comm_subgroup_size, skip_grad_scaling=[])
+
     def _setup_communication_groups(self) -> int:
         """Set up model, reader, and ensemble communication groups.
 
@@ -374,6 +391,7 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_group_size=self.model_comm_group_size,
             model_comm_group_rank=model_layout.model_comm_group_rank,
         )
+        self.ens_comm_subgroup_size = ensemble_layout.ens_comm_subgroup_size
         ensemble_groups = create_ensemble_process_groups(
             ensemble_layout,
             use_local_synchronization=self.use_local_synchronization,
