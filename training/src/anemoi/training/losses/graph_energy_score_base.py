@@ -7,12 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Shared ensemble aggregation for CSR energy scores."""
+"""Shared ensemble aggregation for graph energy scores."""
 
 from abc import abstractmethod
 
 import torch
 
+from anemoi.training.losses.graph_edge_operations import compute_edge_validity
+from anemoi.training.losses.graph_edge_operations import compute_node_validity
 from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
 from anemoi.training.losses.graph_score_base import csr_matmul
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
@@ -20,8 +22,6 @@ from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
     """Combine a neighbourhood norm into empirical or fair energy scores."""
-
-    uses_row_weight_sums: bool = False
 
     def __init__(
         self,
@@ -39,8 +39,11 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
         self,
         differences: torch.Tensor,
         matrix: torch.Tensor | None,
-        row_weight_sum: torch.Tensor | None,
+        source_index: torch.Tensor | None,
+        destination_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
         node_valid: torch.Tensor | None,
+        edge_valid: torch.Tensor | None,
         valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
         """Return one norm per batch, time, node, and variable."""
@@ -55,36 +58,38 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
         edge_weights: torch.Tensor | None,
     ) -> torch.Tensor:
         """Evaluate distances from each member to the observation and between unordered member pairs."""
-        assert source_index is None
-        assert destination_index is None
-        assert edge_weights is None
         ensemble_size = y_pred_ens.shape[2]
 
-        node_valid = None
+        node_valid = compute_node_validity(
+            y_pred_ens,
+            y_target,
+            ignore_nans=self.ignore_nans,
+        )
+        edge_valid = None
         valid_weight_sum = None
-        if self.ignore_nans:
-            node_valid = torch.isfinite(y_target) & torch.isfinite(y_pred_ens).all(dim=2)
-            if matrix is not None:
+        if node_valid is not None:
+            if source_index is not None:
+                assert destination_index is not None
+                assert edge_weights is not None
+                edge_valid, valid_weight_sum = compute_edge_validity(
+                    node_valid,
+                    source_index,
+                    destination_index,
+                    edge_weights,
+                )
+            elif matrix is not None:
                 valid_weight_sum = csr_matmul(matrix, node_valid.to(dtype=y_pred_ens.dtype))
-
-        row_weight_sum = None
-        if self.uses_row_weight_sums:
-            assert matrix is not None
-            ones = torch.ones(
-                matrix.shape[1],
-                1,
-                dtype=y_pred_ens.dtype,
-                device=y_pred_ens.device,
-            )
-            row_weight_sum = torch.sparse.mm(matrix, ones).squeeze(-1)
 
         observation_sum = torch.zeros_like(y_target)
         for member in range(ensemble_size):
             observation_sum = observation_sum + self._neighbourhood_norm(
                 y_pred_ens[:, :, member] - y_target,
                 matrix,
-                row_weight_sum,
+                source_index,
+                destination_index,
+                edge_weights,
                 node_valid,
+                edge_valid,
                 valid_weight_sum,
             )
 
@@ -94,8 +99,11 @@ class BaseGraphEnergyScoreLoss(BaseGraphScoreLoss):
                 pair_sum = pair_sum + self._neighbourhood_norm(
                     y_pred_ens[:, :, first] - y_pred_ens[:, :, second],
                     matrix,
-                    row_weight_sum,
+                    source_index,
+                    destination_index,
+                    edge_weights,
                     node_valid,
+                    edge_valid,
                     valid_weight_sum,
                 )
 
