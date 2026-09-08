@@ -31,12 +31,12 @@ jobs:
               --distributed-backend=all \
               --distributed-world-size=2
 
-            # Run the combined model and ensemble sharding checks on CPUs.
+            # model ensemble sharding tests together on CPUs.
             OMP_NUM_THREADS=1 python3 -m pytest -q \
               models/tests/distributed/test_ensemble.py \
               --distributed \
               --distributed-backend=gloo \
-              --distributed-world-size=4
+              --distributed-world-size=8
 
             deactivate
             rm -rf $REPO_NAME
@@ -44,7 +44,7 @@ jobs:
             #SBATCH --job-name=anemoi_core_dist_primitives
             #SBATCH --nodes=1
             #SBATCH --ntasks=1
-            #SBATCH --cpus-per-task=4
+            #SBATCH --cpus-per-task=8
             #SBATCH --gpus-per-node=2
             #SBATCH --time=00:30:00
             #SBATCH --qos=ng
