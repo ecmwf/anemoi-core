@@ -10,6 +10,7 @@
 
 import os
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -25,6 +26,7 @@ from torch_geometric.utils import index_sort
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -32,6 +34,9 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
+
+if TYPE_CHECKING:
+    from anemoi.models.distributed.halo import HaloInfo
 
 
 def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
@@ -74,6 +79,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
+    src_splits: Optional[list[int]] = None  # optional, only used for bipartite graphs
 
     def materialise(
         self,
@@ -220,6 +226,7 @@ def build_graph_partition_from_shard_info(
     n_src = sum(shard_info.src_nodes) if shard_info.src_is_sharded() else x_src.size(0)
     n_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
+    src_splits = shard_info.src_nodes
 
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
@@ -233,10 +240,19 @@ def build_graph_partition_from_shard_info(
             num_parts=comm_size,
             dst_splits=dst_splits,
             edge_splits=edge_splits,
+            src_splits=src_splits,
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    return GraphPartition(
+        num_nodes=partition.num_nodes,
+        num_edges=partition.num_edges,
+        num_parts=partition.num_parts,
+        dst_splits=partition.dst_splits,
+        edge_splits=partition.edge_splits,
+        src_splits=src_splits,
+    )
 
 
 def ensure_edges_are_dst_sorted(
@@ -322,6 +338,7 @@ def shard_graph_to_local(
     shard_info: BipartiteGraphShardInfo,
     model_comm_group: Optional[ProcessGroup] = None,
     cond: Optional[PairTensor] = None,
+    halo_info: Optional["HaloInfo"] = None,
 ) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]:
     """Shard graph tensors to the local rank using precomputed partition metadata.
 
@@ -344,6 +361,9 @@ def shard_graph_to_local(
         Model communication group.
     cond : tuple[Tensor, Tensor], optional
         Conditioning tensors (cond_src, cond_dst).
+    halo_info : HaloInfo, optional
+        Precomputed metadata for exchanging only required source nodes. If
+        omitted, all source features are synchronized before localization.
 
     Returns
     -------
@@ -368,6 +388,9 @@ def shard_graph_to_local(
         ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
     else:
         x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
+        if cond is not None:
+            cond_src, cond_dst = cond
+            cond = (cond_src, shard_tensor(cond_dst, 0, partition.dst_splits, model_comm_group))
 
     # shard or validate edges
     if shard_info.edges_are_sharded():
@@ -378,27 +401,38 @@ def shard_graph_to_local(
         edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
         edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
 
-    # relabel dst indices to local
-    edge_index = edge_index.clone()
-    partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
+    if halo_info is None:
+        # relabel dst indices to local
+        edge_index = edge_index.clone()
+        partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
 
-    # gather x_src — always reduce in backward for correct gradients on halo nodes
-    x_src_full = sync_tensor(
-        x_src,
-        0,
-        shard_info.src_nodes,
-        model_comm_group,
-        gather_in_fwd=shard_info.src_is_sharded(),
-    )
-
-    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+        # gather x_src — always reduce in backward for correct gradients on halo nodes
+        x_src_full = sync_tensor(
+            x_src,
+            0,
+            shard_info.src_nodes,
+            model_comm_group,
+            gather_in_fwd=shard_info.src_is_sharded(),
+        )
+        x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+    else:
+        assert (
+            x_src.size(0) == halo_info.num_local_src_nodes
+        ), f"Expected {halo_info.num_local_src_nodes} local source nodes, got {x_src.size(0)}"
+        x_src_local = halo_exchange(x_src, halo_info, model_comm_group)
+        edge_index = halo_info.edge_index_local
+        src_ids = None
 
     # same for conditioning [if cond is not None]
     cond_local = None
     if cond is not None:
         cond_src, cond_dst = cond
-        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
-        cond_local = (cond_src_full[src_ids], cond_dst)
+        if halo_info is None:
+            cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
+            cond_src_local = cond_src_full[src_ids]
+        else:
+            cond_src_local = halo_exchange(cond_src, halo_info, model_comm_group)
+        cond_local = (cond_src_local, cond_dst)
 
     updated_shard_info = BipartiteGraphShardInfo(
         src_nodes=shard_info.src_nodes,

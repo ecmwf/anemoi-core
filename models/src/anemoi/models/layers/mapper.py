@@ -24,6 +24,10 @@ from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.halo import HaloInfo
+from anemoi.models.distributed.halo import build_halo_info_bipartite
+from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
+from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
 from anemoi.models.distributed.khop_edges import GraphPartition
 from anemoi.models.distributed.khop_edges import build_graph_partition
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
@@ -31,6 +35,7 @@ from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
@@ -159,6 +164,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         cpu_offload: bool = False,
         layer_kernels: DotDict = None,
         shard_strategy: str = "edges",
+        use_halo_exchange: bool = True,
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -199,6 +205,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Defined in config/models/<model>.yaml
         shard_strategy : str, optional
             Strategy to shard tensors, by default "edges"
+        use_halo_exchange : bool, optional
+            Exchange only required remote source nodes for distributed edge
+            sharding. If ``False``, use the legacy full-source synchronization.
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         edge_pre_mlp: bool, by default False
@@ -239,43 +248,64 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         self.emb_nodes_dst = Linear(self.in_channels_dst, self.hidden_dim)
 
         self.shard_strategy = shard_strategy
+        self.use_halo_exchange = use_halo_exchange
+
+        self._cached_halo_info = None
+        self._cached_halo_cache_specs = None
+        self._cached_halo_partition = None
 
         assert shard_strategy in ["heads", "edges"], (
             f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
             f"Supported strategies are 'heads' and 'edges'."
         )
 
-    def prepare_edge_sharding_wrapper(
+    def _get_or_build_cached_halo_info(
         self,
         x: PairTensor,
-        shard_info: BipartiteGraphShardInfo,
-        batch_size: int,
-        edge_attr: Tensor,
         edge_index: Adj,
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
-        edges_are_dst_sorted: bool = True,
-    ):
-        x_dst = x[1]
-        num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
-        edge_attr, edge_index = ensure_edges_are_dst_sorted(
-            edge_attr,
-            edge_index,
-            num_dst=num_dst,
-            edges_are_sharded=shard_info.edges_are_sharded(),
-            model_comm_group=model_comm_group,
-            edges_are_dst_sorted=edges_are_dst_sorted,
-        )
+        shard_info: BipartiteGraphShardInfo,
+        model_comm_group: ProcessGroup,
+    ) -> tuple[GraphPartition, HaloInfo]:
+        """Return cached bipartite halo metadata and its graph partition."""
+        cache_specs = halo_cache_specs(shard_info, model_comm_group)
 
-        # build a GraphPartition for the distributed shard (across GPUs)
-        shard_partition = build_graph_partition_from_shard_info(
+        # This cache assumes static graph topology. Dynamic graphs with unchanged
+        # shard sizes would reuse stale halo indices and must invalidate the cache.
+        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
+            return self._cached_halo_partition, self._cached_halo_info
+
+        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
+        partition = build_graph_partition_from_shard_info(
             edge_index,
             x,
             shard_info,
             model_comm_group,
         )
+        halo_info = build_halo_info_bipartite(
+            partition,
+            edge_index,
+            model_comm_group,
+            shard_info.edges,
+            debug=ANEMOI_DEBUG_SHARDING,
+        )
 
-        # shard to local rank: gathers src, shards dst+edges, relabels dst, drops unconnected src
+        self._cached_halo_info = halo_info
+        self._cached_halo_cache_specs = cache_specs
+        self._cached_halo_partition = partition
+        return partition, halo_info
+
+    def prepare_edge_sharding_wrapper(
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        shard_partition: GraphPartition,
+        halo_info: Optional[HaloInfo],
+        model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ):
+        # Shard to the local rank and exchange only required remote source nodes.
         (x_src, x_dst), edge_attr, edge_index, shard_info, cond = shard_graph_to_local(
             shard_partition,
             x,
@@ -284,6 +314,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             shard_info,
             model_comm_group,
             cond=cond,
+            halo_info=halo_info,
         )
 
         # build a second GraphPartition for local chunking within this shard
@@ -345,17 +376,57 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        x_src, x_dst = x
+        num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_dst,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        halo_info = None
+        if self.use_halo_exchange and model_is_distributed(model_comm_group):
+            x_src, src_nodes = ensure_sharded(x_src, 0, shard_info.src_nodes, model_comm_group)
+            if cond is not None:
+                cond_src, cond_dst = cond
+                cond_src, _ = ensure_sharded(cond_src, 0, shard_info.src_nodes, model_comm_group)
+                cond = (cond_src, cond_dst)
+            shard_info = BipartiteGraphShardInfo(
+                src_nodes=src_nodes,
+                dst_nodes=shard_info.dst_nodes,
+                edges=shard_info.edges,
+            )
+            x = (x_src, x_dst)
+
+        if self.use_halo_exchange and model_is_distributed(model_comm_group):
+            shard_partition, halo_info = self._get_or_build_cached_halo_info(
+                x,
+                edge_index,
+                shard_info,
+                model_comm_group,
+            )
+        else:
+            shard_partition = build_graph_partition_from_shard_info(
+                edge_index,
+                x,
+                shard_info,
+                model_comm_group,
+            )
+
         x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
             shard_info,
-            batch_size,
             edge_attr,
             edge_index,
+            shard_partition,
+            halo_info,
             model_comm_group,
             cond,
-            edges_are_dst_sorted,
         )
 
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim

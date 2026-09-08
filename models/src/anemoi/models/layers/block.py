@@ -1108,7 +1108,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
             edge_index_for_attention = halo_info.edge_index_local
             # attention_size: local nodes (dst) attend to local + halo nodes (src)
-            attention_size = (halo_info.total_nodes, halo_info.num_local_nodes)
+            attention_size = (halo_info.total_src_nodes, halo_info.local_dst_nodes)
         else:
             x_plus_halo = x
             edge_index_for_attention = edge_index

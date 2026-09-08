@@ -477,7 +477,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
     def forward(ctx, input_, halo_info_, mgroup_):
         ctx.send_indices = halo_info_.send_indices
         ctx.recv_counts = halo_info_.recv_counts
-        ctx.num_local_nodes = halo_info_.num_local_nodes
+        ctx.num_local_nodes = halo_info_.num_local_src_nodes
         ctx.comm_group = mgroup_
         if mgroup_:
             return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
