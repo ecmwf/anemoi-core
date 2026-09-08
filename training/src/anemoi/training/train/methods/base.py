@@ -46,7 +46,9 @@ from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
-from anemoi.training.utils.resolve_config import resolve_subgrid
+from anemoi.training.utils.resolve_config import is_container
+from anemoi.training.utils.resolve_config import is_mapping
+from anemoi.training.utils.resolve_config import is_sequence
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 
@@ -56,6 +58,8 @@ _trainable_edge_perm_fix_migration = importlib.import_module(
 ).migrate
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
@@ -67,6 +71,28 @@ if TYPE_CHECKING:
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+# helpers for building the loss config
+def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -> None:
+    """Recursively replace ``subgrid: output_mask`` placeholders with the mask tuple."""
+    if is_mapping(node):
+        for k, v in node.items():
+            if is_container(v) and not isinstance(v, str):
+                resolve_subgrid_node(v, output_mask, dataset_name)
+            elif (k, v) == ("subgrid", "output_mask"):
+                node[k] = output_mask.as_tuple()
+                LOGGER.info("Resolved subgrid for dataset '%s' to output_mask as tuple: %s", dataset_name, node[k])
+    elif is_sequence(node) and not isinstance(node, str):
+        for item in node:
+            resolve_subgrid_node(item, output_mask, dataset_name)
+
+
+def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
+    """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
+    for dataset_name, dataset_config in config.items():
+        if dataset_config is not None:
+            resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):

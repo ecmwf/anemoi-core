@@ -38,24 +38,3 @@ def is_sequence(node: object) -> bool:
 def is_container(node: object) -> bool:
     """Return True for any mapping or sequence config node."""
     return is_mapping(node) or is_sequence(node)
-
-
-def resolve_subgrid_node(node: object, output_mask: object, dataset_name: str) -> None:
-    """Recursively replace ``subgrid: output_mask`` placeholders with the mask tuple."""
-    if is_mapping(node):
-        for k, v in node.items():
-            if is_container(v):
-                resolve_subgrid_node(v, output_mask, dataset_name)
-            elif (k, v) == ("subgrid", "output_mask"):
-                node[k] = output_mask.as_tuple()
-                LOGGER.info("Resolved subgrid for dataset '%s' to output_mask as tuple: %s", dataset_name, node[k])
-    elif is_sequence(node):
-        for item in node:
-            resolve_subgrid_node(item, output_mask, dataset_name)
-
-
-def resolve_subgrid(config: Mapping, output_mask: Mapping) -> None:
-    """Resolve ``subgrid: output_mask`` placeholders for every dataset in ``config``."""
-    for dataset_name, dataset_config in config.items():
-        if dataset_config is not None:
-            resolve_subgrid_node(dataset_config, output_mask[dataset_name], dataset_name)
