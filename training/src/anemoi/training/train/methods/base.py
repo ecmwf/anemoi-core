@@ -1283,13 +1283,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
         """Check each spatial projector's target grid against the encoder's node set."""
         for dataset_name, projector in self.model.spatial_pre_processors.items():
-            # The encoder concatenates these node attributes onto the projected tensor,
-            # so a mismatch surfaces as an opaque shape error mid-forward.
-            encoder_grid_size = graph_data[dataset_name].num_nodes
+            node_set = self.model.model.encoder_node_set(dataset_name)
+            encoder_grid_size = graph_data[node_set].num_nodes
             if projector.output_grid_size != encoder_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
-                    f"{projector.output_grid_size} points, but the encoder node set {dataset_name!r} "
+                    f"{projector.output_grid_size} points, but the encoder node set {node_set!r} "
                     f"has {encoder_grid_size}. Check that the projection matrix matches the graph."
                 )
                 raise ValueError(msg)

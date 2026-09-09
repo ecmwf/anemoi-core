@@ -445,17 +445,23 @@ def test_spatial_processor_grid_sizes_skips_unknown_dataset() -> None:
     module._validate_spatial_processor_grid_sizes()
 
 
-def _target_grid_module(output_grid_size: int | None) -> SingleTraining:
+def _target_grid_module(output_grid_size: int | None, encoder_node_set: str = "in_lres") -> SingleTraining:
     class Projector(torch.nn.Module):
         @property
         def output_grid_size(self) -> int:
             return output_grid_size
+
+    class InnerModel(torch.nn.Module):
+        def encoder_node_set(self, dataset_name: str) -> str:
+            del dataset_name
+            return encoder_node_set
 
     class ModelWithProjector(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
             processors = {} if output_grid_size is None else {"in_lres": Projector()}
             self.spatial_pre_processors = torch.nn.ModuleDict(processors)
+            self.model = InnerModel()
 
     module = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(module)
@@ -482,6 +488,13 @@ def test_spatial_processor_target_grid_rejects_mismatched_encoder_nodes() -> Non
 
     with pytest.raises(ValueError, match=r"in_lres.*4.*6"):
         module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=6))
+
+
+def test_spatial_processor_target_grid_uses_encoder_node_set_not_dataset_name() -> None:
+    """Downscaler conditioning inputs are encoded on their target's grid, not their own."""
+    module = _target_grid_module(output_grid_size=4, encoder_node_set="out_hres")
+
+    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=2, out_hres=4))
 
 
 def test_spatial_processor_target_grid_skips_without_processors() -> None:
