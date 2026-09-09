@@ -125,7 +125,7 @@ class DirectionalHarmonics(EdgeDirection):
         self, name: str | None = None, order: int = 3, norm: str | None = None, dtype: str = "float32"
     ) -> None:
         self.order = order
-        super().__init__(name, norm=norm, dtype=dtype)
+        super().__init__(name=name, norm=norm, dtype=dtype)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
@@ -183,7 +183,7 @@ class BaseBooleanEdgeAttributeBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for boolean edge attributes."""
 
     def __init__(self, name: str | None = None) -> None:
-        super().__init__(name, norm=None, dtype="bool")
+        super().__init__(name=name, norm=None, dtype="bool")
 
 
 class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
@@ -193,7 +193,7 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
     def __init__(self, node_attr_name: str, name: str | None = None) -> None:
         self.node_attr_name = node_attr_name
-        super().__init__(name)
+        super().__init__(name=name)
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
@@ -309,7 +309,7 @@ class RadialBasisFeatures(EdgeLength):
         ), f"RBF centers must be in range [0, 1] (or [0, r_scale] if r_scale is set). Got centers: {centers}, r_scale: {r_scale}"
 
         self.sigma = sigma
-        super().__init__(name, norm=norm, dtype=dtype)
+        super().__init__(name=name, norm=norm, dtype=dtype)
 
     def aggregate(self, edge_features: torch.Tensor, index: torch.Tensor, ptr=None, dim_size=None) -> torch.Tensor:
         """Aggregate edge features with per-node scaling and per-target-node normalization.
@@ -372,7 +372,7 @@ class GaussianDistanceWeights(EdgeLength):
 
     def __init__(self, name: str | None = None, sigma: float = 1.0, norm: str = "l1", **kwargs) -> None:
         self.sigma = sigma
-        super().__init__(name, norm=norm)
+        super().__init__(name=name, norm=norm)
 
     def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         dists = super().compute(x_i, x_j)
