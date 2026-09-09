@@ -35,8 +35,8 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.base import resolve_subgrid
 from anemoi.training.utils.enums import TensorDim
-from anemoi.training.utils.resolve_config import resolve_subgrid
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
