@@ -55,8 +55,22 @@ class TensorLayout:
     _AXIS = ("batch", "time", "ensemble", "grid", "variables")
 
     @classmethod
-    def from_tuple(cls, *args) -> "TensorLayout":
-        """Create a TensorLayout from a tuple of axis names."""
+    def from_tuple(cls, *args, time_in_grid: bool = False) -> "TensorLayout":
+        """Create a TensorLayout from a tuple of axis names.
+
+        Parameters
+        ----------
+        *args : str
+            Logical axis names in the order they appear in the tensor.
+        time_in_grid : bool, default False
+            True when the time axis is encoded within the grid dimension
+            (sparse observations). False for gridded datasets that carry an
+            explicit time axis.
+
+        Returns
+        -------
+        TensorLayout
+        """
         axis_positions = {name: i for i, name in enumerate(args)}
         return cls(
             batch=axis_positions.get("batch"),
@@ -64,7 +78,13 @@ class TensorLayout:
             ensemble=axis_positions.get("ensemble"),
             grid=axis_positions.get("grid", -2),
             variables=axis_positions.get("variables", -1),
+            time_in_grid=time_in_grid,
         )
+
+    @property
+    def axis_names(self) -> tuple[str, ...]:
+        """Logical axis names of this layout, ordered by physical position."""
+        return tuple(sorted(self.dims, key=lambda name: getattr(self, name)))
 
     @property
     def dims(self) -> set[str]:

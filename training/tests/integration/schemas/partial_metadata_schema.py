@@ -31,6 +31,9 @@ PARTIAL_METADATA_SCHEMA = {
         "dataset_names": list,  # list of datasets
         "task": None,
         "__datasets__": {  # schema applied to each dataset entry
+            "is_static_grid": None,
+            "is_tabular": None,
+            "grid_size": None,
             "timesteps": {
                 "relative_date_indices_training": None,
                 "input_relative_date_indices": None,

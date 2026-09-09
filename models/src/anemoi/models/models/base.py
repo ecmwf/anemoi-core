@@ -23,11 +23,11 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.create import GraphCreator
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.utils.config import COORDS_DIM
@@ -530,17 +530,51 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    @staticmethod
+    def _shard_along_grid(batch: Batch, dataset_name: str, model_comm_group: ProcessGroup) -> Batch:
+        """Return the batch with one dataset split across the model_comm_group, along its grid axis.
+
+        Raises
+        ------
+        NotImplementedError
+            If the dataset is tabular; this is not yet supported.  # TODO: look at this with Jan
+        """
+        view = batch[dataset_name]
+        if not isinstance(view, GriddedSourceView):
+            msg = (
+                f"Sharded inference is implemented for gridded datasets only, but {dataset_name!r} is "
+                f"{type(view).__name__}."
+            )
+            raise NotImplementedError(msg)
+
+        if view.shard_sizes is not None:
+            return batch
+
+        grid_dim = view.layout.axis("grid", ndim=view.data.ndim)
+        sizes = get_shard_sizes(view.data, grid_dim, model_comm_group=model_comm_group)
+        coordinates = view.coordinates
+        if coordinates is not None:
+            coordinates = shard_tensor(coordinates, 0, sizes, model_comm_group)
+        return batch.update_source(
+            dataset_name,
+            view.clone(
+                data=shard_tensor(view.data, grid_dim, sizes, model_comm_group),
+                coordinates=coordinates,
+                shard_sizes=sizes,
+            ),
+        )
+
     def predict_step(
         self,
-        x: dict[str, torch.Tensor],
-        target: dict[str, torch.Tensor],
+        x: Batch,
+        target: Batch,
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         """Prediction step for the model.
 
         Base implementation applies pre-processing, performs a forward pass, and applies post-processing.
@@ -548,10 +582,11 @@ class BaseGraphModel(nn.Module):
 
         Parameters
         ----------
-        x : dict[str, torch.Tensor]
+        x : Batch
             Input batched data (before pre-processing).
-        target : dict[str, torch.Tensor]
-            Target batched data (before pre-processing).
+        target : Batch
+            Decoder conditioning (before pre-processing): the forcing variables at the
+            output valid times, carrying the decode geometry and the output time extent.
         pre_processors : nn.ModuleDict
             Pre-processing module.
         post_processors : nn.ModuleDict
@@ -567,61 +602,18 @@ class BaseGraphModel(nn.Module):
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Model output (after post-processing).
-
-        Examples
-        --------
-        - Only tabular datasets supported.
-        ```python
-        batch = {
-            "dataset1": {
-                "data": torch.randn(2, 1000, 18),  # Example input tensor (num_time_steps, grid_size, num_variables)
-                "latitudes": torch.randn(1, 1000),  # Example latitude tensor
-                "longitudes": torch.randn(1, 1000),  # Example longitude tensor
-                "variables": ["var_1", "var_2", ..., "var_N"],
-                "layout": ["time", "grid", "variable"]
-            },
-            "dataset2": {
-                "data": torch.randn(8, 10, 32, 5),
-                "latitudes": torch.randn(1, 32),  # Example latitude tensor
-                "longitudes": torch.randn(1, 32),  # Example longitude tensor
-                "variables": ["var_1", "var_2", ..., "var_N"],
-                "layout": ["time", "grid", "variable"]
-            },
-        }
-
-        target = {
-            "dataset1": {
-                "latitudes": torch.randn(1, 1000),  # Example latitude tensor
-                "longitudes": torch.randn(1, 1000),  # Example longitude tensor
-                "variables": ["var_1", "var_2", ..., "var_M"],
-                "layout": ["time", "grid", "variable"]
-            },
-        }
-
-        output = model.predict_step(
-            batch=batch,
-            target=target,
-            pre_processors=pre_processors,
-            post_processors=post_processors,
-        )
+        Batch
+            Model output (after post-processing), built from the target information.
         ```
         """
         with torch.no_grad():
             dataset_names = list(x.keys())
 
-            # Handle distributed processing
-            grid_shard_sizes: DatasetShardSizes | None = None
-            if model_comm_group is not None:
-                grid_shard_sizes = {}
-                for dataset_name in dataset_names:  # TODO: make this compatible with tabular
-                    grid_shard_sizes[dataset_name] = get_shard_sizes(
-                        x[dataset_name], -2, model_comm_group=model_comm_group
-                    )
-                    x[dataset_name] = shard_tensor(
-                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
-                    )
+            if model_is_distributed(model_comm_group):
+                for dataset_name in dataset_names:
+                    x = self._shard_along_grid(x, dataset_name, model_comm_group)
+                for dataset_name in target.dataset_names:
+                    target = self._shard_along_grid(target, dataset_name, model_comm_group)
 
             processed_batch = x
             for dataset_name in dataset_names:
@@ -630,20 +622,32 @@ class BaseGraphModel(nn.Module):
                     pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
                 )
 
+            # The target forcings condition the decoder, and need to go through the input processors
+            processed_target = target
+            for dataset_name in target.dataset_names:
+                if dataset_name not in pre_processors:
+                    continue
+                processed_target = processed_target.update_source(
+                    dataset_name,
+                    pre_processors[dataset_name](target[dataset_name], in_place=False, **kwargs),
+                )
+
             # Perform forward pass
-            y_hat = self.forward(processed_batch, model_comm_group=model_comm_group, **kwargs)
+            y_hat = self.forward(processed_batch, target=processed_target, model_comm_group=model_comm_group, **kwargs)
 
             # Apply post-processing
-            for dataset_name in dataset_names:
-                y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
+            for dataset_name in y_hat.dataset_names:
+                if dataset_name not in post_processors:
+                    continue
+                y_hat = y_hat.update_source(
+                    dataset_name,
+                    post_processors[dataset_name](y_hat[dataset_name], in_place=False),
+                )
 
-            # Gather output if needed
-            if gather_out and model_comm_group is not None:
-                assert grid_shard_sizes is not None
-                for dataset_name in dataset_names:
-                    y_hat[dataset_name] = gather_tensor(
-                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
-                    )
+            # Gather the output if needed
+            if gather_out:
+                for dataset_name in y_hat.dataset_names:
+                    y_hat = y_hat.update_source(dataset_name, y_hat[dataset_name].allgather(model_comm_group))
 
         return y_hat
 

@@ -209,10 +209,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 )
 
     def _build_encoding_graphproviders(
-        self,
-        encoders_config: DotDict,
-        static_graph: HeteroData,
-        dynamic_graph_config: DotDict
+        self, encoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
         """Builds the graph providers for the encoding networks."""
 
@@ -237,10 +234,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
     def _build_processing_graphproviders(
-        self,
-        processor_config: DotDict,
-        static_graph: HeteroData,
-        dynamic_graph_config: DotDict
+        self, processor_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
         """Builds the graph providers for the processor network."""
 
@@ -252,7 +246,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dst_size=static_graph[self._graph_name_hidden].num_nodes,
             trainable_size=processor_config.get("trainable_size", 0),
         )
-    
+
     def _build_processing_networks(self, processor_config: DotDict) -> None:
         self.processor = instantiate(
             processor_config,
@@ -266,10 +260,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         )
 
     def _build_decoding_graphproviders(
-        self,
-        decoders_config: DotDict,
-        static_graph: HeteroData,
-        dynamic_graph_config: DotDict
+        self, decoders_config: DotDict, static_graph: HeteroData, dynamic_graph_config: DotDict
     ) -> None:
         """Builds the graph providers for the decoding network."""
         self.decoder_graph_provider = torch.nn.ModuleDict()
@@ -318,7 +309,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """Builds the model components."""
         self._build_encoding_graphproviders(model_config.encoders, static_graph, dynamic_graph_config)
         self._build_encoding_networks(model_config.encoders)
-        
+
         self._build_latent_aggregator(model_config.latent_aggregator)
         self._build_processing_graphproviders(model_config.processor, static_graph, dynamic_graph_config)
         self._build_processing_networks(model_config.processor)
@@ -905,10 +896,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():
+            dataset_md = md_dict["metadata_inference"][dataset]
             shapes = {
                 "variables": self.input_dim[dataset],
                 "input_timesteps": self.n_step_input,
                 "ensemble": 1,
-                "grid": None,  # grid size is dynamic
+                "grid": dataset_md.get("grid_size"),  # None for tabular data
             }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
+            dataset_md["shapes"] = shapes

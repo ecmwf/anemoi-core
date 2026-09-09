@@ -13,7 +13,6 @@ import torch
 
 from anemoi.models.distributed.shapes import ShardSizes
 
-
 LOGGER = logging.getLogger(__name__)
 
 
@@ -42,4 +41,3 @@ class FlatView:
             shard_sizes=self.shard_sizes,
             batch_sizes=self.batch_sizes,
         )
-

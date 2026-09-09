@@ -76,6 +76,12 @@ class SourceView(ABC):
     boundaries: list[tuple[slice, ...]] | None = None
     shard_sizes: ShardSizes | list[ShardSizes] = None
 
+    def __post_init__(self) -> None:
+        """
+        Dispatch to the concrete (gridded / tabular) view's validation.
+        Required for the __post_init__ overrides to be called on the SourceView subclasses.
+        """
+
     @cached_property
     def name_to_index(self) -> dict[str, int]:
         """Mapping from variable name to index along the variables axis."""
