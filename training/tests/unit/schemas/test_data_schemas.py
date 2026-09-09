@@ -17,20 +17,25 @@ _MINIMAL_DATA = {
     "num_features": None,
 }
 
+_MINIMAL_DATASET = {"processors": {}}
 
-class TestDataSchemaWithSpatialProcessors:
-    def test_spatial_processors_absent_by_default(self) -> None:
-        schema = DataSchema(**_MINIMAL_DATA)
-        assert schema.spatial_processors is None
 
-    def test_spatial_processors_with_edges_name(self) -> None:
+class TestDatasetDataSchemaWithSpatialProcessor:
+    def test_spatial_processor_absent_by_default(self) -> None:
+        schema = DataSchema(**_MINIMAL_DATA, datasets={"lowres": _MINIMAL_DATASET})
+        assert schema.datasets["lowres"].spatial_processor is None
+
+    def test_spatial_processor_with_edges_name(self) -> None:
         schema = DataSchema(
             **_MINIMAL_DATA,
-            spatial_processors={
+            datasets={
                 "lowres": {
-                    "_target_": _TARGET,
-                    "edges_name": ["lowres", "to", "hires"],
+                    **_MINIMAL_DATASET,
+                    "spatial_processor": {
+                        "_target_": _TARGET,
+                        "edges_name": ["lowres", "to", "hires"],
+                    },
                 },
             },
         )
-        assert schema.spatial_processors["lowres"].edges_name == ("lowres", "to", "hires")
+        assert schema.datasets["lowres"].spatial_processor.edges_name == ("lowres", "to", "hires")

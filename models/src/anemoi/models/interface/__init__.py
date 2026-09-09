@@ -282,14 +282,16 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
         # Keyed by dataset name; empty by default so existing models are unaffected.
-        # Built from optional config.data.spatial_processors.<dataset_name> entries.
+        # Built from optional config.data.datasets.<dataset_name>.spatial_processor entries.
         self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
-        spatial_configs = getattr(getattr(self.config, "data", None), "spatial_processors", {}) or {}
-        for dataset_name, sp_config in spatial_configs.items():
+        for dataset_name, dataset_config in data_config.items():
+            sp_config = getattr(dataset_config, "spatial_processor", None)
+            if sp_config is None:
+                continue
             projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
             if not isinstance(projector, SpatialPreprocessor):
                 raise TypeError(
-                    f"spatial_processors.{dataset_name} must instantiate a SpatialPreprocessor, "
+                    f"datasets.{dataset_name}.spatial_processor must instantiate a SpatialPreprocessor, "
                     f"got {type(projector)}"
                 )
             self.spatial_pre_processors[dataset_name] = projector

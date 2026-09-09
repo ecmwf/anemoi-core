@@ -34,6 +34,11 @@ class DatasetDataSchema(PydanticBaseModel):
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
         Processors including imputers and normalizers are applied in order of definition. (single dataset mode)"
+    spatial_processor: SpatialProcessorSchema | None = Field(default=None)
+    (
+        "Spatial preprocessor applied to this dataset before normalization "
+        "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
+    )
 
 
 class DataSchema(PydanticBaseModel):
@@ -45,5 +50,3 @@ class DataSchema(PydanticBaseModel):
     "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
-    spatial_processors: dict[str, SpatialProcessorSchema] | None = Field(default=None)
-    "Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector for downscaling)."

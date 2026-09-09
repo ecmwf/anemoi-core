@@ -30,18 +30,20 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor(monkeypatch) ->
     config = OmegaConf.create(
         {
             "data": {
-                "datasets": {},
-                "spatial_processors": {
+                "datasets": {
                     "projected": {
-                        "_target_": "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector",
-                        "edges_name": ["source", "to", "projected"],
+                        "processors": {},
+                        "spatial_processor": {
+                            "_target_": "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector",
+                            "edges_name": ["source", "to", "projected"],
+                        },
                     }
                 },
             },
             "model": {"model": {"_target_": "unused.DummyModel"}},
         }
     )
-    spatial_config = config.data.spatial_processors.projected
+    spatial_config = config.data.datasets.projected.spatial_processor
 
     def instantiate(config_to_instantiate, **kwargs):
         if config_to_instantiate is spatial_config:
