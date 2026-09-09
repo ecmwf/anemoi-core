@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -17,6 +17,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -83,7 +84,7 @@ class SingleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict, list]:
+    ) -> TrainingStepOutput:
         """Training / validation step."""
         # Debug counters: how many times this rank has entered `_step` for
         # each mode. Split so training and validation don't interleave. Useful
@@ -195,20 +196,22 @@ class SingleTraining(BaseTrainingModule):
             # dropped this step produced NaN forecasts and must be zero-filled
             # (same handling as fully-dropped datasets).
             advance_dropped = list(set(current_dropped or []) | set(current_decoder_dropped or []))
-            x = self.task.advance_input(
-                x,
-                y_preds_next,
-                batch,
-                **task_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-                dropped_datasets=advance_dropped,
-            )
+            # Advance input state for each dataset if another step follows
+            if step_idx < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_preds_next,
+                    batch,
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                    dropped_datasets=advance_dropped,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / len(task_steps)
-        return loss, metrics, y_preds
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)

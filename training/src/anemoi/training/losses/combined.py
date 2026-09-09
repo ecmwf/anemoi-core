@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -29,6 +29,7 @@ class CombinedLoss(BaseLoss):
     """Combined Loss function."""
 
     needs_graph_data: bool = True
+    needs_data_node_name: bool = True
     # CombinedLoss builds child losses itself, so it needs the full scaler
     # set and data indices during construction.
     factory_context_keys = frozenset(
@@ -199,6 +200,9 @@ class CombinedLoss(BaseLoss):
     @functools.wraps(ScaleTensor.update_scaler, assigned=("__doc__", "__annotations__"))
     def update_scaler(self, name: str, scaler: torch.Tensor, *, override: bool = False) -> None:
         for loss in self.losses:
+            loss_scaler = getattr(loss, "scaler", None)
+            if loss_scaler is not None and name not in loss_scaler:
+                continue
             loss.update_scaler(name=name, scaler=scaler, override=override)
 
     def has_scaler_for_dim(self, dim: TensorDim) -> bool:

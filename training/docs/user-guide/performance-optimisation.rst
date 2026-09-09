@@ -277,10 +277,8 @@ their recommended settings
 
 .. note::
 
-   Longer rollout increases the CPU memory required by the dataloaders.
-   It can be beneficial to break rollout runs into multiple runs (e.g.
-   rollout 1->6 and rollout 7->12) and tune the number of workers for
-   both runs accordingly.
+   Dataloader CPU memory can increase as the active rollout length
+   grows. Longer rollouts might require reducing the number of workers.
 
 Change attention backend
 ========================

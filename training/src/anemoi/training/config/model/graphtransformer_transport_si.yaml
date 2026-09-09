@@ -1,0 +1,17 @@
+defaults:
+- graphtransformer_transport
+- _self_
+
+model:
+  transport:
+    objective: stochastic_interpolant
+    training_condition:
+      distribution: uniform_time
+    source:
+      kind: reference_state
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: unit_time
+        num_steps: 50
+      sampler:
+        sampler: heun

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,11 +13,15 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.primitives import _alltoall_transpose
+from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
+from anemoi.models.distributed.primitives import _halo_exchange
+from anemoi.models.distributed.primitives import _halo_exchange_bwd
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
 
 
 def ensure_sharded(
@@ -319,14 +323,23 @@ class _ShardParallelSection(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.comm_group and ctx.gather_in_backward is True:
-            return (
-                _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
-                None,
-                None,
-                None,
-                None,
-            )
+        if ctx.comm_group is not None:
+            if ctx.gather_in_backward:
+                return (
+                    _gather(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
+            else:
+                return (
+                    _expand_sharded_tensor(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    None,
+                    None,
+                    None,
+                    None,
+                )
         return grad_output, None, None, None, None
 
 
@@ -421,3 +434,67 @@ class _AllToAllParallelSection(torch.autograd.Function):
                 None,
             )
         return grad_output, None, None, None, None, None
+
+
+def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
+    """Halo exchange for graph-partitioned node features.
+
+    Sends inner node features to peer ranks that need them as halo
+    nodes and receives halo node features from peers.  Returns the
+    local features concatenated with received halo rows.
+
+    Supports autograd: the backward pass reverses the communication and
+    accumulates remote gradients at the ``send_indices`` positions.
+
+    Parameters
+    ----------
+    input_ : Tensor
+        Local node features, shape ``(num_local_nodes, ...)``.
+    halo_info : HaloInfo
+        Per-rank halo exchange metadata (from :func:`build_halo_info`).
+    mgroup : ProcessGroup
+        Model communication group.
+
+    Returns
+    -------
+    Tensor
+        ``(num_local_nodes + num_halo_nodes, ...)`` — local + halo features.
+    """
+    return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
+
+
+class _HaloExchangeParallelSection(torch.autograd.Function):
+    """Halo exchange with autograd support.
+
+    Forward: gather inner node features at ``send_indices``, exchange via
+    all-to-all, concatenate received halo rows after local rows.
+
+    Backward: reverse exchange — send halo gradients back to originating
+    ranks, scatter-add received gradients at ``send_indices`` positions.
+    """
+
+    @staticmethod
+    def forward(ctx, input_, halo_info_, mgroup_):
+        ctx.send_indices = halo_info_.send_indices
+        ctx.recv_counts = halo_info_.recv_counts
+        ctx.num_local_nodes = halo_info_.num_local_nodes
+        ctx.comm_group = mgroup_
+        if mgroup_:
+            return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            return (
+                _halo_exchange_bwd(
+                    grad_output,
+                    ctx.send_indices,
+                    ctx.recv_counts,
+                    ctx.num_local_nodes,
+                    ctx.comm_group,
+                ),
+                None,
+                None,
+            )
+        return grad_output, None, None

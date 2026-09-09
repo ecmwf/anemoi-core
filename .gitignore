@@ -102,6 +102,9 @@ dmypy.json
 *.tgz
 *.odb
 
+# Keep the copyright notice used by pre-commit (overrides *.txt above)
+!tools/pre-commit-copyright-notice.txt
+
 # ML artifacts
 wandb/
 mlruns/

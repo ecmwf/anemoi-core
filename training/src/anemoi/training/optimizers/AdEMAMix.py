@@ -1,16 +1,27 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 """AdEMAMix optimizer implementation.
 
------------------------------------------------------------------------------
-Copyright (c) 2024 Apple Inc.
+::
 
-This source file is part of the ADEMAMix project:
-https://github.com/apple/ml-ademamix
+    -----------------------------------------------------------------------------
+    Copyright (c) 2024 Apple Inc.
 
-Licensed under the MIT License.
-See the LICENSE file at: https://github.com/apple/ml-ademamix/blob/main/LICENSE
+    This source file is part of the ADEMAMix project:
+    https://github.com/apple/ml-ademamix
 
-Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
------------------------------------------------------------------------------
+    Licensed under the MIT License.
+    See the LICENSE file at: https://github.com/apple/ml-ademamix/blob/main/LICENSE
+
+    Adapted from: https://pytorch.org/docs/1.6.0/_modules/torch/optim/adam.html
+    -----------------------------------------------------------------------------
 """
 
 import math
@@ -47,18 +58,18 @@ class AdEMAMix(Optimizer):
     r"""Implements the AdEMAMix algorithm.
 
     Arguments:
-        params (iterable): iterable of parameters to optimize or dicts defining
-            parameter groups
-        lr (float, optional): learning rate (default: 1e-3)
+        params (iterable): Iterable of parameters to optimize or dicts defining
+            parameter groups.
+        lr (float, optional): Learning rate (default: 1e-3).
         betas (Tuple[float, float, float], optional): coefficients used for computing
             running averages of gradient and its square (default: (0.9, 0.999, 0.9999))
-            corresponding to beta_1, beta_2, beta_3 in AdEMAMix
-        alpha (float): AdEMAMix alpha coeficient mixing the slow and fast EMAs (default: 2)
-        beta3_warmup (int, optional): number of warmup steps used to increase beta3 (default: None)
-        alpha_warmup: (int, optional): number of warmup steps used to increase alpha (default: None)
-        eps (float, optional): term added to the denominator to improve
-            numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay as in AdamW (default: 0)
+            corresponding to beta_1, beta_2, beta_3 in AdEMAMix.
+        alpha (float): AdEMAMix alpha coefficient mixing the slow and fast EMAs (default: 2).
+        beta3_warmup (int, optional): Number of warmup steps used to increase beta3 (default: None).
+        alpha_warmup (int, optional): Number of warmup steps used to increase alpha (default: None).
+        eps (float, optional): Term added to the denominator to improve
+            numerical stability (default: 1e-8).
+        weight_decay (float, optional): Weight decay as in AdamW (default: 0).
     """
 
     def __init__(
@@ -111,6 +122,11 @@ class AdEMAMix(Optimizer):
         Arguments:
             closure (callable, optional): A closure that reevaluates the model
                 and returns the loss.
+
+        Returns
+        -------
+        float | None
+            The loss returned by ``closure``, or ``None`` when no closure is supplied.
         """
         loss = None
         if closure is not None:

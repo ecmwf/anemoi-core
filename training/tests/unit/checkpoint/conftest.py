@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -172,21 +172,20 @@ def minimal_checkpoint(sample_state_dict: dict) -> dict:
 
 
 @pytest.fixture
-def corrupted_checkpoint_data() -> dict:
-    """Create intentionally corrupted checkpoint data for error testing."""
-    return {
-        "state_dict": {"layer.weight": "not_a_tensor"},  # String instead of tensor
-        "optimizer_state_dict": None,  # None instead of dict
-        "epoch": "ten",  # String instead of int
-    }
-
-
-@pytest.fixture
 def temp_checkpoint_dir(tmp_path: Path) -> Path:
     """Create a temporary directory for checkpoint files."""
     checkpoint_dir = tmp_path / "checkpoints"
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
     return checkpoint_dir
+
+
+@pytest.fixture
+def sample_checkpoint(tmp_path: Path) -> Path:
+    """Write a minimal on-disk checkpoint for source/loading round-trip tests."""
+    ckpt_path = tmp_path / "test.ckpt"
+    state = {"state_dict": {"layer.weight": torch.randn(10, 5)}, "epoch": 3}
+    torch.save(state, ckpt_path)
+    return ckpt_path
 
 
 @pytest.fixture
@@ -271,19 +270,6 @@ def _cleanup_temp_files(tmp_path: Path) -> None:
     """Automatically cleanup temporary files after each test."""
     # Cleanup happens automatically with tmp_path, but we can add custom cleanup here if needed
     _ = tmp_path  # Use the parameter to prevent unused argument warnings
-
-
-# Parameterized fixtures for testing multiple formats
-@pytest.fixture(params=["lightning", "pytorch", "state_dict"])
-def checkpoint_format(request: pytest.FixtureRequest) -> str:
-    """Parametrize tests across different checkpoint formats."""
-    return request.param
-
-
-@pytest.fixture(params=["cpu", "meta"])
-def map_location(request: pytest.FixtureRequest) -> str:
-    """Parametrize tests across different map locations."""
-    return request.param
 
 
 # Custom markers for test categorization

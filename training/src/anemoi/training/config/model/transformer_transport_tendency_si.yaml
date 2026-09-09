@@ -1,0 +1,17 @@
+defaults:
+- transformer_transport_tendency
+- _self_
+
+model:
+  transport:
+    objective: stochastic_interpolant
+    training_condition:
+      distribution: uniform_time
+    source:
+      kind: zero
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: unit_time
+        num_steps: 50
+      sampler:
+        sampler: heun

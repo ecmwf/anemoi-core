@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -99,12 +100,21 @@ class EnsembleTraining(BaseTrainingModule):
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
-        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy:
+        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
+        # Defaults are the single-device values used by SingleDeviceStrategy,
+        # which does not set up communication groups. A ``None`` process group
+        # makes the ensemble gather a no-op (see gather_tensor).
         self.ens_comm_group = None
-        self.ens_comm_group_id = None
-        self.ens_comm_group_rank = None
-        self.ens_comm_num_groups = None
-        self.ens_comm_group_size = None
+        self.ens_comm_group_id = 0
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_size = 1
+
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = 0
+        self.ens_comm_subgroup_rank = 0
+        self.ens_comm_subgroup_num_groups = 1
+        self.ens_comm_subgroup_size = 1
 
     def set_ens_comm_group(
         self,
@@ -150,24 +160,6 @@ class EnsembleTraining(BaseTrainingModule):
 
         return x
 
-    def _collapse_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Collapse ensemble dimension.
-
-        Collapse the ensemble dimension in the input batch by taking the first (and only) element along the ensemble
-        dimension.
-        """
-        y: dict[str, torch.Tensor] = {}
-        for dataset_name, target in batch.items():
-            msg = (
-                "Expected singleton ensemble dimension in target for "
-                f"{dataset_name}, got shape {tuple(target.shape)}."
-            )
-            assert target.ndim == 5 and target.shape[2] == 1, msg
-            y[dataset_name] = target[:, :, 0, :, :]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-
-        return y
-
     def compute_dataset_loss_metrics(
         self,
         y_pred: torch.Tensor,
@@ -193,6 +185,16 @@ class EnsembleTraining(BaseTrainingModule):
             validation_mode=validation_mode,
             dataset_name=dataset_name,
         )
+
+        # torch.compile performance change
+        # mark pred_filtered and target_filtered as dynamic shapes
+        # (they change based on *_indices)
+        # Marking them as dynamic prevents torch from recompiling
+        # everytime the *_indices change
+        # Tensors must be marked as dynamic before being passed to the compiled function
+        dynamic_indices = True  # TODO(cathal): set as true only for validation
+        if dynamic_indices:
+            torch._dynamo.mark_dynamic(y_pred_ens_full, -1)
 
         loss = self._compute_loss(
             y_pred_ens_full,
@@ -240,7 +242,7 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-    ) -> tuple[torch.Tensor, dict, list]:
+    ) -> TrainingStepOutput:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
         metrics = {}
@@ -250,11 +252,10 @@ class EnsembleTraining(BaseTrainingModule):
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for task_step_kwargs in task_steps:
+        for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
 
-            y_full = self.task.get_targets(batch, **task_step_kwargs)
-            y = self._collapse_ens_dim(y_full)
+            y = self.task.get_targets(batch, **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -267,20 +268,21 @@ class EnsembleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset
-            x = self.task.advance_input(
-                x,
-                y_pred,
-                batch,
-                **task_step_kwargs,
-                data_indices=self.data_indices,
-                output_mask=self.output_mask,
-                grid_shard_slice=self.grid_shard_slice,
-            )
+            # Advance input state for each dataset if another step follows
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_pred,
+                    batch,
+                    **task_step_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
 
             loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
         loss *= 1.0 / len(task_steps)
-        return loss, metrics, y_preds
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)

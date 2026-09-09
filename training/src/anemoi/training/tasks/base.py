@@ -41,14 +41,6 @@ class BaseTask(ABC):
     num_outputs : int
         Number of output time steps for the task.
 
-    Methods
-    -------
-    get_input_offsets() -> list[datetime.timedelta]
-        Get the list of input time offsets.
-    get_output_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the list of output time offsets.
-    get_offsets(**kwargs) -> list[datetime.timedelta]
-        Get the full list of input and output time offsets.
     """
 
     name: str
@@ -123,6 +115,27 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
+    def _assert_time_indices_in_batch(
+        self,
+        time_indices: list[int],
+        batch: dict[str, torch.Tensor],
+        **_kwargs,
+    ) -> None:
+        """Raise if the batch does not contain all requested time steps."""
+        if not time_indices:
+            return
+
+        required = max(time_indices) + 1
+        for dataset_name, dataset_batch in batch.items():
+            available = dataset_batch.shape[1]
+            if available < required:
+                msg = (
+                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but requires "
+                    f"index {required - 1} (indices {time_indices}). The dataloader's "
+                    "time window does not match the task rollout."
+                )
+                raise ValueError(msg)
+
     def get_inputs(
         self,
         batch: dict[str, torch.Tensor],
@@ -173,6 +186,7 @@ class BaseTask(ABC):
             variable space (all variables including forcings).
         """
         time_indices = self.get_batch_output_indices(**kwargs)
+        self._assert_time_indices_in_batch(time_indices, batch, **kwargs)
         time_indices = normalize_time_indices(time_indices)
 
         y = {}
@@ -183,6 +197,22 @@ class BaseTask(ABC):
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
+
+    def log_training_state(self) -> None:  # noqa: B027
+        """Log the effective task state at the start of training."""
+
+    def training_runtime_state_dict(self) -> dict:
+        """Return training runtime state to be persisted in the training checkpoint.
+
+        Override in subclasses to include any mutable state that accumulates
+        during training and must survive a job resume (e.g. curriculum counters).
+        This state is stored at the training checkpoint level, not in the model
+        state_dict, so that it is invisible to inference code.
+        """
+        return {}
+
+    def load_training_runtime_state_dict(self, state: dict) -> None:  # noqa: B027
+        """Restore training runtime state from a training checkpoint."""
 
     def on_train_epoch_end(self, current_epoch: int) -> None:  # noqa: B027
         """Hook to update task state at the end of each training epoch (e.g. for curriculum learning)."""
@@ -215,8 +245,16 @@ class BaseSingleStepTask(BaseTask):
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
+        Parameters
+        ----------
+        *args
+            Positional arguments; the first item is the input state.
+        **_kwargs
+            Additional keyword arguments, which are ignored by the default implementation.
+
         Returns
         -------
-            dict[str, torch.Tensor]: The advanced input state for each dataset.
+        dict[str, torch.Tensor]
+            The advanced input state for each dataset.
         """
         return args[0]

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,80 +7,91 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
 import logging
-import types
 from typing import Any
+from typing import Union
 
 import pytorch_lightning as pl
+import torch
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from packaging.version import Version
 from pytorch_lightning.callbacks import Callback
+from pytorch_lightning.callbacks import WeightAveraging as _PLWeightAveraging
+from torch.optim.swa_utils import get_ema_avg_fn
 
 LOGGER = logging.getLogger(__name__)
 
 MIN_PL_VERSION = "2.6.0"
 
 
-def _safe_swap_models(self: Any, pl_module: Any) -> None:
-    """Swap buffers between the averaged model and the current model.
+class WeightAveraging(_PLWeightAveraging):
+    """Base class that averages parameters and synchronises fixed buffers."""
 
-    Uses name-based matching to allow buffer reordering as can happen with dynamic scalers (e.g.
-    NaNMaskScaler).
+    def __init__(
+        self,
+        device: Union[torch.device, str, int] | None = None,
+        use_buffers: bool = False,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(device=device, use_buffers=use_buffers, **kwargs)
 
-    Args:
-        pl_module : The PyTorch Lightning module
+
+class EMAWeightAveraging(WeightAveraging):
+    """Exponential Moving Average weight averaging."""
+
+    def __init__(
+        self,
+        device: Union[torch.device, str, int] | None = None,
+        use_buffers: bool = False,
+        decay: float = 0.999,
+        update_every_n_steps: int = 1,
+        update_starting_at_step: int | None = None,
+        update_starting_at_epoch: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            device=device,
+            use_buffers=use_buffers,
+            **kwargs,
+            avg_fn=get_ema_avg_fn(decay=decay),
+        )
+        self.update_every_n_steps = update_every_n_steps
+        self.update_starting_at_step = update_starting_at_step
+        self.update_starting_at_epoch = update_starting_at_epoch
+
+
+class SWAWeightAveraging(WeightAveraging):
+    """Stochastic Weight Averaging (running mean).
+
+    Uses the default running-mean function from PyTorch's ``AveragedModel``.
     """
-    assert self._average_model is not None
 
-    avg_params = dict(self._average_model.module.named_parameters())
-    for name, current_param in pl_module.named_parameters():
-        avg_param = avg_params[name]
-        tmp = avg_param.data.clone()
-        avg_param.data.copy_(current_param.data)
-        current_param.data.copy_(tmp)
-
-    avg_buffers = dict(self._average_model.module.named_buffers())
-    for name, current_buf in pl_module.named_buffers():
-        if name not in avg_buffers:
-            continue
-        avg_buf = avg_buffers[name]
-        if avg_buf.shape != current_buf.shape:
-            continue
-        tmp = avg_buf.data.clone()
-        avg_buf.data.copy_(current_buf.data)
-        current_buf.data.copy_(tmp)
-
-
-def _safe_copy_average_to_current(self: Any, pl_module: Any) -> None:
-    """Copy averaged buffers to the current model.
-
-    Same as ``_safe_swap_models`` but for the copy performed at the end of training.
-    """
-    assert self._average_model is not None
-
-    avg_params = dict(self._average_model.module.named_parameters())
-    for name, current_param in pl_module.named_parameters():
-        current_param.data.copy_(avg_params[name].data)
-
-    avg_buffers = dict(self._average_model.module.named_buffers())
-    for name, current_buf in pl_module.named_buffers():
-        if name not in avg_buffers:
-            continue
-        avg_buf = avg_buffers[name]
-        if avg_buf.shape != current_buf.shape:
-            continue
-        current_buf.data.copy_(avg_buf.data)
+    def __init__(
+        self,
+        device: Union[torch.device, str, int] | None = None,
+        use_buffers: bool = False,
+        update_every_n_steps: int = 1,
+        update_starting_at_step: int | None = None,
+        update_starting_at_epoch: int | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(device=device, use_buffers=use_buffers, **kwargs)
+        self.update_every_n_steps = update_every_n_steps
+        self.update_starting_at_step = update_starting_at_step
+        self.update_starting_at_epoch = update_starting_at_epoch
 
 
 def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -> list[Callback]:
     """Get weight averaging callback from the config.
 
-    Example config for EMA weight averaging:
+    Example config (recommended):
         weight_averaging:
-            _target_: pytorch_lightning.callbacks.EMAWeightAveraging
+            _target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
             decay: 0.999
+
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
+    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
 
     Parameters
     ----------
@@ -116,11 +127,5 @@ def _get_weight_averaging_callback(weight_averaging_config: DictConfig | None) -
 
     callback = instantiate(weight_averaging_config)
     LOGGER.info("Loaded weight averaging callback: %s", weight_averaging_config["_target_"])
-
-    # Patch swap/copy methods to use name-based matching. Needed for dynamic scalers like NaNMaskScaler.
-    if hasattr(callback, "_swap_models"):
-        callback._swap_models = types.MethodType(_safe_swap_models, callback)
-    if hasattr(callback, "_copy_average_to_current"):
-        callback._copy_average_to_current = types.MethodType(_safe_copy_average_to_current, callback)
 
     return [callback]

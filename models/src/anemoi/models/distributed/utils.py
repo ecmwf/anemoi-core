@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,6 +10,14 @@
 
 import torch
 from torch import Tensor
+from torch.distributed.distributed_c10d import ProcessGroup
+
+
+def model_is_distributed(
+    model_comm_group: ProcessGroup | None = None,
+) -> bool:
+    """Return whether a model communication group spans multiple ranks."""
+    return model_comm_group is not None and model_comm_group.size() > 1
 
 
 def get_memory_format(tensor: Tensor):

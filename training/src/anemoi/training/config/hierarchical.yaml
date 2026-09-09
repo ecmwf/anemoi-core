@@ -26,5 +26,44 @@ model:
     hidden_nodes_name: ["hidden_1", "hidden_2", "hidden_3"]
   enable_hierarchical_level_processing: True
   level_process_num_layers: 2
+
+  upscale_mapper:
+      # With omegaconf=2.4, the following will be supported ${model.decoders[0].mapper}
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
+  downscale_mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+      edge_pre_mlp: False
+
+  node_trainable_parameters:
+    hidden_1: 8
+    hidden_2: 8
+    hidden_3: 8
+
   processor:
     num_chunks: 2

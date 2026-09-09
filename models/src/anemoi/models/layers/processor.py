@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -19,10 +19,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
@@ -403,14 +402,51 @@ class GNNProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
+        """Run the GNN processor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             target_nodes = sum(shard_info.nodes)
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr, edge_index, target_nodes, target_nodes, model_comm_group
+                edge_attr,
+                edge_index,
+                target_nodes,
+                target_nodes,
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
 
@@ -436,6 +472,7 @@ class GraphTransformerProcessor(BaseProcessor):
         mlp_implementation: MLPImplementation = "mlp",
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        shard_strategy: str = "edges",
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -470,6 +507,8 @@ class GraphTransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        shard_strategy: str, by default "edges"
+            Strategy to shard tensors, options are "edges" and "heads"
         graph_attention_backend: str, by default "triton"
             Backend to use for graph transformer conv, options are "triton" and "pyg"
         edge_pre_mlp: bool, by default False
@@ -486,6 +525,12 @@ class GraphTransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        assert shard_strategy in ["edges", "heads"], (
+            f"Invalid shard strategy '{shard_strategy}' for {self.__class__.__name__}. "
+            f"Supported strategies are 'edges' and 'heads'."
+        )
+        self.shard_strategy = shard_strategy
+
         self.build_layers(
             GraphTransformerProcessorBlock,
             in_channels=num_channels,
@@ -496,6 +541,7 @@ class GraphTransformerProcessor(BaseProcessor):
             layer_kernels=self.layer_factory,
             qk_norm=qk_norm,
             mlp_implementation=mlp_implementation,
+            shard_strategy=shard_strategy,
             graph_attention_backend=graph_attention_backend,
             edge_dim=edge_dim,
             edge_pre_mlp=edge_pre_mlp,
@@ -511,20 +557,60 @@ class GraphTransformerProcessor(BaseProcessor):
         edge_attr: Tensor,
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
+        edges_are_dst_sorted: bool = True,
         *args,
         **kwargs,
     ) -> Tensor:
-        size = sum(shard_info.nodes)
+        """Run the graph-transformer processor.
 
-        if shard_info.edges_are_sharded():
-            # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
-            # but edge_attr can stay sharded
-            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
-        else:
-            # Edges not pre-sharded, shard edge_attr here (edge_index stays full)
-            edge_shard_sizes = get_shard_sizes(edge_attr, 0, model_comm_group)
-            edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
+        Parameters
+        ----------
+        x : Tensor
+            Node features.
+        batch_size : int
+            Batch size.
+        shard_info : GraphShardInfo
+            Shard metadata for node and edge tensors.
+        edge_attr : Tensor
+            Edge attributes.
+        edge_index : Adj
+            Edge indices.
+        model_comm_group : ProcessGroup, optional
+            Model communication group.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        *args : tuple
+            Additional positional arguments.
+        **kwargs : dict
+            Additional keyword arguments passed to processor blocks.
+
+        Returns
+        -------
+        Tensor
+            Processed node features.
+        """
+        size = sum(shard_info.nodes) if shard_info.nodes_are_sharded() else x.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=size,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
+        )
+
+        if not shard_info.edges_are_sharded():  # ensure edges are sharded
+            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
+                edge_attr, edge_index, size, size, model_comm_group, edges_are_dst_sorted=edges_are_dst_sorted
+            )
             shard_info = GraphShardInfo(nodes=shard_info.nodes, edges=edge_shard_sizes)
+
+        # Heads sharding needs full edge_index (nodes are full, only heads are sharded)
+        if self.shard_strategy == "heads":
+            edge_index = gather_tensor(edge_index, 1, shard_info.edges, model_comm_group)
 
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
@@ -533,6 +619,7 @@ class GraphTransformerProcessor(BaseProcessor):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=True,  # ensured by ensure_edges_are_dst_sorted above
             **kwargs,
         )
 

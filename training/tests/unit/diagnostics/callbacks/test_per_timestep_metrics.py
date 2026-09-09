@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,13 +10,12 @@
 """Tests for PerTimestepMetrics callback."""
 
 from unittest.mock import MagicMock
-from unittest.mock import patch
 
 import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
-from anemoi.training.losses.base import BaseLoss
+from anemoi.training.train.step_output import TrainingStepOutput
 
 BS = 2
 TIME = 6
@@ -35,71 +34,59 @@ def callback_every_2() -> PerTimestepMetrics:
     return PerTimestepMetrics(every_n_batches=2)
 
 
-class FakeLoss(BaseLoss):
-    """Minimal BaseLoss subclass for testing."""
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs: object) -> torch.Tensor:  # noqa: ARG002
-        return torch.tensor(1.0)
-
-    @property
-    def name(self) -> str:
-        return "fake"
-
-
 def _make_pl_module(
     n_timesteps: int = TIME,
-    n_ens: int = ENS,
     n_grid: int = GRID,
     n_var: int = NVAR,
 ) -> MagicMock:
     """Create a mocked pl_module with the attributes needed by the callback."""
     pl_module = MagicMock()
 
-    pred = torch.randn(BS, n_timesteps, n_ens, n_grid, n_var)
     target = torch.randn(BS, n_timesteps, n_grid, n_var)
 
-    # task.get_inputs returns input dict
-    pl_module.task.get_inputs.return_value = {"data": torch.randn(BS, 2, n_grid, n_var)}
-    pl_module._expand_ens_dim.return_value = {"data": torch.randn(BS, 2, n_ens, n_grid, n_var)}
-
-    # model forward returns predictions
-    pl_module.__call__ = MagicMock(return_value={"data": pred})
-    pl_module.return_value = {"data": pred}
-
-    # task.get_targets returns targets
-    y_full = {"data": target.unsqueeze(2)}  # add ens dim for _collapse_ens_dim
+    # task.get_targets returns targets with ensemble dim
+    y_full = {"data": target.unsqueeze(2)}
     pl_module.task.get_targets.return_value = y_full
     pl_module._collapse_ens_dim.return_value = {"data": target}
 
-    # No ensemble comm group (single GPU case)
-    pl_module.ens_comm_subgroup = None
-
-    pl_module.model.post_processors = {"data": lambda x, **_: x}
-
-    fake_loss = FakeLoss()
-    pl_module.metrics = {"data": {"fkcrps": fake_loss}}
-
-    pl_module.val_metric_ranges = {
-        "data": {
-            "pl": torch.arange(0, 2),
-            "sfc": torch.arange(2, 3),
-        },
-    }
-
     pl_module.grid_shard_slice = {"data": None}
-    pl_module.model_comm_group = None
+    # no grid sharding: return tensors unchanged with a None slice, as the real method does.
+    pl_module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
     pl_module.logger_enabled = True
-    pl_module.data_indices = MagicMock()
+
+    # calculate_val_metrics returns a dict of metric_name -> tensor
+    def mock_calculate_val_metrics(
+        _y_pred: torch.Tensor,
+        _y: torch.Tensor,
+        **_kwargs: object,
+    ) -> dict[str, torch.Tensor]:
+        return {
+            "fkcrps_metric/data/pl": torch.tensor(1.0),
+            "fkcrps_metric/data/sfc": torch.tensor(2.0),
+        }
+
+    pl_module.calculate_val_metrics = MagicMock(side_effect=mock_calculate_val_metrics)
 
     return pl_module
 
 
-def _make_trainer(precision: str = "32-true") -> MagicMock:
+def _make_outputs(
+    n_timesteps: int = TIME,
+    n_ens: int = ENS,
+    n_grid: int = GRID,
+    n_var: int = NVAR,
+) -> TrainingStepOutput:
+    """Create outputs as returned by validation_step."""
+    val_loss = torch.tensor(0.5)
+    metrics = {}
+    y_pred = torch.randn(BS, n_timesteps, n_ens, n_grid, n_var)
+    y_preds_dict = {"data": y_pred}
+    return TrainingStepOutput(loss=val_loss, metrics=metrics, predictions=[y_preds_dict])
+
+
+def _make_trainer() -> MagicMock:
     trainer = MagicMock()
-    trainer.precision = precision
+    trainer.precision = "32-true"
     return trainer
 
 
@@ -123,32 +110,47 @@ class TestPerTimestepMetrics:
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
+        outputs = _make_outputs()
 
         # batch_idx=1 should be skipped (1 % 2 != 0)
-        callback_every_2.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=1)
-        pl_module.task.get_inputs.assert_not_called()
+        callback_every_2.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=1)
+        pl_module.calculate_val_metrics.assert_not_called()
 
     def test_runs_on_matching_batch(self, callback_every_2: PerTimestepMetrics) -> None:
         """Callback should run on batches matching every_n_batches."""
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
+        outputs = _make_outputs()
 
-        callback_every_2.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
-        pl_module.task.get_inputs.assert_called_once()
+        callback_every_2.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
+        pl_module.calculate_val_metrics.assert_called()
+
+    def test_calls_calculate_val_metrics_per_timestep(self, callback: PerTimestepMetrics) -> None:
+        """Callback should call calculate_val_metrics once per timestep."""
+        trainer = _make_trainer()
+        pl_module = _make_pl_module()
+        batch = _make_batch()
+        outputs = _make_outputs()
+
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
+
+        # Should be called TIME times (once per timestep)
+        assert pl_module.calculate_val_metrics.call_count == TIME
 
     def test_logs_per_timestep_metrics(self, callback: PerTimestepMetrics) -> None:
         """Callback should log metrics for each timestep and variable group."""
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
+        outputs = _make_outputs()
 
-        callback.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
 
-        # Should have logged: TIME timesteps * 2 var groups * 1 metric = 12 calls
+        # Should have logged: TIME timesteps * 2 metric keys = 12 calls
         assert pl_module.log.call_count == TIME * 2
 
-        # Check metric names
+        # Check metric names include timestep suffix
         logged_names = [call.args[0] for call in pl_module.log.call_args_list]
         for t in range(1, TIME + 1):
             assert f"val_fkcrps_metric/data/pl/t_{t}" in logged_names
@@ -159,8 +161,9 @@ class TestPerTimestepMetrics:
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
+        outputs = _make_outputs()
 
-        callback.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
 
         # Check first log call kwargs
         _, kwargs = pl_module.log.call_args_list[0]
@@ -175,50 +178,64 @@ class TestPerTimestepMetrics:
         trainer = _make_trainer()
         pl_module = _make_pl_module(n_timesteps=1)
         batch = _make_batch(n_timesteps=1)
+        outputs = _make_outputs(n_timesteps=1)
 
-        callback.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
 
-        # 1 timestep * 2 groups = 2 log calls
+        # 1 timestep * 2 metric keys = 2 log calls
         assert pl_module.log.call_count == 2
         logged_names = [call.args[0] for call in pl_module.log.call_args_list]
         assert "val_fkcrps_metric/data/pl/t_1" in logged_names
         assert "val_fkcrps_metric/data/sfc/t_1" in logged_names
 
-    def test_skips_non_baseloss_metrics(self, callback: PerTimestepMetrics) -> None:
-        """Non-BaseLoss metrics should be skipped."""
+    def test_skips_when_no_outputs(self, callback: PerTimestepMetrics) -> None:
+        """Should skip gracefully when outputs is empty or missing y_preds."""
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
 
-        pl_module.metrics["data"]["non_loss"] = MagicMock(spec=[])
+        callback.on_validation_batch_end(trainer, pl_module, None, batch, batch_idx=0)
+        pl_module.calculate_val_metrics.assert_not_called()
 
-        callback.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
+        empty_outputs = TrainingStepOutput(loss=torch.tensor(0.5), metrics={}, predictions=[])
+        callback.on_validation_batch_end(trainer, pl_module, empty_outputs, batch, batch_idx=0)
+        pl_module.calculate_val_metrics.assert_not_called()
 
-        # Only BaseLoss metrics logged: TIME * 2 groups
-        assert pl_module.log.call_count == TIME * 2
+    def test_slices_time_dimension_correctly(self, callback: PerTimestepMetrics) -> None:
+        """Verify that calculate_val_metrics receives single-timestep slices."""
+        trainer = _make_trainer()
+        pl_module = _make_pl_module(n_timesteps=3)
+        batch = _make_batch(n_timesteps=3)
+        outputs = _make_outputs(n_timesteps=3)
 
-    def test_uses_autocast_for_mixed_precision(self, callback: PerTimestepMetrics) -> None:
-        """Should apply autocast when precision is mixed."""
-        trainer = _make_trainer(precision="16-mixed")
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
+
+        # Check each call has time dim of size 1
+        for call in pl_module.calculate_val_metrics.call_args_list:
+            y_pred_arg = call.args[0]
+            y_arg = call.args[1]
+            assert y_pred_arg.shape[1] == 1  # time dim
+            assert y_arg.shape[1] == 1  # time dim
+
+    def test_passes_kwargs_to_calculate_val_metrics(self, callback: PerTimestepMetrics) -> None:
+        """Verify kwargs passed to calculate_val_metrics."""
+        trainer = _make_trainer()
+        pl_module = _make_pl_module(n_timesteps=1)
+        batch = _make_batch(n_timesteps=1)
+        outputs = _make_outputs(n_timesteps=1)
+
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
+
+        _, kwargs = pl_module.calculate_val_metrics.call_args_list[0]
+        assert kwargs["grid_shard_slice"] is None
+        assert kwargs["dataset_name"] == "data"
+
+    def test_uses_collapse_ens_dim(self, callback: PerTimestepMetrics) -> None:
+        """Should call _collapse_ens_dim on targets when available."""
+        trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
+        outputs = _make_outputs()
 
-        # Should not raise
-        callback.on_validation_batch_end(trainer, pl_module, [], batch, batch_idx=0)
-        assert pl_module.log.call_count == TIME * 2
-
-    def test_ensemble_gather(self, callback: PerTimestepMetrics) -> None:
-        """Should call gather_tensor when ens_comm_subgroup is set."""
-        pl_module = _make_pl_module()
-        batch = _make_batch()
-
-        pl_module.ens_comm_subgroup = MagicMock()
-        pl_module.ens_comm_subgroup_size = 2
-
-        with patch(
-            "anemoi.models.distributed.graph.gather_tensor",
-            side_effect=lambda x, **_: x,
-        ):
-            callback._eval_per_timestep(pl_module, batch)
-
-        assert pl_module.log.call_count == TIME * 2
+        callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
+        pl_module._collapse_ens_dim.assert_called_once()

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -24,10 +24,12 @@ from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.khop_edges import bipartite_subgraph
-from anemoi.models.distributed.khop_edges import drop_unconnected_src_nodes
+from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.khop_edges import shard_graph_to_local
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
@@ -99,27 +101,40 @@ class BaseMapper(nn.Module, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
-    ):
+    ) -> Tensor | PairTensor:
         """Forward pass of the mapper.
 
         Parameters
         ----------
         x : PairTensor
-            Input tensor pair (source, destination)
+            Input tensor pair (source, destination).
         batch_size : int
-            Batch size
+            Batch size.
         shard_info : BipartiteGraphShardInfo
             Shard metadata. Each field is a list of per-rank partition sizes
             along the sharded dimension, or None if the tensor is replicated.
         edge_attr : Tensor, optional
-            Edge attributes (required for graph-based mappers)
+            Edge attributes (required for graph-based mappers).
         edge_index : Adj, optional
-            Edge indices (required for graph-based mappers)
+            Edge indices (required for graph-based mappers).
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         keep_x_dst_sharded : bool, optional
-            Whether to keep destination sharded, by default False
+            Whether to keep destination sharded, by default False.
+        edges_are_dst_sorted : bool, optional
+            Whether `edge_index` and `edge_attr` are already ordered by destination node.
+            Edges from graph providers already are. Pass False for custom full-graph
+            edges that are not ordered this way. If edges are already sharded, each rank
+            is expected to already have the right edges for its local destination nodes.
+        **kwargs : dict
+            Additional keyword arguments passed to the mapper implementation.
+
+        Returns
+        -------
+        Tensor or PairTensor
+            Mapper output tensor or tensor pair.
         """
         pass
 
@@ -132,7 +147,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -156,7 +171,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
@@ -192,7 +207,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -205,9 +220,9 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         Linear = self.layer_factory.Linear
 
         self.proc = GraphTransformerMapperBlock(
-            in_channels=hidden_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            out_channels=num_channels,
             attn_channels=attn_channels,
             num_heads=num_heads,
             edge_dim=edge_dim,
@@ -239,104 +254,79 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = True,
     ):
-        x_src, x_dst = x
-        shard_sizes_src, shard_sizes_dst, shard_sizes_edges = (
-            shard_info.src_nodes,
-            shard_info.dst_nodes,
-            shard_info.edges,
+        x_dst = x[1]
+        num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
+        edge_attr, edge_index = ensure_edges_are_dst_sorted(
+            edge_attr,
+            edge_index,
+            num_dst=num_dst,
+            edges_are_sharded=shard_info.edges_are_sharded(),
+            model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        # gather x_src if sharded, always reduce in bwds for correct gradient propagation on halo nodes
-        x_src = sync_tensor(x_src, 0, shard_sizes_src, model_comm_group, gather_in_fwd=shard_info.src_is_sharded())
-
-        # ensure dst is sharded to match 1hop edge sharding
-        x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
-
-        # 1hop sorting + edge sharding
-        if not shard_info.edges_are_sharded():
-            src_size = x_src.size(0)
-            dst_size = sum(shard_sizes_dst)
-            edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
-                edge_attr, edge_index, src_size, dst_size, model_comm_group
-            )
-
-        # relabel destination indices from global to local
-        if model_comm_group is not None and model_comm_group.size() > 1:
-            rank = model_comm_group.rank()
-            dst_offset = sum(shard_sizes_dst[:rank])
-            edge_index = edge_index.clone()  # no in-place modification of pre-sharded tensor
-            edge_index[1] -= dst_offset
-
-        # at this point, x_src is synced i.e. full, x_dst is sharded, edges are sharded (incoming edges to x_dst)
-        graph_size_full_src_sharded_dst = (x_src.shape[0], x_dst.shape[0])
-        x_src, edge_index, nodes_src = drop_unconnected_src_nodes(x_src, edge_index, graph_size_full_src_sharded_dst)
-
-        if cond is not None:  # sync cond_src to match x_src:
-            cond_src, cond_dst = cond
-            cond_src_full = sync_tensor(
-                cond_src,
-                0,
-                shard_sizes_src,
-                model_comm_group,
-                gather_in_fwd=shard_info.src_is_sharded(),
-            )
-            cond = (cond_src_full[nodes_src], cond_dst)
-
-        shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_src,
-            dst_nodes=shard_sizes_dst,
-            edges=shard_sizes_edges,
+        # build a GraphPartition for the distributed shard (across GPUs)
+        shard_partition = build_graph_partition_from_shard_info(
+            edge_index,
+            x,
+            shard_info,
+            model_comm_group,
         )
 
-        return x_src, x_dst, edge_attr, edge_index, shard_info, cond
+        # shard to local rank: gathers src, shards dst+edges, relabels dst, drops unconnected src
+        (x_src, x_dst), edge_attr, edge_index, shard_info, cond = shard_graph_to_local(
+            shard_partition,
+            x,
+            edge_attr,
+            edge_index,
+            shard_info,
+            model_comm_group,
+            cond=cond,
+        )
 
-    def run_processor_chunk_edge_sharding(
+        # build a second GraphPartition for local chunking within this shard
+        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
+        chunk_partition = build_graph_partition(
+            edge_index,
+            num_parts=num_chunks,
+            num_nodes=(x_src.shape[0], x_dst.shape[0]),
+        )
+
+        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition
+
+    def run_processor_chunk(
         self,
+        chunk_partition: GraphPartition,
+        chunk_id: int,
         x: tuple[Tensor, Tensor],
-        dst_chunk: Tensor,
         edge_attr: Tensor,
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        size: tuple[int],
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
-        x_src, x_dst = x
-
-        # get subgraph of x_dst_chunk and incoming edges, drop unconnected src nodes
-        nodes_src_full = torch.arange(size[0], device=edge_index.device)
-        edge_index, edge_attr = bipartite_subgraph(
-            (nodes_src_full, dst_chunk),
-            edge_index,
-            edge_attr,
-            size=size,
-            relabel_nodes=True,
+        # O(1) slicing: extract subgraph for this chunk
+        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
+            chunk_id, x, edge_attr, edge_index, cond=cond
         )
-
-        # drop unconnected src nodes and relabel edges
-        x_src_chunk, edge_index_chunk, connected_src_nodes = drop_unconnected_src_nodes(x_src, edge_index, size)
-        x_dst_chunk = x_dst[dst_chunk]
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
-
-        if cond is not None:  # update cond with correct conditioning
-            cond_src, cond_dst = cond
-            cond = (cond_src[connected_src_nodes], cond_dst[dst_chunk])
 
         # pre-process chunk, embedding x_src/x_dst
         x_src_chunk, x_dst_chunk = self.pre_process((x_src_chunk, x_dst_chunk))
 
         (_, x_dst_out), _ = self.proc(
             (x_src_chunk, x_dst_chunk),
-            edge_attr,
+            edge_attr_chunk,
             edge_index_chunk,
             shard_info,
             batch_size,
             chunk_size,
             model_comm_group,
-            cond=cond,
+            cond=cond_chunk,
             **kwargs,
         )
 
@@ -352,9 +342,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shard_info, cond = maybe_checkpoint(
+        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
@@ -364,29 +355,28 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             edge_index,
             model_comm_group,
             cond,
+            edges_are_dst_sorted,
         )
 
-        size = (x_src.shape[0], x_dst.shape[0])  # node sizes of local graph shard
-        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-
-        dst_chunks = torch.arange(size[1], device=x_dst.device).tensor_split(num_chunks)
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
-        for dst_chunk in dst_chunks:
-            out_dst[dst_chunk] = maybe_checkpoint(
-                self.run_processor_chunk_edge_sharding,
+        for chunk_id in range(chunk_partition.num_parts):
+            dst_range = chunk_partition._get_dst_range(chunk_id)
+            out_dst[dst_range] = maybe_checkpoint(
+                self.run_processor_chunk,
                 self.gradient_checkpointing,
+                chunk_partition,
+                chunk_id,
                 (x_src, x_dst),
-                dst_chunk,
                 edge_attr,
                 edge_index,
                 shard_info,
                 batch_size,
-                size,
                 model_comm_group,
                 cond,
+                edges_are_dst_sorted=True,  # ensured by prepare_edge_sharding_wrapper
                 **kwargs,
             ).to(dtype=out_type)
 
@@ -404,6 +394,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -440,6 +431,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             batch_size=batch_size,
             size=size,
             model_comm_group=model_comm_group,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
 
@@ -459,6 +451,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
 
@@ -470,6 +463,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             "edge_index": edge_index,
             "model_comm_group": model_comm_group,
             "keep_x_dst_sharded": keep_x_dst_sharded,
+            "edges_are_dst_sorted": edges_are_dst_sorted,
             **kwargs,
         }
 
@@ -491,7 +485,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -515,7 +509,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Must remain ``None`` for forward graph-transformer mappers.
@@ -551,7 +545,7 @@ class GraphTransformerForwardMapper(GraphTransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=None,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -611,7 +605,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -636,7 +630,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node
@@ -674,7 +668,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -691,6 +685,14 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
             **kwargs,
         )
 
+        if self.in_channels_src != self.hidden_dim:
+            LOGGER.info(
+                f"The processor latents are linearly projected from {self.in_channels_src} to {self.hidden_dim} channels."
+            )
+            self.emb_nodes_src = self.layer_factory.Linear(self.in_channels_src, self.hidden_dim)
+        else:
+            self.emb_nodes_src = nn.Identity()
+
         self.node_data_extractor = nn.Sequential(
             nn.LayerNorm(self.hidden_dim), nn.Linear(self.hidden_dim, self.out_channels_dst)
         )
@@ -703,6 +705,7 @@ class GraphTransformerBackwardMapper(GraphTransformerBaseMapper):
 
     def pre_process(self, x):
         x_src, x_dst = x
+        x_src = self.emb_nodes_src(x_src)
         x_dst = self.emb_nodes_dst(x_dst)
         return x_src, x_dst
 
@@ -718,7 +721,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -737,7 +740,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node
@@ -760,7 +763,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -770,8 +773,8 @@ class GNNBaseMapper(BaseMapper, ABC):
 
         self.emb_edges = MLP(
             in_features=edge_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
-            out_features=hidden_dim,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -786,6 +789,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -803,7 +807,12 @@ class GNNBaseMapper(BaseMapper, ABC):
         if not shard_info.edges_are_sharded():
             # Edges not pre-sharded, do 1-hop sorting and sharding here
             edge_attr, edge_index, shard_sizes_edges = shard_edges_1hop(
-                edge_attr, edge_index, size[0], size[1], model_comm_group
+                edge_attr,
+                edge_index,
+                size[0],
+                size[1],
+                model_comm_group,
+                edges_are_dst_sorted=edges_are_dst_sorted,
             )
 
         shard_info = BipartiteGraphShardInfo(
@@ -842,6 +851,7 @@ class GNNBaseMapper(BaseMapper, ABC):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -854,6 +864,7 @@ class GNNBaseMapper(BaseMapper, ABC):
             edge_index=edge_index,
             model_comm_group=model_comm_group,
             keep_x_dst_sharded=keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
 
@@ -866,7 +877,7 @@ class GNNForwardMapper(GNNBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -885,7 +896,7 @@ class GNNForwardMapper(GNNBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int
             Output channels of the destination node, by default None
@@ -908,7 +919,7 @@ class GNNForwardMapper(GNNBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -920,11 +931,11 @@ class GNNForwardMapper(GNNBaseMapper):
             **kwargs,
         )
 
-        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
+        mlp_hidden_dim = compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
-            in_channels=hidden_dim,
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            out_channels=num_channels,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -938,7 +949,7 @@ class GNNForwardMapper(GNNBaseMapper):
         self.emb_nodes_src = MLP(
             in_features=in_channels_src,
             hidden_dim=mlp_hidden_dim,
-            out_features=hidden_dim,
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -947,7 +958,7 @@ class GNNForwardMapper(GNNBaseMapper):
         self.emb_nodes_dst = MLP(
             in_features=in_channels_dst,
             hidden_dim=mlp_hidden_dim,
-            out_features=hidden_dim,
+            out_features=num_channels,
             layer_kernels=self.layer_factory,
             n_extra_layers=mlp_extra_layers + 1,
             mlp_implementation=mlp_implementation,
@@ -971,7 +982,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         mlp_extra_layers: int,
@@ -990,8 +1001,8 @@ class GNNBackwardMapper(GNNBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int
             Output channels of the destination node
         num_chunks: int
@@ -1013,7 +1024,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             cpu_offload=cpu_offload,
@@ -1025,11 +1036,11 @@ class GNNBackwardMapper(GNNBaseMapper):
             **kwargs,
         )
 
-        mlp_hidden_dim = compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio)
+        mlp_hidden_dim = compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio)
 
         self.proc = GraphConvMapperBlock(
-            in_channels=hidden_dim,
-            out_channels=hidden_dim,
+            in_channels=num_channels,
+            out_channels=num_channels,
             layer_kernels=self.layer_factory,
             mlp_extra_layers=mlp_extra_layers,
             mlp_hidden_ratio=mlp_hidden_ratio,
@@ -1067,6 +1078,7 @@ class GNNBackwardMapper(GNNBaseMapper):
         edge_index: Adj,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> Tensor:
 
@@ -1078,6 +1090,7 @@ class GNNBackwardMapper(GNNBaseMapper):
             edge_index,
             model_comm_group,
             keep_x_dst_sharded,
+            edges_are_dst_sorted=edges_are_dst_sorted,
             **kwargs,
         )
         return x_dst
@@ -1091,7 +1104,7 @@ class PointWiseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
@@ -1099,7 +1112,7 @@ class PointWiseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1136,6 +1149,7 @@ class PointWiseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1157,7 +1171,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         cpu_offload: bool = False,
         gradient_checkpointing: bool = True,
         layer_kernels: dict | None = None,
@@ -1166,7 +1180,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1189,6 +1203,7 @@ class PointWiseForwardMapper(PointWiseMapper):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         x_dst = super().forward(
@@ -1212,7 +1227,7 @@ class PointWiseBackwardMapper(PointWiseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: int,
         initialise_data_extractor_zero: bool = False,
         cpu_offload: bool = False,
@@ -1223,7 +1238,7 @@ class PointWiseBackwardMapper(PointWiseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             cpu_offload=cpu_offload,
             gradient_checkpointing=gradient_checkpointing,
             layer_kernels=layer_kernels,
@@ -1259,7 +1274,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1285,8 +1300,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
         mlp_hidden_ratio: float
@@ -1320,7 +1335,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            hidden_dim=num_channels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
             layer_kernels=layer_kernels,
@@ -1329,8 +1344,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
         )
 
         self.proc = TransformerMapperBlock(
-            num_channels=hidden_dim,
-            hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
+            num_channels=num_channels,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
             attn_channels=attn_channels,
             num_heads=num_heads,
             window_size=window_size,
@@ -1396,6 +1411,7 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edge_index: Optional[Adj] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
         return maybe_checkpoint(
@@ -1418,7 +1434,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1444,7 +1460,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
+        num_channels : int
             Hidden dimension
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
@@ -1479,7 +1495,7 @@ class TransformerForwardMapper(TransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,
@@ -1541,7 +1557,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         *,
         in_channels_src: int,
         in_channels_dst: int,
-        hidden_dim: int,
+        num_channels: int,
         out_channels_dst: Optional[int] = None,
         num_chunks: int,
         num_heads: int,
@@ -1567,8 +1583,8 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             Input channels of the source node
         in_channels_dst : int
             Input channels of the destination node
-        hidden_dim : int
-            Hidden dimension
+        num_channels : int
+            Number of channels in the hidden layers
         out_channels_dst : int, optional
             Output channels of the destination node, by default None
         mlp_hidden_ratio: float
@@ -1602,7 +1618,7 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         super().__init__(
             in_channels_src=in_channels_src,
             in_channels_dst=in_channels_dst,
-            hidden_dim=hidden_dim,
+            num_channels=num_channels,
             layer_kernels=layer_kernels,
             out_channels_dst=out_channels_dst,
             num_chunks=num_chunks,

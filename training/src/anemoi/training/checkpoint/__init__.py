@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -41,13 +41,8 @@ from .utils import estimate_checkpoint_memory
 from .utils import format_size
 from .utils import get_checkpoint_metadata
 from .utils import validate_checkpoint
-
-# Import validation utilities with graceful fallback
-try:
-    from .validation import validate_pipeline_health
-except ImportError:
-    # Validation module not available
-    validate_pipeline_health = None
+from .validation import CheckpointPipelineValidator
+from .validation import validate_pipeline_health
 
 __all__ = [
     # Exceptions
@@ -59,6 +54,7 @@ __all__ = [
     "CheckpointLoadError",
     "CheckpointNotFoundError",
     "CheckpointPipeline",
+    "CheckpointPipelineValidator",
     "CheckpointSourceError",
     "CheckpointTimeoutError",
     "CheckpointValidationError",

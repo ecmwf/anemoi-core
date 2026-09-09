@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -39,9 +39,7 @@ def layer_kernels():
 def test_multi_head_self_attention_init(
     num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation, layer_kernels
 ):
-    embed_dim = (
-        num_heads * embed_dim_multiplier
-    )  # TODO: Make assert in MHSA to check if embed_dim is divisible by num_heads
+    embed_dim = num_heads * embed_dim_multiplier
 
     mhsa = attention_module(
         num_heads,
@@ -61,6 +59,17 @@ def test_multi_head_self_attention_init(
     assert dropout_p == mhsa.dropout_p
     assert mhsa.q_norm.bias is None
     assert mhsa.k_norm.bias is None
+
+
+@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
+def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_module, layer_kernels):
+    with pytest.raises(ValueError, match="must be divisible by number of heads"):
+        attention_module(
+            num_heads=3,
+            embed_dim=10,
+            layer_kernels=layer_kernels,
+            attention_implementation="scaled_dot_product_attention",
+        )
 
 
 @pytest.mark.gpu

@@ -1,0 +1,14 @@
+---
+defaults:
+  - transport
+  - _self_
+
+transport:
+  objective: edm_diffusion
+
+training_loss:
+  datasets:
+    data:
+      _target_: anemoi.training.losses.WeightedMSELoss
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+      ignore_nans: False

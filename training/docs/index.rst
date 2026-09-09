@@ -38,6 +38,7 @@ This package provides the *Anemoi* training functionality.
    user-guide/configuring
    user-guide/multi-datasets
    user-guide/training
+   user-guide/evaluation
    user-guide/tasks
    user-guide/training-methods
    user-guide/models

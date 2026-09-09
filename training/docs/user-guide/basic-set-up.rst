@@ -19,9 +19,8 @@ These missing values in the configuration are placeholders for the user
 to fill in marked with ``???``. You can find the default configurations
 in the `Anemoi Training repository
 <https://github.com/ecmwf/anemoi-training>`_ under
-``src/anemoi/training/config/``. Alternatively, the next section will
-show you how to :ref:`generate a user config file <Configuring the
-Training>`.
+``src/anemoi/training/config/``. Alternatively, the next section shows
+how to :doc:`generate a user config file <configuring>`.
 
 .. _prep-training-components:
 

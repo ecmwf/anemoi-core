@@ -1,4 +1,4 @@
-# (C) Copyright 2025 Anemoi contributors.
+# (C) Copyright 2025-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,22 +12,21 @@ import gc
 import logging
 import os
 import time
-from pathlib import Path
 
 import psutil
 import pytest
+import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
 from torch.cuda import reset_peak_memory_stats
 
 from anemoi.training.diagnostics.benchmark_server import benchmark
-from anemoi.training.diagnostics.benchmark_server import parse_benchmark_config
+from anemoi.training.diagnostics.benchmark_server import get_benchmark_store
 from anemoi.training.diagnostics.benchmark_server import track_dataloader_benchmark_results
 from anemoi.training.train.profiler import AnemoiProfiler
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"  # reduce memory fragmentation
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +60,7 @@ def restore_base_seed(original_seed: str | None) -> None:
 
 @pytest.mark.multigpu
 @pytest.mark.slow
-def test_benchmark_dataloader(
+def test_benchmark_training_dataloader(
     benchmark_config: tuple[DictConfig, str],  # cfg, benchmarkTestCase,
 ) -> None:
     """Runs a benchmark for dataloader performance, testing MultiDataset batch sampling speed."""
@@ -151,9 +150,14 @@ def test_benchmark_training_cycle(
     # Run model with profiler
     AnemoiProfiler(cfg).profile()
 
-    # determine store from benchmark config
-    config_path = Path("~/.config/anemoi/anemoi-benchmark.yaml").expanduser()
-    user, hostname, path = parse_benchmark_config(config_path)
-    store: str = f"ssh://{user}@{hostname}:{path}"
+    # determine store from benchmark config (per-kind, so benchmark artefacts
+    # land under the 'benchmarks' subdirectory on the server)
+    store = get_benchmark_store("benchmarks")
 
     benchmark(cfg, test_case, store)
+
+    # barrier to ensure all processes have completed before finishing the test
+    # otherwise process 0 will finish the final test before process 0
+    # has finished comparing the results against the benchmark server
+    # torch.dist is initialized in the benchmark function, so we can use it here
+    dist.barrier()

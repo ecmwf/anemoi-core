@@ -20,9 +20,9 @@ around three key components:
 To train a model, users typically subclass one of the pre-implemented
 graph modules or create a new one by extending ``BaseTrainingModule``.
 
-*****************
+*******************
  BaseTrainingModule
-*****************
+*******************
 
 All training methods subclass :class:`~anemoi.training.train.methods.base.BaseTrainingModule`,
 which itself inherits from PyTorch Lightning's
@@ -81,8 +81,8 @@ All methods inherit from
 
 :class:`~anemoi.training.train.methods.single.SingleTraining`
    Deterministic single-member training. Compatible with
-   :class:`~anemoi.training.tasks.forecasting.Forecaster`,
-   :class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`,
+   :class:`~anemoi.training.tasks.forecaster.Forecaster`,
+   :class:`~anemoi.training.tasks.temporal_downscaler.TemporalDownscaler`,
    and :class:`~anemoi.training.tasks.timeless.Autoencoder`.
 
 :class:`~anemoi.training.train.methods.ensemble.EnsembleTraining`
@@ -90,10 +90,10 @@ All methods inherit from
    members per device and uses ``DDPEnsGroupStrategy`` for distributed
    execution.
 
-:class:`~anemoi.training.train.methods.diffusion.DiffusionTraining`
-   Base class for diffusion-based probabilistic forecasters. Applies
-   stepwise pre/post-processors and handles the noise-conditioned
-   forward pass.
+:class:`~anemoi.training.train.methods.transport.TransportTraining`
+   Configurable transport training for EDM diffusion and stochastic-interpolant
+   objectives. Selects state or tendency targets with ``prediction_mode``
+   and the objective with ``transport_objective``.
 
 .. automodule:: anemoi.training.train.methods.single
    :members:
@@ -105,7 +105,17 @@ All methods inherit from
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.train.methods.diffusion
+.. automodule:: anemoi.training.train.methods.transport
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.methods.edm_diffusion
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+.. automodule:: anemoi.training.train.methods.stochastic_interpolant
    :members:
    :no-undoc-members:
    :show-inheritance:
@@ -120,9 +130,9 @@ temporal I/O structure for each scientific workflow.
 Current supported tasks include:
 
 #. **Forecaster** —
-   :class:`~anemoi.training.tasks.forecasting.Forecaster`
+   :class:`~anemoi.training.tasks.forecaster.Forecaster`
 #. **Temporal Downscaler** —
-   :class:`~anemoi.training.tasks.temporal_downscaling.TemporalDownscaler`
+   :class:`~anemoi.training.tasks.temporal_downscaler.TemporalDownscaler`
 #. **AutoEncoder** —
    :class:`~anemoi.training.tasks.timeless.Autoencoder`
 

@@ -32,15 +32,19 @@ WRAPPED_LOSSES = ["anemoi.training.losses.aggregate.TimeAggregateLossWrapper"]
 LOGGER = logging.getLogger(__name__)
 
 
-def _graph_data_kwargs(target_cls: type, graph_data: object | None, extra_kwargs: dict | None = None) -> dict:
-    """Return runtime kwargs for classes that declare ``needs_graph_data``."""
+def _graph_data_kwargs(
+    target_cls: type,
+    graph_data: object | None,
+    data_node_name: str | None,
+) -> dict:
+    """Return graph runtime context explicitly requested by a loss class."""
     if not getattr(target_cls, "needs_graph_data", False):
         return {}
     result: dict = {}
     if graph_data is not None:
         result["graph_data"] = graph_data
-    if extra_kwargs:
-        result.update(extra_kwargs)
+    if data_node_name is not None and getattr(target_cls, "needs_data_node_name", False):
+        result["data_node_name"] = data_node_name
     return result
 
 
@@ -187,8 +191,8 @@ def get_loss_function(
     target_cls = get_class(loss_config["_target_"])
     predicted_variables = loss_config.pop("predicted_variables", None)
     target_variables = loss_config.pop("target_variables", None)
+    compatibility_options = loss_config.pop("check_variables_compatibility", {})
 
-    graph_extra = {"data_node_name": data_node_name} if data_node_name is not None else {}
     target = loss_config.get("_target_")
 
     # For CombinedLoss, propagate parent scalers to sub-losses that don't specify their own.
@@ -209,7 +213,7 @@ def get_loss_function(
             loss_config,
             per_scale_loss=per_scale_loss,
             **kwargs,
-            **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+            **_graph_data_kwargs(target_cls, graph_data, data_node_name),
         )
 
     if target in WRAPPED_LOSSES:
@@ -241,7 +245,7 @@ def get_loss_function(
         loss_config,
         **constructor_kwargs,
         **kwargs,
-        **_graph_data_kwargs(target_cls, graph_data, graph_extra),
+        **_graph_data_kwargs(target_cls, graph_data, data_node_name),
         _recursive_=False,
     )
 
@@ -262,6 +266,7 @@ def get_loss_function(
             target_variables=target_variables,
             data_indices=data_indices,
         )
+        loss_function.compatibility_options = dict(compatibility_options)
     _apply_scalers(loss_function, scalers_to_include, scalers, data_indices)
     return loss_function
 
