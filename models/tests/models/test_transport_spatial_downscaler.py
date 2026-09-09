@@ -17,6 +17,7 @@ sampling flow.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -146,6 +147,74 @@ def _make_bare_model(
     }
     model._input_dataset_names_by_target = {"out_hres": ["in_lres", "in_hres"]}
     return model
+
+
+def test_encoder_node_set_maps_conditioning_inputs_to_their_target() -> None:
+    """Conditioning inputs are encoded on the target grid, so they share its node set."""
+    model = _make_bare_model()
+
+    assert model.encoder_node_set("in_lres") == "out_hres"
+    assert model.encoder_node_set("in_hres") == "out_hres"
+
+
+def test_encoder_node_set_leaves_target_datasets_unchanged() -> None:
+    model = _make_bare_model()
+
+    assert model.encoder_node_set("out_hres") == "out_hres"
+
+
+def test_forward_transport_network_resolves_encoder_and_decoder_by_routing_name() -> None:
+    """Encoder/decoder keys are user-defined config names, not dataset names."""
+    model = _make_bare_model()
+    model.target_dataset_name = "out_hres"
+    model._graph_name_hidden = "hidden"
+    model.node_attributes.attr_ndims["hidden"] = 1
+    model.latent_skip = False
+
+    # Config keys deliberately differ from the dataset name, as in graphtransformer_multi_*.
+    model.dataset2encoder = {"out_hres": "enc0"}
+    model.dataset2decoder = {"out_hres": "dec0"}
+
+    calls: list[str] = []
+
+    def _encoder(_pair: Any, **_kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        calls.append("encoder")
+        return torch.zeros(4, 1), torch.zeros(4, 1)
+
+    def _decoder(_pair: Any, **_kwargs: Any) -> torch.Tensor:
+        calls.append("decoder")
+        return torch.zeros(4, 1)
+
+    model.encoder = {"enc0": _encoder}
+    model.decoder = {"dec0": _decoder}
+
+    edges = (None, None, None)
+    provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
+    model.encoder_graph_provider = {"out_hres": provider}
+    model.decoder_graph_provider = {"out_hres": provider}
+    model.processor_graph_provider = provider
+    model.processor = lambda x, **_kwargs: x
+    model.latent_aggregator = lambda *_args, **_kwargs: torch.zeros(4, 1)
+
+    model._resolve_in_out_sharded = lambda **_kwargs: {"out_hres": False}
+    model._assert_valid_sharding = lambda *_args, **_kwargs: None
+    model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
+        {"out_hres": {}},
+        {},
+        {"out_hres": {}},
+    )
+    model._assemble_input = lambda **_kwargs: (torch.zeros(4, 1), None, None)
+    model._assemble_output = lambda x, *_args, **_kwargs: x
+
+    target = torch.zeros(1, 1, 1, 4, 1)
+    out = model._forward_transport_network(
+        x={"out_hres": target},
+        conditioned_target={"out_hres": target},
+        condition={"out_hres": torch.zeros(1)},
+    )
+
+    assert calls == ["encoder", "decoder"]
+    assert "out_hres" in out
 
 
 # ── role inference ────────────────────────────────────────────────────────────

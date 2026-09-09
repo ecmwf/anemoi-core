@@ -1183,6 +1183,15 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     # ── dimension arithmetic ─────────────────────────────────────────────────
 
+    def encoder_node_set(self, dataset_name: str) -> str:
+        """Graph node set whose grid this dataset's features must occupy at encode time."""
+        # Conditioning inputs have no encoder of their own; they are concatenated onto
+        # the target grid, so their projected tensors must match the target's node set.
+        for target_name, input_names in self._input_dataset_names_by_target.items():
+            if dataset_name in input_names:
+                return target_name
+        return dataset_name
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Return the encoder input dimension on the target grid for ``dataset_name``."""
         if dataset_name not in self.target_dataset_names:
@@ -1519,7 +1528,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             dst_nodes=shard_sizes_hidden,
             edges=enc_edge_shard_sizes,
         )
-        x_data_latent, x_latent = self.encoder[target_name](
+        x_data_latent, x_latent = self.encoder[self.dataset2encoder[target_name]](
             (x_data_latent, x_hidden_latent),
             batch_size=bse,
             shard_info=enc_shard_info,
@@ -1565,7 +1574,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             dst_nodes=shard_sizes_data,
             edges=dec_edge_shard_sizes,
         )
-        x_out = self.decoder[target_name](
+        x_out = self.decoder[self.dataset2decoder[target_name]](
             (x_latent_proc, x_data_latent),
             batch_size=bse,
             shard_info=dec_shard_info,
