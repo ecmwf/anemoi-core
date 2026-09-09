@@ -29,6 +29,10 @@ data:
     in_lres:
       forcing: []
       diagnostic: []
+      spatial_processor:
+        _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
+        file_path: ${system.input.truncation}
+        row_normalize: True
       processors:
         normalizer:
           _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -63,14 +67,6 @@ data:
             default: mean-std
             none: []
 
-  # CrossGridProjector reprojects the lres input onto the hres grid before
-  # concatenation with in_hres. Loaded from the .npz truncation matrix so no
-  # extra graph edge is needed.
-  spatial_processors:
-    in_lres:
-      _target_: anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector
-      file_path: ${system.input.truncation}
-      row_normalize: True
 
 training:
   transport:

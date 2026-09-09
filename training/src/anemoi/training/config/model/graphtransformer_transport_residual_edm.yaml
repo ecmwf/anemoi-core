@@ -1,24 +1,167 @@
 ---
-# Model config for spatial downscaling with AnemoiTransportResidualModelEncProcDec.
+# Model config for spatial downscaling with AnemoiTransportSpatialDownscalerModelEncProcDec.
 #
-# Inherits all encoder/processor/decoder architecture and EDM transport settings
-# from graphtransformer_transport_edm. The only downscaling-specific additions are:
-#   - _target_: AnemoiTransportResidualModelEncProcDec — uses a separate encoding
-#     path per input dataset and concatenates all inputs + noised residual before
-#     encoding the output (hres) nodes.
-#   - input_datasets: datasets whose features are fed into the encoder as conditioning.
-#   - output_datasets: datasets the decoder reconstructs (residual prediction targets).
-#
-# Architecture note: in_lres and in_hres share the hres grid after CrossGridProjector
-# remaps in_lres. Both are concatenated with y_noised as the encoder input for out_hres.
-defaults:
-  - graphtransformer_transport_edm
-  - _self_
+# Dataset roles come from training.transport.encoder_decoder_roles:
+#   reference = in_lres, conditioning = in_hres, target = out_hres.
+# Only *target* datasets get an encoder/decoder pair. in_lres (remapped onto the hres
+# grid by data.datasets.in_lres.spatial_processor) and in_hres are concatenated as
+# extra per-node features before encoding, so the triple shares one encoder anchored
+# at out_hres.
+
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
 
 model:
   _target_: anemoi.models.models.AnemoiTransportSpatialDownscalerModelEncProcDec
-  # Datasets whose normalized features are concatenated as conditioning input.
-  # in_lres arrives on the hres grid via CrossGridProjector (data.spatial_processors).
-  # input_datasets: [in_lres, in_hres]
-  # # Datasets the model decodes; the loss is computed on these residuals.
-  # output_datasets: [out_hres]
+  hidden_nodes_name: "hidden"
+  latent_skip: True
+  transport:
+    objective: edm_diffusion
+    sigma_data: 1.0
+    noise_channels: 32
+    noise_cond_dim: 16
+    sigma_max: 100.0
+    sigma_min: 0.02
+    rho: 7.0
+    noise_embedder:
+      _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+      num_channels: ${model.model.transport.noise_channels}
+      max_period: 1000
+    training_condition:
+      distribution: "karras"
+      sigma_max: ${model.model.transport.sigma_max}
+      sigma_min: ${model.model.transport.sigma_min}
+      rho: ${model.model.transport.rho}
+    inference_defaults:
+      sampling_schedule:
+        schedule_type: "karras"
+        sigma_max: 100.0
+        sigma_min: 0.02
+        rho: 7.0
+        num_steps: 50
+      sampler:
+        sampler: "heun"
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+    normalized_shape: ${model.num_channels}
+    condition_shape: 16
+    zero_init: True
+    autocast: false
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  num_channels: ${model.num_channels}
+  trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
+  sub_graph_edge_attributes: ${model.attributes.edges}
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
+  num_heads: 16 # GraphTransformer or Transformer only
+  qk_norm: True
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  layer_kernels: ${model.layer_kernels}
+  shard_strategy: "edges"
+  graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+encoders:
+  "0":
+    # Target only: the graph's encoder edges are (out_hres -> hidden), and the
+    # conditioning datasets are folded in as node features by _assemble_input.
+    source_datasets: [ "out_hres" ]
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.data2hidden}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
+decoders:
+  "0":
+    target_datasets: [ "out_hres" ]
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, prognostics, trainable_parameters, encoded_data
+    mapper:
+      _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      sub_graph_edge_attributes: ${model.attributes.edges}
+      num_chunks: 4
+      mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16 # GraphTransformer or Transformer only
+      initialise_data_extractor_zero: False
+      qk_norm: True
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+      shard_strategy: "edges"
+      graph_attention_backend: "triton"  # Options: "triton", "pyg"
+
+# The residual baseline is the projected reference (ResidualPredictionMode), so the
+# downscaler's _assemble_input returns no x_skip and never indexes self.residual.
+residual:
+  datasets: {}
+
+output_mask:
+  datasets:
+    out_hres:
+      _target_: anemoi.training.utils.masks.NoOutputMask
+
+node_trainable_parameters:
+  in_lres: 8
+  in_hres: 8
+  out_hres: 8
+  hidden: 8
+
+edge_trainable_parameters:
+  data2hidden: 8
+  hidden2hidden: 8
+  hidden2data: 8
+
+attributes:
+  edges:
+  - edge_length
+  - edge_dirs
+  nodes: []
+
+# Torch compile configuration
+# A list of modules present in the model, which will be compiled
+compile:
+  - module: anemoi.models.layers.conv.GraphTransformerConv
+  - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+
+# Bounding configuration
+bounding:
+  datasets:
+    in_lres: []
+    in_hres: []
+    out_hres: []
