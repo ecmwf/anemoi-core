@@ -29,6 +29,9 @@ class HEALPixNodes(BaseNodeBuilder):
     ----------
     resolution : int
         The resolution of the grid.
+    nest_ordering : bool, optional
+        If true, assume NEST pixel ordering, else RING ordering
+        See: https://healpy.readthedocs.io/en/latest/generated/healpy.pixelfunc.ang2pix.html
 
     Methods
     -------
@@ -42,9 +45,10 @@ class HEALPixNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, resolution: int, name: str) -> None:
+    def __init__(self, resolution: int, name: str, nest_ordering: bool = True) -> None:
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
+        self.nest_ordering = nest_ordering
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
@@ -65,7 +69,7 @@ class HEALPixNodes(BaseNodeBuilder):
         LOGGER.info(f"Creating HEALPix nodes with resolution {spatial_res_degrees:.2} deg.")
 
         npix = hp.nside2npix(2**self.resolution)
-        hpxlon, hpxlat = hp.pix2ang(2**self.resolution, range(npix), nest=True, lonlat=True)
+        hpxlon, hpxlat = hp.pix2ang(2**self.resolution, range(npix), nest=self.nest_ordering, lonlat=True)
 
         return self.reshape_coords(hpxlat, hpxlon)
 
