@@ -146,6 +146,26 @@ class BasePreprocessor(nn.Module):
             x = x.clone()
         return x
 
+    def expected_nan_mask(self, x: Tensor) -> Optional[Tensor]:
+        """Positions where NaNs are legitimate after the forward transform.
+
+        Processors that intentionally leave NaNs in the tensor (e.g. an imputer that
+        only fills the input timesteps and defers the target NaNs to the loss)
+        override this to return a boolean mask marking those positions. Everything
+        not covered by the mask is still checked by ``Processors._run_checks``.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            The tensor as returned by the full forward chain.
+
+        Returns
+        -------
+        Optional[torch.Tensor]
+            Boolean mask broadcastable to ``x``, or None if no NaN is expected.
+        """
+        return None
+
 
 class Processors(nn.Module):
     """A collection of processors."""
@@ -200,11 +220,21 @@ class Processors(nn.Module):
 
     def _run_checks(self, x):
         """Run checks on the processed tensor."""
-        if not self.inverse:
-            # Forward transformation checks:
-            assert not torch.isnan(
-                x
-            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
+        if self.inverse:
+            return
+
+        # Forward transformation checks: no NaN may survive the chain, except at the
+        # positions where one of the processors declares them to be expected.
+        nans = torch.isnan(x)
+        for processor in self.processors.values():
+            expected_nan_mask = getattr(processor, "expected_nan_mask", None)
+            expected = expected_nan_mask(x) if expected_nan_mask is not None else None
+            if expected is not None:
+                nans = nans & ~expected
+        assert not nans.any(), (
+            f"NaNs ({nans.sum()}) found at unexpected positions in processed tensor "
+            f"after {self.__class__.__name__}."
+        )
 
 
 class StepwiseProcessors(nn.Module):
