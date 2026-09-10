@@ -103,10 +103,14 @@ def prepare_compilation(
     training_config: DictConfig,
 ) -> torch.nn.Module:
     """Reads model_config and marks the matching submodules in model for compilation."""
+    # TODO add warning if gradient checkpointing is enabled, stating that non-determinism in compilation can lead to errors
+    torch.set_num_threads(1) # trying to see if this prevents global state (num_threads) changing, it does
+    torch._inductor.config.shape_padding=False #non-deterministic shape padding can cause recompile errors when using torch compile inside checkpointed regions
     # disable LRU cache, this is a fix for https://github.com/pytorch/pytorch/issues/166926
     # The runtime impact of this should be marginal
     if version.parse(torch.__version__) >= version.parse("2.10.0"):
         torch._C._dynamo.eval_frame._set_lru_cache(False)
+        LOGGER.info('disabling LRU cache')
     else:
         LOGGER.warning(
             "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may"
