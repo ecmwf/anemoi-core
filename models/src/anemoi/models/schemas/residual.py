@@ -18,6 +18,13 @@ class SkipConnectionSchema(BaseModel):
         description="Timestep index to use for the skip connection. "
         "Defaults to -1, which selects the most recent timestep.",
     )
+    exclude: list[str] | None = Field(
+        None,
+        description="Variable names for which the additive skip term is disabled "
+        "(the variables stay prognostic but the residual is zeroed). Names not "
+        "present in a given dataset are ignored, so a shared config can list "
+        "variables that only exist in some datasets.",
+    )
 
 
 class TruncationConfigDiskSchema(BaseModel):

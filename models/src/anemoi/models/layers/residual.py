@@ -29,6 +29,10 @@ from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseRegularSHT
 
+import logging
+
+LOGGER = logging.getLogger(__name__)
+
 
 class BaseResidualConnection(nn.Module, ABC):
     """Base class for residual connection modules."""
@@ -63,11 +67,45 @@ class SkipConnection(BaseResidualConnection):
     This layer returns the most recent timestep from the input sequence.
 
     This module is used to bypass processing layers and directly pass the latest input forward.
+
+    Parameters
+    ----------
+    step : int
+        Timestep index of the input sequence to use (default -1, the most recent).
+    exclude : list[str], optional
+        Variable names for which the additive skip term should be disabled.
+        The channels are zeroed in the returned tensor so that the ``+=`` in
+        ``_assemble_output`` becomes a no-op for those variables while the
+        variables remain prognostic (input + output + loss). Names not present
+        in ``data_indices.model.input.name_to_index`` are silently ignored, so
+        a shared residual config can list variables that only exist in some
+        datasets.
     """
 
-    def __init__(self, step: int = -1, **_) -> None:
+    def __init__(
+        self,
+        step: int = -1,
+        exclude: list[str] | None = None,
+        data_indices=None,
+        **_,
+    ) -> None:
         super().__init__()
         self.step = step
+
+        mask: torch.Tensor | None = None
+        hit_names: list[str] = []
+        if exclude and data_indices is not None:
+            name_to_index = data_indices.model.input.name_to_index
+            hit_names = [n for n in exclude if n in name_to_index]
+            if hit_names:
+                mask = torch.ones(len(name_to_index))
+                mask[[name_to_index[n] for n in hit_names]] = 0.0
+        if mask is not None:
+            self.register_buffer("_skip_mask", mask, persistent=False)
+            LOGGER.info("SkipConnection: data-grid residual disabled for %s", hit_names)
+        else:
+            # Sentinel: no exclusion for this dataset.
+            self._skip_mask = None
 
     def forward(
         self,
@@ -78,6 +116,8 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
+        if self._skip_mask is not None:
+            x_skip = x_skip * self._skip_mask.to(x_skip.dtype)
         return self._expand_time(x_skip, n_step_output)
 
 
