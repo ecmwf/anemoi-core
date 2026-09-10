@@ -40,12 +40,10 @@ class BaseNodeBuilder(ABC):
     """
 
     hidden_attributes: set[str] = set()
-    _init_attributes: list = None
 
     def __init__(self, name: str, attributes: list[BaseNodeAttribute] | None = None) -> None:
         self.name = name
         self.attributes = attributes or []
-        self._init_attributes = list()
         self.area_mask_builder = None
         self.device = get_distributed_device()
 
