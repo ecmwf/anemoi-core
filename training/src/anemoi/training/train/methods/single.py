@@ -38,6 +38,7 @@ class SingleTraining(BaseTrainingModule):
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
+        n_loss_steps = self.num_loss_steps(task_steps, validation_mode)
         for i, task_kwargs in enumerate(task_steps):
             y_pred = self(x)
 
@@ -66,9 +67,10 @@ class SingleTraining(BaseTrainingModule):
                     grid_shard_slice=self.grid_shard_slice,
                 )
 
-            loss = loss + loss_next
+            if i < n_loss_steps:
+                loss = loss + loss_next
             metrics.update(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(task_steps)
+        loss *= 1.0 / n_loss_steps
         return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
