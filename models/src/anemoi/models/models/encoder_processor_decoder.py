@@ -171,6 +171,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             % (self.principal_dataset_name, self.dataset_names)
         )
 
+        if self.latent_fusion_method == "gated":
+            LOGGER.info(
+                f"Gated latent fusion: principal dataset '{self.principal_dataset_name}' "
+                f"seeds the initial latent; other datasets fold in via gated fusion."
+            )
+
 
         # Decoder hidden -> data
         # Per-dataset decoder overrides may be supplied via `model.decoders.<dataset_name>`;
