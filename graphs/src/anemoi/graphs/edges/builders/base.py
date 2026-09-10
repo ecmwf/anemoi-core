@@ -100,7 +100,7 @@ class BaseEdgeBuilder(ABC):
         graph[self.name].edge_type = edge_type
         return graph
 
-    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> HeteroData:
+    def register_attributes(self, graph: HeteroData, attributes: list[BaseEdgeAttributeBuilder]) -> HeteroData:
         """Register attributes in the edges of the graph specified.
 
         Parameters
@@ -115,8 +115,6 @@ class BaseEdgeBuilder(ABC):
         HeteroData
             The graph with the registered attributes.
         """
-        attributes = attributes or []
-
         for attr_obj in attributes:
             edge_index = graph[self.name].edge_index
             graph[self.name][attr_obj.name] = attr_obj(

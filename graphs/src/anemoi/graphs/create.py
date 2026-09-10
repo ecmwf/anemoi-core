@@ -216,7 +216,7 @@ def _parse_edges(cfg: DotDict) -> list[BaseEdgeBuilder]:
                 for attr_name, attr_cfg in attributes_cfg.items():
                     attributes.append(instantiate(attr_cfg, name=attr_name))
 
-            # Each edge can have multiple edge builders
+            # Each set of edges can have multiple edge builders
             edge_builders_list = []
             for builder_cfg in edge_cfg.edge_builders:
                 edge_builder = instantiate(
