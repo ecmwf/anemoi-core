@@ -817,6 +817,30 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return loss, metrics_next, y_pred
 
+    def num_loss_steps(self, task_steps: tuple[dict, ...], validation_mode: bool) -> int:
+        """Number of rollout steps that contribute to the validation loss.
+
+        If ``task.validation_rollout`` is set, validation may roll out further
+        than training. The reported loss is still averaged over the training
+        rollout only to keep ``val_..._loss`` comparable to
+        ``train_..._loss``.
+
+        Parameters
+        ----------
+        task_steps : tuple[dict, ...]
+            The steps the current rollout loop iterates over.
+        validation_mode : bool
+            Whether the rollout is a validation rollout.
+
+        Returns
+        -------
+        int
+            How many of the leading ``task_steps`` are accumulated into the loss.
+        """
+        if not validation_mode:
+            return len(task_steps)
+        return min(len(task_steps), len(tuple(self.task.steps("training"))))
+
     def compute_loss_metrics(
         self,
         y_pred: dict[str, torch.Tensor],
@@ -861,7 +885,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 if validation_mode:
                     loss_obj = self.loss[dataset_name]
                     loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-                    metrics_next[f"{dataset_name}_{loss_name}_loss"] = dataset_loss
+                    step = kwargs.get("rollout_step")
+                    suffix = "" if step is None else f"/{step + 1}"
+                    metrics_next[f"{dataset_name}_{loss_name}_loss{suffix}"] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():

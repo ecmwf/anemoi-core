@@ -984,6 +984,73 @@ def test_single_training_loss_is_averaged_over_num_steps(
     assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
 
 
+def _run_validation_rollout_loss(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    training_rollout: int,
+    validation_rollout: int | None,
+    per_step_losses: list[float],
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """Run ``_step(validation_mode=True)`` with scripted per-step losses."""
+    data_indices = _data_indices_single()
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": training_rollout, "maximum": training_rollout},
+        validation_rollout=validation_rollout,
+    )
+    module = _make_single_training(task, data_indices)
+
+    losses = iter([torch.tensor(value) for value in per_step_losses])
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    def fake_compute_loss_metrics(*_args, **kwargs) -> tuple[torch.Tensor, dict, dict]:
+        loss = next(losses)
+        return loss, {f"data_dummy_loss/{kwargs['rollout_step'] + 1}": loss}, dummy_y
+
+    monkeypatch.setattr(module, "compute_loss_metrics", fake_compute_loss_metrics)
+
+    batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+    output = module._step(batch, validation_mode=True)
+    return output.loss, output.metrics
+
+
+def test_validation_loss_is_averaged_over_training_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With validation_rollout > training rollout the loss still averages the training rollout."""
+    loss, metrics = _run_validation_rollout_loss(
+        monkeypatch,
+        training_rollout=2,
+        validation_rollout=4,
+        per_step_losses=[2.0, 4.0, 100.0, 200.0],
+    )
+
+    # Steps 3 and 4 are logged but excluded from the loss: (2.0 + 4.0) / 2 = 3.0
+    assert torch.isclose(loss, torch.tensor(3.0)), f"Expected 3.0, got {loss.item()}"
+    assert sorted(metrics) == [f"data_dummy_loss/{step}" for step in (1, 2, 3, 4)]
+
+
+def test_validation_loss_follows_training_rollout_when_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With validation_rollout unset the validation rollout equals the training rollout."""
+    loss, metrics = _run_validation_rollout_loss(
+        monkeypatch,
+        training_rollout=2,
+        validation_rollout=None,
+        per_step_losses=[2.0, 4.0],
+    )
+
+    assert torch.isclose(loss, torch.tensor(3.0)), f"Expected 3.0, got {loss.item()}"
+    assert sorted(metrics) == [f"data_dummy_loss/{step}" for step in (1, 2)]
+
+
 def test_single_training_advance_input_called_between_rollout_steps(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
