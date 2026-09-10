@@ -41,7 +41,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=True,
+        coordinates_are_static=True,
     )
 
 
@@ -55,7 +55,7 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=False,
+        coordinates_are_static=False,
         boundaries=None,
     )
 
@@ -240,7 +240,7 @@ def test_tabular_multiple_tensors(default_constant_imputer) -> None:
         statistics=STATISTICS,
         coordinates=None,
         layout=layout,
-        is_static=False,
+        coordinates_are_static=False,
         boundaries=None,
     )
     out = default_constant_imputer.transform(view, in_place=False)

@@ -710,8 +710,9 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: Batch,
+        auxiliary_output: dict[str, Any] | None = None,
         members: int | list[int] | None = 0,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
         """Build the plotting fields and coordinates for a tabular observation dataset.
 
         We extract the fields directly from the per-dataset SourceView using select_time.
@@ -719,24 +720,22 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         Parameters
         ----------
         pl_module : pl.LightningModule
-            The LightningModule instance.
+            Training module providing task, data-index, and processor metadata.
         dataset_name : str
-            The name of the (sparse / tabular) dataset to process.
+            Sparse dataset to extract.
         outputs : TrainingStepOutput
-            The outputs from the model.
+            Validation output containing prediction views.
         batch : Batch
-            The batch of data.
+            Validation batch containing sparse inputs and targets.
+        auxiliary_output : dict[str, Any] | None, optional
+            Optional conditioned-target views to include in the plot.
         members : int | list[int] | None, optional
-            Ensemble members to keep in the prediction. ``None`` keeps all of them.
-            The input and target panels always show the first member, as they are
-            observations rather than forecasts. Default is 0 (first member).
+            Prediction members to show; None retains all members. Inputs and targets show member zero.
 
         Returns
         -------
-        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-            Shape: (input_latlons, output_latlons, x, y_true, y_pred). ``y_pred`` is
-            ``(grid, vars)`` for a single member and ``(members, grid, vars)`` when
-            several are kept, so ensemble-aware plot functions can get the full spread.
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]
+            Shape: (input_latlons, output_latlons, x, y_true, y_pred, auxiliary).
         """
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         task = pl_module.task
@@ -777,15 +776,23 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         target_view = target_batch[dataset_name]
         y_true, output_latlons = _field_and_coords(target_view)
 
-        # Prediction (already at the output/target observation locations).
-        prediction = self._align_output_metadata(outputs.predictions[0][dataset_name], feature_indices)
-        prediction = self.post_processors[dataset_name](
-            prediction.apply_func(lambda t, **_: t.detach().cpu()),
-            in_place=False,
-        )
-        y_pred = _select_pred_members(prediction.data[self.sample_idx], prediction).numpy()
+        def _output_field(output: Batch | SourceView) -> np.ndarray:
+            output_view = output[dataset_name] if isinstance(output, Batch) else output
+            output_view = self._align_output_metadata(output_view, feature_indices)
+            output_view = self.post_processors[dataset_name](
+                output_view.apply_func(lambda t, **_: t.detach().cpu()),
+                in_place=False,
+            )
+            return _select_pred_members(output_view.data[self.sample_idx], output_view).numpy()
 
-        return input_latlons, output_latlons, x, y_true, y_pred
+        # Prediction (already at the output/target observation locations).
+        y_pred = _output_field(outputs.predictions[0][dataset_name])
+
+        auxiliary = None
+        if auxiliary_output is not None and dataset_name in auxiliary_output:
+            auxiliary = _output_field(auxiliary_output[dataset_name])
+
+        return input_latlons, output_latlons, x, y_true, y_pred, auxiliary
 
 
 class LossCurvePlot(BasePerBatchPlotCallback):
@@ -859,10 +866,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
 
         for dataset_name in dataset_names:
             if not isinstance(self.loss[dataset_name], BaseLoss):
-                LOGGER.warning(
-                    "Loss function must be a subclass of BaseLoss, or provide `squash`.",
-                    RuntimeWarning,
-                )
+                LOGGER.warning("Loss function must be a subclass of BaseLoss, or provide `squash`.")
             loss_inputs = extract_loss_inputs(pl_module, dataset_name, self.parameter_groups)
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
@@ -1057,11 +1061,12 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             local_rank = pl_module.local_rank
 
             if _is_sparse_dataset(batch, dataset_name):
-                input_latlons, output_latlons, x, y_true, y_pred = self._sparse_sample(
+                input_latlons, output_latlons, x, y_true, y_pred, auxiliary = self._sparse_sample(
                     pl_module,
                     dataset_name,
                     outputs,
                     batch,
+                    auxiliary_output=auxiliary_output,
                     members=self._get_process_members(pl_module),
                 )
                 fig = self.plot_fn(
@@ -1070,7 +1075,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     y_true=y_true,
                     y_pred=y_pred,
                     latlons=input_latlons,
-                    auxiliary=None,
+                    auxiliary=auxiliary,
                     sparse=True,
                     output_latlons=output_latlons,
                     settings=self.plotting_settings,

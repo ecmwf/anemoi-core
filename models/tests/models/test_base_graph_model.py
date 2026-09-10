@@ -9,15 +9,17 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
 
 
 class DummyGraphModel(BaseGraphModel):
-    def _build_networks(self, model_config) -> None:
+    def _build_networks(self, model_config, static_graph, dynamic_graph_config) -> None:
         self.seen_hidden_name = model_config.model.hidden_nodes_name
 
     def _assemble_input(self, x, batch_size, grid_shard_sizes=None, model_comm_group=None):
@@ -71,7 +73,7 @@ def _make_hierarchical_graph() -> HeteroData:
     return graph
 
 
-def test_base_graph_model_builds_with_omegaconf_config() -> None:
+def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.MonkeyPatch) -> None:
     model_config = OmegaConf.create(
         {
             "model": {
@@ -86,7 +88,7 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
                 "encoders": {
                     0: {
                         "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
+                        "dataset_fusing_strategy": "none",
                         "mapper": {},
                     },
                 },
@@ -105,20 +107,25 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
         },
     )
 
+    graph = _make_graph()
+    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input=1,
         n_step_output=1,
-        graph_data=_make_graph(),
+        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
+        is_dataset_static={"data": True},
+        data_layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
     )
 
     assert model.seen_hidden_name == "hidden"
     assert "data" in model.residual
+    assert model.target_dim["data"] == 4
 
 
-def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
+def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytest.MonkeyPatch) -> None:
     model_config = OmegaConf.create(
         {
             "model": {
@@ -134,7 +141,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
                 "encoders": {
                     0: {
                         "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
+                        "dataset_fusing_strategy": "none",
                         "mapper": {},
                     },
                 },
@@ -153,14 +160,18 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
         },
     )
 
+    graph = _make_hierarchical_graph()
+    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     model = DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input=1,
         n_step_output=1,
-        graph_data=_make_hierarchical_graph(),
+        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
+        is_dataset_static={"data": True},
+        data_layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
     )
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
-    assert model.node_attributes.num_nodes["hidden_3"] == 1
+    assert model._graph_data["hidden_3"].num_nodes == 1

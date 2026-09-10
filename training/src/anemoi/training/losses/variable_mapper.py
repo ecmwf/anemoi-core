@@ -373,19 +373,19 @@ class LossVariableMapper(BaseLossWrapper):
 
         if empty_metric_selection:
             if squash:
-                return torch.zeros((), dtype=torch.float32, device=pred.device, requires_grad=False)
+                return torch.zeros((), dtype=pred.dtype, device=pred.device, requires_grad=False)
             len_model_output = len(pred.variables)
-            return torch.zeros(len_model_output, dtype=torch.float32, device=pred.device, requires_grad=False)
+            return torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         if squash:
             return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
         len_model_output = len(pred.variables)
-        loss = torch.zeros(len_model_output, dtype=torch.float32, device=pred.device, requires_grad=False)
         loss_per_variable = self.loss(
             pred_filtered,
             target_filtered,
             squash=squash,
             **loss_kwargs,
         )
+        loss = loss_per_variable.new_zeros(len_model_output)
         loss[pred_indices] = loss_per_variable
         return loss

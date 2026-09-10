@@ -13,6 +13,9 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import GriddedSourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
@@ -20,6 +23,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.losses.variable_mapper import LossVariableMapper
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
@@ -476,25 +480,40 @@ class TestScalerIndicesRemapping:
         assert call["pred"].shape[-1] == 2
         assert call["target"].shape[-1] == 2
 
-    def test_empty_remap_returns_zero(self, data_indices_forcing_gaps: IndexCollection) -> None:
-        """scaler_indices selecting no filtered variables → zero tensor."""
+    @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+    @pytest.mark.parametrize("squash", [False, True])
+    def test_empty_remap_returns_zero(
+        self,
+        data_indices_forcing_gaps: IndexCollection,
+        dtype: torch.dtype,
+        squash: bool,
+    ) -> None:
+        """Empty selections preserve the prediction dtype for scalar and variable outputs."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
-        w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
+        w.add_scaler(dimension=TensorDim.GRID, scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=TensorDim.VARIABLE, scaler=torch.tensor([2.0]), name="var_w")
 
-        pred = torch.zeros(1, 1, 1, 8, 6)
-        target = torch.zeros(1, 1, 1, 8, 10)
-        pred[..., 0] = 1.0
+        def view(nvars: int) -> GriddedSourceView:
+            return create_source_view(
+                name="data",
+                data=torch.ones(1, 1, 1, 8, nvars, dtype=dtype),
+                variables=[f"v{i}" for i in range(nvars)],
+                statistics={},
+                coordinates=torch.zeros(8, 2),
+                layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+                coordinates_are_static=True,
+            )
 
-        # Global index 3 not in filtered set ["var_0"]
+        # Global index 3 is outside the filtered set ["var_0"].
         loss = w(
-            pred,
-            target,
+            view(6),
+            view(10),
+            squash=squash,
             scaler_indices=(..., [3]),
             pred_layout=IndexSpace.DATA_OUTPUT,
             target_layout=IndexSpace.DATA_FULL,
         )
-        torch.testing.assert_close(loss, torch.tensor(0.0))
+        torch.testing.assert_close(loss, torch.zeros(() if squash else (6,), dtype=dtype))
 
     def test_partial_remap_logs_debug(
         self,

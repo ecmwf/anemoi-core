@@ -359,7 +359,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         )
 
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
-        out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
+        out_type = torch.get_autocast_dtype("cuda") if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
         for chunk_id in range(chunk_partition.num_parts):

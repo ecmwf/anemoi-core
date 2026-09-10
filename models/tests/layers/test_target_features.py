@@ -18,11 +18,13 @@ import pytest
 import torch
 from torch import Tensor
 
-from anemoi.models.layers.target_features import TARGET_FEATURE_REGISTRY
-from anemoi.models.layers.target_features import CompositeTargetFeature
-from anemoi.models.layers.target_features import DecodingTargetFeature
-from anemoi.models.layers.target_features import create_decoding_target_features
-from anemoi.models.layers.target_features import register_target_feature
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import GriddedSourceView
+from anemoi.models.models.target_features import TARGET_FEATURE_REGISTRY
+from anemoi.models.models.target_features import CompositeTargetFeature
+from anemoi.models.models.target_features import DecodingTargetFeature
+from anemoi.models.models.target_features import create_decoding_target_features
+from anemoi.models.models.target_features import register_target_feature
 
 
 @dataclass
@@ -105,7 +107,15 @@ class TargetFeatureTestCase:
             model_init.num_nodes,
             model_init.num_vars,
         )
-        return torch.rand(shape, dtype=torch.float32)
+        return GriddedSourceView(
+            name=self.DATASET,
+            data=torch.rand(shape, dtype=torch.float32),
+            coordinates=torch.zeros(model_init.num_nodes, 2),
+            variables=[f"v{i}" for i in range(model_init.num_vars)],
+            statistics={},
+            layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+            coordinates_are_static=True,
+        )
 
     @pytest.fixture
     def x_encoded_data(self, model_init, spec) -> Tensor:
@@ -133,7 +143,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
         expected_dim: int,
         model: SimpleNamespace,
         model_init: FakeModelConfig,
-        x_input_data: Tensor,
+        x_input_data: GriddedSourceView,
         x_encoded_data: Tensor,
     ) -> None:
         """Test that the target feature has the expected dimension and produces the correct tensor shape."""
@@ -143,13 +153,17 @@ class TestTargetFeatures(TargetFeatureTestCase):
         assert feature.dim == expected_dim
 
         # Test feature shape
-        out = feature.tensor(x_input_data, x_encoded_data, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET)
+        out = feature.tensor(
+            x_input_data, x_encoded_data, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+        )
         ensemble_size, num_nodes, n_step_input = self.ENSEMBLE_SIZE, model_init.num_nodes, model_init.n_step_input
         var_idx = model_init.specs[self.DATASET].forcing_idx
         num_rows = self.BATCH_SIZE * ensemble_size * num_nodes
         assert out.shape == (num_rows, feature.dim)
 
-        out = feature.tensor(x_input_data, x_encoded_data, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET)
+        out = feature.tensor(
+            x_input_data, x_encoded_data, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+        )
         if feature_name == "forcings":
             # Test forcing specific shape and content
             assert out.shape == (self.BATCH_SIZE * ensemble_size * num_nodes, feature.dim)
@@ -158,18 +172,20 @@ class TestTargetFeatures(TargetFeatureTestCase):
                     for node in range(num_nodes):
                         row = (batch * ensemble_size + ens) * num_nodes + node
                         expected = torch.cat(
-                            [x_input_data[batch, step, ens, node, var_idx] for step in range(n_step_input)],
+                            [x_input_data.data[batch, step, ens, node, var_idx] for step in range(n_step_input)],
                         )
                         torch.testing.assert_close(out[row], expected)
         elif feature_name == "encoded_data":
             # Test encoded_data is passed through correctly
             assert out is x_encoded_data
             with pytest.raises(ValueError, match="requires the encoder output for dataset 'data'"):
-                feature.tensor(x_input_data, None, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET)
+                feature.tensor(
+                    x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+                )
         elif feature_name == "coordinates":
             # Test coordinates feature requires dataset_name to be provided
             with pytest.raises(AssertionError, match="dataset_name must be provided"):
-                feature.tensor(x_input_data, None, batch_size=self.BATCH_SIZE)
+                feature.tensor(x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE)
 
     def test_composite_dim_is_the_sum_of_its_features(self, model: SimpleNamespace) -> None:
         """Test that the composite feature's dimension is the sum of its child features."""
@@ -184,16 +200,20 @@ class TestTargetFeatures(TargetFeatureTestCase):
         model_init: FakeModelConfig,
         spec: DatasetSpec,
         model: SimpleNamespace,
-        x_input_data: Tensor,
+        x_input_data: GriddedSourceView,
     ) -> None:
         """Test that a composite feature concatenates its child features in the declared order."""
         composite = create_decoding_target_features(["coordinates", "trainable_parameters"], [self.DATASET], model)
 
-        out = composite.tensor(x_input_data, None, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET)
+        out = composite.tensor(
+            x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+        )
 
         num_nodes = model_init.num_nodes
         assert out.shape == (self.BATCH_SIZE * num_nodes, composite.dim)
-        torch.testing.assert_close(out[:num_nodes, : spec.coord_dim], model.node_attributes.latlons_data)
+        torch.testing.assert_close(
+            out[:num_nodes, : spec.coord_dim], torch.tensor([0.0, 0.0, 1.0, 1.0]).expand(num_nodes, 4)
+        )
         torch.testing.assert_close(
             out[:num_nodes, spec.coord_dim :],
             model.node_attributes.trainable_tensors[self.DATASET].trainable,

@@ -64,10 +64,25 @@ class InputNormalizer(BasePreprocessor):
         tuple[torch.Tensor, torch.Tensor]
             (norm_mul, norm_add) tensors of shape (len(name_to_index), ).
         """
-        minimum = torch.tensor(statistics["minimum"], dtype=torch.float32, device=device)
-        maximum = torch.tensor(statistics["maximum"], dtype=torch.float32, device=device)
-        mean = torch.tensor(statistics["mean"], dtype=torch.float32, device=device)
-        stdev = torch.tensor(statistics["stdev"], dtype=torch.float32, device=device)
+        required_by_method = {
+            "mean-std": ("mean", "stdev"),
+            "std": ("stdev",),
+            "min-max": ("minimum", "maximum"),
+            "max": ("maximum",),
+            "none": (),
+        }
+        methods = {self.methods.get(name, self.default) for name in name_to_index}
+        unknown = methods - required_by_method.keys()
+        if unknown:
+            raise ValueError(f"Unknown normalisation methods: {sorted(unknown)}")
+        required = {key for method in methods for key in required_by_method[method]}
+        missing = required - statistics.keys()
+        if missing:
+            raise ValueError(f"Normalization requires statistics: {sorted(missing)}")
+        values = {key: torch.as_tensor(statistics[key], dtype=torch.float32, device=device) for key in required}
+        for key, value in values.items():
+            if value.ndim != 1 or value.shape[0] != len(name_to_index):
+                raise ValueError(f"Statistic {key!r} must contain one value per variable.")
 
         norm_mul = torch.ones(len(name_to_index), dtype=torch.float32, device=device)
         norm_add = torch.zeros(len(name_to_index), dtype=torch.float32, device=device)
@@ -77,32 +92,32 @@ class InputNormalizer(BasePreprocessor):
             method = self.methods.get(name, self.default)
 
             if method == "mean-std":
-                if stdev[i] < eps:
+                if values["stdev"][i] < eps:
                     warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
                 else:
-                    norm_mul[i] = 1.0 / stdev[i]
-                    norm_add[i] = -mean[i] / stdev[i]
+                    norm_mul[i] = 1.0 / values["stdev"][i]
+                    norm_add[i] = -values["mean"][i] / values["stdev"][i]
 
             elif method == "std":
-                if stdev[i] < eps:
+                if values["stdev"][i] < eps:
                     warnings.warn(f"Variable {name} has near-zero variance. Skipping scale adjustments.")
                 else:
-                    norm_mul[i] = 1.0 / stdev[i]
+                    norm_mul[i] = 1.0 / values["stdev"][i]
 
             elif method == "min-max":
-                rng = maximum[i] - minimum[i]
+                rng = values["maximum"][i] - values["minimum"][i]
                 if rng < eps:
                     warnings.warn(f"Variable {name} has a near-zero range. Skipping scale adjustments.")
-                    norm_add[i] = -minimum[i]
+                    norm_add[i] = -values["minimum"][i]
                 else:
                     norm_mul[i] = 1.0 / rng
-                    norm_add[i] = -minimum[i] / rng
+                    norm_add[i] = -values["minimum"][i] / rng
 
             elif method == "max":
-                if torch.abs(maximum[i]) < eps:
+                if torch.abs(values["maximum"][i]) < eps:
                     warnings.warn(f"Variable {name} has a near-zero maximum. Skipping scale adjustments.")
                 else:
-                    norm_mul[i] = 1.0 / maximum[i]
+                    norm_mul[i] = 1.0 / values["maximum"][i]
 
             elif method == "none":
                 continue
@@ -154,6 +169,8 @@ class InputNormalizer(BasePreprocessor):
             Statistics dictionary required for normalization.
         name_to_index : dict[str, int]
             Dictionary mapping variable names to their indices, required for normalization.
+        data_index : torch.Tensor, optional
+            Unused deprecated argument. Select variables on the source view before normalization.
 
         Returns
         -------
@@ -195,6 +212,8 @@ class InputNormalizer(BasePreprocessor):
             Statistics dictionary required for normalization.
         name_to_index : dict[str, int]
             Dictionary mapping variable names to their indices, required for normalization.
+        data_index : torch.Tensor, optional
+            Unused deprecated argument. Select variables on the source view before normalization.
 
         Returns
         -------

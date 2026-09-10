@@ -40,9 +40,9 @@ class TensorLayout:
     Notes
     -----
     For sparse observation datasets (``time_in_grid=True``) the per-sample
-    inner tensor has shape ``(ensemble, grid, variables)`` and the batch
-    dimension is represented by the outer Python list (one tensor per
-    sample). ``batch`` therefore stays ``None`` even after collation.
+    inner tensor has shape ``(grid, variables)`` and the batch dimension is
+    represented by the outer Python list (one tensor per sample). ``batch``
+    therefore stays ``None`` even after collation.
     """
 
     batch: int | None = None
@@ -70,6 +70,7 @@ class TensorLayout:
         Returns
         -------
         TensorLayout
+            Layout with each named axis at its supplied position.
         """
         axis_positions = {name: i for i, name in enumerate(args)}
         return cls(
@@ -84,7 +85,8 @@ class TensorLayout:
     @property
     def axis_names(self) -> tuple[str, ...]:
         """Logical axis names of this layout, ordered by physical position."""
-        return tuple(sorted(self.dims, key=lambda name: getattr(self, name)))
+        layout = self.normalized(self.ndim)
+        return tuple(sorted(layout.dims, key=lambda name: getattr(layout, name)))
 
     @property
     def dims(self) -> set[str]:
@@ -156,6 +158,13 @@ class TensorLayout:
     def has_axis(self, name: str) -> bool:
         """Return whether the layout defines a position for logical axis ``name``."""
         return getattr(self, name, None) is not None
+
+    def normalized(self, ndim: int) -> "TensorLayout":
+        """Return a layout with physical axes resolved against the tensor rank."""
+        positions = {name: self.axis(name, ndim=ndim) for name in self._AXIS if self.has_axis(name)}
+        if len(positions) != ndim or set(positions.values()) != set(range(ndim)):
+            raise ValueError(f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once.")
+        return TensorLayout(**positions, time_in_grid=self.time_in_grid)
 
     def __repr__(self) -> str:
         parts = []

@@ -11,6 +11,8 @@ import pytest
 import torch
 from torch import nn
 
+from anemoi.models.data import Batch
+from anemoi.models.data import TensorLayout
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 
 
@@ -20,7 +22,7 @@ class _AggregationReached(RuntimeError):
 
 class _GraphProvider(nn.Module):
     def get_edges(self, **kwargs):
-        return None, None, None
+        return torch.zeros(1, 1), torch.zeros(2, 1, dtype=torch.long), None
 
 
 class _HiddenAttributes(nn.Module):
@@ -45,15 +47,21 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
     def __init__(self) -> None:
         nn.Module.__init__(self)
         self.input_datasets = ["dataset_a", "dataset_b"]
-        self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
+        self.dataset2encoder = {"dataset_a": "shared", "dataset_b": "shared"}
+        self.encoder2datasets = {"shared": self.input_datasets}
+        self.encoder_fusing_strategy = {"shared": "sequential"}
         self._graph_name_hidden = "hidden"
         self.input_dim_latent = 4
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(
             {dataset_name: _GraphProvider() for dataset_name in self.input_datasets},
         )
-        self.encoder = nn.ModuleDict({"dataset_a": _SharedEncoder()})
+        self.encoder = nn.ModuleDict({"shared": _SharedEncoder()})
+        self.encoder_src_projection = nn.ModuleDict()
         self.latent_aggregator = _CaptureAggregator()
+
+    def _hidden_coordinates(self) -> torch.Tensor:
+        return torch.zeros(1, 2)
 
     def _build_networks(self, model_config) -> None:
         raise NotImplementedError
@@ -66,8 +74,9 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         model_comm_group=None,
         dataset_name: str | None = None,
     ):
+        del x, batch_size, grid_shard_sizes, model_comm_group
         value = float(self.input_datasets.index(dataset_name) + 1)
-        return torch.full((1, 4), value), None, [1]
+        return torch.zeros(1, 2), torch.full((1, 4), value), None, None, None, None
 
     def _assemble_output(self, *args, **kwargs):
         raise NotImplementedError
@@ -75,13 +84,17 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
 
 def test_shared_encoder_preserves_each_dataset_latent() -> None:
     model = _SharedEncoderModel()
-    inputs = {
-        "dataset_a": torch.zeros(1, 1, 1, 1, 1),
-        "dataset_b": torch.zeros(1, 1, 1, 1, 1),
-    }
+    inputs = Batch(
+        data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
+        coordinates={name: torch.zeros(1, 2) for name in model.input_datasets},
+        metadata={"static_coords": frozenset(model.input_datasets)},
+        layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in model.input_datasets},
+        variables={name: ["a"] for name in model.input_datasets},
+        statistics={name: {} for name in model.input_datasets},
+    )
 
     with pytest.raises(_AggregationReached):
-        model(inputs)
+        model(inputs, target=inputs)
 
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))

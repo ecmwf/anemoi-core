@@ -15,13 +15,12 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
-from anemoi.models.utils.config import get_multiple_datasets_config
-
 from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.utils.config import get_multiple_datasets_config
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -79,7 +78,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
-        self.is_dataset_static = {key: bool(getattr(val, "is_static_grid", True)) for key, val in data_readers.items()}
+        self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
+        self.data_layouts = {name: reader.layout.with_batch_dim() for name, reader in data_readers.items()}
         self._build_model()
         self._update_metadata()
 
@@ -202,6 +202,7 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             is_dataset_static=self.is_dataset_static,
+            data_layouts=self.data_layouts,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
@@ -212,8 +213,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
     @staticmethod
     def _as_payload(ds_data: torch.Tensor | dict) -> dict:
-        """
-        Normalise one dataset entry to the payload dict of the inference boundary.
+        """Normalise one dataset entry to the payload dict of the inference boundary.
         A bare tensor is accepted as a data-only payload.
         """
         return ds_data if isinstance(ds_data, dict) else {"data": ds_data}
@@ -235,8 +235,7 @@ class AnemoiModelInterface(torch.nn.Module):
         return torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1))
 
     def _statistics_for(self, dataset_name: str, variables: list[str]) -> dict:
-        """
-        Slice the checkpoint's data-space statistics down to the variables.
+        """Slice the checkpoint's data-space statistics down to the variables.
         Same alignment that is done for the model outputs in AnemoiModelEncProcDec._assemble_output.
         """
         name_to_index = self.data_indices[dataset_name].name_to_index
@@ -244,15 +243,14 @@ class AnemoiModelInterface(torch.nn.Module):
         return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
 
     def _target_forcing_names(self, dataset_name: str) -> list[str]:
-        """
-        Returns the names of the output-time forcing variables that condition this dataset's decoder.
+        """Returns the names of the output-time forcing variables that condition this dataset's decoder.
         Mirrors the BaseTask.get_forcings method.
         """
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
     def _is_tabular(self, dataset_name: str) -> bool:
-        return not self.is_dataset_static.get(dataset_name, True)
+        return self.data_layouts[dataset_name].time_in_grid
 
     def _prepare_data(self, payload: dict, dataset_name: str, variables: list[str]) -> dict:
         """Prepare the input data for the model.
@@ -373,14 +371,11 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def get_batch(self, data: dict[str, dict]) -> Batch:
         """Collate the per-dataset sample payloads into a single-sample Batch."""
-        static_coord_datasets = frozenset(
-            dataset_name for dataset_name in data if self.is_dataset_static.get(dataset_name, True)
-        )
+        static_coord_datasets = frozenset(dataset_name for dataset_name in data if self.is_dataset_static[dataset_name])
         return Batch.collate(data, static_coord_datasets=static_coord_datasets)
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
-        """
-        Convert a model output Batch back to plain per-dataset payload dicts.
+        """Convert a model output Batch back to plain per-dataset payload dicts.
         The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
         """
         unwrapped = {}
@@ -448,7 +443,8 @@ class AnemoiModelInterface(torch.nn.Module):
         gather_out : bool, optional
             Whether to gather the output, by default True.
         **kwargs
-            Additional prediction keyword arguments.
+            Additional prediction keyword arguments. Transport models require
+            ``target_template`` here so sampling knows the output geometry.
 
         Returns
         -------
@@ -480,6 +476,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,
             "model_comm_group": model_comm_group,
+            "gather_out": gather_out,
         }
 
         # Add tendency processors if they exist

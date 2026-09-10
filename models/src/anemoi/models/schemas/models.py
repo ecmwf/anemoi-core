@@ -19,8 +19,6 @@ from typing import Union
 
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -31,15 +29,10 @@ from pydantic import model_validator
 
 from anemoi.models.models.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
-from anemoi.models.transport.settings import EdmSettings
-from anemoi.models.transport.settings import NoiseConditioningSettings
-from anemoi.models.transport.settings import StochasticInterpolantSettings
-from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.utils.schemas import BaseModel
 
 from .aggregator import AggregatorSchema  # noqa: TC001
 from .bounding import BoundingSchema
-from .aggregator import AggregatorSchema  # noqa: TC001
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -226,7 +219,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Model schema."
     node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])
     "Learnable node and edge parameters."
-    bounding: DatasetDict[list[Bounding]]
+    bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
@@ -264,18 +257,6 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
-
-    @model_validator(mode="before")
-    @classmethod
-    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
-        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
-        for field in ("encoders", "decoders"):
-            if field in data:
-                if isinstance(data[field], dict):
-                    data[field] = {str(k): v for k, v in data[field].items()}
-                elif isinstance(data[field], DictConfig):
-                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
-        return data
 
     @model_validator(mode="before")
     @classmethod

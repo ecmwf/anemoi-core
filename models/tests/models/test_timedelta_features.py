@@ -16,6 +16,7 @@ from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.data.views import TabularSourceView
 from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.utils.config import DotDict
 
 
@@ -69,20 +70,21 @@ def test_forecaster_requires_timedeltas_when_node_encoding_is_configured() -> No
 def test_forecaster_input_dimensions_include_configured_timedelta_features() -> None:
     model = _model_with_timedelta_attributes()
     model.is_dataset_static = {"obs": False}
+    model.data_layouts = {"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)}
     model.num_input_channels = {"obs": 5}
-    model.num_input_channels_decoding_forcings = {"obs": 2}
     model.node_attributes = SimpleNamespace(num_trainable_parameters={"obs": 4})
-    model.use_encoder_data_output = {"obs": False}
 
     assert model._calculate_input_dim("obs") == 16
-    assert model._calculate_target_dim("obs") == 13
 
 
 def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     model = _model_with_timedelta_attributes()
     model.residual = {}
     model.node_attributes = {}
-    model.use_encoder_data_output = {"obs": False}
+    model.dataset2decoder = {"obs": "obs_decoder"}
+    model.decoders_target_input = {
+        "obs_decoder": create_decoding_target_features(["coordinates"], ["obs"], model),
+    }
     view = TabularSourceView(
         name="obs",
         data=[torch.ones(3, 1)],
@@ -100,13 +102,14 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     )
     target_coords, target_features, _, target_batch_sizes, target_timedeltas = model._assemble_target(
         view,
-        encoder_data_output=None,
+        None,
+        view,
         batch_size=1,
         dataset_name="obs",
     )
 
     assert input_features.shape == (3, 8)
-    assert target_features.shape == (3, 8)
+    assert target_features.shape == (3, 4)
     assert torch.equal(input_coords, target_coords)
     assert torch.equal(input_timedeltas, view.timedeltas[0])
     assert torch.equal(target_timedeltas, view.timedeltas[0])
@@ -135,7 +138,12 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
 def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> None:
     model = _model_with_timedelta_attributes()
     model.node_attributes = {}
-    model.use_encoder_data_output = {"obs": True}
+    model.input_datasets = ["obs"]
+    model.input_dim = {"obs": 8}
+    model.dataset2decoder = {"obs": "obs_decoder"}
+    model.decoders_target_input = {
+        "obs_decoder": create_decoding_target_features(["encoded_data"], ["obs"], model),
+    }
     view = TabularSourceView(
         name="obs",
         data=[torch.ones(2, 1)],
@@ -149,7 +157,8 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
 
     _, target_features, _, _, target_timedeltas = model._assemble_target(
         view,
-        encoder_data_output=encoder_output,
+        encoder_output,
+        view,
         batch_size=1,
         dataset_name="obs",
     )

@@ -75,13 +75,13 @@ training_loss:
     era5:
       # ERA5 uses additional scalers
       _target_: anemoi.training.losses.MSELoss
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-      ignore_nans: false
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+      ignore_nans: true
     cerra:
       # CERRA uses additional scalers
       _target_: anemoi.training.losses.MSELoss
-      scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-      ignore_nans: false
+      scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+      ignore_nans: true
 
 validation_metrics:
   datasets:

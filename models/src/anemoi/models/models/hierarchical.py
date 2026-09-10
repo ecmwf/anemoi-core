@@ -23,8 +23,8 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.utils.config import COORDS_DIM
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,8 +45,6 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 )
                 continue
 
-            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
-
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
                 graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
@@ -59,7 +57,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.encoder[dataset_name] = instantiate(
                 model_config.encoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=encoder_in_channels_src[0],
+                in_channels_src=self.input_dim[dataset_name],
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
             )
@@ -205,8 +203,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 model_config.decoder,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
-                in_channels_dst=decoder_in_channels_dst[0],
-                out_channels_dst=decoder_output_channels_dst[0],
+                in_channels_dst=self.target_dim[dataset_name],
+                out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
             )
 
@@ -315,7 +313,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents in the innermost layer
-        x_latent = self.latent_aggregator(dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latents[self._graph_name_hidden[0]], dataset_latents)
 
         ## Upscale
         x_encoded_latents_dict = {}

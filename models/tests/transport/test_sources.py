@@ -12,7 +12,11 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from anemoi.models.transport.settings import TransportSourceSettings
+from anemoi.models.transport.sources import TransportSourceBuilder
+from anemoi.models.transport.sources import TransportSourceRequest
 from anemoi.models.transport.sources import reference_state_sampling_source
+from anemoi.models.transport.sources import sampling_source_specs
 
 
 def _data_indices_with_positions(
@@ -55,3 +59,37 @@ def test_reference_state_sampling_source_rejects_missing_input_variables() -> No
 
     with pytest.raises(ValueError, match="reference_state transport sources require all model-output variables"):
         reference_state_sampling_source(x, data_indices=data_indices, n_step_output=1)
+
+
+def test_reference_state_sampling_source_rejects_sparse_obs() -> None:
+    data_indices = _data_indices_with_positions(("a",), [0])
+    x = {"obs": [torch.zeros(2, 1)]}
+
+    with pytest.raises(NotImplementedError, match="reference_state.*sparse observation"):
+        reference_state_sampling_source(x, data_indices=data_indices, n_step_output=1)
+
+
+def test_sampling_source_specs_support_sparse_obs_shapes() -> None:
+    target_template = {"obs": [torch.zeros(2, 0), torch.zeros(5, 0)]}
+
+    specs = sampling_source_specs(target_template, num_output_channels={"obs": 4})
+
+    assert specs["obs"].is_sparse
+    assert specs["obs"].shape == [(2, 4), (5, 4)]
+
+
+def test_transport_source_builder_creates_scaled_sparse_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
+    target = {"obs": [torch.zeros(2, 3), torch.zeros(5, 3)]}
+    builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
+
+    def fake_randn(shape: tuple[int, ...], device=None, dtype=None) -> torch.Tensor:
+        return torch.full(shape, 4.0, device=device, dtype=dtype)
+
+    monkeypatch.setattr(torch, "randn", fake_randn)
+
+    source = builder.build(TransportSourceRequest.from_data(target, default_kind="zero"))
+
+    assert isinstance(source["obs"], list)
+    assert [sample.shape for sample in source["obs"]] == [torch.Size([2, 3]), torch.Size([5, 3])]
+    torch.testing.assert_close(source["obs"][0], torch.full((2, 3), 8.0))
+    torch.testing.assert_close(source["obs"][1], torch.full((5, 3), 8.0))

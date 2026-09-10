@@ -9,6 +9,7 @@
 
 import logging
 from dataclasses import dataclass
+
 import torch
 
 from anemoi.models.distributed.shapes import ShardSizes

@@ -9,8 +9,8 @@
 
 
 import logging
-from typing import TYPE_CHECKING
 from contextlib import nullcontext
+from typing import TYPE_CHECKING
 from typing import Literal
 
 import einops
@@ -19,6 +19,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
+from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data import TensorLayout
@@ -28,11 +29,6 @@ LOGGER = logging.getLogger(__name__)
 
 
 CRPSBackend = Literal["naive", "stable"]
-
-
-# Position of the ensemble axis in a gridded ``(batch, time, ensemble, grid, variables)``
-# tensor. TODO: does this need to be hardcoded here? can we pass it in to __init__?
-GRIDDED_ENSEMBLE_AXIS = 2
 
 
 class CRPS(BaseLoss):
@@ -87,11 +83,12 @@ class CRPS(BaseLoss):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        ensemble_axis: int = GRIDDED_ENSEMBLE_AXIS,
+        layout: "TensorLayout",
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask CRPS inputs while preserving each tensor's ensemble size."""
-        target_nan_mask = torch.isnan(target).any(dim=ensemble_axis, keepdim=True)
-        pred_nan_mask = torch.isnan(pred).any(dim=ensemble_axis, keepdim=True)
+        ensemble_dim = layout.axis(TensorDim.ENSEMBLE_DIM)
+        target_nan_mask = torch.isnan(target).any(dim=ensemble_dim, keepdim=True)
+        pred_nan_mask = torch.isnan(pred).any(dim=ensemble_dim, keepdim=True)
         nan_mask = target_nan_mask | pred_nan_mask
         target = target.masked_fill(nan_mask, 0.0)
         pred = pred.masked_fill(nan_mask, 0.0)
@@ -188,7 +185,7 @@ class CRPS(BaseLoss):
     ) -> torch.Tensor:
         return pred.apply_loss(
             target,
-            self._forward_impl,
+            self._evaluate_loss_tensor,
             squash=squash,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,
@@ -212,10 +209,10 @@ class CRPS(BaseLoss):
         **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
-        ensemble_axis = layout.axis("ensemble", ndim=y_pred.ndim)
+        ensemble_axis = layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.ndim)
 
         if self.ignore_nans:
-            y_pred, y_target = self.mask_nans(y_pred, y_target, ensemble_axis)
+            y_pred, y_target = self.mask_nans(y_pred, y_target, layout)
 
         context = (
             torch.amp.autocast(device_type=y_pred.device.type, enabled=False) if self.no_autocast else nullcontext()

@@ -21,7 +21,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-
+from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data_indices.collection import IndexCollection
@@ -30,9 +30,9 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
-from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
+from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -61,11 +61,16 @@ def split_graph_config(
     Parameters
     ----------
     graph_config : DotDict
-        Graph configuration
+        Graph configuration.
     is_dataset_static : dict[str, bool]
         Dictionary indicating whether each dataset is static (e.g., static grid) or not.
     hidden_nodes_name : str or list of str
         Name(s) of the hidden nodes in the graph. They are considered to be static.
+
+    Returns
+    -------
+    tuple[DotDict, DotDict]
+        Static graph configuration and dynamic graph configuration.
     """
     if isinstance(hidden_nodes_name, str):
         is_dataset_static[hidden_nodes_name] = True
@@ -108,6 +113,7 @@ class BaseGraphModel(nn.Module):
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
         is_dataset_static: dict[str, bool],
+        data_layouts: dict[str, TensorLayout],
         n_step_input: int,
         n_step_output: int,
     ) -> None:
@@ -142,6 +148,7 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self.is_dataset_static = is_dataset_static
+        self.data_layouts = data_layouts
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.latent_skip = model_config.model.model.latent_skip
@@ -312,9 +319,10 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        if self.is_dataset_static[dataset_name]:
+        if not self.data_layouts[dataset_name].time_in_grid:
             return (
                 self.n_step_input * self.num_input_channels[dataset_name]
+                + self.dynamic_node_attribute_dims.get(dataset_name, 0)
                 + COORDS_DIM
                 + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
             )
@@ -554,7 +562,7 @@ class BaseGraphModel(nn.Module):
         sizes = get_shard_sizes(view.data, grid_dim, model_comm_group=model_comm_group)
         coordinates = view.coordinates
         if coordinates is not None:
-            coordinates = shard_tensor(coordinates, 0, sizes, model_comm_group)
+            coordinates = shard_tensor(coordinates, -2, sizes, model_comm_group)
         return batch.update_source(
             dataset_name,
             view.clone(

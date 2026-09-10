@@ -20,23 +20,35 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
+from anemoi.models.transport.data_helpers import Data
+from anemoi.models.transport.data_helpers import add_data
+from anemoi.models.transport.data_helpers import data_device
+from anemoi.models.transport.data_helpers import data_dtype
+from anemoi.models.transport.data_helpers import is_sparse_data
+from anemoi.models.transport.data_helpers import randn_like_data
+from anemoi.models.transport.data_helpers import scale_data
 from anemoi.models.transport.random_fields import randn_with_grid_sharding
 from anemoi.models.transport.settings import TransportSourceSettings
 
 TRANSPORT_SOURCE_KINDS = frozenset({"zero", "gaussian", "reference_state"})
-TransportSourceFactory = Callable[[], dict[str, torch.Tensor]]
+TransportSourceFactory = Callable[[], dict[str, Data]]
 
 
 def reference_state_sampling_source(
-    x: dict[str, torch.Tensor],
+    x: dict[str, Data],
     *,
     data_indices: dict[str, Any],
     n_step_output: int,
-) -> dict[str, torch.Tensor]:
+) -> dict[str, Data]:
     """Use the latest input state as the source field, selecting model-output variables."""
     sources = {}
     for dataset_name, x_data in x.items():
+        if is_sparse_data(x_data):
+            msg = (
+                "reference_state transport sources are not implemented for sparse observation datasets. "
+                f"Choose a non-reference source for dataset '{dataset_name}'."
+            )
+            raise NotImplementedError(msg)
         output_names = data_indices[dataset_name].model.output.ordered_names
         try:
             input_positions = data_indices[dataset_name].model.input.positions_for_names(output_names)
@@ -57,46 +69,74 @@ def reference_state_sampling_source(
 
 @dataclass(frozen=True)
 class TransportSourceSpec:
-    """Shape, device, and dtype used to create a source tensor."""
+    """Shape, device, and dtype used to create source data."""
 
-    shape: tuple[int, ...]
+    shape: tuple[int, ...] | list[tuple[int, ...]]
     device: torch.device
     dtype: torch.dtype
     grid_shard_sizes: ShardSizes = None
+    is_sparse: bool = False
 
     @classmethod
-    def from_tensor(cls, tensor: torch.Tensor, grid_shard_sizes: ShardSizes = None) -> TransportSourceSpec:
+    def from_data(cls, data: Data, grid_shard_sizes: ShardSizes = None) -> TransportSourceSpec:
+        if is_sparse_data(data):
+            if not data:
+                msg = "Cannot infer transport source shape from an empty sparse data list."
+                raise ValueError(msg)
+            if grid_shard_sizes is not None:
+                msg = "Grid sharding is not supported for sparse transport source data."
+                raise NotImplementedError(msg)
+            return cls(
+                shape=[tuple(sample.shape) for sample in data],
+                device=data_device(data),
+                dtype=data_dtype(data),
+                grid_shard_sizes=grid_shard_sizes,
+                is_sparse=True,
+            )
         return cls(
-            shape=tuple(tensor.shape),
-            device=tensor.device,
-            dtype=tensor.dtype,
+            shape=tuple(data.shape),
+            device=data.device,
+            dtype=data.dtype,
             grid_shard_sizes=grid_shard_sizes,
         )
 
 
 def sampling_source_specs(
-    x: dict[str, torch.Tensor],
+    target_template: dict[str, Data],
     *,
-    n_step_output: int,
     num_output_channels: dict[str, int],
     grid_shard_sizes: DatasetShardSizes | None = None,
 ) -> dict[str, TransportSourceSpec]:
-    """Infer source tensor shapes from the sampling input batch."""
-    return {
-        dataset_name: TransportSourceSpec(
+    """Infer source tensor shapes from the sampling output template."""
+    specs = {}
+    for dataset_name, target_data in target_template.items():
+        dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
+        if is_sparse_data(target_data):
+            if dataset_grid_shard_sizes is not None:
+                msg = "Grid sharding is not supported for sparse transport source data."
+                raise NotImplementedError(msg)
+            specs[dataset_name] = TransportSourceSpec(
+                shape=[(*sample.shape[:-1], num_output_channels[dataset_name]) for sample in target_data],
+                device=data_device(target_data),
+                dtype=data_dtype(target_data),
+                grid_shard_sizes=dataset_grid_shard_sizes,
+                is_sparse=True,
+            )
+            continue
+
+        specs[dataset_name] = TransportSourceSpec(
             shape=(
-                x_data.shape[0],
-                n_step_output,
-                x_data.shape[2],
-                x_data.shape[-2],
+                target_data.shape[0],
+                target_data.shape[1],
+                target_data.shape[2],
+                target_data.shape[-2],
                 num_output_channels[dataset_name],
             ),
-            device=x_data.device,
-            dtype=x_data.dtype,
-            grid_shard_sizes=grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None,
+            device=target_data.device,
+            dtype=target_data.dtype,
+            grid_shard_sizes=dataset_grid_shard_sizes,
         )
-        for dataset_name, x_data in x.items()
-    }
+    return specs
 
 
 @dataclass(frozen=True)
@@ -118,9 +158,9 @@ class TransportSourceRequest:
         }
 
     @classmethod
-    def from_tensors(
+    def from_data(
         cls,
-        tensors: dict[str, torch.Tensor],
+        data: dict[str, Data],
         *,
         default_kind: str,
         custom_source_factories: dict[str, TransportSourceFactory] | None = None,
@@ -131,11 +171,11 @@ class TransportSourceRequest:
     ) -> TransportSourceRequest:
         return cls(
             specs={
-                name: TransportSourceSpec.from_tensor(
-                    tensor,
+                name: TransportSourceSpec.from_data(
+                    dataset_data,
                     grid_shard_sizes=grid_shard_sizes.get(name) if grid_shard_sizes is not None else None,
                 )
-                for name, tensor in tensors.items()
+                for name, dataset_data in data.items()
             },
             default_kind=default_kind,
             custom_source_factories={} if custom_source_factories is None else custom_source_factories,
@@ -145,25 +185,41 @@ class TransportSourceRequest:
         )
 
     @staticmethod
-    def _zero(specs: dict[str, TransportSourceSpec]) -> dict[str, torch.Tensor]:
-        return {name: torch.zeros(spec.shape, device=spec.device, dtype=spec.dtype) for name, spec in specs.items()}
+    def _zero(specs: dict[str, TransportSourceSpec]) -> dict[str, Data]:
+        sources: dict[str, Data] = {}
+        for name, spec in specs.items():
+            if spec.is_sparse:
+                assert isinstance(spec.shape, list)
+                sources[name] = [torch.zeros(shape, device=spec.device, dtype=spec.dtype) for shape in spec.shape]
+            else:
+                assert isinstance(spec.shape, tuple)
+                sources[name] = torch.zeros(spec.shape, device=spec.device, dtype=spec.dtype)
+        return sources
 
     @staticmethod
     def _gaussian(
         specs: dict[str, TransportSourceSpec],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
-    ) -> dict[str, torch.Tensor]:
-        return {
-            name: randn_with_grid_sharding(
-                spec.shape,
-                device=spec.device,
-                dtype=spec.dtype,
-                model_comm_group=model_comm_group,
-                grid_shard_sizes=spec.grid_shard_sizes,
-            )
-            for name, spec in specs.items()
-        }
+    ) -> dict[str, Data]:
+        sources: dict[str, Data] = {}
+        for name, spec in specs.items():
+            if spec.is_sparse:
+                if spec.grid_shard_sizes is not None:
+                    msg = "Grid sharding is not supported for sparse transport source data."
+                    raise NotImplementedError(msg)
+                assert isinstance(spec.shape, list)
+                sources[name] = [torch.randn(shape, device=spec.device, dtype=spec.dtype) for shape in spec.shape]
+            else:
+                assert isinstance(spec.shape, tuple)
+                sources[name] = randn_with_grid_sharding(
+                    spec.shape,
+                    device=spec.device,
+                    dtype=spec.dtype,
+                    model_comm_group=model_comm_group,
+                    grid_shard_sizes=spec.grid_shard_sizes,
+                )
+        return sources
 
 
 class TransportSourceBuilder:
@@ -191,7 +247,7 @@ class TransportSourceBuilder:
     def resolve_kind(self, default_kind: str) -> str:
         return default_kind if self.kind == "default" else self.kind
 
-    def build(self, request: TransportSourceRequest) -> dict[str, torch.Tensor]:
+    def build(self, request: TransportSourceRequest) -> dict[str, Data]:
         kind = self.resolve_kind(request.default_kind)
         source_factories = request.source_factories()
         allowed_kinds = request.allowed_kinds or (TRANSPORT_SOURCE_KINDS | frozenset(source_factories))
@@ -214,25 +270,29 @@ class TransportSourceBuilder:
         msg = f"Transport source kind '{kind}' requires a source factory."
         raise ValueError(msg)
 
-    def _scale_source(self, sources: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def _scale_source(self, sources: dict[str, Data]) -> dict[str, Data]:
         if self.scale != 1.0:
-            return {name: self.scale * source for name, source in sources.items()}
+            return {name: scale_data(source, self.scale) for name, source in sources.items()}
         return sources
 
     def _postprocess_source(
         self,
-        sources: dict[str, torch.Tensor],
+        sources: dict[str, Data],
         request: TransportSourceRequest,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Data]:
         noise_scale = self.noise_scale
         if noise_scale != 0.0:
             sources = {
-                name: source
-                + noise_scale
-                * randn_like_with_grid_sharding(
+                name: add_data(
                     source,
-                    model_comm_group=request.model_comm_group,
-                    grid_shard_sizes=request.specs[name].grid_shard_sizes,
+                    scale_data(
+                        randn_like_data(
+                            source,
+                            model_comm_group=request.model_comm_group,
+                            grid_shard_sizes=request.specs[name].grid_shard_sizes,
+                        ),
+                        noise_scale,
+                    ),
                 )
                 for name, source in sources.items()
             }

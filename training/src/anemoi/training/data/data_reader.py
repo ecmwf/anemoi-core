@@ -237,12 +237,17 @@ class BaseAnemoiReader(ABC):
 
     @property
     @abstractmethod
+    def layout(self) -> TensorLayout:
+        """Layout of one sample, independent of whether its coordinates change."""
+
+    @property
+    @abstractmethod
     def is_static_grid(self) -> bool:
         """Whether the reader exposes a single, time-invariant grid.
 
-        ``True`` for gridded datasets (one set of latitudes/longitudes shared
-        by every sample); ``False`` for sparse observation datasets where the
-        coordinates change at every sample. Used by
+        ``True`` when one set of latitudes/longitudes is shared by every
+        sample; ``False`` when coordinates can change between samples.
+        Tensor structure is described separately by :attr:`layout`. Used by
         :class:`~anemoi.training.data.multidataset.MultiDataset` to decide
         whether to share coordinate tensors by reference across the batch.
         """
@@ -335,7 +340,8 @@ class BaseAnemoiReader(ABC):
         * ``"metadata"`` — ``dict[str, Any]`` of non-tensor per-sample
           metadata (empty for gridded; carries ``"boundaries"`` for sparse).
         """
-        raise NotImplementedError("Subclasses must implement get_sample() method.")
+        msg = "Subclasses must implement get_sample() method."
+        raise NotImplementedError(msg)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
@@ -354,6 +360,11 @@ class BaseAnemoiReader(ABC):
 
 class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
+
+    @property
+    def layout(self) -> TensorLayout:
+        """Return the gridded per-sample layout."""
+        return TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 
     @property
     def grid_size(self) -> int:
@@ -480,7 +491,7 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
             "data": self.get_data(time_indices),
             "variables": self.variables,
             "statistics": self.statistics,
-            "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+            "layout": self.layout,
             "coordinates": self.get_coordinates(time_indices),
             "metadata": {},
             "grid_size": self.grid_size,
@@ -502,6 +513,11 @@ class ObservationDataReader(BaseAnemoiReader):
     encode the per-time split of the flat ``N`` axis and travel through
     :attr:`Batch.metadata` rather than being moved to device.
     """
+
+    @property
+    def layout(self) -> TensorLayout:
+        """Return the tabular per-sample layout."""
+        return TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
 
     @property
     def is_static_grid(self) -> bool:
@@ -542,6 +558,11 @@ class ObservationDataReader(BaseAnemoiReader):
         time_indices: TimeIndices,
     ) -> dict:
         """Get a sample from the observation dataset.
+
+        Parameters
+        ----------
+        time_indices : TimeIndices
+            Time windows and shard selection for the observation sample.
 
         Returns
         -------
@@ -586,7 +607,7 @@ class ObservationDataReader(BaseAnemoiReader):
             "data": data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             "variables": self.variables,
             "statistics": self.statistics,
-            "layout": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+            "layout": self.layout,
             "coordinates": coordinates,
             "timedeltas": timedeltas,
             "metadata": {"boundaries": boundaries},

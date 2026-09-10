@@ -19,7 +19,9 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.data import SourceView
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
@@ -346,7 +348,35 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     )
 
 
-def _pred_view(tensor: torch.Tensor, *, dataset_name: str = "data"):
+def _make_sparse_batch(
+    *,
+    dataset_name: str = "obs",
+    input_nodes: int = 2,
+    output_nodes: int = 3,
+    num_vars: int = 2,
+) -> Batch:
+    """Wrap one sparse sample with one input and one output observation time."""
+    data = torch.arange((input_nodes + output_nodes) * num_vars, dtype=torch.float32).reshape(-1, num_vars)
+    coordinates = torch.stack(
+        [
+            torch.linspace(0.0, 0.4, input_nodes + output_nodes),
+            torch.linspace(1.0, 1.4, input_nodes + output_nodes),
+        ],
+        dim=-1,
+    )
+    boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
+    return Batch(
+        data={dataset_name: [data]},
+        coordinates={dataset_name: [coordinates]},
+        metadata={dataset_name: {BOUNDARIES_META_KEY: boundaries}},
+        timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
+        statistics={dataset_name: {}},
+    )
+
+
+def _pred_view(tensor: torch.Tensor, *, dataset_name: str = "data") -> SourceView:
     """Wrap a prediction tensor as a per-dataset SourceView.
 
     BatchOutputPlot / LossCurvePlot consume outputs.predictions as a
@@ -428,6 +458,52 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
     torch.testing.assert_close(plotted_output.predictions[0]["data"].data, output.predictions[0]["data"].data)
     torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
     assert plotted_output.plot_kwargs == {}
+
+
+def test_batch_output_plot_sparse_forwards_auxiliary_output() -> None:
+    """Sparse sample plots forward the conditioned target to the plot function."""
+    callback = _sample_plot(
+        sample_idx=0,
+        parameters=["a", "b"],
+        accumulation_levels_plot=[0.5],
+        dataset_names=["obs"],
+    )
+    callback.post_processors = {"obs": _IdentityProcessor()}
+    callback.plot_fn = MagicMock(return_value=MagicMock())
+    callback._output_figure = MagicMock()
+
+    pl_module = _make_pl_module_forecaster(validation_rollout=1)
+    data_indices = MagicMock()
+    data_indices.data.output.full = slice(None)
+    data_indices.data.input.todict.return_value = {"name_to_index": {"a": 0, "b": 1}, "diagnostic": []}
+    data_indices.model.output.name_to_index = {"a": 0, "b": 1}
+    pl_module.data_indices = {"obs": data_indices}
+
+    batch = _make_sparse_batch()
+    output_view = batch["obs"].select_time(1)
+    prediction = output_view.clone(data=[torch.full_like(output_view.data[0], 2.0)])
+    auxiliary = output_view.clone(data=[torch.full_like(output_view.data[0], 3.0)])
+    output = _step_output([{"obs": prediction}])
+    trainer = MagicMock()
+    trainer.logger = MagicMock()
+
+    callback._plot(
+        trainer,
+        pl_module,
+        ["obs"],
+        output,
+        batch,
+        batch_idx=0,
+        epoch=0,
+        auxiliary_output={"obs": auxiliary},
+    )
+
+    callback.plot_fn.assert_called_once()
+    kwargs = callback.plot_fn.call_args.kwargs
+    torch.testing.assert_close(torch.as_tensor(kwargs["y_pred"]), torch.full((3, 2), 2.0))
+    torch.testing.assert_close(torch.as_tensor(kwargs["auxiliary"]), torch.full((3, 2), 3.0))
+    assert kwargs["sparse"] is True
+    assert kwargs["output_latlons"].shape == (3, 2)
 
 
 def test_process_time_interpolator_output_shapes():

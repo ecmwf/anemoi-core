@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
 from typing import Literal
@@ -26,6 +27,9 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -162,7 +166,7 @@ class BaseLoss(nn.Module, ABC):
 
         Returns
         -------
-        torch.Tensor, torch.Tensor]
+        torch.Tensor, torch.Tensor
             * 0-masked copy of ``pred`` if ``self.ignore_nans``, else ``pred``.
             * 0-masked copy of ``target`` if ``self.ignore_nans``, else ``target``.
         """
@@ -245,10 +249,18 @@ class BaseLoss(nn.Module, ABC):
                 keepdim=True,
             )
 
-        dims = [layout.batch, layout.time, layout.ensemble]
-        out = torch.mean(space_time_reduced, dim=tuple([f for f in dims if f is not None])).squeeze()
+        dims = tuple(f for f in (layout.batch, layout.time, layout.ensemble) if f is not None)
+        out = torch.mean(space_time_reduced, dim=dims, keepdim=True) if dims else space_time_reduced
+        # Return a scalar or one loss per variable, preserving a single-variable vector.
+        out = out.squeeze() if squash else out.flatten()
 
         return out if group is None else reduce_tensor(out, group)
+
+    def _evaluate_loss_tensor(self, pred: torch.Tensor, target: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Compute the numerical loss in at least float32, including under autocast."""
+        dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
+        with torch.autocast(device_type=pred.device.type, enabled=False):
+            return self._forward_impl(pred.to(dtype), target.to(dtype), **kwargs)
 
     def iter_leaf_losses(self) -> Iterator["BaseLoss"]:
         """Yield all leaf loss modules.
@@ -432,6 +444,7 @@ class FunctionalLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Calculates the area-weighted scaled loss.
+
         Dispatches to the tensor-level _forward_impl via the source view's layout.
 
         Parameters
@@ -453,7 +466,7 @@ class FunctionalLoss(BaseLoss):
             Distributed group, by default None.
         squash_mode : {"avg", "sum"}, optional
             Reduction mode for the variable dimension, by default ``"avg"``.
-        **_kwargs
+        **kwargs
             Additional keyword arguments.
 
         Returns
@@ -463,7 +476,7 @@ class FunctionalLoss(BaseLoss):
         """
         return pred.apply_loss(
             target,
-            self._forward_impl,
+            self._evaluate_loss_tensor,
             squash=squash,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,
