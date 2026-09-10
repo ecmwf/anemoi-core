@@ -15,7 +15,6 @@ import time
 
 import psutil
 import pytest
-import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.cuda import empty_cache
@@ -153,5 +152,5 @@ def test_benchmark_training_cycle(
     # determine store from benchmark config (per-kind, so benchmark artefacts
     # land under the 'benchmarks' subdirectory on the server)
     store = get_benchmark_store("benchmarks")
-    
+
     benchmark(cfg, test_case, store)
