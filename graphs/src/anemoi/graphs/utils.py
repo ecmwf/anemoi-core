@@ -48,7 +48,7 @@ def get_distributed_device() -> torch.device:
         local_rank = int(os.environ.get("SLURM_LOCALID", 0))
         device = torch.device(f"cuda:{local_rank}")
     else:
-        device = torch.device("cpu")
+        device = "cpu"
 
     return device
 
