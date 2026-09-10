@@ -94,7 +94,8 @@ def test_split_distributes_full_tensor_to_rank_local_slice(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
+        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -169,7 +170,8 @@ def test_gather_reconstructs_full_tensor_from_rank_local_slices(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
+        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -340,7 +342,8 @@ def test_expand_sharded_tensor_populates_only_rank_local_slice(
 @pytest.mark.parametrize(
     "shard_size_pattern",
     [
-        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((127, 257, 63, 577), id="dim=0,irregular-shard-sizes=[127,257,63,577]"),
+        pytest.param((1, 127, 257, 639), id="dim=0,singleton-shard-sizes=[1,127,257,639]"),
         pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
     ],
 )
@@ -433,11 +436,19 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
     ("split_shard_size_pattern", "concat_shard_size_pattern"),
     [
         pytest.param(
-            (128, 384, 256, 512),
-            (512, 256, 128, 384),
+            (127, 257, 63, 577),
+            (31, 173, 89, 349),
             id=(
-                "split-dim=0,irregular-split-shard-sizes=[128,384,256,512],"
-                "concat-dim=1,concat-shard-sizes=[512,256,128,384]"
+                "split-dim=0,irregular-split-shard-sizes=[127,257,63,577],"
+                "concat-dim=1,irregular-concat-shard-sizes=[31,173,89,349]"
+            ),
+        ),
+        pytest.param(
+            (1, 127, 257, 639),
+            (53, 1, 211, 389),
+            id=(
+                "split-dim=0,singleton-split-shard-sizes=[1,127,257,639],"
+                "concat-dim=1,singleton-concat-shard-sizes=[53,1,211,389]"
             ),
         ),
         pytest.param(
@@ -916,7 +927,8 @@ def _test_alltoallwrapper_custom_message_sizes_rank(
 @pytest.mark.parametrize(
     "message_size_pattern",
     [
-        pytest.param((128, 384, 256, 512), id="irregular-message-sizes=[128,384,256,512]"),
+        pytest.param((127, 257, 63, 577), id="irregular-message-sizes=[127,257,63,577]"),
+        pytest.param((1, 127, 257, 639), id="singleton-message-sizes=[1,127,257,639]"),
         pytest.param((256, 0, 256, 256), id="empty-message-sizes=[256,0,256,256]"),
     ],
 )
