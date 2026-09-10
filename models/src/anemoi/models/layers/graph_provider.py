@@ -552,7 +552,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         The matrix is initially built in COO format
         and then converted to CSR format for efficient sparse operations.
         """
-        sub_graph = graph[edges_name]
+        sub_graph = graph[tuple(edges_name)]
         edge_index = sub_graph.edge_index
 
         if edge_weight_attribute:

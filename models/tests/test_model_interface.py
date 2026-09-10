@@ -11,17 +11,10 @@ import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-import anemoi.models.interface as interface_module
 from anemoi.models.interface import AnemoiModelInterface
-from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
 
 
-class _DummyModel(torch.nn.Module):
-    def forward(self, x, **_kwargs):
-        return x
-
-
-def test_interface_passes_complete_graph_to_spatial_preprocessor(monkeypatch) -> None:
+def test_interface_passes_complete_graph_to_spatial_preprocessor() -> None:
     graph = HeteroData()
     graph["source"].num_nodes = 2
     graph["projected"].num_nodes = 1
@@ -40,21 +33,9 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor(monkeypatch) ->
                     }
                 },
             },
-            "model": {"model": {"_target_": "unused.DummyModel"}},
+            "model": {"model": {"_target_": "torch.nn.Identity"}},
         }
     )
-    spatial_config = config.data.datasets.projected.spatial_processor
-
-    def instantiate(config_to_instantiate, **kwargs):
-        if config_to_instantiate is spatial_config:
-            return CrossGridProjector(
-                graph=kwargs["graph"],
-                edges_name=tuple(config_to_instantiate.edges_name),
-            )
-        return _DummyModel()
-
-    monkeypatch.setattr(interface_module, "instantiate", instantiate)
-
     model_interface = AnemoiModelInterface.__new__(AnemoiModelInterface)
     torch.nn.Module.__init__(model_interface)
     model_interface.config = config
