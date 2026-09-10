@@ -10,6 +10,7 @@
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -19,6 +20,9 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
+
+if TYPE_CHECKING:
+    from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,7 +47,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, dataset: DictConfig | str, name: str, attributes: list | None = None) -> None:
+    def __init__(self, dataset: DictConfig | str, name: str, attributes: list[BaseNodeAttribute] | None = None) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
         super().__init__(name, attributes)
@@ -82,13 +86,13 @@ class TextNodes(BaseNodeBuilder):
         name: str,
         idx_lon: int = 0,
         idx_lat: int = 1,
-        attributes: list | None = None,
+        attributes: list[BaseNodeAttribute] | None = None,
     ) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset
         self.idx_lon = idx_lon
         self.idx_lat = idx_lat
-        super().__init__(name, attributes)
+        super().__init__(name=name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -132,7 +136,7 @@ class NPZFileNodes(BaseNodeBuilder):
         name: str,
         lat_key: str = "latitudes",
         lon_key: str = "longitudes",
-        attributes: list | None = None,
+        attributes: list[BaseNodeAttribute] | None = None,
     ) -> None:
         """Initialize the NPZFileNodes builder.
 
@@ -148,13 +152,13 @@ class NPZFileNodes(BaseNodeBuilder):
             Name of the key of the latitude arrays. Defaults to "latitudes".
         lon_key : str, optional
             Name of the key of the latitude arrays. Defaults to "longitudes".
-        attributes : list, optional
+        attributes : list[BaseNodeAttribute], optional
             List of attributes. Defaults to None.
         """
         self.npz_file = Path(npz_file)
         self.lat_key = lat_key
         self.lon_key = lon_key
-        super().__init__(name, attributes)
+        super().__init__(name=name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.
@@ -242,7 +246,7 @@ class XArrayNodes(BaseNodeBuilder):
         name: str,
         lat_key: str = "lat",
         lon_key: str = "lon",
-        attributes: list | None = None,
+        attributes: list[BaseNodeAttribute] | None = None,
     ) -> None:
         super().__init__(name, attributes)
         self.dataset = dataset
