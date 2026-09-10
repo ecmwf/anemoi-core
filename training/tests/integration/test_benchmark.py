@@ -139,6 +139,7 @@ def test_benchmark_training_cycle(
 ) -> None:
     """Runs a benchmark and then compares them against the values stored on a server."""
     cfg, test_case = benchmark_config
+    dist.barrier()
     LOGGER.info("Benchmarking the configuration: %s", test_case)
 
     # Reset memory logging and free all possible memory between runs
@@ -153,11 +154,14 @@ def test_benchmark_training_cycle(
     # determine store from benchmark config (per-kind, so benchmark artefacts
     # land under the 'benchmarks' subdirectory on the server)
     store = get_benchmark_store("benchmarks")
-
-    benchmark(cfg, test_case, store)
-
-    # barrier to ensure all processes have completed before finishing the test
-    # otherwise process 0 will finish the final test before process 0
-    # has finished comparing the results against the benchmark server
-    # torch.dist is initialized in the benchmark function, so we can use it here
-    dist.barrier()
+    
+    # use try...finally so that both processes reach barrier
+    # even if proc 0 raises at failed benchmark comparison
+    try:
+        benchmark(cfg, test_case, store)
+    finally:
+        # barrier to ensure all processes have completed before finishing the test
+        # otherwise process 0 will finish the final test before process 0
+        # has finished comparing the results against the benchmark server
+        # torch.dist is initialized in the benchmark function, so we can use it here
+        dist.barrier()
