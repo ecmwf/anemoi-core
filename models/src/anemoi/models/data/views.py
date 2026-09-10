@@ -55,6 +55,14 @@ def _fancy_variable_index(
     return indices
 
 
+def _shape_without_ensemble_dim(tensor: torch.Tensor, layout: TensorLayout) -> tuple[int, ...]:
+    """Tensor shape with the ensemble axis removed, needed for comparisons that ignore member count."""
+    if layout.ensemble is None:
+        return tuple(tensor.shape)
+    axis = layout.axis("ensemble", ndim=tensor.ndim)
+    return tuple(size for dim, size in enumerate(tensor.shape) if dim != axis)
+
+
 @dataclass(frozen=True, slots=True)
 class SourceView(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
@@ -230,7 +238,11 @@ class GriddedSourceView(SourceView):
         device = self.data.device
 
         batch_size = self.data.shape[self.layout.batch]
-        coordinates = einops.repeat(self.coordinates, "grid latlon -> (batch grid) latlon", batch=batch_size)
+        ensemble_size = self.data.shape[self.layout.ensemble] if self.layout.ensemble is not None else 1
+        # effective batch size: we must account for both batch and ensemble dimensions
+        coordinates = einops.repeat(
+            self.coordinates, "grid latlon -> (repeat grid) latlon", repeat=batch_size * ensemble_size
+        )
 
         return FlatView(
             data=flattened_data,
@@ -442,18 +454,53 @@ class TabularSourceView(SourceView):
         ), f"{self.__class__.__name__} data must be a non-empty list of tensors."
         return self.data[0].dtype
 
+    @property
+    def ensemble_size(self) -> int:
+        """Number of ensemble members per sample; 1 when the layout has no ensemble axis."""
+        if self.layout.ensemble is None:
+            return 1
+        return self.data[0].shape[self.layout.ensemble]
+
+    def _fold_members(self, sample: torch.Tensor) -> torch.Tensor:
+        """Fold one sample's ensemble axis into its node axis, as the gridded view does.
+
+        ``GriddedSourceView`` flattens to ``(batch ensemble grid)``; doing the same here
+        keeps the two kinds interchangeable downstream -- the encoder and decoder graphs see
+        one node set per (sample, member) either way.
+        """
+        if self.layout.ensemble is None:
+            return sample
+        ensemble_axis = self.layout.axis("ensemble", ndim=sample.ndim)
+        grid_axis = self.layout.axis("grid", ndim=sample.ndim)
+        if ensemble_axis > grid_axis:
+            msg = (
+                f"{self.__class__.__name__} expects the ensemble axis before the grid axis so that "
+                f"folding yields (ensemble grid) order; got {self.layout!r}."
+            )
+            raise ValueError(msg)
+        return sample.flatten(ensemble_axis, grid_axis)
+
     def flatten(self) -> FlatView:
-        if len(self.data) > 1:
-            data = torch.cat(self.data, dim=0)
-            coordinates = torch.cat(self.coordinates, dim=0)
-            timedeltas = None if self.timedeltas is None else torch.cat(self.timedeltas, dim=0)
-        elif len(self.data) == 1:
-            data = self.data[0]
-            coordinates = self.coordinates[0]
-            timedeltas = None if self.timedeltas is None else self.timedeltas[0]
-        else:
+        if not self.data:
             msg = f"{self.__class__.__name__} cannot flatten an empty batch."
             raise ValueError(msg)
+
+        members = self.ensemble_size
+        folded = [self._fold_members(sample) for sample in self.data]
+        # coordinates and timedeltas are repeated per member to line up with the folded data
+        repeated_coords = [coords.repeat(members, 1) for coords in self.coordinates]
+        repeated_timedeltas = (
+            None if self.timedeltas is None else [td.repeat(members) for td in self.timedeltas]
+        )
+
+        if len(folded) > 1:
+            data = torch.cat(folded, dim=0)
+            coordinates = torch.cat(repeated_coords, dim=0)
+            timedeltas = None if repeated_timedeltas is None else torch.cat(repeated_timedeltas, dim=0)
+        else:
+            data = folded[0]
+            coordinates = repeated_coords[0]
+            timedeltas = None if repeated_timedeltas is None else repeated_timedeltas[0]
 
         if timedeltas is not None and timedeltas.shape[0] != coordinates.shape[0]:
             msg = (
@@ -483,14 +530,25 @@ class TabularSourceView(SourceView):
             timedeltas=None if timedeltas is None else timedeltas.to(device),
             device=device,
             shard_sizes=flat_shard_sizes,
-            batch_sizes=tuple(sample.shape[self.layout.grid] for sample in self.data),
+            batch_sizes=tuple(
+                sample.shape[self.layout.grid] for sample in self.data for _ in range(members)
+            ),
         )
 
     def unflatten(self, data: torch.Tensor) -> "TabularSourceView":
+        """Split a flattened (rows, features) tensor back into per-sample tensors."""
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
-        batch_sizes = [data.shape[self.layout.grid] for data in self.data]
-        batch_starts = np.cumsum([0] + batch_sizes[:-1])
-        new_data = [data.narrow(self.layout.grid, int(batch_starts[i]), length) for i, length in enumerate(batch_sizes)]
+        members = self.ensemble_size
+        node_counts = [sample.shape[self.layout.grid] for sample in self.data]
+        row_counts = [count * members for count in node_counts]
+        row_starts = np.cumsum([0] + row_counts[:-1])
+
+        new_data = []
+        for sample_index, rows in enumerate(row_counts):
+            chunk = data.narrow(0, int(row_starts[sample_index]), rows)
+            if self.layout.ensemble is not None:
+                chunk = chunk.unflatten(0, (members, node_counts[sample_index]))
+            new_data.append(chunk)
         return self.clone(data=new_data)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":
@@ -522,9 +580,11 @@ class TabularSourceView(SourceView):
         losses = []
         non_empty = []
         for i, (pred, target) in enumerate(zip(self.data, other.data)):
-            assert (
-                pred.shape == target.shape
-            ), f"Sample {i} of both views must have the same shape; got {pred.shape} and {target.shape}."
+            # every axis but the ensemble one must line up for this to work
+            assert _shape_without_ensemble_dim(pred, self.layout) == _shape_without_ensemble_dim(target, self.layout), (
+                f"Sample {i} of both views must have the same shape apart from the ensemble axis; "
+                f"got {tuple(pred.shape)} and {tuple(target.shape)}."
+            )
             assert torch.all(
                 self.coordinates[i] == other.coordinates[i]
             ), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."

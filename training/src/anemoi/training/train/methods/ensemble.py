@@ -20,13 +20,14 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
-from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
+
+    from anemoi.models.data.tensor_layout import TensorLayout
+    from anemoi.models.data.views import SourceView
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
     from anemoi.training.train.training_task.base import BaseTask
 
@@ -41,10 +42,10 @@ class EnsembleTraining(BaseTrainingModule):
         *,
         config: DictConfig,
         task: BaseTask,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
+        data_readers: dict,
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -60,16 +61,18 @@ class EnsembleTraining(BaseTrainingModule):
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
+        data_readers : dict
+            Per-dataset readers; the model interface derives ``is_dataset_static`` from them.
         metadata : dict
             Provenance information
         """
         super().__init__(
             config=config,
             task=task,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
+            data_readers=data_readers,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
@@ -153,30 +156,58 @@ class EnsembleTraining(BaseTrainingModule):
         return self._ensemble_plot_adapter
 
     def _expand_ens_dim(self, batch: Batch) -> Batch:
-        """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
+        """
+            Expand the per-device ensemble dimension by tiling the data nens_per_device times.
+            The tiling is driven by each dataset's own layout rather than a fixed dimension.
+        """
         new_data = {}
         for dataset_name, dataset_batch in batch.data.items():
-            new_data[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(new_data[dataset_name].shape))
+            layout = batch.layouts.get(dataset_name)
+            if layout is None or layout.ensemble is None:
+                raise ValueError(f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})")
+
+            if isinstance(dataset_batch, list):
+                # unstructured obs: the batch is the outer list, so each sample is tiled on its own.
+                new_data[dataset_name] = [self._tile_members(sample, layout) for sample in dataset_batch]
+                shapes = [list(sample.shape) for sample in new_data[dataset_name]]
+            else:
+                new_data[dataset_name] = self._tile_members(dataset_batch, layout)
+                shapes = list(new_data[dataset_name].shape)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
+
+    def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
+        """Repeat the data nens_per_device times along its ensemble axis (identified from the layout)."""
+        repeats = [1] * data.ndim
+        repeats[layout.axis("ensemble", ndim=data.ndim)] = self.nens_per_device
+        return data.repeat(*repeats)
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         dataset_name: str,
         rollout_step: int | None = None,
         validation_mode: bool = False,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
+        ensemble_axis = y_pred.layout.axis("ensemble", ndim=y_pred.ndim)
 
-        y_pred_ens = gather_tensor(
-            y_pred.clone(),  # for bwd because we checkpoint this region
-            dim=TensorDim.ENSEMBLE_DIM,
-            sizes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
-            mgroup=self.ens_comm_subgroup,
+        def gather_members(tensor: torch.Tensor) -> torch.Tensor:
+            return gather_tensor(
+                tensor.clone(),  # for bwd because we checkpoint this region
+                dim=ensemble_axis,
+                sizes=[tensor.shape[ensemble_axis]] * self.ens_comm_subgroup_size,
+                mgroup=self.ens_comm_subgroup,
+            )
+
+        payload = y_pred.data
+        y_pred_ens = y_pred.clone(
+            data=[gather_members(sample) for sample in payload]
+            if isinstance(payload, list)
+            else gather_members(payload),
         )
 
         y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -194,7 +225,9 @@ class EnsembleTraining(BaseTrainingModule):
         # Tensors must be marked as dynamic before being passed to the compiled function
         dynamic_indices = True  # TODO(cathal): set as true only for validation
         if dynamic_indices:
-            torch._dynamo.mark_dynamic(y_pred_ens_full, -1)
+            full_payload = y_pred_ens_full.data
+            for tensor in full_payload if isinstance(full_payload, list) else [full_payload]:
+                torch._dynamo.mark_dynamic(tensor, -1)
 
         loss = self._compute_loss(
             y_pred_ens_full,

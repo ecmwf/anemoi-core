@@ -206,6 +206,8 @@ class MultiDataset(IterableDataset):
         self.model_comm_group_id = model_comm_group_id
         self.model_comm_group_rank = model_comm_group_rank
         self.model_comm_num_groups = model_comm_num_groups
+        self.reader_group_rank = reader_group_rank
+        self.reader_group_size = reader_group_size
 
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
@@ -222,7 +224,7 @@ class MultiDataset(IterableDataset):
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
-            reader_group_rank,
+            self.reader_group_rank,
             self.sample_comm_group_id,
             self.sample_comm_num_groups,
         )

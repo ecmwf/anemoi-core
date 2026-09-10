@@ -548,7 +548,7 @@ class ObservationDataReader(BaseAnemoiReader):
         dict
             ``
             {
-                "data": (N, V) tensor,
+                "data": (1, N, V) tensor,   # leading size-1 ensemble axis
                 "coordinates": (N, 2) tensor,
                 "timedeltas": (N,) tensor,
                 "metadata": {
@@ -583,10 +583,10 @@ class ObservationDataReader(BaseAnemoiReader):
         )
 
         return {
-            "data": data,
+            "data": data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             "variables": self.variables,
             "statistics": self.statistics,
-            "layout": TensorLayout(grid=0, variables=1, time_in_grid=True, ensemble=None),
+            "layout": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
             "coordinates": coordinates,
             "timedeltas": timedeltas,
             "metadata": {"boundaries": boundaries},

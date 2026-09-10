@@ -19,7 +19,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
-from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data import TensorLayout
@@ -29,6 +28,11 @@ LOGGER = logging.getLogger(__name__)
 
 
 CRPSBackend = Literal["naive", "stable"]
+
+
+# Position of the ensemble axis in a gridded ``(batch, time, ensemble, grid, variables)``
+# tensor. TODO: does this need to be hardcoded here? can we pass it in to __init__?
+GRIDDED_ENSEMBLE_AXIS = 2
 
 
 class CRPS(BaseLoss):
@@ -79,10 +83,15 @@ class CRPS(BaseLoss):
             msg = f"Unknown CRPS backend {backend!r}. Expected one of: 'naive', 'stable'."
             raise ValueError(msg)
 
-    def mask_nans(self, pred: torch.Tensor, target: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def mask_nans(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        ensemble_axis: int = GRIDDED_ENSEMBLE_AXIS,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Mask CRPS inputs while preserving each tensor's ensemble size."""
-        target_nan_mask = torch.isnan(target).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
-        pred_nan_mask = torch.isnan(pred).any(dim=TensorDim.ENSEMBLE_DIM, keepdim=True)
+        target_nan_mask = torch.isnan(target).any(dim=ensemble_axis, keepdim=True)
+        pred_nan_mask = torch.isnan(pred).any(dim=ensemble_axis, keepdim=True)
         nan_mask = target_nan_mask | pred_nan_mask
         target = target.masked_fill(nan_mask, 0.0)
         pred = pred.masked_fill(nan_mask, 0.0)
@@ -154,7 +163,7 @@ class CRPS(BaseLoss):
         diag = torch.eye(ens_size, dtype=torch.bool, device=preds.device)
         err_r = einops.repeat(
             torch.abs(preds - targets.unsqueeze(dim=-1)),
-            "batch t var latlon ens -> batch t var latlon n ens",
+            "... ens -> ... n ens",
             n=ens_size,
         )
 
@@ -203,20 +212,19 @@ class CRPS(BaseLoss):
         **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
+        ensemble_axis = layout.axis("ensemble", ndim=y_pred.ndim)
 
         if self.ignore_nans:
-            y_pred, y_target = self.mask_nans(y_pred, y_target)
-
-        y_target = einops.rearrange(y_target, "bs t 1 latlon v -> bs t v latlon 1")
-        y_pred = einops.rearrange(y_pred, "bs t e latlon v -> bs t v latlon e")
+            y_pred, y_target = self.mask_nans(y_pred, y_target, ensemble_axis)
 
         context = (
             torch.amp.autocast(device_type=y_pred.device.type, enabled=False) if self.no_autocast else nullcontext()
         )
         with context:
-            crps = self._kernel_crps(y_pred, y_target)
+            # `_kernel_crps` requires the ensemble axis to be last
+            crps = self._kernel_crps(y_pred.movedim(ensemble_axis, -1), y_target.movedim(ensemble_axis, -1))
 
-        crps = einops.rearrange(crps, "bs t v latlon -> bs t 1 latlon v")
+        crps = crps.unsqueeze(ensemble_axis)
         crps = self.scale(
             crps,
             scaler_indices,

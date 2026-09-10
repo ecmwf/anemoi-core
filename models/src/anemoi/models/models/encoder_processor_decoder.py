@@ -345,7 +345,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             inputs.append(dynamic_node_attributes.to(device=x_flat.data.device, dtype=x_flat.data.dtype))
 
         if dataset_name in self.node_attributes:
-            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size).to(x_flat.data.device)
+            trainable_parameters = self.node_attributes(dataset_name, batch_size=batch_size)
             if grid_shard_sizes is not None:
                 trainable_parameters = shard_tensor(trainable_parameters, 0, grid_shard_sizes, model_comm_group)
 
@@ -525,8 +525,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
             **graph_batch_kwargs,
         )
-        edge_attr = edge_attr.to(device=x_data_latent.device, dtype=x_data_latent.dtype)
-        edge_index = edge_index.to(x_data_latent.device)
+
+        edge_attr = edge_attr.to(dtype=x_data_latent.dtype)
         assert edge_index.shape[1] == edge_attr.shape[0], (
             f"Encoder edge_index shape {list(edge_index.shape)} does not match "
             f"edge_attr shape {list(edge_attr.shape)} for dataset {dataset_name}."
@@ -687,11 +687,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def forward(
         self,
         batch: Batch,
-        target: Optional[Batch] = None,
+        target: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
-    ) -> dict[str, Tensor]:
+    ) -> Batch:
         """Forward pass of the model.
 
         Parameters
@@ -702,13 +702,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
             views (``view.flatten().shard_sizes``).
+        target : Batch
+            Decoder conditioning: the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None
 
         Returns
         -------
-        dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+        Batch
+            Output of the model, built by updating `target` per decoded dataset (sharded
+            if the input is sharded).
         """
         dataset_names = list(batch.keys())
 
@@ -735,7 +738,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         if hidden_trainable_parameters is not None:
-            hidden_trainable_parameters = hidden_trainable_parameters.to(x_hidden_latent.device)
             x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
 
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
@@ -789,8 +791,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(x_latent.device)
-        processor_edge_index = processor_edge_index.to(x_latent.device)
+        processor_edge_attr = processor_edge_attr.to(dtype=x_latent.dtype)
 
         x_latent_proc = self.processor(
             x=x_latent,
@@ -843,8 +844,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 model_comm_group=model_comm_group,
                 **graph_batch_kwargs,
             )
-            decoder_edge_attr = decoder_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
-            decoder_edge_index = decoder_edge_index.to(x_latent.device)
+            decoder_edge_attr = decoder_edge_attr.to(dtype=x_latent.dtype)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,

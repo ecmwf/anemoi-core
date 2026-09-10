@@ -720,8 +720,14 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         step_kwargs = next(iter(task.steps("validation")))
         output_indices = task.get_batch_output_indices(**step_kwargs)
 
+        def _select_member(field: torch.Tensor, view: SourceView) -> torch.Tensor:
+            """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member."""
+            if view.layout.ensemble is None:
+                return field
+            return field.select(view.layout.axis("ensemble", ndim=field.ndim), 0)
+
         def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
-            field = sub_view.data[self.sample_idx]  # (grid, vars) for sparse obs
+            field = _select_member(sub_view.data[self.sample_idx], sub_view)  # (grid, vars)
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
 
@@ -741,7 +747,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             prediction.apply_func(lambda t, **_: t.detach().cpu()),
             in_place=False,
         )
-        y_pred = prediction.data[self.sample_idx].numpy()
+        y_pred = _select_member(prediction.data[self.sample_idx], prediction).numpy()
 
         return input_latlons, output_latlons, x, y_true, y_pred
 
