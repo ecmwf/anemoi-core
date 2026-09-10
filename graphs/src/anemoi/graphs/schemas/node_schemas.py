@@ -113,9 +113,7 @@ class IcosahedralandHealPixNodeSchema(BaseModel):
 
 
 class HealPixNodeSchema(IcosahedralandHealPixNodeSchema):
-    target_: Literal[
-        "anemoi.graphs.nodes.HEALPixNodes",
-    ] = Field(..., alias="_target_")
+    target_: Literal["anemoi.graphs.nodes.HEALPixNodes",] = Field(..., alias="_target_")
     "HEALPix nodes class implementation from anemoi.graphs.nodes."
     nest_ordering: bool = True
     "Whether to use HEALPix NESTED pixel ordering. If False, RING ordering is used, which is isolatitude and sorted north to south. Defaults to True."
