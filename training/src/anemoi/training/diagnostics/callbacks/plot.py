@@ -666,15 +666,23 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 return processed[self.sample_idx].unsqueeze(0)
             return processed[self.sample_idx : self.sample_idx + 1]
 
-        output_tensor = torch.cat(
-            tuple(
-                pl_module.plot_adapter.select_members(
-                    _post_process(x[dataset_name]),
-                    members,
-                )
-                for x in outputs
-            ),
-        )
+        def _ensemble_axis(view: SourceView, tensor: torch.Tensor) -> int | None:
+            """Ensemble axis of the tensor, or None."""
+            if not view.layout.has_axis("ensemble"):
+                return None
+            if isinstance(view.data, list):
+                return view.layout.axis("ensemble", ndim=tensor.ndim - 1) + 1
+            return view.layout.axis("ensemble", ndim=tensor.ndim)
+
+        def _select_members(view: SourceView) -> torch.Tensor:
+            tensor = _post_process(view)
+            ensemble_axis = _ensemble_axis(view, tensor)
+            if ensemble_axis is None:
+                # No ensemble axis to slice
+                return tensor
+            return pl_module.plot_adapter.select_members(tensor, members, ensemble_axis=ensemble_axis)
+
+        output_tensor = torch.cat(tuple(_select_members(x[dataset_name]) for x in outputs))
 
         output_tensor = pl_module.plot_adapter.prepare_plot_output_tensor(output_tensor)
         return (
@@ -702,15 +710,33 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         dataset_name: str,
         outputs: TrainingStepOutput,
         batch: Batch,
+        members: int | list[int] | None = 0,
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         """Build the plotting fields and coordinates for a tabular observation dataset.
 
         We extract the fields directly from the per-dataset SourceView using select_time.
 
+        Parameters
+        ----------
+        pl_module : pl.LightningModule
+            The LightningModule instance.
+        dataset_name : str
+            The name of the (sparse / tabular) dataset to process.
+        outputs : TrainingStepOutput
+            The outputs from the model.
+        batch : Batch
+            The batch of data.
+        members : int | list[int] | None, optional
+            Ensemble members to keep in the prediction. ``None`` keeps all of them.
+            The input and target panels always show the first member, as they are
+            observations rather than forecasts. Default is 0 (first member).
+
         Returns
         -------
         tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
-            Shape: (input_latlons, output_latlons, x, y_true, y_pred).
+            Shape: (input_latlons, output_latlons, x, y_true, y_pred). ``y_pred`` is
+            ``(grid, vars)`` for a single member and ``(members, grid, vars)`` when
+            several are kept, so ensemble-aware plot functions can get the full spread.
         """
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         task = pl_module.task
@@ -721,10 +747,20 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         output_indices = task.get_batch_output_indices(**step_kwargs)
 
         def _select_member(field: torch.Tensor, view: SourceView) -> torch.Tensor:
-            """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member."""
+            """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member (index-0)."""
             if view.layout.ensemble is None:
                 return field
-            return field.select(view.layout.axis("ensemble", ndim=field.ndim), 0)
+            return field.select(view.layout.axis("ensemble", ndim=field.ndim), 0)  # member 0
+
+        def _select_pred_members(field: torch.Tensor, view: SourceView) -> torch.Tensor:
+            """Select the requested member(s) from a sparse-obs predicted ensemble."""
+            if view.layout.ensemble is None:
+                return field
+            axis = view.layout.axis("ensemble", ndim=field.ndim)
+            if members is not None:
+                index = members if isinstance(members, list) else [members]
+                field = field.index_select(axis, torch.tensor(index, device=field.device))
+            return field.squeeze(axis) if field.shape[axis] == 1 else field.movedim(axis, 0)
 
         def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
             field = _select_member(sub_view.data[self.sample_idx], sub_view)  # (grid, vars)
@@ -747,7 +783,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             prediction.apply_func(lambda t, **_: t.detach().cpu()),
             in_place=False,
         )
-        y_pred = _select_member(prediction.data[self.sample_idx], prediction).numpy()
+        y_pred = _select_pred_members(prediction.data[self.sample_idx], prediction).numpy()
 
         return input_latlons, output_latlons, x, y_true, y_pred
 
@@ -887,14 +923,12 @@ class LossCurvePlot(BasePerBatchPlotCallback):
 
 
 class BatchOutputPlot(BasePlotAdditionalMetrics):
-    """Generic per-batch spatial-output plot driven by a pluggable ``plot_fn``.
+    """Generic per-batch spatial-output plot driven by a pluggable plot_fn.
 
     One callback class serves the sample / spectrum / histogram map plots; the
-    concrete figure is produced by the injected ``plot_fn``. Reuses the
-    richer-batch data extraction (``process`` / ``process_output_tensor`` for
-    gridded data, ``_sparse_sample`` for scattered observation datasets). When a
-    ``plot_fn`` does not support sparse data (e.g. spectrum / histogram) it
-    returns ``None`` for such datasets and the callback skips them.
+    concrete figure is produced by the injected plot_fn. When a
+    plot_fn does not support unstructured data (e.g. spectrum / histogram), it
+    returns None for such datasets and the callback skips them.
     """
 
     def __init__(
@@ -928,7 +962,9 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             Forward the optional auxiliary tensor (e.g. corrupted targets) to
             ``plot_fn``, by default False.
         members : int | list[int] | None, optional
-            Ensemble members to select; defaults to the adapter default.
+            Ensemble members to select. None selects all of them. Left unset, the
+            plot adapter decides (all members for ensemble runs, the first member
+            otherwise).
         every_n_batches : int, optional
             Batch frequency to plot at, by default None.
         dataset_names : list[str] | None, optional
@@ -960,9 +996,11 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             fn = fn.func
         return getattr(fn, "__name__", type(self).__name__)
 
-    def _get_process_members(self) -> int | list[int] | None:
-        """Return the ``members`` argument passed to ``process()``."""
-        return 0 if isinstance(self._members, _Unset) else self._members
+    def _get_process_members(self, pl_module: pl.LightningModule) -> int | list[int] | None:
+        """Return the `members` argument passed to process()."""
+        if isinstance(self._members, _Unset):
+            return pl_module.plot_adapter.default_plot_members
+        return self._members
 
     def _figure_tags(self, dataset_name: str, tag_suffix: str, batch_idx: int, local_rank: int) -> tuple[str, str]:
         focus_tag = self.focus_mask.tag
@@ -1024,6 +1062,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     dataset_name,
                     outputs,
                     batch,
+                    members=self._get_process_members(pl_module),
                 )
                 fig = self.plot_fn(
                     **spatial_inputs,
@@ -1055,7 +1094,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                 dataset_name,
                 outputs,
                 batch,
-                members=self._get_process_members(),
+                members=self._get_process_members(pl_module),
             )
             auxiliary_tensor = (
                 None
@@ -1064,7 +1103,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
                     pl_module,
                     dataset_name,
                     [auxiliary_output],
-                    members=self._get_process_members(),
+                    members=self._get_process_members(pl_module),
                 )
             )
 

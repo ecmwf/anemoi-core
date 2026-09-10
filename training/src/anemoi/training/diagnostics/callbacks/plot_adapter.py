@@ -67,7 +67,12 @@ class BasePlotAdapter(ABC):
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return output_tensor
 
-    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:  # noqa: ARG002
+    def select_members(
+        self,
+        tensor: Any,
+        members: int | list[int] | None = None,  # noqa: ARG002
+        ensemble_axis: int | None = None,  # noqa: ARG002
+    ) -> Any:
         """Select ensemble members from tensor. No-op for non-ensemble adapters."""
         return tensor
 
@@ -180,26 +185,37 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return self._inner.prepare_plot_output_tensor(output_tensor)
 
-    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:
-        """Slice ensemble members from dim 2 of the output tensor.
+    def select_members(
+        self,
+        tensor: Any,
+        members: int | list[int] | None = None,
+        ensemble_axis: int | None = None,
+    ) -> Any:
+        """Slice ensemble members from the input tensor's ensemble axis.
 
         Parameters
         ----------
         tensor : Any
-            Tensor with shape (..., members, grid, vars).
+            Tensor carrying an ensemble axis at ``ensemble_axis``.
         members : int | list[int] | None
             Members to select. None returns all members, int/list selects specific members.
+        ensemble_axis : int | None
+            Physical position of the ensemble axis, as retrieved from the prediction
+            view's layout. Defaults to 2, i.e., its position in the canonical gridded
+            (batch, time, ensemble, grid, variables) layout.
 
         Returns
         -------
         Any
-            Tensor with selected ensemble members.
+            Tensor with selected ensemble members. The ensemble axis is kept (with
+            size 1 for a single member) so callers can rely on its position.
         """
         if members is None:
             return tensor
         if not isinstance(members, list):
             members = [members]
-        return tensor[:, :, members, ...]
+        axis = 2 if ensemble_axis is None else ensemble_axis % tensor.ndim
+        return tensor[(slice(None),) * axis + (members,)]
 
     def prepare_loss_batch(self, batch: dict) -> dict:
         """Return the batch for loss plotting."""

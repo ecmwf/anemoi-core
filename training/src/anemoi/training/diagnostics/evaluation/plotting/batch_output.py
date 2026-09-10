@@ -38,7 +38,8 @@ Built-in plot functions and their optional kwargs
     - ``log_scale`` (bool, default ``False``): use log scale on the y-axis.
 
 ``ensemble_plot_fn``
-    Ensemble spread/mean/error map plot.
+    Ensemble spread/mean/error map plot. Supports sparse observation datasets, whose
+    panels are drawn at the target observation locations.
 
     - ``accumulation_levels_plot`` (list, default ``DEFAULT_ACCUMULATION_LEVELS``):
       colour levels in mm for precipitation fields.
@@ -182,6 +183,8 @@ def ensemble_plot_fn(
     auxiliary: np.ndarray | None = None,  # noqa: ARG001
     settings: Any | None = None,
     accumulation_levels_plot: list | None = None,
+    sparse: bool = False,
+    output_latlons: np.ndarray | None = None,
     **_kwargs: Any,
 ) -> Figure:
     """Adapter for ``plot_predicted_ensemble`` (PlotEnsSample)."""
@@ -199,4 +202,6 @@ def ensemble_plot_fn(
         precip_and_related_fields=getattr(settings, "precip_and_related_fields", None),
         colormaps=getattr(settings, "colormaps", None),
         projection_kind=getattr(settings, "projection_kind", "equirectangular"),
+        sparse=sparse,
+        output_latlons=output_latlons,
     )
