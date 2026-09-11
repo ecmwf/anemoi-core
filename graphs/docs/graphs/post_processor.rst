@@ -100,7 +100,7 @@ graph.
 ********************
 
 The ``RestrictEdgeLength`` post-processor will remove edges longer than
-a certain treshold (set in km). This can be useful when one or multiple
+a certain threshold (set in km). This can be useful when one or multiple
 edge builders create edges of various lenghts, some of which are
 undesirable. For example when using ``KNNEdges`` applied to all of the
 hidden mesh but only a subset of the data nodes (e.g. those in a LAM

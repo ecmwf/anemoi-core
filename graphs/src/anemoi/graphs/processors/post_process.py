@@ -398,7 +398,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         edge_attributes: dict | None = None,
     ) -> None:
         super().__init__(source_name, target_name, edge_attributes=edge_attributes)
-        self.treshold = max_length_km
+        self.threshold = max_length_km
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
 
@@ -407,7 +407,7 @@ class RestrictEdgeLength(BaseEdgeMaskingProcessor):
         target_nodes = graph[self.target_name]
         edge_index = graph[self.edges_name].edge_index
         lengths = EARTH_RADIUS * EdgeLength()(x=(source_nodes, target_nodes), edge_index=edge_index)
-        mask = torch.where(lengths > self.treshold, False, True).squeeze().cpu()
+        mask = torch.where(lengths > self.threshold, False, True).squeeze().cpu()
         cases = [
             (self.source_mask_attr_name, source_nodes, 0),
             (self.target_mask_attr_name, target_nodes, 1),
