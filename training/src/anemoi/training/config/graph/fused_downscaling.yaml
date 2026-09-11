@@ -14,6 +14,8 @@
 
 overwrite: True
 nodes:
+  # TODO(Vera): for shared encoders, also share graphs instead of building the same graph
+  # multiple times.
   in_hres:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
@@ -27,7 +29,10 @@ nodes:
   in_lres:
     node_builder:
       _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-      dataset: ${system.input.dataset_lres}
+      # use the high res dataset to build nodes for the low res input
+      # The inputs are projected onto the high res grid before being
+      # passed to the encoder.
+      dataset: ${system.input.dataset}
     attributes: ${graph.attributes.nodes}
   hidden:
     node_builder:
