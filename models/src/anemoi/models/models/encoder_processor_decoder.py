@@ -9,6 +9,7 @@
 
 
 import logging
+from pathlib import Path
 from typing import Optional
 
 import einops
@@ -17,6 +18,7 @@ from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
@@ -36,6 +38,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
+        file_graph = isinstance(self._graph_data, Path)
+
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
@@ -49,11 +53,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden)],
-                edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name],
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                trainable_size=encoder_config.mapper.get("trainable_size", 0),
+                graph=(
+                    self._graph_data if file_graph else self._graph_data[(dataset_name, "to", self._graph_name_hidden)]
+                ),
+                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                src_size=DEFAULT_DATASET_NAME if file_graph else self.node_attributes.num_nodes[dataset_name],
+                dst_size=(
+                    self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden]
+                ),
+                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                dataset_name=dataset_name if file_graph else None,
             )
 
         self.encoder = torch.nn.ModuleDict()
@@ -77,11 +86,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Processor hidden -> hidden
         self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)],
-            edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.processor.get("trainable_size", 0),
+            graph=(
+                self._graph_data
+                if file_graph
+                else self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]
+            ),
+            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            src_size=self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden],
+            dst_size=self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden],
+            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            dataset_name=self.dataset_names[0] if file_graph else None,
         )
 
         self.processor = instantiate(
@@ -109,11 +123,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden, "to", dataset_name)],
-                edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=decoder_config.mapper.get("trainable_size", 0),
+                graph=(
+                    self._graph_data if file_graph else self._graph_data[(self._graph_name_hidden, "to", dataset_name)]
+                ),
+                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                src_size=(
+                    self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden]
+                ),
+                dst_size=DEFAULT_DATASET_NAME if file_graph else self.node_attributes.num_nodes[dataset_name],
+                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                dataset_name=dataset_name if file_graph else None,
             )
 
         self.decoder = torch.nn.ModuleDict()
@@ -297,6 +316,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs
+            Additional model-specific arguments.
 
         Returns
         -------
@@ -347,6 +368,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=batch_size,
                 model_comm_group=model_comm_group,
+                device=x[dataset_name].device,
             )
 
             enc_shard_info = BipartiteGraphShardInfo(
@@ -380,6 +402,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ) = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
+            device=x[dataset_names[0]].device,  # Use the device of the first dataset for processor edges
         )
 
         x_latent_proc = self.processor(
@@ -414,7 +437,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 dec_edge_shard_sizes,
             ) = self.decoder_graph_provider[
                 dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
+            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group, device=x[dataset_name].device)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
