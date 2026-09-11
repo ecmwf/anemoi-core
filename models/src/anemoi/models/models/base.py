@@ -24,6 +24,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
@@ -385,6 +386,39 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    @staticmethod
+    def _apply_spatial_preprocessor(
+        tensors: tuple[Tensor, ...],
+        dataset_name: str,
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
+        """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
+        if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
+            return tensors, grid_shard_sizes
+
+        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        projected_tensors = []
+        output_grid_shard_sizes: ShardSizes = None
+        for index, tensor in enumerate(tensors):
+            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
+                tensor,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=source_grid_shard_sizes,
+            )
+            if index == 0:
+                output_grid_shard_sizes = tensor_grid_shard_sizes
+            elif tensor_grid_shard_sizes != output_grid_shard_sizes:
+                raise RuntimeError(
+                    f"Spatial preprocessor for {dataset_name!r} returned inconsistent target-grid shard sizes."
+                )
+            projected_tensors.append(projected_tensor)
+
+        if grid_shard_sizes is not None:
+            grid_shard_sizes[dataset_name] = output_grid_shard_sizes
+        return tuple(projected_tensors), grid_shard_sizes
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -393,6 +427,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -414,6 +449,9 @@ class BaseGraphModel(nn.Module):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional arguments.
 
@@ -449,10 +487,19 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            for dataset_name in dataset_names:
+                (projected_tensor,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                    (x[dataset_name],),
+                    dataset_name,
+                    spatial_pre_processors,
+                    model_comm_group,
+                    grid_shard_sizes,
+                )
+                x[dataset_name] = projected_tensor
+
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
-
-            # Perform forward pass
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
