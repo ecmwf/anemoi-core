@@ -26,7 +26,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.primitives import _alltoall_op
 from anemoi.models.distributed.primitives import _alltoall_transpose
 from anemoi.models.distributed.primitives import _resolve_group_name
-from anemoi.models.testing import run_distributed_test
+from anemoi.models.testing import _run_distributed_test
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
@@ -117,7 +117,7 @@ def test_alltoall_op_interface(
     """
     if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoall requires torch >= 2.6.")
-    run_distributed_test(
+    _run_distributed_test(
         _test_alltoall_opcheck_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -208,7 +208,7 @@ def test_alltoall_transpose_compiles_and_matches_eager(
     """
     if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoall requires torch >= 2.6.")
-    run_distributed_test(
+    _run_distributed_test(
         _test_alltoall_transpose_compile_matches_eager_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,

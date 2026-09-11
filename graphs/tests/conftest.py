@@ -14,7 +14,7 @@ import xarray as xr
 import yaml
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.testing import DatasetMock
+from anemoi.graphs.testing import _DatasetMock
 
 lats = [-0.15, 0, 0.15]
 lons = [0, 0.25, 0.5, 0.75]
@@ -162,7 +162,7 @@ def graph_long_and_short_edges() -> HeteroData:
 @pytest.fixture(scope="session")
 def icon_dataset_mock():
     """AICON graph dataset mock."""
-    return DatasetMock
+    return _DatasetMock
 
 
 @pytest.fixture

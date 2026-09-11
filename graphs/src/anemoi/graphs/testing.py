@@ -10,7 +10,7 @@
 import numpy as np
 
 
-class DatasetMock:
+class _DatasetMock:
     """This datasets emulates the most primitive unstructured grid with
     refinement.
 
