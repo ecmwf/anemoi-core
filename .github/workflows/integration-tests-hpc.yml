@@ -15,20 +15,6 @@ on:
           - test_benchmark
           - test_training_cycle
           - test_accuracy
-  # Split by event, so each trigger does one thing:
-  #  - pull_request `synchronize`: pushes. Same-repo pull requests have secrets
-  #    here, so nothing changes for them, and they run their OWN copy of this
-  #    file, so an edit to it is tested by the push that makes it. A fork's push
-  #    never runs the tests: its token cannot read secrets, and the gate fails
-  #    it anyway (new commits need a fresh approval).
-  #  - pull_request_target `labeled`: adding 'run-expensive-tests'. The only way
-  #    a fork's code reaches the HPC, since only this event has secrets for a
-  #    fork. It runs the BASE branch's copy of this file.
-  # Everything here runs pull request code, so nothing may be added without
-  # `needs: ci-approval` (the check-ci-approval pre-commit hook enforces that).
-  # `opened` would double-run a pull request opened with the label (that fires
-  # `labeled` too); without `reopened` and `unlabeled`, the checks of the last
-  # run simply stand until the next push or label.
   pull_request:
     types: [synchronize]
   pull_request_target:
@@ -41,37 +27,14 @@ permissions:
   contents: read
 
 jobs:
-  # Two questions, answered in two places, and neither ever looks at the other's
-  # label:
-  #  - Are the tests WANTED? Ours, the `if:` below, and only 'run-expensive-tests'
-  #    counts. No means this job skips, everything downstream skips with it, and
-  #    the run is green. Other labels being added never re-run the tests.
-  #  - May this code RUN on our HPC account? The action's, and only
-  #    'approved-for-ci' counts. It FAILS when the answer is no -- an `if:` on the
-  #    approval label would report Success for "nothing ran" -- and it spends the
-  #    label, so one approval buys one run.
-  #
-  # So 'approved-for-ci' starts nothing by itself. On a fork, a maintainer
-  # reads the diff, applies 'approved-for-ci', then applies 'run-expensive-tests'
-  # (or removes and re-adds it if it is already there). Both at once also works.
-  # Never leave the approval sitting alone: nothing revokes it before it is
-  # spent -- a fork's push runs with a read-only token, so the gate can fail
-  # that run but cannot delete the label.
   ci-approval:
     name: ci-approval
     if: >-
       ${{
-        (github.event_name != 'pull_request' && github.event_name != 'pull_request_target') ||
-        (
-          github.event_name == 'pull_request_target' &&
-          github.event.label.name == 'run-expensive-tests'
-        ) ||
-        (
-          github.event_name == 'pull_request' &&
-          contains(github.event.pull_request.labels.*.name, 'run-expensive-tests')
-        )
+        !github.event.pull_request ||     # always run if no PR
+        github.event.label.name == 'run-expensive-tests' ||        # ignore labelling events, that don't hav
+        (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-expensive-tests'))
       }}
-    # No checkout, no Python; the action needs bash, jq, and gh only to revoke.
     runs-on: ubuntu-slim
     permissions:
       pull-requests: write   # only so the label can be revoked again
@@ -80,7 +43,6 @@ jobs:
         with:
           label: approved-for-ci
 
-  # `needs: ci-approval` is the whole wiring; no `if:` belongs here.
   build-env:
     name: build-env
     needs: ci-approval
@@ -89,12 +51,6 @@ jobs:
     steps:
       # The source is checked out on the runner and shipped to the cluster, so
       # the HPC job needs no clone and no GitHub token.
-      #
-      # Pinned to the head commit in the event rather than a pull request ref:
-      # a ref is read when this step runs, which may be long after the label was
-      # applied, and a fork could push in between. The gate approved the commit
-      # in the event, so that is the commit that runs. Outside pull requests the
-      # sha is empty and the action checks out the run's own commit.
       #
       # allow-unsafe-pr-checkout: fork code in a trusted context, payable only
       # because this job hangs off ci-approval.
@@ -150,12 +106,6 @@ jobs:
             #SBATCH --mem=64G
           troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
 
-  # One job per expensive test. On workflow_dispatch a single test can be picked
-  # via the 'tests' input; on every other event all three run. When build-env is
-  # skipped these skip automatically as dependents -- and when ci-approval fails
-  # they skip too, but the run is already red. ci-approval is listed directly,
-  # not just reached through build-env: check-ci-approval wants every job to name
-  # the gate, so an edge later moved in the wrong place cannot ungate one.
   test_benchmark:
     needs: [ci-approval, build-env]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
