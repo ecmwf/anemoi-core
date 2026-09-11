@@ -1,3 +1,12 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import torch
 from torch import nn
 
@@ -9,8 +18,7 @@ class VariableDropout(nn.Module):
         multi_variable_dropout: bool = False,
         max_drop: int = 1,
     ) -> None:
-        """
-        Initializes the VariableDropout layer.
+        """Initializes the VariableDropout layer.
 
         Parameters
         ----------
@@ -25,9 +33,7 @@ class VariableDropout(nn.Module):
         super().__init__()
 
         assert 0.0 <= dropout_rate <= 1.0, "Dropout rate must be between 0 and 1."
-        assert (
-            isinstance(max_drop, int) and max_drop > 0
-        ), "max_drop must be a positive integer."
+        assert isinstance(max_drop, int) and max_drop > 0, "max_drop must be a positive integer."
 
         self.dropout_rate = dropout_rate
         self.multi_variable_dropout = multi_variable_dropout
@@ -36,8 +42,7 @@ class VariableDropout(nn.Module):
     def forward(
         self, x: torch.Tensor, names: list[str], prognostic_indices: list[int]
     ) -> tuple[torch.Tensor, list[str]]:
-        """
-        Forward pass for the VariableDropout layer.
+        """Forward pass for the VariableDropout layer.
         args:
         x : torch.Tensor
             The input tensor of shape (batch_size x time, num_ens, gridpoints,num_variables).
@@ -57,9 +62,7 @@ class VariableDropout(nn.Module):
             return x, names
 
         # keep = torch.ones(len(names), dtype=torch.bool, device=x.device)
-        prognostic_indices = torch.as_tensor(
-            prognostic_indices, dtype=torch.long, device=x.device
-        )
+        prognostic_indices = torch.as_tensor(prognostic_indices, dtype=torch.long, device=x.device)
 
         num_prognostic = len(prognostic_indices)
 
