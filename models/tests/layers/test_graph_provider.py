@@ -87,6 +87,21 @@ def test_projection_graph_provider_does_not_mutate_graph_weights() -> None:
     torch.testing.assert_close(graph["data", "to", "target"].gauss_weight, original_weights)
 
 
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {},
+        {
+            "file_path": "/unused/projection.npz",
+            "edges_name": ("data", "to", "target"),
+        },
+    ],
+)
+def test_projection_graph_provider_requires_exactly_one_source(kwargs) -> None:
+    with pytest.raises(ValueError, match="Exactly one of file_path or edges_name"):
+        ProjectionGraphProvider(**kwargs)
+
+
 def _make_graph_with_edges() -> HeteroData:
     graph = HeteroData()
     graph["data"].num_nodes = 3
