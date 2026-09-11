@@ -297,10 +297,8 @@ def test_normalized_leaky_relu_bounding(config, name_to_index, name_to_index_sta
         ),
     ],
 )
-def test_bounding_skips_missing_variables(cls, extra_kwargs, name_to_index_stats, statistics):
-    # Same bounding config applied to a dataset that only contains 'var1'.
-    # 'missing_var' must be silently skipped so the same config can be shared
-    # across multi-dataset setups.
+def test_fail_with_missing_variables(cls, extra_kwargs, statistics: dict, name_to_index_stats: dict):
+    """Test that bounding layers raise an error when a variable is missing from the name_to_index mapping."""
     partial_name_to_index = {"var1": 0}
     kwargs = dict(
         variables=["var1", "missing_var"],
@@ -311,9 +309,5 @@ def test_bounding_skips_missing_variables(cls, extra_kwargs, name_to_index_stats
         kwargs["statistics"] = statistics
         kwargs["name_to_index_stats"] = name_to_index_stats
 
-    bounding = cls(**kwargs)
-    assert bounding.data_index.tolist() == [0]
-
-    # forward must run without error and preserve shape on a tensor sized to the partial dataset.
-    partial_input = torch.tensor([[-1.0], [4.0], [0.5]])
-    bounding(partial_input.clone())
+    with pytest.raises(KeyError):
+        cls(**kwargs)
