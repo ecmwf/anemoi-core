@@ -58,7 +58,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         self.encoder = torch.nn.ModuleDict()
         for encoder_name, encoder_config in model_config.encoders.items():
-            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
+            # Fused source datasets have no node set of their own, so only the
+            # anchors carry an encoder input dimension and encoder edges.
+            encoder_anchors = self.encoder2anchors[encoder_name]
+            encoder_in_channels_src = [self.input_dim[d] for d in encoder_anchors]
             assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
                 f"All datasets for encoder {encoder_name} must have the same input dimension, "
                 f"but got {encoder_in_channels_src}."
@@ -69,7 +72,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+                edge_dim=self.encoder_graph_provider[encoder_anchors[0]].edge_dim,
             )
 
         # Latent aggregator: combines encoder outputs before the processor

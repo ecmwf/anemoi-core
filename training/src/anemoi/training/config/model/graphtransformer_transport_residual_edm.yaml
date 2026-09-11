@@ -85,7 +85,7 @@ encoders:
     # Target only: the graph's encoder edges are (out_hres -> hidden), and the
     # conditioning datasets are folded in as node features by _assemble_input.
     source_datasets: [ "out_hres" ]
-    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported", "concatenate_inputs_along_variable_dim" (model-class dependent)
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

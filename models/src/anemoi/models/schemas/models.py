@@ -162,8 +162,17 @@ class EncodersSchema(BaseModel):
 
     source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
     "List of datasets for which the encoder is applicable."
-    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
-    "Dataset fusing strategy. Default to 'not_supported'."
+    dataset_fusing_strategy: Literal["not_supported", "concatenate_inputs_along_variable_dim"] = Field(
+        default="not_supported"
+    )
+    "How the source datasets are combined into one encoder input. Defaults to 'not_supported' (no fusing)."
+    fusion_anchor: Optional[str] = Field(default=None, example="dataset1")
+    """Source dataset whose graph node set the fused features live on.
+
+    Required when ``dataset_fusing_strategy`` enables fusing, and forbidden
+    otherwise.  The other source datasets must already be on this dataset's
+    grid by the time they reach the encoder.
+    """
     mapper: Union[
         GNNEncoderSchema,
         GraphTransformerEncoderSchema,
@@ -173,6 +182,27 @@ class EncodersSchema(BaseModel):
         ...,
         discriminator="target_",
     )
+
+    @model_validator(mode="after")
+    def validate_fusion_anchor(self) -> "EncodersSchema":
+        fusing = self.dataset_fusing_strategy != "not_supported"
+        if not fusing and self.fusion_anchor is not None:
+            msg = (
+                f"fusion_anchor='{self.fusion_anchor}' is set but dataset_fusing_strategy is "
+                f"'{self.dataset_fusing_strategy}', so the anchor would be ignored."
+            )
+            raise ValueError(msg)
+        if fusing and self.fusion_anchor is None:
+            msg = (
+                f"dataset_fusing_strategy='{self.dataset_fusing_strategy}' requires fusion_anchor "
+                f"to name the source dataset whose graph node set the fused features live on "
+                f"(one of {self.source_datasets})."
+            )
+            raise ValueError(msg)
+        if fusing and self.fusion_anchor not in self.source_datasets:
+            msg = f"fusion_anchor '{self.fusion_anchor}' is not in source_datasets {self.source_datasets}."
+            raise ValueError(msg)
+        return self
 
 
 class DecodersSchema(BaseModel):
