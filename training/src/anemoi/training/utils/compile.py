@@ -99,6 +99,7 @@ def _check_env_and_warn() -> None:
 
 def _set_num_threads(num_threads: int) -> None:
     """Sets the number of threads for PyTorch and the OMP environment variable.
+
     Otherwise Pytorch Lightning sets it multiple times during runtime, leading to
     spurious recompilations due to 'global state (num_threads)' changing.
     """
@@ -129,9 +130,10 @@ def prepare_compilation(
             "Gradient checkpointing is enabled. Be aware that using torch.compile() with gradient checkpointing "
             "can lead to non-deterministic errors stemming from micro-benchmarks leading to different compilation"
             "decisions for checkpointed code, which can lead to 'checkpoint metadata does not match' errors."
-            "\"mode='max-autotune'\" in particular can cause issues due to different block sizes based on micro-benchmarks.",
+            "\"mode='max-autotune'\" in particular can error due to different block sizes based on micro-benchmarks.",
         )
-        torch._inductor.config.shape_padding = False  # non-deterministic shape padding can cause recompile errors when using torch compile inside checkpointed regions
+        # non-deterministic shape padding can error when using torch compile inside checkpointed regions
+        torch._inductor.config.shape_padding = False
         LOGGER.info("Disabled non-deterministic shape padding due to gradient checkpointing being enabled.")
 
     # disable LRU cache, this is a fix for https://github.com/pytorch/pytorch/issues/166926
