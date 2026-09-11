@@ -240,6 +240,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         for name, key in (("variable", variable), ("provenance", provenance), ("lead", lead), ("level", level)):
             self._counts[name][key] += 1
         self._counts["joint"][(provenance, variable)] += 1
+        output_frequency = query.get("output_frequency")
+        if output_frequency is not None:
+            self._counts["output_frequency"][f"{_hours(output_frequency):g} h"] += 1
         self._counts["entered"]["samples"] += 1
         self._counts["valid_target"]["samples"] += int(float(step["valid_target_count"].cpu()) > 0)
         for source in context.get("active_sources", []):
@@ -1769,6 +1772,28 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 labels.append(f"{name}{suffix}")
             ax.set_xticks(range(len(values)), labels, rotation=60, ha="right", fontsize=7)
             ax.set_title(f"observed {title} counts")
+        temporal_labels = sorted(
+            set(counts.get("lead", {})) | set(counts.get("output_frequency", {})),
+            key=lambda label: float(str(label).split()[0]),
+        )
+        temporal_axis = axes[0, 2]
+        temporal_axis.clear()
+        temporal_x = np.arange(len(temporal_labels))
+        temporal_axis.bar(
+            temporal_x - 0.2,
+            [counts.get("lead", {}).get(label, 0) for label in temporal_labels],
+            0.4,
+            label="forecast lead",
+        )
+        temporal_axis.bar(
+            temporal_x + 0.2,
+            [counts.get("output_frequency", {}).get(label, 0) for label in temporal_labels],
+            0.4,
+            label="output frequency",
+        )
+        temporal_axis.set_xticks(temporal_x, temporal_labels, rotation=60, ha="right", fontsize=7)
+        temporal_axis.legend(fontsize=7)
+        temporal_axis.set_title("observed forecast lead and output-frequency counts")
         joint = counts.get("joint", {})
         provenances = sorted({key[0] for key in joint})
         variables = sorted({key[1] for key in joint})
