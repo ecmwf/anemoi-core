@@ -35,7 +35,6 @@ jobs:
             # propagate to the sbatch job); secrets are valid inside this template.
             export MLFLOW_TEST_URL=${{ secrets.MLFLOW_TEST_URL }}
             export DATASET_ROOT_PATH=${{ secrets.DATASET_ROOT_PATH }}
-            export TORCHINDUCTOR_FORCE_DISABLE_CACHES=1 #TEMP #forcing intermittent compilation error
             ${{ inputs.pytest_cmd }}
             deactivate
           sbatch_options: ${{ inputs.sbatch_options }}
