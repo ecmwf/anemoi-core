@@ -73,15 +73,15 @@ def shard_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to shard
+        dimension along which to shard.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
     gather_in_backward : bool
-        perform gather in backward, default True
+        perform gather in backward, default True.
 
     Returns
     -------
@@ -99,13 +99,13 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -113,6 +113,22 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         Gathered tensor.
     """
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
+
+
+def gather_ensemble(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
+    """Gather ensemble members for a loss replicated across the ensemble subgroup.
+
+    Every rank in ``mgroup`` must compute the same loss on the gathered
+    predictions. Backward keeps the local ensemble slice and multiplies it by
+    the subgroup size to compensate for DDP averaging partial gradients.
+    The gradient of the replicated loss with respect to the full gathered
+    predictions is identical across subgroup ranks.
+
+    ``mgroup`` must be the ensemble communication subgroup (``ens_comm_subgroup``),
+    so its size is ``num_gpus_per_ensemble // num_gpus_per_model``. With no
+    subgroup, the tensor and its gradient pass through unchanged.
+    """
+    return _GatherEnsembleParallelSection.apply(input_, dim, sizes, mgroup)
 
 
 def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
@@ -123,9 +139,9 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -149,13 +165,15 @@ def sync_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
+    gather_in_fwd : bool, optional
+        Whether to gather in forward. If False, only reduce gradients in backward.
 
     Returns
     -------
@@ -173,13 +191,13 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -379,6 +397,26 @@ class _GatherParallelSection(torch.autograd.Function):
                 None,
                 None,
             )
+        return grad_output, None, None, None
+
+
+class _GatherEnsembleParallelSection(torch.autograd.Function):
+    """Gather members and compensate for DDP averaging in backward."""
+
+    @staticmethod
+    def forward(ctx, input_, dim_, sizes_, mgroup_):
+        ctx.dim = dim_
+        ctx.comm_group = mgroup_
+        ctx.sizes = sizes_
+        if mgroup_:
+            return _gather(input_, dim_, sizes_, group=mgroup_)
+        return input_
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        if ctx.comm_group:
+            grad_local = _split(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group)
+            return grad_local * ctx.comm_group.size(), None, None, None
         return grad_output, None, None, None
 
 

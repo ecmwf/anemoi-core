@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import gather_ensemble
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
@@ -172,7 +172,7 @@ class EnsembleTraining(BaseTrainingModule):
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
 
-        y_pred_ens = gather_tensor(
+        y_pred_ens = gather_ensemble(
             y_pred.clone(),  # for bwd because we checkpoint this region
             dim=TensorDim.ENSEMBLE_DIM,
             sizes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
