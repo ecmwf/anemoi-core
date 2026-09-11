@@ -50,6 +50,19 @@ class TestMultiDataset:
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
+    def test_single_participant_per_dataset(self, multi_dataset: MultiDataset) -> None:
+        """Bare readers are one participant named after the dataset; several participants are rejected."""
+        readers = multi_dataset.reference_readers
+        assert multi_dataset.dataset_names == ["dataset_a", "dataset_b"]
+        assert multi_dataset.participant_readers == {name: {name: reader} for name, reader in readers.items()}
+        assert multi_dataset.participant_row() == readers
+
+        with pytest.raises(ValueError, match="exactly one participant per dataset"):
+            MultiDataset(
+                data_readers={"dataset_a": {"p1": readers["dataset_a"], "p2": readers["dataset_b"]}},
+                relative_date_indices={"dataset_a": [0, 2, 6]},
+            )
+
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns a flat range over the valid (sequence, position) anchors."""
         # relative_date_indices are: [0, 2, 6]
@@ -116,7 +129,7 @@ class TestMultiDataset:
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when a dataset has no valid anchors."""
-        data_readers = multi_dataset.data_readers
+        data_readers = multi_dataset.reference_readers
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
         # Make dataset_b return no valid anchors
@@ -130,7 +143,7 @@ class TestMultiDataset:
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when intersection of valid anchors is empty."""
-        data_readers = multi_dataset.data_readers
+        data_readers = multi_dataset.reference_readers
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
         # dataset_a has anchors at positions [0, 1, 2]; dataset_b at [5, 6, 7] — no overlap

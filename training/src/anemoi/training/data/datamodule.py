@@ -9,6 +9,7 @@
 
 
 import logging
+from collections.abc import Iterator
 from functools import cached_property
 from typing import Any
 
@@ -17,6 +18,7 @@ from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.datasets import AnemoiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
@@ -27,6 +29,20 @@ from anemoi.training.utils.worker_init import worker_init_func
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
+
+
+def iter_participant_configs(datareader_config: dict[str, Any]) -> Iterator[tuple[str, str, Any]]:
+    """Yield ``(dataset_name, participant, reader_config)`` for every reader of a stage.
+
+    A dataset configured as a bare reader has one participant named after the
+    dataset; a ``participants:`` block yields one entry per participant.
+    """
+    for dataset_name, dataset_config in datareader_config.items():
+        if "participants" in dataset_config:
+            for participant, reader_config in dataset_config["participants"].items():
+                yield dataset_name, participant, reader_config
+        else:
+            yield dataset_name, dataset_name, dataset_config
 
 
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
@@ -60,9 +76,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
 
         # Set training end dates if not specified for each dataset
-        for name, dataset_config in self.train_dataloader_datareader_config.items():
-            if dataset_config.end is None:
-                msg = f"No end date specified for training dataset {name}."
+        for name, participant, reader_config in iter_participant_configs(self.train_dataloader_datareader_config):
+            if reader_config.end is None:
+                which = name if participant == name else f"{name} (participant {participant})"
+                msg = f"No end date specified for training dataset {which}."
                 raise ValueError(msg)
 
         if not self.config.dataloader.pin_memory:
@@ -81,7 +98,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.data_readers.items():
+        for dataset_name, dataset in self.ds_train.reference_readers.items():
             stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
@@ -151,10 +168,14 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         label: str = "generic",
     ) -> AnemoiDataset:
-        data_readers = {
-            name: create_dataset(data_reader, task=self.task) for name, data_reader in datareader_config.items()
-        }
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        # Nested readers {dataset_name: {participant: reader}}; the single form has one
+        # participant named after the dataset.
+        data_readers: dict[str, dict[str, BaseAnemoiReader]] = {name: {} for name in datareader_config}
+        for name, participant, reader_config in iter_participant_configs(datareader_config):
+            data_readers[name][participant] = create_dataset(reader_config, task=self.task)
+        # Relative date indices are a per-dataset quantity (participants share the frequency).
+        reference_readers = {name: next(iter(participants.values())) for name, participants in data_readers.items()}
+        relative_date_indices = compute_relative_date_indices(self.task, reference_readers, mode=label)
 
         return instantiate_with_runtime_kwargs(
             config,
@@ -187,7 +208,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 rollout=len(tuple(self.task.steps(label))),
                 relative_date_indices=compute_relative_date_indices(
                     self.task,
-                    dataset.data_readers,
+                    dataset.reference_readers,
                     mode=label,
                 ),
             )

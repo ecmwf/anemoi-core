@@ -9,6 +9,7 @@
 
 import logging
 import os
+from collections.abc import Mapping
 
 import numpy as np
 import torch
@@ -26,11 +27,13 @@ class MultiDataset(AnemoiDataset):
 
     Selection policy: ONE set of anchors shared by all readers (intersection of
     the readers' valid anchors); every sample reads ALL readers at that anchor.
+    Every dataset has exactly one participant, i.e. there is a single participant
+    row (see :meth:`AnemoiDataset.participant_row`).
     """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: Mapping[str, BaseAnemoiReader | Mapping[str, BaseAnemoiReader]],
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
@@ -42,11 +45,11 @@ class MultiDataset(AnemoiDataset):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
-            Dictionary mapping dataset names to their data_readers
+        data_readers : Mapping[str, BaseAnemoiReader | Mapping[str, BaseAnemoiReader]]
+            Dataset names mapped to their reader, or to a single-entry ``{participant: reader}``
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
-            Precomputed relative date indices for each data reader
+            Precomputed relative date indices per dataset name
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -67,13 +70,22 @@ class MultiDataset(AnemoiDataset):
             rollout=rollout,
             batch_size=batch_size,
         )
+        for dataset_name, participants in self.participant_readers.items():
+            if len(participants) != 1:
+                msg = (
+                    f"MultiDataset supports exactly one participant per dataset; dataset '{dataset_name}' has "
+                    f"participants {list(participants)}. Use MultiDomainDataset for datasets with several "
+                    "participants."
+                )
+                raise ValueError(msg)
         self._check_no_mixed_sequence_types()
         self._set_relative_date_indices(relative_date_indices)
 
     def _compute_anchors(self, relative_date_indices: dict[str, TimeIndices]) -> None:
-        # Valid (sequence, position) anchors shared by all readers, plus a flat index
-        # over them that the shuffle/shard logic operates on.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        # Valid (sequence, position) anchors shared by all readers of the single
+        # participant row, plus a flat index over them that the shuffle/shard logic
+        # operates on.
+        self.anchors = compute_valid_anchors(self.participant_row(), relative_date_indices)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
@@ -90,7 +102,7 @@ class MultiDataset(AnemoiDataset):
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         sequence, position = (int(v) for v in self.anchors[index])
-        return {name: self._read(name, sequence, position) for name in self.data_readers}
+        return {name: self._read(name, sequence, position) for name in self.dataset_names}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

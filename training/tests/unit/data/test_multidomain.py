@@ -43,10 +43,43 @@ class TestMultiDomain:
         mock_dataset_b.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
         mock_dataset_b.compute_anchors.return_value = np.array([[0, 0], [0, 1], [0, 2], [0, 3]])
 
-        data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
-        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 6, 18]}  # e.g. f([t, t-6h]) = t+12h
+        # One dataset ("data") with two participants that share variables and frequency but
+        # have independent anchors. Relative date indices are keyed by dataset name.
+        data_readers = {"data": {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}}
+        relative_date_indices = {"data": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDomainDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+
+    def test_participants_of_single_dataset(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
+        assert multi_domain.dataset_name == "data"
+        assert multi_domain.dataset_names == ["data"]
+        assert multi_domain.participants == ["dataset_a", "dataset_b"]
+        assert multi_domain.reference_readers == {"data": readers["dataset_a"]}
+        assert multi_domain.participant_row("dataset_b") == {"data": readers["dataset_b"]}
+        assert set(multi_domain.relative_date_indices) == {"data"}
+        # dataset-level properties are keyed by dataset name (reference participant) ...
+        assert multi_domain.metadata == {"data": readers["dataset_a"].metadata}
+        assert set(multi_domain.shard_shapes) == {"data"}
+        # ... per-participant values stay available
+        assert multi_domain._collect_participants("grid_size") == {"data": {"dataset_a": 5, "dataset_b": 8}}
+
+    def test_rejects_several_datasets(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
+        with pytest.raises(ValueError, match="exactly one dataset"):
+            MultiDomainDataset(
+                data_readers={"data": readers["dataset_a"], "other": readers["dataset_b"]},
+                relative_date_indices={"data": [0, 2, 6], "other": [0, 2, 6]},
+            )
+
+    def test_participant_without_anchors_raises(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
+        readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
+        with pytest.raises(ValueError, match="Participant 'dataset_b': No valid anchors"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
 
     def test_sharding(self, multi_domain: MultiDomainDataset) -> None:
         """Test that sharding logic correctly partitions the dataset."""
@@ -88,24 +121,25 @@ class TestMultiDomain:
         multi_domain.per_worker_init(n_workers=2, worker_id=1)
         worker_1_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
 
-        for domain in multi_domain.dataset_names:
+        for domain in multi_domain.participants:
             assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
 
     def test_get_sample_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
         multi_domain.get_sample("dataset_a", 0)
 
-        multi_domain.data_readers["dataset_a"].get_sample.assert_called_once()
-        multi_domain.data_readers["dataset_b"].get_sample.assert_not_called()
+        readers["dataset_a"].get_sample.assert_called_once()
+        readers["dataset_b"].get_sample.assert_not_called()
 
         multi_domain.get_sample("dataset_b", 2)
-        multi_domain.data_readers["dataset_b"].get_sample.assert_called_once()
+        readers["dataset_b"].get_sample.assert_called_once()
 
     def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.data_readers["dataset_b"].num_sequences = 2
+        multi_domain.participant_readers["data"]["dataset_b"].num_sequences = 2
 
         with pytest.raises(ValueError, match="same MultiDomainDataset is unsupported"):
             MultiDomainDataset(
-                data_readers=multi_domain.data_readers,
+                data_readers=multi_domain.participant_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
             )
 
@@ -269,7 +303,7 @@ class TestMultiDomain:
         """End-to-end: dataset __iter__ honours batch_size and epoch changes reshuffle the block order."""
         mocker.patch("anemoi.training.data.datasets.anemoidataset.get_base_seed", return_value=1000)
         dataset = MultiDomainDataset(
-            data_readers=multi_domain.data_readers,
+            data_readers=multi_domain.participant_readers,
             relative_date_indices=multi_domain.relative_date_indices,
             batch_size=2,
         )
@@ -294,28 +328,38 @@ class TestMultiDomain:
         assert set(epoch_1) == set(epoch_0)
 
     def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.data_readers["dataset_b"].metadata["variables_metadata"]["10u"]["units"] = "km/h"
+        reader_b = multi_domain.participant_readers["data"]["dataset_b"]
+        reader_b.metadata["variables_metadata"]["10u"]["units"] = "km/h"
 
         with pytest.raises(ValueError, match="Variable compatibility check failed"):
             MultiDomainDataset(
-                data_readers=multi_domain.data_readers,
+                data_readers=multi_domain.participant_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
             )
 
     def test_check_datasets_units_accepts_compatibility_options(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.data_readers["dataset_b"].metadata["variables_metadata"]["10u"]["units"] = "km/h"
+        reader_b = multi_domain.participant_readers["data"]["dataset_b"]
+        reader_b.metadata["variables_metadata"]["10u"]["units"] = "km/h"
 
         MultiDomainDataset(
-            data_readers=multi_domain.data_readers,
+            data_readers=multi_domain.participant_readers,
             relative_date_indices=multi_domain.relative_date_indices,
             check_variables_compatibility={"ignore_units": True},
         )
 
+    @staticmethod
+    def _set_participant_metadata(multi_domain: MultiDomainDataset, metadata: dict[str, dict]) -> None:
+        for participant, meta in metadata.items():
+            multi_domain.participant_readers["data"][participant].metadata = meta
+
     def test_check_datasets_units_raises_error_for_incompatible_units(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.metadata = {
-            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
-            "dataset_b": {"variables_metadata": {"10u": {"units": "km/h"}}},
-        }
+        self._set_participant_metadata(
+            multi_domain,
+            {
+                "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+                "dataset_b": {"variables_metadata": {"10u": {"units": "km/h"}}},
+            },
+        )
         with pytest.raises(
             ValueError,
             match="Variable compatibility check failed for domain1 'dataset_a' and domain2 'dataset_b'",
@@ -323,18 +367,24 @@ class TestMultiDomain:
             multi_domain._check_datasets_units()
 
     def test_check_datasets_units_passes_for_compatible_units(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.metadata = {
-            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
-            "dataset_b": {"variables_metadata": {"10u": {"units": "m/s"}}},
-        }
+        self._set_participant_metadata(
+            multi_domain,
+            {
+                "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+                "dataset_b": {"variables_metadata": {"10u": {"units": "m/s"}}},
+            },
+        )
 
         assert multi_domain._check_datasets_units() is None
 
     def test_check_datasets_units_skips_when_no_dataset_has_metadata(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.metadata = {
-            "dataset_a": {"variables_metadata": {}},
-            "dataset_b": {"variables_metadata": {}},
-        }
+        self._set_participant_metadata(
+            multi_domain,
+            {
+                "dataset_a": {"variables_metadata": {}},
+                "dataset_b": {"variables_metadata": {}},
+            },
+        )
 
         assert multi_domain._check_datasets_units() is None
 
@@ -342,10 +392,13 @@ class TestMultiDomain:
         self,
         multi_domain: MultiDomainDataset,
     ) -> None:
-        multi_domain.metadata = {
-            "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
-            "dataset_b": {"variables_metadata": {}},
-        }
+        self._set_participant_metadata(
+            multi_domain,
+            {
+                "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
+                "dataset_b": {"variables_metadata": {}},
+            },
+        )
         assert (
             multi_domain._check_datasets_units() is None
         ), "Should skip units check when only one dataset has variable metadata"

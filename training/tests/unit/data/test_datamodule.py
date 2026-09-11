@@ -53,7 +53,7 @@ def _attach_statistics_reader(
 ) -> Mock:
     reader = mocker.Mock()
     reader.statistics_tendencies.side_effect = lambda delta: {"delta": delta}
-    datamodule.__dict__["ds_train"] = SimpleNamespace(data_readers={"data": reader})
+    datamodule.__dict__["ds_train"] = SimpleNamespace(reference_readers={"data": reader})
     return reader
 
 
@@ -166,11 +166,11 @@ def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None
     )
 
     ds_train = mocker.Mock()
-    ds_train.data_readers = {"data": object()}
+    ds_train.reference_readers = {"data": object()}
     ds_valid = mocker.Mock()
-    ds_valid.data_readers = {"data": object()}
+    ds_valid.reference_readers = {"data": object()}
     ds_test = mocker.Mock()
-    ds_test.data_readers = {"data": object()}
+    ds_test.reference_readers = {"data": object()}
     datamodule.__dict__.update(ds_train=ds_train, ds_valid=ds_valid, ds_test=ds_test)
 
     mocker.patch(
@@ -208,19 +208,21 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
-    mocker.patch(
+    compute_indices = mocker.patch(
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
     )
     instantiate = mocker.patch("anemoi.training.data.datamodule.instantiate_with_runtime_kwargs")
 
     config = {"_target_": "anemoi.training.data.datasets.AnemoiDataset"}
-    datamodule._get_dataset(config, {"data": object()}, shuffle=False, label="validation")
+    reader_config = {"dataset_config": "dataset.zarr"}
+    datamodule._get_dataset(config, {"data": reader_config}, shuffle=False, label="validation")
 
-    create_dataset.assert_called_once()
+    create_dataset.assert_called_once_with(reader_config, task=datamodule.task)
+    compute_indices.assert_called_once_with(datamodule.task, {"data": data_reader}, mode="validation")
     instantiate.assert_called_once_with(
         config,
-        data_readers={"data": data_reader},
+        data_readers={"data": {"data": data_reader}},
         relative_date_indices={"data": [0, 1]},
         shuffle=False,
         label="validation",
@@ -228,6 +230,36 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         rollout=2,
         batch_size=2,
     )
+
+
+def test_get_dataset_builds_one_reader_per_participant(mocker: MockFixture) -> None:
+    """A participants block yields nested readers; relative date indices come from the first participant."""
+    datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
+    datamodule.epoch = 0
+    datamodule.task = mocker.Mock()
+    datamodule.task.steps.return_value = ({},)
+    datamodule.config = DictConfig({"dataloader": {"batch_size": {"training": 2, "validation": 1, "test": 1}}})
+
+    readers = {"h1": object(), "h2": object()}
+    mocker.patch(
+        "anemoi.training.data.datamodule.create_dataset",
+        side_effect=lambda reader_config, task: readers[reader_config["name"]],  # noqa: ARG005
+    )
+    compute_indices = mocker.patch(
+        "anemoi.training.data.datamodule.compute_relative_date_indices",
+        return_value={"data": [0, 1]},
+    )
+    instantiate = mocker.patch("anemoi.training.data.datamodule.instantiate_with_runtime_kwargs")
+
+    config = {"_target_": "anemoi.training.data.datasets.MultiDomainDataset"}
+    datareader_config = DictConfig(
+        {"data": {"statistics_from": "h1", "participants": {"h1": {"name": "h1"}, "h2": {"name": "h2"}}}},
+    )
+    datamodule._get_dataset(config, datareader_config, shuffle=True, label="training")
+
+    compute_indices.assert_called_once_with(datamodule.task, {"data": readers["h1"]}, mode="training")
+    assert instantiate.call_args.kwargs["data_readers"] == {"data": {"h1": readers["h1"], "h2": readers["h2"]}}
+    assert instantiate.call_args.kwargs["batch_size"] == 2
 
 
 def test_state_dict_restores_dataloader_epoch() -> None:

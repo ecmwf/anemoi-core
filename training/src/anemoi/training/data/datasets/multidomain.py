@@ -17,6 +17,8 @@ import torch
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.datasets import AnemoiDataset
+from anemoi.training.data.datasets.anemoidataset import normalize_participant_readers
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
@@ -87,20 +89,25 @@ class MultiDomainSampler:
 
 
 class MultiDomainDataset(AnemoiDataset):
-    """Sample independent domains through one iterable dataset.
+    """Sample the participants of ONE dataset through one iterable dataset.
 
     Unlike :class:`MultiDataset`, which returns synchronized samples from every
-    reader, each iteration yields one domain. Readers retain independent grids
-    and date ranges. Mixing single-sequence native-grid readers with
+    reader, each iteration yields one participant (domain) of the dataset.
+    Participants retain independent grids and date ranges but share variables
+    and frequency. Mixing single-sequence native-grid readers with
     multi-sequence trajectory readers is currently unsupported.
 
     Selection policy: anchors, worker shards and sample counts are kept PER
-    domain (dictionaries keyed by domain name); every sample reads ONE reader.
+    participant (dictionaries keyed by participant name); the anchors of a
+    participant are those of its participant row (intersection across datasets,
+    here a single one). Every sample reads ONE reader. Relative date indices,
+    shard sizes and the dataset-level properties (statistics, metadata, ...)
+    are per dataset, i.e. keyed by :attr:`dataset_name`.
     """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: Mapping[str, Mapping[str, BaseAnemoiReader]],
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multidomain",
@@ -109,14 +116,14 @@ class MultiDomainDataset(AnemoiDataset):
         batch_size: int = 1,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
-        """A dataset that combines multiple data_readers together.
+        """A dataset that interchanges the participants of one dataset.
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
-            Domain names mapped to their data readers.
+        data_readers : Mapping[str, Mapping[str, BaseAnemoiReader]]
+            ``{dataset_name: {participant: reader}}`` with exactly one dataset name.
         relative_date_indices : dict[str, TimeIndices]
-            Domain names mapped to their relative date indices.
+            Relative date indices keyed by dataset name (shared by all participants).
         shuffle : bool, optional
             Whether to shuffle samples, by default True.
         label : str, optional
@@ -127,13 +134,22 @@ class MultiDomainDataset(AnemoiDataset):
             Rollout length represented by the relative date indices, by default 1.
         batch_size : int, optional
             Per-GPU batch size the DataLoader collates, by default 1. Samples are
-            yielded in domain-pure blocks of this size so every batch holds one domain.
+            yielded in participant-pure blocks of this size so every batch holds one participant.
         check_variables_compatibility : Mapping[str, object], optional
             Options forwarded to ``Variable.check_compatibility``. The options
             follow ``CheckVariablesCompatibilitySchema``.
         """
+        nested = normalize_participant_readers(data_readers)
+        if len(nested) != 1:
+            msg = (
+                "MultiDomainDataset supports exactly one dataset with several participants, got datasets "
+                f"{list(nested)}. Declare the domains as 'participants:' of a single dataset."
+            )
+            raise ValueError(msg)
+        ((self.dataset_name, participants),) = nested.items()
+        self.participants = list(participants)
         super().__init__(
-            data_readers=data_readers,
+            data_readers=nested,
             shuffle=shuffle,
             label=label,
             epoch=epoch,
@@ -148,46 +164,53 @@ class MultiDomainDataset(AnemoiDataset):
         self.chunk_index_range = {}  # overwrite base to empty dict
 
     def _compute_anchors(self, relative_date_indices: dict[str, TimeIndices]) -> None:
-        # Independent anchors per domain, each with its own flat index.
-        self.anchors = {
-            name: data_reader.compute_anchors(relative_date_indices[name])
-            for name, data_reader in self.data_readers.items()
-        }
+        # Independent anchors per participant, each with its own flat index. A
+        # participant's anchors are the valid anchors of its row of readers
+        # (intersected across datasets; a single dataset here).
+        self.anchors = {}
+        for participant in self.participants:
+            try:
+                self.anchors[participant] = compute_valid_anchors(
+                    self.participant_row(participant),
+                    relative_date_indices,
+                )
+            except ValueError as e:
+                msg = f"Participant '{participant}': {e}"
+                raise ValueError(msg) from e
         self.valid_date_indices = {
             name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }
 
     def _check_datasets_units(self, **options: object) -> None:
-        """Check that all datasets have the same units.
+        """Check that all participants have the same units.
 
         Raises
         ------
-            ValueError: If the datasets have different units.
+            ValueError: If the participants have different units.
         """
         from anemoi.transform.variables import Variable
 
-        domains_with_units = [
-            domain for domain, metadata in self.metadata.items() if metadata.get("variables_metadata", {})
-        ]
+        metadata = self._collect_participants("metadata")[self.dataset_name]
+        domains_with_units = [domain for domain, meta in metadata.items() if meta.get("variables_metadata", {})]
 
         if len(domains_with_units) == 0:
-            LOGGER.warning("All datasets have empty metadata, skipping units check.")
+            LOGGER.warning("All participants have empty metadata, skipping units check.")
             return
         if len(domains_with_units) == 1:
-            LOGGER.warning("Only one dataset has variable metadata, skipping units check.")
+            LOGGER.warning("Only one participant has variable metadata, skipping units check.")
             return
 
-        # need to cross check all datasets, as some may have missing metadata for some variables
+        # need to cross check all participants, as some may have missing metadata for some variables
         for i, domain1 in enumerate(domains_with_units):
             for domain2 in domains_with_units[i + 1 :]:
 
                 variable_domain1 = {
                     name: Variable.from_dict(name, data)
-                    for name, data in self.metadata[domain1]["variables_metadata"].items()
+                    for name, data in metadata[domain1]["variables_metadata"].items()
                 }
                 variable_domain2 = {
                     name: Variable.from_dict(name, data)
-                    for name, data in self.metadata[domain2]["variables_metadata"].items()
+                    for name, data in metadata[domain2]["variables_metadata"].items()
                 }
 
                 try:
@@ -211,9 +234,9 @@ class MultiDomainDataset(AnemoiDataset):
         """
         self.worker_id = worker_id
 
-        for dataset in self.dataset_names:
-            self.n_samples_per_worker[dataset], self.chunk_index_range[dataset] = self._shard_indices(
-                len(self.valid_date_indices[dataset]),
+        for participant in self.participants:
+            self.n_samples_per_worker[participant], self.chunk_index_range[participant] = self._shard_indices(
+                len(self.valid_date_indices[participant]),
                 n_workers,
                 worker_id,
             )
@@ -221,10 +244,10 @@ class MultiDomainDataset(AnemoiDataset):
         self._seed_worker()
 
     def get_sample(self, domain_name: str, index: int) -> dict[str, torch.Tensor]:
-        """Get a sample from the specified domain and index.
+        """Get a sample from the specified participant (domain) and index.
 
         Args:
-            domain_name (str): The name of the domain to sample from.
+            domain_name (str): The participant to sample from.
             index (int): The index of the sample to retrieve.
 
         Returns
@@ -232,7 +255,7 @@ class MultiDomainDataset(AnemoiDataset):
             dict[str, torch.Tensor]: The sample retrieved from the specified domain and index.
         """
         sequence, position = (int(value) for value in self.anchors[domain_name][index])
-        return {domain_name: self._read(domain_name, sequence, position)}
+        return {domain_name: self._read(self.dataset_name, sequence, position, participant=domain_name)}
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Yield samples from independently partitioned domains in domain-pure blocks.
@@ -258,7 +281,7 @@ class MultiDomainDataset(AnemoiDataset):
             self.shuffle,
             batch_size=self.batch_size,
         )
-        for domain_name in self.dataset_names:
+        for domain_name in self.participants:
             if sampler.num_dropped(domain_name):
                 LOGGER.info(
                     "Worker %d (%s): dropping %d trailing sample(s) of domain '%s' that do not fill a "

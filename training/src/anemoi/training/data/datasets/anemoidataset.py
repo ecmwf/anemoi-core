@@ -13,6 +13,7 @@ import os
 import random
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
 from functools import cached_property
 
 import numpy as np
@@ -35,6 +36,29 @@ from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
+ParticipantReaders = dict[str, dict[str, BaseAnemoiReader]]
+"""Nested readers: ``{dataset_name: {participant_name: reader}}``."""
+
+
+def normalize_participant_readers(
+    data_readers: Mapping[str, BaseAnemoiReader | Mapping[str, BaseAnemoiReader]],
+) -> ParticipantReaders:
+    """Normalise readers to the nested ``{dataset_name: {participant: reader}}`` form.
+
+    A dataset given as a bare reader (the single form) has exactly one
+    participant, named after the dataset. Nested entries are copied as is.
+    """
+    nested: ParticipantReaders = {}
+    for dataset_name, entry in data_readers.items():
+        if isinstance(entry, Mapping):
+            if not entry:
+                msg = f"Dataset '{dataset_name}' has no participants."
+                raise ValueError(msg)
+            nested[dataset_name] = dict(entry)
+        else:
+            nested[dataset_name] = {dataset_name: entry}
+    return nested
+
 
 class AnemoiDataset(IterableDataset, ABC):
     """Base Anemoi Datasets torch dataset class.
@@ -44,11 +68,20 @@ class AnemoiDataset(IterableDataset, ABC):
     :meth:`_compute_anchors`, :meth:`per_worker_init` and :meth:`__iter__`.
     Everything that does not depend on that policy (worker seeding, worker
     sharding, sharded reads, relative-date-index normalisation) lives here.
+
+    Readers are organised as ``{dataset_name: {participant: reader}}``
+    (:attr:`participant_readers`). A dataset given as a bare reader has one
+    participant named after the dataset. A *participant row*
+    (:meth:`participant_row`) is the ``{dataset_name: reader}`` view of one
+    participant across all datasets; selection policies work on rows.
+    Everything keyed by ``dataset_name`` only (relative date indices, shard
+    sizes, statistics, metadata, ...) is a per-dataset quantity taken from the
+    dataset's reference participant (:attr:`reference_readers`).
     """
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: Mapping[str, BaseAnemoiReader | Mapping[str, BaseAnemoiReader]],
         shuffle: bool = True,
         label: str = "multi",
         epoch: int = 0,
@@ -59,9 +92,9 @@ class AnemoiDataset(IterableDataset, ABC):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
-            Dictionary mapping dataset names to their data_readers
-            Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
+        data_readers : Mapping[str, BaseAnemoiReader | Mapping[str, BaseAnemoiReader]]
+            Dataset names mapped to a reader (single form) or to ``{participant: reader}``.
+            Format: {"dataset_a": reader_a, "dataset_b": {"p1": reader_b1, "p2": reader_b2}, ...}
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -77,15 +110,46 @@ class AnemoiDataset(IterableDataset, ABC):
         if batch_size < 1:
             msg = f"batch_size must be >= 1, got {batch_size}"
             raise ValueError(msg)
-        self.data_readers = data_readers
+        self.participant_readers = normalize_participant_readers(data_readers)
+        self.dataset_names = list(self.participant_readers.keys())
         self.label = label
         self.shuffle = shuffle
-        self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
         self.batch_size = batch_size
         self.relative_date_indices: dict[str, TimeIndices] = {}
         self._lazy_init_model_and_reader_group_info()
+
+    def participant_row(self, participant: str | None = None) -> dict[str, BaseAnemoiReader]:
+        """Return the readers of one participant across all datasets: ``{dataset_name: reader}``.
+
+        A dataset with a single participant takes part in every row. With
+        ``participant=None`` every dataset must have exactly one participant
+        (there is only one row, the :class:`MultiDataset` case).
+        """
+        row = {}
+        for dataset_name, participants in self.participant_readers.items():
+            if participant is not None and participant in participants:
+                row[dataset_name] = participants[participant]
+            elif len(participants) == 1:
+                row[dataset_name] = next(iter(participants.values()))
+            else:
+                msg = (
+                    f"Dataset '{dataset_name}' has participants {list(participants)}, none of which is "
+                    f"'{participant}'."
+                )
+                raise ValueError(msg)
+        return row
+
+    @property
+    def reference_readers(self) -> dict[str, BaseAnemoiReader]:
+        """Return one representative reader per dataset (its first participant).
+
+        All participants of a dataset share frequency and variables, so this is
+        the reader to use for per-dataset quantities such as relative date indices,
+        statistics and variable indices.
+        """
+        return {name: next(iter(participants.values())) for name, participants in self.participant_readers.items()}
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -121,8 +185,11 @@ class AnemoiDataset(IterableDataset, ABC):
         trajectory reader (init x step axes) are not comparable; combining them
         would silently keep only sequence-0 samples.
         """
-        single_seq = [name for name, reader in self.data_readers.items() if reader.num_sequences == 1]
-        multi_seq = [name for name, reader in self.data_readers.items() if reader.num_sequences > 1]
+        single_seq, multi_seq = [], []
+        for dataset_name, participants in self.participant_readers.items():
+            for participant, reader in participants.items():
+                name = dataset_name if participant == dataset_name else f"{dataset_name}/{participant}"
+                (single_seq if reader.num_sequences == 1 else multi_seq).append(name)
         if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
@@ -165,8 +232,15 @@ class AnemoiDataset(IterableDataset, ABC):
         self._set_relative_date_indices(relative_date_indices)
 
     def _collect(self, attr_name: str) -> dict:
-        """Helper method to collect attributes from all data readers."""
-        return {name: getattr(dataset, attr_name) for name, dataset in self.data_readers.items()}
+        """Collect ``attr_name`` per dataset, from the dataset's reference reader."""
+        return {name: getattr(reader, attr_name) for name, reader in self.reference_readers.items()}
+
+    def _collect_participants(self, attr_name: str) -> dict[str, dict]:
+        """Collect ``attr_name`` per dataset and participant: ``{dataset_name: {participant: value}}``."""
+        return {
+            name: {participant: getattr(reader, attr_name) for participant, reader in participants.items()}
+            for name, participants in self.participant_readers.items()
+        }
 
     @cached_property
     def statistics(self) -> dict[str, dict]:
@@ -372,13 +446,23 @@ class AnemoiDataset(IterableDataset, ABC):
             sanity_rnd,
         )
 
-    def _read(self, dataset_name: str, sequence: int, position: int) -> torch.Tensor:
-        """Read one sample from a reader at a ``(sequence, position)`` anchor.
+    def _read(
+        self,
+        dataset_name: str,
+        sequence: int,
+        position: int,
+        participant: str | None = None,
+    ) -> torch.Tensor:
+        """Read one sample of ``dataset_name`` at a ``(sequence, position)`` anchor.
 
-        Applies the reader's relative date indices and, when shard sizes are
-        known (set by ``set_comm_group_info``), restricts the grid to this
-        reader group rank's shard.
+        ``participant`` selects the reader within the dataset (default: its
+        first, for single-participant datasets its only, participant). Applies
+        the dataset's relative date indices and, when shard sizes are known
+        (set by ``set_comm_group_info``), restricts the grid to this reader
+        group rank's shard.
         """
+        participants = self.participant_readers[dataset_name]
+        reader = participants[participant] if participant is not None else next(iter(participants.values()))
         time_steps = offset_time_indices(position, self.relative_date_indices[dataset_name])
         # self.shard_sizes is lazily initialised to None; guard against the case where
         # set_comm_group_info has not been called yet.
@@ -387,14 +471,14 @@ class AnemoiDataset(IterableDataset, ABC):
             grid_indices = slice(start, end)
         else:
             grid_indices = slice(None)
-        return self.data_readers[dataset_name].get_sample(sequence, time_steps, grid_indices)
+        return reader.get_sample(sequence, time_steps, grid_indices)
 
     @cached_property
     def shard_shapes(self) -> dict[str, list]:
         """Return shard shapes for all data readers."""
         shard_shapes = {}
-        for name, dataset in self.data_readers.items():
-            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
+        for name, reader in self.reference_readers.items():
+            shard_shapes[name] = get_balanced_partition_sizes(reader.grid_size, self.reader_group_size)
         return shard_shapes
 
     def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
@@ -421,7 +505,8 @@ class AnemoiDataset(IterableDataset, ABC):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.data_readers.items():
-            subtree = dataset.tree(prefix=name)
-            tree.add(subtree)
+        for dataset_name, participants in self.participant_readers.items():
+            for participant, reader in participants.items():
+                prefix = dataset_name if participant == dataset_name else f"{dataset_name}/{participant}"
+                tree.add(reader.tree(prefix=prefix))
         return tree
