@@ -87,17 +87,18 @@ class PerTimestepMetrics(Callback):
             target = y[dataset_name]
             target_physical = y_physical[dataset_name]
 
-            n_timesteps = target.data.shape[TensorDim.TIME]
+            n_timesteps = target.data.shape[target.layout.axis(TensorDim.TIME)]
 
             # Gather ensemble members across the ensemble comm group
             if hasattr(pl_module, "ens_comm_subgroup") and pl_module.ens_comm_subgroup is not None:
                 from anemoi.models.distributed.graph import gather_tensor
 
+                ensemble_dim = pred.layout.axis(TensorDim.ENSEMBLE_DIM)
                 pred = pred.clone(
                     data=gather_tensor(
                         pred.data.clone(),
-                        dim=TensorDim.ENSEMBLE_DIM,
-                        sizes=[pred.data.size(TensorDim.ENSEMBLE_DIM)] * pl_module.ens_comm_subgroup_size,
+                        dim=ensemble_dim,
+                        sizes=[pred.data.size(ensemble_dim)] * pl_module.ens_comm_subgroup_size,
                         mgroup=pl_module.ens_comm_subgroup,
                     ),
                 )

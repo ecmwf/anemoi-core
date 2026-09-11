@@ -11,7 +11,7 @@
 
 Validates that ``BaseImputer.{get_nans,transform,inverse_transform}``
 correctly consume a :class:`TensorLayout` for both gridded
-``(B, T, E, N, V)`` and sparse ``(E=1, N, V)`` per-sample tensors.
+``(B, T, E, N, V)`` and sparse ``(N, V)`` per-sample tensors.
 """
 
 from __future__ import annotations
@@ -57,14 +57,14 @@ def test_get_nans_gridded_with_layout():
 
 def test_get_nans_sparse_with_layout():
     imputer = _make_imputer()
-    # (E=1, N=4, V=3) — sparse per-sample shape.
-    x = torch.zeros(1, 4, 3)
-    x[0, 1, 0] = float("nan")
-    x[0, 2, 1] = float("nan")
-    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    # (N=4, V=3) — sparse per-sample shape.
+    x = torch.zeros(4, 3)
+    x[1, 0] = float("nan")
+    x[2, 1] = float("nan")
+    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
 
     mask = imputer.get_nans(x, layout=layout)
-    assert mask.shape == (4, 3)  # ensemble dropped
+    assert mask.shape == (4, 3)
     assert mask[1, 0].item() is True
     assert mask[2, 1].item() is True
     assert mask.sum().item() == 2
@@ -86,25 +86,23 @@ def test_transform_inverse_sparse_roundtrip():
     imputer = _make_imputer()
     x = torch.tensor(
         [
-            [
-                [float("nan"), 0.0, 0.0],
-                [0.0, float("nan"), 0.0],
-                [0.0, 0.0, 0.0],
-            ]
+            [float("nan"), 0.0, 0.0],
+            [0.0, float("nan"), 0.0],
+            [0.0, 0.0, 0.0],
         ]
     )
-    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     transformed = imputer.transform(x.clone(), layout=layout)
     # NaNs replaced by configured constants (1 for "a", 2 for "b").
-    assert transformed[0, 0, 0].item() == pytest.approx(1.0)
-    assert transformed[0, 1, 1].item() == pytest.approx(2.0)
+    assert transformed[0, 0].item() == pytest.approx(1.0)
+    assert transformed[1, 1].item() == pytest.approx(2.0)
     assert not torch.isnan(transformed).any()
 
     # Inverse should restore NaNs at the same positions.
     restored = imputer.inverse_transform(transformed.clone(), layout=layout)
-    assert torch.isnan(restored[0, 0, 0])
-    assert torch.isnan(restored[0, 1, 1])
-    assert restored[0, 2, 2].item() == 0.0
+    assert torch.isnan(restored[0, 0])
+    assert torch.isnan(restored[1, 1])
+    assert restored[2, 2].item() == 0.0
 
 
 def test_transform_inverse_gridded_roundtrip_with_layout():
@@ -129,10 +127,10 @@ def test_loss_mask_training_sparse_has_singleton_batch_dim():
     matches the (BATCH, GRID, VARIABLE) scaler contract used downstream.
     """
     imputer = _make_imputer()
-    # (E=1, N=4, V=3) with a NaN to ensure the mask is built.
-    x = torch.zeros(1, 4, 3)
-    x[0, 1, 0] = float("nan")
-    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    # (N=4, V=3) with a NaN to ensure the mask is built.
+    x = torch.zeros(4, 3)
+    x[1, 0] = float("nan")
+    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
 
     imputer.transform(x.clone(), layout=layout)
     # Expect (1, N, n_outputs) — n_outputs = number of model output vars.

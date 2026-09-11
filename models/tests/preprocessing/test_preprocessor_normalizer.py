@@ -43,7 +43,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=True,
+        coordinates_are_static=True,
     )
 
 
@@ -57,7 +57,7 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=False,
+        coordinates_are_static=False,
         boundaries=None,
     )
 
@@ -139,30 +139,28 @@ def test_normalizer_not_inplace(input_normalizer, make_view, base_payload) -> No
     assert torch.allclose(view_data_2d(view), original)
 
 
-def test_normalizer_inplace(input_normalizer, make_view, base_payload) -> None:
+def test_normalizer_with_inplace_allowed(input_normalizer, make_view, base_payload, normalized_payload) -> None:
     view = make_view(base_payload)
-    original = view_data_2d(view).clone()
     out = input_normalizer(view, in_place=True)
-    assert not torch.allclose(view_data_2d(view), original)
-    assert torch.allclose(view_data_2d(view), view_data_2d(out))
+    torch.testing.assert_close(view_data_2d(out), normalized_payload)
 
 
 def test_normalize(input_normalizer, make_view, base_payload, normalized_payload) -> None:
     view = make_view(base_payload)
-    out = input_normalizer.transform(view)
+    out = input_normalizer(view)
     assert torch.allclose(view_data_2d(out), normalized_payload)
 
 
 def test_inverse_transform(input_normalizer, make_view, base_payload, normalized_payload) -> None:
     view = make_view(normalized_payload)
-    out = input_normalizer.inverse_transform(view)
+    out = input_normalizer(view, inverse=True)
     assert torch.allclose(view_data_2d(out), base_payload)
 
 
 def test_normalize_inverse_roundtrip(input_normalizer, make_view, base_payload) -> None:
     view = make_view(base_payload)
-    transformed = input_normalizer.transform(view, in_place=False)
-    restored = input_normalizer.inverse_transform(transformed, in_place=False)
+    transformed = input_normalizer(view, in_place=False)
+    restored = input_normalizer(transformed, inverse=True, in_place=False)
     assert torch.allclose(view_data_2d(restored), base_payload)
 
 
@@ -171,7 +169,7 @@ def test_std_and_default_methods(make_view) -> None:
     normalizer = InputNormalizer(config=config)
     payload = torch.Tensor([[1.0, 2.0, 3.0, 4.0, 5.0], [6.0, 7.0, 8.0, 9.0, 10.0]])
     view = make_view(payload)
-    out = view_data_2d(normalizer.transform(view))
+    out = view_data_2d(normalizer(view))
     # std: q -> data / stdev (stdev=1.0), unchanged
     assert torch.allclose(out[..., 3], payload[..., 3])
     # mean-std: other -> (data - mean) / stdev = (data - 3) / 14
@@ -192,7 +190,7 @@ def test_near_zero_variance_warns_and_skips(make_view) -> None:
     payload = torch.Tensor([[5.0], [5.0]])
     view = make_view(payload, variables=["x"], statistics=statistics)
     with pytest.warns(UserWarning, match="near-zero variance"):
-        out = normalizer.transform(view)
+        out = normalizer(view)
     assert torch.allclose(view_data_2d(out), payload)
 
 
@@ -208,23 +206,23 @@ def test_near_zero_range_warns_and_shifts(make_view) -> None:
     payload = torch.Tensor([[5.0], [7.0]])
     view = make_view(payload, variables=["x"], statistics=statistics)
     with pytest.warns(UserWarning, match="near-zero range"):
-        out = normalizer.transform(view)
+        out = normalizer(view)
     # norm_mul stays 1, norm_add = -minimum -> data - 5
     assert torch.allclose(view_data_2d(out), payload - 5.0)
 
 
-def test_data_index_deprecation_warning(input_normalizer, make_view, base_payload) -> None:
-    view = make_view(base_payload)
-    with pytest.warns(DeprecationWarning, match="data_index"):
-        input_normalizer.transform(view, in_place=False, data_index=[0, 1, 2])
+def test_normalizes_selected_variables(input_normalizer, make_view, base_payload, normalized_payload) -> None:
+    view = make_view(base_payload).select(variables=[0, 1, 2])
+    result = input_normalizer(view, in_place=False)
+    torch.testing.assert_close(view_data_2d(result), normalized_payload[:, :3])
 
 
 def test_parameter_caching(input_normalizer, make_view, base_payload) -> None:
     assert len(input_normalizer._param_cache) == 0
-    input_normalizer.transform(make_view(base_payload), in_place=False)
+    input_normalizer(make_view(base_payload), in_place=False)
     assert len(input_normalizer._param_cache) == 1
     # second call with the same variable set hits the cache, no new entry
-    input_normalizer.transform(make_view(base_payload), in_place=False)
+    input_normalizer(make_view(base_payload), in_place=False)
     assert len(input_normalizer._param_cache) == 1
     input_normalizer.reset_cache()
     assert len(input_normalizer._param_cache) == 0
@@ -241,10 +239,10 @@ def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
         statistics=STATISTICS,
         coordinates=None,
         layout=layout,
-        is_static=False,
+        coordinates_are_static=False,
         boundaries=None,
     )
-    out = input_normalizer.transform(view, in_place=False)
+    out = input_normalizer(view, in_place=False)
     assert len(out.data) == 2
     for tensor in out.data:
         assert torch.allclose(tensor, normalized_payload)

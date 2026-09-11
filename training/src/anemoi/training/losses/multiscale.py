@@ -11,6 +11,7 @@
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import einops
 import torch
@@ -28,6 +29,9 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
+
+if TYPE_CHECKING:
+    from anemoi.models.data.views import GriddedSourceView
 
 LOGGER = logging.getLogger(__name__)
 
@@ -319,8 +323,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     def forward(
         self,
-        y_pred_ens: torch.Tensor,
-        y: torch.Tensor,
+        y_pred_ens: "GriddedSourceView",
+        y: "GriddedSourceView",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -331,6 +335,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         grid_dim: int | None = None,
         **kwargs,
     ) -> torch.Tensor:
+        """Smooth gridded tensors and evaluate each scale with the source metadata."""
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
         is_model_sharded = grid_shard_sizes is not None
@@ -342,14 +347,14 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 channel_shard_sizes_pred,
                 channel_shard_sizes_y,
             ) = self._prepare_for_smoothing(
-                y_pred_ens,
-                y,
+                y_pred_ens.data,
+                y.data,
                 group,
                 grid_shard_sizes,
             )
         else:
-            y_pred_ens_for_smooth = y_pred_ens
-            y_for_smooth = y
+            y_pred_ens_for_smooth = y_pred_ens.data
+            y_for_smooth = y.data
 
         weighted_losses = []
         prev_y_pred_ens = None
@@ -408,8 +413,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             weighted_losses.append(
                 weight
                 * self.loss(
-                    y_pred_ens_tmp,
-                    y_tmp,
+                    y_pred_ens.clone(data=y_pred_ens_tmp),
+                    y.clone(data=y_tmp),
                     squash=squash,
                     scaler_indices=scaler_indices,
                     without_scalers=without_scalers,

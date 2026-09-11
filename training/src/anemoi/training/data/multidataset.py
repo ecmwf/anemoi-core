@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import random
+from collections.abc import Iterator
 from functools import cached_property
 from io import StringIO
 
@@ -25,8 +26,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.training.utils.time_indices import offset_time_indices
@@ -366,12 +367,12 @@ class MultiDataset(IterableDataset):
         console.print(tree)
         return buf.getvalue()
 
-    def __iter__(self):
+    def __iter__(self) -> Iterator[dict[str, dict]]:
         """Return an iterator that yields per-dataset coordinate-rich payloads.
 
-        Returns
-        -------
-        dict[str, dict[str, torch.Tensor]]
+        Yields
+        ------
+        dict[str, dict]
             Mapping ``{name: {"data": tensor, "coordinates": tensor, ...}}``
             for each synchronized sample.
         """

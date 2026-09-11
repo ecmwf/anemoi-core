@@ -20,15 +20,15 @@ from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
+    from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data.tensor_layout import TensorLayout
     from anemoi.models.data.views import SourceView
-    from torch.distributed.distributed_c10d import ProcessGroup
-
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -156,15 +156,16 @@ class EnsembleTraining(BaseTrainingModule):
         return self._ensemble_plot_adapter
 
     def _expand_ens_dim(self, batch: Batch) -> Batch:
-        """
-            Expand the per-device ensemble dimension by tiling the data nens_per_device times.
-            The tiling is driven by each dataset's own layout rather than a fixed dimension.
+        """Expand the per-device ensemble dimension by tiling the data nens_per_device times.
+
+        The tiling is driven by each dataset's own layout rather than a fixed dimension.
         """
         new_data = {}
         for dataset_name, dataset_batch in batch.data.items():
             layout = batch.layouts.get(dataset_name)
             if layout is None or layout.ensemble is None:
-                raise ValueError(f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})")
+                msg = f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})"
+                raise ValueError(msg)
 
             if isinstance(dataset_batch, list):
                 # unstructured obs: the batch is the outer list, so each sample is tiled on its own.
@@ -193,7 +194,7 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
-        ensemble_axis = y_pred.layout.axis("ensemble", ndim=y_pred.ndim)
+        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.ndim)
 
         def gather_members(tensor: torch.Tensor) -> torch.Tensor:
             return gather_tensor(
@@ -205,9 +206,9 @@ class EnsembleTraining(BaseTrainingModule):
 
         payload = y_pred.data
         y_pred_ens = y_pred.clone(
-            data=[gather_members(sample) for sample in payload]
-            if isinstance(payload, list)
-            else gather_members(payload),
+            data=(
+                [gather_members(sample) for sample in payload] if isinstance(payload, list) else gather_members(payload)
+            ),
         )
 
         y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -227,7 +228,7 @@ class EnsembleTraining(BaseTrainingModule):
         if dynamic_indices:
             full_payload = y_pred_ens_full.data
             for tensor in full_payload if isinstance(full_payload, list) else [full_payload]:
-                torch._dynamo.mark_dynamic(tensor, -1)
+                torch._dynamo.mark_dynamic(tensor, y_pred_ens_full.layout.axis(TensorDim.VARIABLE, ndim=tensor.ndim))
 
         loss = self._compute_loss(
             y_pred_ens_full,

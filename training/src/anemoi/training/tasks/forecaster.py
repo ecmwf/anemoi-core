@@ -147,132 +147,7 @@ class BaseForecaster(BaseTask):
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
-        batch: torch.Tensor,
-        rollout_step: int = 0,
-        data_indices: IndexCollection | None = None,
-        output_mask: object | None = None,
-        grid_shard_slice: slice | None = None,
-    ) -> torch.Tensor:
-        """Advance a single dataset's input state for the next rollout step.
-
-        Supports model outputs shaped like ``(B, T, E, G, V)``.
-        """
-        msg = "Subclasses must implement _advance_dataset_input."
-        raise NotImplementedError(msg)
-
-    def advance_input(
-        self,
-        x: dict[str, torch.Tensor],
-        y_pred: dict[str, torch.Tensor],
-        batch: dict[str, torch.Tensor],
-        rollout_step: int = 0,
-        data_indices: dict[str, IndexCollection] | None = None,
-        output_mask: dict[str, object] | None = None,
-        grid_shard_slice: dict[str, slice | None] | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Advance the input state for the next rollout step."""
-        for dataset_name in x:
-            x[dataset_name] = self._advance_dataset_input(
-                x[dataset_name],
-                y_pred.get(dataset_name),
-                batch[dataset_name],
-                rollout_step=rollout_step,
-                data_indices=data_indices[dataset_name],
-                output_mask=None if output_mask is None else output_mask[dataset_name],
-                grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice[dataset_name],
-            )
-        return x
-
-    def log_extra(self, logger: Callable, logger_enabled: bool, **_kwargs) -> None:
-        """Log any task-specific information."""
-        logger(
-            "rollout",
-            float(self.rollout.step),
-            on_step=False,
-            on_epoch=True,
-            logger=logger_enabled,
-            rank_zero_only=True,
-            sync_dist=False,
-        )
-
-    def log_training_state(self) -> None:
-        """Log the effective rollout state at the start of training."""
-        LOGGER.info("Effective task rollout step: %d.", self.rollout.step)
-
-    def training_runtime_state_dict(self) -> dict:
-        """Return training runtime state to be persisted in the training checkpoint.
-
-        Captures the current rollout curriculum step so that job resume
-        continues the schedule from where it left off rather than restarting
-        from ``rollout.start``.
-        """
-        return {"rollout": self.rollout.state_dict()}
-
-    def load_training_runtime_state_dict(self, state: dict) -> None:
-        """Restore training runtime state from a training checkpoint."""
-        if "rollout" in state:
-            initialized_step = self.rollout.step
-            self.rollout.load_state_dict(state["rollout"])
-            LOGGER.info(
-                "Restored rollout step from checkpoint: %d (task was initialized at step %d).",
-                self.rollout.step,
-                initialized_step,
-            )
-
-    def on_train_epoch_end(self, current_epoch: int) -> None:
-        if self.rollout.should_increase(current_epoch):
-            self.rollout.increase(current_epoch)
-
-    def _get_timestep_for_metadata(self) -> str:
-        """Get the timestep string for metadata."""
-        offsets = self._offsets
-        timestep = min(offsets[i + 1] - offsets[i] for i in range(len(offsets) - 1))
-        return frequency_to_string(timestep)
-
-
-class Forecaster(BaseForecaster):
-    """Basic Forecasting task implementation.
-
-    Builds input and output offsets from ``multistep_input``,
-    ``multistep_output`` and a ``timestep`` string (e.g. ``"6H"``).
-    """
-
-    name: str = "forecaster"
-
-    def __init__(
-        self,
-        multistep_input: int,
-        multistep_output: int,
-        timestep: str,
-        rollout: dict | None = None,
-        validation_rollout: int | None = None,
-        **kwargs,
-    ) -> None:
-
-        self.timestep = frequency_to_timedelta(timestep)
-        self.num_input_steps = multistep_input
-        self.num_output_steps = multistep_output
-
-        # Input: e.g. multistep_input=2, timestep=6H     ->  [-6H, 0H]
-        input_offsets = [-1 * i * self.timestep for i in range(multistep_input)]
-        # Outputs: e.g. multistep_output=1, timestep=6H  -> [[6H], [12H], [18H], ...] up to rollout.maximum
-        output_offsets = [(i + 1) * self.timestep for i in range(multistep_output)]
-        rollout_shift = self.timestep * self.num_output_steps
-
-        super().__init__(
-            input_offsets=input_offsets,
-            output_offsets=output_offsets,
-            rollout_shift=rollout_shift,
-            rollout=rollout,
-            validation_rollout=validation_rollout,
-            **kwargs,
-        )
-
-    def _advance_dataset_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -286,28 +161,38 @@ class Forecaster(BaseForecaster):
 
     def advance_input(
         self,
-        x: dict[str, torch.Tensor],
-        y_pred: dict[str, torch.Tensor],
-        batch: dict[str, torch.Tensor],
+        x: "Batch",
+        y_pred: "Batch",
+        output_values: "Batch",
         rollout_step: int = 0,
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
-        grid_shard_slice: dict[str, slice | None] | None = None,
-    ) -> dict[str, torch.Tensor]:
-        """Advance the input state for the next rollout step."""
-        for dataset_name in x:
-            x[dataset_name] = self._advance_dataset_input(
-                x[dataset_name],
-                y_pred.get(dataset_name),
-                batch[dataset_name],
-                rollout_step=rollout_step,
+    ) -> "Batch":
+        """Advance the input state for the next rollout step, preserving coords and metadata.
+
+        Missing predictions are passed as None to the forecasting task. The
+        regular Forecaster rotates these input windows without updating them.
+        Sparse observation datasets (``layout.time_in_grid=True``) pass through unchanged.
+        """
+        del rollout_step
+        new_data = {}
+        for dataset_name, view in x.items():
+            if view.layout.time_in_grid:
+                # Sparse observations have no explicit time axis to roll.
+                new_data[dataset_name] = view.data
+                continue
+
+            prediction = y_pred[dataset_name].data.to(view.dtype) if dataset_name in y_pred else None
+            new_data[dataset_name] = self._advance_dataset_input(
+                view.data,
+                prediction,
+                output_values[dataset_name].data,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],
-                grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice[dataset_name],
             )
-        return x
+        return x.with_data(new_data)
 
-    def log_extra(self, logger: Callable, logger_enabled: bool) -> None:
+    def log_extra(self, logger: Callable, logger_enabled: bool, batch_size: int | None = None) -> None:
         """Log any task-specific information."""
         logger(
             "rollout",
@@ -317,6 +202,7 @@ class Forecaster(BaseForecaster):
             logger=logger_enabled,
             rank_zero_only=True,
             sync_dist=False,
+            batch_size=batch_size,
         )
 
     def log_training_state(self) -> None:
@@ -395,7 +281,7 @@ class Forecaster(BaseForecaster):
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -408,10 +294,8 @@ class Forecaster(BaseForecaster):
 
         x = x.roll(-keep_steps, dims=1)
 
+        # Match upstream: missing predictions leave the rotated window unmodified.
         for i in range(keep_steps):
-            if y_pred is None:
-                continue
-
             if y_pred is None:
                 continue
 
@@ -509,13 +393,11 @@ class OffsetForecaster(BaseForecaster):
 
     def _advance_dataset_input(
         self,
-        x: "Batch",
-        y_pred: "Batch",
-        output_values: "Batch",
-        rollout_step: int = 0,
+        x: torch.Tensor,
+        y_pred: torch.Tensor,
+        output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
-        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
@@ -523,14 +405,12 @@ class OffsetForecaster(BaseForecaster):
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
         # Return a fresh tensor: gradient computations need the version of x at each rollout step
+        previous = x
         x = x.clone()
 
         # Shift part of input to be reused.
         for old_idx, new_idx in self._advance_map["inin"]:
-            x[:, new_idx] = x[:, old_idx]
-
-        # Compute batch indices for the output offsets of this rollout step
-        output_batch_indices = self.get_batch_output_indices(rollout_step=rollout_step)
+            x[:, new_idx] = previous[:, old_idx]
 
         for out_idx, new_idx in self._advance_map["outin"]:
             # Get prognostic variables
@@ -541,8 +421,7 @@ class OffsetForecaster(BaseForecaster):
                 data_indices.model.output.prognostic,
             ]
 
-            batch_time_index = output_batch_indices[out_idx]
-            true_state = batch[:, batch_time_index]
+            true_state = output_values[:, out_idx]
 
             if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
                 true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
@@ -551,13 +430,12 @@ class OffsetForecaster(BaseForecaster):
                 x[:, new_idx],
                 true_state,
                 data_indices,
-                grid_shard_slice=grid_shard_slice,
             )
 
             # get new "constants" needed for time-varying fields
-            x[:, new_idx, ..., data_indices.model.input.forcing] = batch[
+            x[:, new_idx, ..., data_indices.model.input.forcing] = output_values[
                 :,
-                batch_time_index,
+                out_idx,
                 ...,
                 data_indices.data.input.forcing,
             ]

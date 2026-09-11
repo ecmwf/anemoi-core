@@ -18,6 +18,9 @@ import torch
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import SourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -47,6 +50,19 @@ spectral_losses = list(spectral_loss_kwargs)
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
 
 
+def _gridded_source_view(data: torch.Tensor) -> SourceView:
+    """Wrap a five-dimensional loss tensor in the current public loss input type."""
+    return create_source_view(
+        name="data",
+        data=data,
+        variables=[f"variable_{index}" for index in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+        coordinates_are_static=True,
+    )
+
+
 def _resolve_subgrid(cfg: dict, output_mask: SimpleNamespace | None = None) -> None:
     mock_method = SimpleNamespace(output_mask={"data": output_mask})
     multi_cfg = {"data": cfg}
@@ -74,12 +90,14 @@ def _assert_variable_and_scalar_shapes(
 
 
 def test_unsquashed_loss_preserves_single_variable_dimension() -> None:
-    pred = torch.ones((1, 1, 1, 4, 1))
+    pred = torch.ones((1, 1, 1, 4, 1), requires_grad=True)
     target = torch.zeros_like(pred)
 
-    loss = MSELoss()(pred, target, squash=False)
+    loss = MSELoss()(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
 
-    assert loss.shape == (1,)
+    torch.testing.assert_close(loss, torch.tensor([4.0]))
+    (grad,) = torch.autograd.grad(loss.sum(), pred)
+    torch.testing.assert_close(grad, torch.full_like(pred, 2.0))
 
 
 @pytest.mark.parametrize(
@@ -132,27 +150,53 @@ def test_crps_rejects_invalid_backend() -> None:
         CRPS(backend="unknown")  # type: ignore[arg-type]
 
 
-def test_crps_with_singleton_target_ensemble_dim() -> None:
+@pytest.mark.parametrize("ignore_nans", [False, True])
+def test_crps_with_singleton_target_ensemble_dim(ignore_nans: bool) -> None:
     pred = torch.zeros(2, 1, 4, 3, 2)
     target = torch.zeros(2, 1, 1, 3, 2)
 
-    out = CRPS()(pred, target, squash=False)
+    out = CRPS(ignore_nans=ignore_nans)(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
 
     torch.testing.assert_close(out, torch.zeros(2))
 
 
-def test_crps_mask_nans_preserves_ensemble_sizes() -> None:
-    pred = torch.ones(1, 1, 3, 2, 1)
-    target = torch.ones(1, 1, 2, 2, 1)
+@pytest.mark.parametrize("ensemble_dim", [0, 2, 4])
+def test_crps_mask_nans_preserves_ensemble_sizes(ensemble_dim: int) -> None:
+    pred = torch.ones(1, 1, 3, 3, 1)
+    target = torch.ones(1, 1, 2, 3, 1)
     pred[:, :, 1, 0, 0] = torch.nan
     target[:, :, 0, 1, 0] = torch.nan
 
-    masked_pred, masked_target = CRPS(ignore_nans=True).mask_nans(pred, target)
+    expected_pred = torch.ones_like(pred)
+    expected_target = torch.ones_like(target)
+    expected_pred[:, :, :, :2, :] = 0
+    expected_target[:, :, :, :2, :] = 0
+    pred = pred.movedim(2, ensemble_dim)
+    target = target.movedim(2, ensemble_dim)
+    axes = ["batch", "time", "grid", "variables"]
+    axes.insert(ensemble_dim, "ensemble")
+    layout = TensorLayout(**{name: index for index, name in enumerate(axes)})
+
+    masked_pred, masked_target = CRPS(ignore_nans=True).mask_nans(pred, target, layout)
 
     assert masked_pred.shape == pred.shape
     assert masked_target.shape == target.shape
-    assert torch.isfinite(masked_pred).all()
-    assert torch.isfinite(masked_target).all()
+    torch.testing.assert_close(masked_pred, expected_pred.movedim(2, ensemble_dim))
+    torch.testing.assert_close(masked_target, expected_target.movedim(2, ensemble_dim))
+
+
+@pytest.mark.parametrize("backend", ["naive", "stable"])
+def test_crps_ignore_nans_masks_loss_and_gradients(backend: str) -> None:
+    pred = torch.tensor([1.0, torch.nan, 9.0, 3.0, 5.0, 11.0]).reshape(1, 1, 2, 3, 1).requires_grad_()
+    target = torch.tensor([0.0, 0.0, torch.nan]).reshape(1, 1, 1, 3, 1)
+
+    loss = CRPS(alpha=0.0, backend=backend, ignore_nans=True)(_gridded_source_view(pred), _gridded_source_view(target))
+
+    # Only the first point contributes: mean(|[1, 3] - 0|) - |3 - 1| / 4 = 1.5.
+    torch.testing.assert_close(loss, torch.tensor(1.5))
+    (grad,) = torch.autograd.grad(loss, pred)
+    expected_grad = torch.tensor([0.75, 0.0, 0.0, 0.25, 0.0, 0.0]).reshape_as(pred)
+    torch.testing.assert_close(grad, expected_grad)
 
 
 @pytest.fixture
@@ -1116,7 +1160,7 @@ def test_mse_ignore_nans() -> None:
 
     loss = MSELoss(ignore_nans=True)
 
-    out = loss(pred, target)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert torch.isfinite(out).all(), "Expected finite loss with ignore_nans=True"
 
     (grad,) = torch.autograd.grad(out, pred, retain_graph=True)
@@ -1132,5 +1176,5 @@ def test_mse_nans() -> None:
 
     loss = MSELoss(ignore_nans=False)
 
-    out = loss(pred, target)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"

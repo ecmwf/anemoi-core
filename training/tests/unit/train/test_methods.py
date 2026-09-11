@@ -23,9 +23,11 @@ from omegaconf import DictConfig
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing.imputer import InputImputer
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
@@ -35,7 +37,7 @@ from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
-from anemoi.training.losses.scalers import NaNMaskScaler
+from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
@@ -50,17 +52,28 @@ from anemoi.training.train.methods.transport import TransportTraining
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 
 if TYPE_CHECKING:
+    from collections.abc import KeysView
+
     from anemoi.training.train.step_output import TrainingStepOutput
 
 
 class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
+        if isinstance(y_pred, SourceView):
+            return y_pred.apply_loss(y, lambda pred, target, **_kwargs: torch.mean((pred - target) ** 2))
         return torch.mean((y_pred - y) ** 2)
+
+
+class DummyUpdatingScaler(BaseUpdatingScaler):
+    """Minimal updating scaler used to exercise generic runtime storage."""
+
+    scale_dims = (TensorDim.GRID,)
 
 
 class CaptureLoss(BaseLoss):
@@ -112,8 +125,8 @@ class DummyModel:
 
     def __init__(self, num_output_variables: int | None = None, output_times: int = 1) -> None:
         self.called_with: dict[str, Any] | None = None
-        self.pre_processors = Processors([])
-        self.post_processors = Processors([], inverse=True)
+        self.pre_processors = {"data": Processors([])}
+        self.post_processors = {"data": Processors([], inverse=True)}
         self.output_times = output_times
         self.num_output_variables = num_output_variables
         self.metrics: dict = {}
@@ -204,17 +217,21 @@ class DummyTransportModel(DummyModel):
             return pred
 
         if isinstance(pred, dict):
+            conditioned_target_batch = conditioned_target if isinstance(conditioned_target, Batch) else None
+            conditioned_target_data = (
+                conditioned_target.data if isinstance(conditioned_target, Batch) else conditioned_target
+            )
             out: dict[str, torch.Tensor] = {}
             for dataset_name, pred_tensor in pred.items():
                 condition_tensor = condition[dataset_name]
-                conditioned_target_tensor = conditioned_target[dataset_name]
+                conditioned_target_tensor = conditioned_target_data[dataset_name]
                 assert condition_tensor.shape[0] == pred_tensor.shape[0]
                 if not all(condition_tensor.shape[i] == 1 for i in range(1, condition_tensor.ndim)):
                     return pred
                 if conditioned_target_tensor.ndim == 4:
                     conditioned_target_tensor = conditioned_target_tensor.unsqueeze(1)
                 out[dataset_name] = conditioned_target_tensor + 0.1 * pred_tensor
-            return out
+            return conditioned_target_batch.with_data(out) if conditioned_target_batch is not None else out
         return pred
 
 
@@ -255,7 +272,8 @@ def _assert_step_return_format(
     for pred in y_preds:
         assert isinstance(pred, dict)
         assert dataset_name in pred
-        assert isinstance(pred[dataset_name], torch.Tensor)
+        payload = pred[dataset_name].data if isinstance(pred[dataset_name], SourceView) else pred[dataset_name]
+        assert isinstance(payload, torch.Tensor)
 
 
 def _wire_training_module(
@@ -283,31 +301,33 @@ def _wire_training_module(
         obj.task = task
 
 
-def test_initialise_updating_scalers_uses_runtime_storage() -> None:
-    updating_scaler = NaNMaskScaler()
+def test_initialise_updating_scalers_updates_losses_and_metrics() -> None:
+    updating_scaler = DummyUpdatingScaler()
     updating_spec = updating_scaler.get_scaling()
+    initialised_spec = (updating_spec[0], torch.full_like(updating_spec[1], 2.0))
     fixed_spec = (0, torch.ones(1))
     loss = MSELoss()
     metric = MSELoss()
 
     for loss_or_metric in (loss, metric):
-        loss_or_metric.add_scaler(*updating_spec, name="nan_mask_weights")
+        loss_or_metric.add_scaler(*updating_spec, name="updating")
         loss_or_metric.add_scaler(*fixed_spec, name="fixed")
-        assert "nan_mask_weights" in dict(loss_or_metric.scaler.named_buffers())
+        assert "updating" in loss_or_metric.scaler.tensors
 
     BaseTrainingModule._initialise_updating_scalers(
-        scalers={"nan_mask_weights": updating_spec, "fixed": fixed_spec},
-        updating_scalers={"nan_mask_weights": updating_scaler},
+        scalers={"updating": initialised_spec, "fixed": fixed_spec},
+        updating_scalers={"updating": updating_scaler},
         loss_obj=loss,
         metrics_dict={"metric": metric},
     )
 
     for loss_or_metric in (loss, metric):
-        assert "nan_mask_weights" not in dict(loss_or_metric.scaler.named_buffers())
-        assert "fixed" in dict(loss_or_metric.scaler.named_buffers())
+        tensors = loss_or_metric.scaler.tensors
+        assert "updating" in tensors
+        assert "fixed" in tensors
         torch.testing.assert_close(
-            loss_or_metric.scaler.get_scaler_tensor("nan_mask_weights"),
-            updating_spec[1],
+            tensors["updating"][1],
+            initialised_spec[1],
         )
 
 
@@ -333,14 +353,15 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
     group = object()
     shard_sizes = [1, 1]
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
 
-    y_pred = torch.randn(1, 1, 1, 2, 3)
-    y = torch.randn(1, 1, 2, 3)
+    y_pred = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
     result = BaseTrainingModule._compute_loss(
@@ -353,8 +374,8 @@ def test_base_compute_loss_forwards_standard_loss_kwargs() -> None:
 
     assert torch.equal(result, torch.tensor(0.0))
     assert len(loss.calls) == 1
-    assert loss.calls[0]["pred"] is y_pred
-    assert loss.calls[0]["target"] is y
+    assert loss.calls[0]["pred"].data is y_pred.data
+    assert loss.calls[0]["target"].data is y.data
     assert loss.calls[0]["kwargs"] == {
         "grid_shard_slice": grid_shard_slice,
         "group": group,
@@ -368,14 +389,16 @@ def test_base_compute_loss_forwards_sharding_metadata_when_requested() -> None:
     group = object()
     shard_sizes = [1, 1]
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
+    module._grid_shard_sizes.return_value = shard_sizes
 
-    y_pred = torch.randn(1, 1, 1, 2, 3)
-    y = torch.randn(1, 1, 2, 3)
+    y_pred = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
     result = BaseTrainingModule._compute_loss(
@@ -410,14 +433,16 @@ def test_base_compute_loss_passes_none_shard_sizes_when_gathered() -> None:
     group = object()
     shard_sizes = [1, 1]
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
+    module._grid_shard_sizes.return_value = None
 
-    y_pred = torch.randn(1, 1, 1, 2, 3)
-    y = torch.randn(1, 1, 2, 3)
+    y_pred = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
 
     BaseTrainingModule._compute_loss(
         module,
@@ -445,7 +470,7 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
     channel_shard_sizes_pred = [1, 1]
     channel_shard_sizes_y = [1, 1]
     pred = torch.randn(1, 1, 1, 2, 1)
-    target = torch.randn(1, 1, 2, 1)
+    target = torch.randn(1, 1, 1, 2, 1)
     grid_shard_slice = slice(0, 1)
 
     multiscale_loss = MultiscaleLossWrapper(
@@ -459,16 +484,18 @@ def test_base_compute_loss_forwards_shard_layout_to_combined_multiscale_loss(
 
     combined_loss = CombinedLoss(multiscale_loss)
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": combined_loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": grid_shard_sizes}
+    module._grid_shard_sizes.return_value = grid_shard_sizes
 
     result = BaseTrainingModule._compute_loss(
         module,
-        y_pred=pred,
-        y=target,
+        y_pred=_gridded_view(pred, ["a"], {}),
+        y=_gridded_view(target, ["a"], {}),
         grid_shard_slice=grid_shard_slice,
         dataset_name="data",
     )
@@ -509,14 +536,15 @@ def test_edm_transport_compute_loss_forwards_standard_loss_kwargs() -> None:
     shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
 
-    y_pred = torch.randn(1, 1, 1, 2, 3)
-    y = torch.randn(1, 1, 2, 3)
+    y_pred = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
     result = EDMDiffusionTransportObjective(module).compute_loss(
@@ -543,14 +571,16 @@ def test_edm_transport_compute_loss_forwards_sharding_metadata_when_requested() 
     shard_sizes = [1, 1]
     weights = {"data": torch.tensor([0.25])}
 
+    module._evaluate_loss = BaseTrainingModule._evaluate_loss
     module.loss = {"data": loss}
     module.model_comm_group = group
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
+    module._grid_shard_sizes.return_value = shard_sizes
 
-    y_pred = torch.randn(1, 1, 1, 2, 3)
-    y = torch.randn(1, 1, 2, 3)
+    y_pred = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(1, 1, 1, 2, 3), ["a", "b", "c"], {})
     grid_shard_slice = slice(0, 2)
 
     EDMDiffusionTransportObjective(module).compute_loss(
@@ -586,19 +616,35 @@ def _transport_objective_with_source(
                 ),
             ),
         ),
+        _grid_shard_sizes=lambda _source: {"data": None},
     )
     return TransportObjective(module)
+
+
+class _DataBatch:
+    def __init__(self, data: dict[str, torch.Tensor]) -> None:
+        self.data = data
+
+    def __getitem__(self, dataset_name: str) -> torch.Tensor:
+        return self.data[dataset_name]
+
+    def keys(self) -> KeysView[str]:
+        return self.data.keys()
+
+    def with_data(self, data: dict[str, torch.Tensor]) -> _DataBatch:
+        return _DataBatch(data)
 
 
 def _prepared_target_with_reference_source() -> PreparedPredictionTarget:
     clean = {"data": torch.full((1, 1, 1, 2, 1), 3.0)}
     reference = {"data": torch.full_like(clean["data"], 2.0)}
+    clean_batch = _DataBatch(clean)
     return PreparedPredictionTarget(
-        model_target=clean,
-        loss_target=clean,
+        model_target=clean_batch,
+        loss_target=clean_batch,
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
-        metric_target=clean,
-        aux={"transport_reference_source": reference},
+        metric_target=clean_batch,
+        aux={"transport_reference_source": lambda: reference},
     )
 
 
@@ -617,9 +663,44 @@ def test_transport_source_default_is_gaussian(monkeypatch: pytest.MonkeyPatch) -
     torch.testing.assert_close(source["data"], torch.full_like(prepared.model_target["data"], 7.0))
 
 
+def test_state_reference_source_is_lazy_and_handles_diagnostic_variables() -> None:
+    """The reference-state source is built lazily from the full batch.
+
+    Diagnostic (output-only) variables are not part of the model input, so the
+    projection must draw from the full batch rather than the model inputs, and
+    it must only be materialised when a reference_state source is requested.
+    """
+    name_to_index = {"A": 0, "B": 1, "D": 2}
+    data_indices = {"data": _make_minimal_index_collection(name_to_index, diagnostic=["D"])}
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, n_step_input=2, task=task)
+    forecaster.model = SimpleNamespace(
+        pre_processors={"data": Processors([])},
+        post_processors={"data": Processors([], inverse=True)},
+    )
+    mode = StatePredictionMode(forecaster)
+
+    batch = _make_gridded_batch(torch.randn(1, 3, 1, 4, len(name_to_index)), variables=list(name_to_index))
+    prepared = mode.prepare_target(batch, x=None)
+
+    reference_factory = prepared.aux["transport_reference_source"]
+    assert callable(reference_factory), "gaussian/zero sources must not pay for the reference projection"
+
+    reference = reference_factory()
+    assert reference["data"].shape[-1] == len(data_indices["data"].model.output)
+    # The reference is the last input step of the full batch in model-output space.
+    torch.testing.assert_close(
+        reference["data"][:, 0],
+        batch["data"].data[:, 1][..., data_indices["data"].data.output.full],
+    )
+
+
 def test_transport_source_rejects_missing_reference_state_source() -> None:
     objective = _transport_objective_with_source("reference_state")
-    clean = {"data": torch.zeros(1, 1, 1, 2, 1)}
+    clean = _DataBatch({"data": torch.zeros(1, 1, 1, 2, 1)})
     prepared = PreparedPredictionTarget(
         model_target=clean,
         loss_target=clean,
@@ -651,17 +732,19 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
                 ),
             ),
         ),
+        _grid_shard_sizes=lambda _source: {"data": None},
     )
 
     anchor = {"data": torch.full((1, 1, 1, 2, 1), 3.0)}
     clean = {"data": torch.full((1, 1, 1, 2, 1), 5.0)}
+    clean_batch = _DataBatch(clean)
     prepared = PreparedPredictionTarget(
-        model_target=clean,
-        loss_target=clean,
+        model_target=clean_batch,
+        loss_target=clean_batch,
         loss_target_layout=IndexSpace.MODEL_OUTPUT,
-        metric_target=clean,
+        metric_target=clean_batch,
         aux={
-            "transport_reference_source": anchor,
+            "transport_reference_source": lambda: anchor,
         },
     )
 
@@ -698,13 +781,255 @@ def test_stochastic_interpolant_prepare_builds_bridge_and_drift(
     torch.testing.assert_close(reconstructed["data"], clean["data"])
 
 
+@pytest.mark.parametrize("sparse", [False, True])
+def test_stochastic_interpolant_prepare_remasks_missing_observations(
+    monkeypatch: pytest.MonkeyPatch,
+    sparse: bool,
+) -> None:
+    """Drift loss targets carry NaNs at missing observations while the network input stays clean."""
+    module = SimpleNamespace(
+        model=SimpleNamespace(
+            model=SimpleNamespace(
+                stochastic_interpolant=StochasticInterpolantSettings(
+                    alpha_schedule="linear",
+                    beta_schedule="quadratic",
+                    sigma_schedule="quadratic_bridge",
+                    noise_scale=1.0,
+                ),
+                training_condition={"distribution": "uniform_time"},
+                transport_source=TransportSourceBuilder(
+                    TransportSourceSettings(kind="gaussian", scale=1.0, noise_scale=0.0),
+                ),
+            ),
+        ),
+        _grid_shard_sizes=lambda _source: None,
+    )
+
+    clean = {"data": torch.full((1, 1, 1, 2, 1), 5.0)}  # imputed, NaN-free
+    missing = {"data": clean["data"].clone()}
+    missing["data"][0, 0, 0, 1, 0] = float("nan")  # the observation was missing
+    if sparse:
+        clean = {"data": [clean["data"][0, 0]]}
+        missing = {"data": [missing["data"][0, 0]]}
+    prepared = PreparedPredictionTarget(
+        model_target=_DataBatch(clean),
+        loss_target=_DataBatch(clean),
+        loss_target_layout=IndexSpace.MODEL_OUTPUT,
+        metric_target=_DataBatch(clean),
+        aux={"model_target_missing": _DataBatch(missing)},
+    )
+
+    monkeypatch.setattr(
+        torch,
+        "rand",
+        lambda shape, device=None, dtype=None: torch.full(shape, 0.25, device=device, dtype=dtype),
+    )
+    monkeypatch.setattr(
+        torch,
+        "randn",
+        lambda shape, device=None, dtype=None: torch.ones(shape, device=device, dtype=dtype),
+    )
+
+    monkeypatch.setattr(torch, "randn_like", torch.ones_like)
+
+    objective = StochasticInterpolantTransportObjective(module).prepare(prepared)
+
+    loss_data = objective.loss_target["data"]
+    target = loss_data[0] if sparse else loss_data
+    network_input = objective.conditioned_target["data"]
+    network_input = network_input[0] if sparse else network_input
+    torch.testing.assert_close(target.flatten(), torch.tensor([2.0, float("nan")]), equal_nan=True)
+    assert torch.isfinite(network_input).all()
+
+    layout = (
+        TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+        if sparse
+        else TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    )
+    target_view = Batch(
+        data={"data": loss_data},
+        layouts={"data": layout},
+        variables={"data": ["value"]},
+        coordinates={"data": [torch.zeros(2, 2)] if sparse else torch.zeros(2, 2)},
+    )["data"]
+    prediction = torch.full_like(target, 3.0, requires_grad=True)
+    prediction_view = target_view.clone(data=[prediction] if sparse else prediction)
+    loss = MSELoss(ignore_nans=True)(prediction_view, target_view)
+    # Dense reduction sums grid nodes; sparse reduction averages them.
+    torch.testing.assert_close(loss, torch.tensor(0.5 if sparse else 1.0))
+    loss.backward()
+    torch.testing.assert_close(prediction.grad.flatten(), torch.tensor([1.0 if sparse else 2.0, 0.0]))
+
+
+class _FakeImputingProcessors:
+    """Processor stub: fills NaNs unless imputation is skipped (loss targets)."""
+
+    def __call__(
+        self,
+        view: SourceView,
+        in_place: bool = False,
+        skip_imputation: bool = False,
+        **_kwargs: Any,
+    ) -> SourceView:
+        del in_place
+        if skip_imputation:
+            return view
+        data = view.data
+        filled = [torch.nan_to_num(t) for t in data] if isinstance(data, list) else torch.nan_to_num(data)
+        return view.clone(data=filled)
+
+
+def test_state_prepare_target_imputes_model_target_and_keeps_loss_nans() -> None:
+    """The corrupted-target path is imputed while loss targets keep their NaNs."""
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.model = SimpleNamespace(
+        pre_processors={"data": _FakeImputingProcessors()},
+        post_processors={"data": Processors([], inverse=True)},
+    )
+    mode = StatePredictionMode(forecaster)
+
+    data = torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))
+    data[0, 1, 0, 2, 0] = float("nan")  # missing observation at the output step
+    batch = _make_gridded_batch(data)
+
+    prepared = mode.prepare_target(batch, x=None)
+
+    assert not torch.isnan(prepared.model_target["data"].data).any()
+    assert torch.isnan(prepared.loss_target["data"].data).any()
+    assert torch.isnan(prepared.aux["model_target_missing"]["data"].data).any()
+
+
+def test_state_model_target_and_missing_stay_consistent_with_real_processors() -> None:
+    """model_target and model_target_missing differ only at missing observations.
+
+    Both variants run through the exact same normalizer; only the imputer is
+    skipped for the NaN-preserving variant. Observed values must therefore be
+    identical, NaNs must sit exactly where the raw target had missing
+    observations, and imputed positions must hold the normalized fill value.
+    """
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    processors = Processors(
+        [
+            ("imputer", InputImputer(config=DictConfig({"default": "mean"}))),
+            ("normalizer", InputNormalizer(config=DictConfig({"default": "mean-std"}))),
+        ],
+    )
+    forecaster.model = SimpleNamespace(
+        pre_processors={"data": processors},
+        post_processors={"data": Processors([], inverse=True)},
+    )
+    mode = StatePredictionMode(forecaster)
+
+    statistics = {
+        "mean": torch.tensor([1.0, 2.0]),
+        "stdev": torch.tensor([2.0, 4.0]),
+        "minimum": torch.tensor([-10.0, -10.0]),
+        "maximum": torch.tensor([10.0, 10.0]),
+    }
+    data = torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))
+    data[0, 1, 0, 2, 0] = float("nan")  # missing observation at the output step
+    batch = Batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(4, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(_NAME_TO_INDEX)},
+        statistics={"data": statistics},
+    )
+
+    prepared = mode.prepare_target(batch, x=None)
+
+    model_target = prepared.model_target["data"].data
+    missing = prepared.aux["model_target_missing"]["data"].data
+    assert model_target.shape == missing.shape
+
+    # NaNs sit exactly where the raw output-step target had missing values.
+    raw_output_step = data[:, 1:2]
+    assert torch.equal(torch.isnan(missing), torch.isnan(raw_output_step))
+    assert not torch.isnan(model_target).any()
+
+    # Identical normalization at observed positions.
+    observed = ~torch.isnan(missing)
+    torch.testing.assert_close(model_target[observed], missing[observed])
+
+    # Imputed positions hold the normalized mean fill value ((mean-mean)/std == 0).
+    torch.testing.assert_close(model_target[~observed], torch.zeros_like(model_target[~observed]))
+
+    # The loss target is the same NaN-preserving normalized target (full == model
+    # output space for this index collection).
+    torch.testing.assert_close(prepared.loss_target["data"].data, missing, equal_nan=True)
+
+
+def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None:
+    """Same consistency contract on the sparse/tabular (observation) view path."""
+    data_indices = _data_indices_single()
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    processors = Processors(
+        [
+            ("imputer", InputImputer(config=DictConfig({"default": "mean"}))),
+            ("normalizer", InputNormalizer(config=DictConfig({"default": "mean-std"}))),
+        ],
+    )
+    forecaster.model = SimpleNamespace(
+        pre_processors={"data": processors},
+        post_processors={"data": Processors([], inverse=True)},
+    )
+    mode = StatePredictionMode(forecaster)
+
+    statistics = {
+        "mean": torch.tensor([1.0, 2.0]),
+        "stdev": torch.tensor([2.0, 4.0]),
+        "minimum": torch.tensor([-10.0, -10.0]),
+        "maximum": torch.tensor([10.0, 10.0]),
+    }
+    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    data = [torch.randn(5, len(_NAME_TO_INDEX))]
+    data[0][3, 0] = float("nan")  # missing observation at the output step
+    batch = Batch(
+        data={"data": data},
+        coordinates={"data": [torch.zeros(5, 2)]},
+        metadata={"data": {"boundaries": [(slice(0, 2), slice(2, 5))]}},
+        layouts={"data": layout},
+        variables={"data": list(_NAME_TO_INDEX)},
+        statistics={"data": statistics},
+    )
+
+    prepared = mode.prepare_target(batch, x=None)
+
+    model_target = prepared.model_target["data"].data[0]
+    missing = prepared.aux["model_target_missing"]["data"].data[0]
+    assert model_target.shape == missing.shape == (3, len(_NAME_TO_INDEX))
+
+    # NaNs sit exactly where the raw output-step rows had missing values.
+    raw_output_rows = data[0][2:5]
+    assert torch.equal(torch.isnan(missing), torch.isnan(raw_output_rows))
+    assert not torch.isnan(model_target).any()
+
+    # Identical normalization at observed positions; normalized fill elsewhere.
+    observed = ~torch.isnan(missing)
+    torch.testing.assert_close(model_target[observed], missing[observed])
+    torch.testing.assert_close(model_target[~observed], torch.zeros_like(model_target[~observed]))
+    torch.testing.assert_close(prepared.loss_target["data"].data[0], missing, equal_nan=True)
+
+
 # ── BaseTrainingModule: calculate_val_metrics ──────────────────────────────────
 
 
 def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
     """calculate_val_metrics passes scaler_indices, grid_shard_slice, group to each metric."""
     module = MagicMock(spec=BaseTrainingModule)
-    module._align_view_to_layout = lambda view, *args, **kwargs: view
+    module._postprocess_dataset_view = lambda view, *_args, **_kwargs: view
     metric = CaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -747,7 +1072,7 @@ def test_calculate_val_metrics_forwards_standard_metric_kwargs() -> None:
 def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> None:
     """calculate_val_metrics adds shard layout when metric.needs_shard_layout_info."""
     module = MagicMock(spec=BaseTrainingModule)
-    module._align_view_to_layout = lambda view, *args, **kwargs: view
+    module._align_view_to_layout = lambda view, *_args, **_kwargs: view
     metric = ShardingAwareCaptureLoss()
     post_processor = MagicMock(side_effect=lambda x, **_: x)
     group = object()
@@ -761,6 +1086,7 @@ def test_calculate_val_metrics_forwards_dataset_shard_sizes_when_requested() -> 
     module.model_comm_group_size = 2
     module.grid_dim = -2
     module.grid_shard_sizes = {"data": shard_sizes}
+    module._grid_shard_sizes.return_value = shard_sizes
 
     y_pred = torch.randn(1, 1, 1, 2, 3)
     y = torch.randn(1, 1, 2, 3)
@@ -842,7 +1168,7 @@ def _gridded_view(
     data: torch.Tensor,
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-):
+) -> SourceView:
     """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSourceView."""
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     return create_source_view(
@@ -852,12 +1178,12 @@ def _gridded_view(
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=True,
+        coordinates_are_static=True,
     )
 
 
 def test_align_view_to_layout_matches_model_output_tensor() -> None:
-    """A prediction view inheriting full target metadata is realigned to its model-output tensor."""
+    """A full source is selected into model-output space with matching metadata."""
     name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
     full_stats = {
@@ -866,8 +1192,8 @@ def test_align_view_to_layout_matches_model_output_tensor() -> None:
         "minimum": torch.tensor([0.0, 0.0, 0.0, 0.0]),
         "maximum": torch.tensor([10.0, 10.0, 10.0, 10.0]),
     }
-    # The model output excludes the forcing variable "f": 3 channels but full (4-var) metadata.
-    pred_tensor = torch.randn(1, 1, 1, 2, 3)
+    # Selecting model-output space excludes the forcing variable "f".
+    pred_tensor = torch.randn(1, 1, 1, 2, 4)
     y_pred = _gridded_view(pred_tensor, list(name_to_index), full_stats)
 
     module = SimpleNamespace(data_indices=data_indices)
@@ -875,13 +1201,12 @@ def test_align_view_to_layout_matches_model_output_tensor() -> None:
 
     expected_names = list(data_indices["data"].model.output.ordered_names)
     assert list(aligned.variables) == expected_names
-    assert len(aligned.name_to_index) == pred_tensor.shape[-1]
+    assert len(aligned.name_to_index) == 3
     expected_positions = [name_to_index[n] for n in expected_names]
     for key, value in aligned.statistics.items():
-        assert len(value) == pred_tensor.shape[-1]
+        assert len(value) == 3
         torch.testing.assert_close(value, full_stats[key][expected_positions])
-    # The data tensor itself is untouched.
-    assert aligned.data is pred_tensor
+    torch.testing.assert_close(aligned.data, pred_tensor[..., :3])
 
 
 def test_align_view_to_layout_is_noop_when_metadata_matches_tensor() -> None:
@@ -897,7 +1222,7 @@ def test_align_view_to_layout_is_noop_when_metadata_matches_tensor() -> None:
 
 
 def test_align_view_to_layout_enables_postprocessing_of_model_output() -> None:
-    """Realigned model-output view can be denormalised without the ERROR.md shape mismatch."""
+    """Selected model-output data and statistics can be denormalised together."""
     name_to_index = {"x": 0, "y": 1, "z": 2, "f": 3}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, forcing=["f"])}
     full_stats = {
@@ -906,23 +1231,22 @@ def test_align_view_to_layout_enables_postprocessing_of_model_output() -> None:
         "minimum": torch.tensor([0.0, 0.0, 0.0, 0.0]),
         "maximum": torch.tensor([10.0, 10.0, 10.0, 10.0]),
     }
-    pred_tensor = torch.zeros(1, 1, 1, 2, 3)
+    pred_tensor = torch.zeros(1, 1, 1, 2, 4)
     y_pred = _gridded_view(pred_tensor, list(name_to_index), full_stats)
 
     normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
     module = SimpleNamespace(data_indices=data_indices)
     aligned = BaseTrainingModule._align_view_to_layout(module, y_pred, IndexSpace.MODEL_OUTPUT, "data")
 
-    # Without the realignment this raises: tensor a (3) must match tensor b (4).
     denormalised = normalizer(aligned, in_place=False, inverse=True)
-    assert denormalised.data.shape == pred_tensor.shape
+    torch.testing.assert_close(denormalised.data, full_stats["mean"][:3].expand(1, 1, 1, 2, 3))
 
 
 def _tabular_view(
     data: list[torch.Tensor],
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-):
+) -> SourceView:
     """Wrap a list of ``(grid, variables)`` tensors in a TabularSourceView (sparse obs)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     return create_source_view(
@@ -932,7 +1256,7 @@ def _tabular_view(
         statistics=statistics,
         coordinates=None,
         layout=layout,
-        is_static=False,
+        coordinates_are_static=False,
         boundaries=None,
     )
 
@@ -953,13 +1277,13 @@ def test_align_view_to_layout_handles_tabular_list_data() -> None:
     y = _tabular_view([torch.zeros(5, 4)], list(name_to_index), full_stats)
     assert BaseTrainingModule._align_view_to_layout(module, y, IndexSpace.DATA_FULL, "data") is y
 
-    # Model-output prediction: list of (grid, 3) tensors but full (4-var) metadata.
-    y_pred = _tabular_view([torch.zeros(5, 3)], list(name_to_index), full_stats)
+    # Select model-output variables from a valid full-data source.
+    y_pred = _tabular_view([torch.zeros(5, 4)], list(name_to_index), full_stats)
     aligned = BaseTrainingModule._align_view_to_layout(module, y_pred, IndexSpace.MODEL_OUTPUT, "data")
 
     expected_names = list(data_indices["data"].model.output.ordered_names)
     assert list(aligned.variables) == expected_names
-    for key, value in aligned.statistics.items():
+    for value in aligned.statistics.values():
         assert len(value) == len(expected_names)
 
     # Realigned metadata lets the post-processor denormalise the list data.
@@ -1017,6 +1341,24 @@ def _make_single_training(task: Any, data_indices: dict[str, IndexCollection]) -
     return module
 
 
+def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) -> Batch:
+    variables = list(_NAME_TO_INDEX)[: data.shape[-1]] if variables is None else variables
+    return Batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(data.shape[-2], 2, dtype=data.dtype, device=data.device)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": variables},
+        statistics={"data": {}},
+    )
+
+
+def _make_target_pair(data: torch.Tensor, variables: list[str] | None = None) -> tuple[Batch, Batch]:
+    target = _make_gridded_batch(data, variables=variables)
+    template = target.select(variables=[])
+    return target, template
+
+
 def test_single_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -> None:
     """SingleTraining._step with Forecaster returns one y_pred per rollout step."""
     data_indices = _data_indices_single()
@@ -1033,11 +1375,11 @@ def test_single_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # batch time-steps correspond to offsets [0h, +6h]
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
     output = module._step(batch, validation_mode=False)
 
     _assert_step_return_format(output, expected_len=1)
-    assert output.predictions[0]["data"].shape == (b, 1, e, g, v)
+    assert output.predictions[0]["data"].data.shape == (b, 1, e, g, v)
 
 
 def test_single_training_step_with_autoencoder(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1055,7 +1397,7 @@ def test_single_training_step_with_autoencoder(monkeypatch: pytest.MonkeyPatch) 
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # Autoencoder: single time step at t=0
-    batch = {"data": torch.randn(b, 1, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 1, e, g, v))
     output = module._step(batch, validation_mode=False)
 
     _assert_step_return_format(output, expected_len=1)
@@ -1084,7 +1426,7 @@ def test_single_training_step_with_temporal_downscaler(
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [0h, 6h, 12h, 18h] → 4 time steps
-    batch = {"data": torch.randn(b, 4, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 4, e, g, v))
     output = module._step(batch, validation_mode=False)
 
     _assert_step_return_format(output, expected_len=1)
@@ -1108,19 +1450,19 @@ def test_single_training_loss_is_averaged_over_num_steps(
     module = _make_single_training(task, data_indices)
 
     per_step_losses = iter([torch.tensor(2.0), torch.tensor(4.0)])
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
     monkeypatch.setattr(
         module,
         "compute_loss_metrics",
-        lambda *_a, **_kw: (next(per_step_losses), {}, dummy_y),
+        lambda *_a, **_kw: (next(per_step_losses), {}, dummy_target[0]),
     )
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
     output = module._step(batch, validation_mode=False)
 
     # Expected average: 3.0 = (2.0 + 4.0) / 2
@@ -1139,34 +1481,32 @@ def test_single_training_advance_input_called_between_rollout_steps(
         rollout={"start": 2, "maximum": 2},
     )
     module = _make_single_training(task, data_indices)
-    module.grid_shard_slice = {"data": slice(1, 3)}
     module.output_mask = {"data": NoOutputMask()}
 
     advance_calls: list[dict[str, Any]] = []
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     monkeypatch.setattr(
         module,
         "compute_loss_metrics",
-        lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y),
+        lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_target[0]),
     )
 
-    def _advance_input(x: dict[str, torch.Tensor], *_args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+    def _advance_input(x: Batch, *_args: Any, **kwargs: Any) -> Batch:
         advance_calls.append(kwargs.copy())
         return x
 
     monkeypatch.setattr(task, "advance_input", _advance_input)
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
     module._step(batch, validation_mode=False)
 
     assert len(advance_calls) == task.num_steps - 1
     for kwargs in advance_calls:
         assert kwargs["output_mask"] is module.output_mask
-        assert kwargs["grid_shard_slice"] is module.grid_shard_slice
 
 
 def test_single_training_forcing_advances_across_rollout_steps(
@@ -1233,6 +1573,8 @@ def test_edm_transport_training_step_with_forecaster() -> None:
 
         def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
+            self.pre_processors = {"data": Processors([])}
+            self.post_processors = {"data": Processors([], inverse=True)}
 
     data_indices = _data_indices_single()
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
@@ -1254,11 +1596,66 @@ def test_edm_transport_training_step_with_forecaster() -> None:
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets=[0h, +6h] → 2 time steps
-    batch = {"data": torch.randn(b, 2, e, g, v)}
-    output = forecaster._step(batch={"data": batch["data"]}, validation_mode=False)
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
+    output = forecaster._step(batch=batch, validation_mode=False)
 
     _assert_step_return_format(output, expected_len=1)
-    assert output.predictions[0]["data"].shape == (b, 1, e, g, v)
+    assert output.predictions[0]["data"].data.shape == (b, 1, e, g, v)
+
+
+def test_transport_training_sample_builds_target_template_like_deterministic_training() -> None:
+    data_indices = _data_indices_single()
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
+
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    batch = Batch(
+        data={"data": torch.randn(1, 2, 1, 3, 2)},
+        coordinates={"data": torch.zeros(3, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": layout},
+        variables={"data": ["A", "B"]},
+        statistics={"data": {}},
+    )
+    x = batch.select(time=[0])
+    target_template = batch.select(time=[1]).with_data({"data": torch.empty(1, 1, 1, 3, 0)})
+    target_values = batch.select(time=[1])
+
+    task = MagicMock()
+    task.get_inputs.return_value = x
+    task.get_targets.return_value = (target_values, target_template)
+    forecaster.task = task
+
+    class _CoreModel:
+        def __init__(self) -> None:
+            self.call = None
+
+        def sample(self, *args, **kwargs) -> SourceView:
+            self.call = {"args": args, "kwargs": kwargs}
+            return kwargs["target_template"]
+
+    core_model = _CoreModel()
+    forecaster.model = SimpleNamespace(model=core_model)
+
+    out = forecaster.sample(
+        batch,
+        task_kwargs={"rollout_step": 0},
+        schedule_params={"num_steps": 2},
+        sampler_params={"sampler": "heun"},
+        marker="value",
+    )
+
+    assert out is target_template
+    task.get_inputs.assert_called_once_with(batch, data_indices=forecaster.data_indices)
+    task.get_targets.assert_called_once_with(batch, data_indices=forecaster.data_indices, rollout_step=0)
+    assert core_model.call["args"] == (x,)
+    assert core_model.call["kwargs"]["target_template"] is target_template
+    assert core_model.call["kwargs"]["model_comm_group"] is forecaster.model_comm_group
+    assert core_model.call["kwargs"]["grid_shard_sizes"] is forecaster.grid_shard_sizes
+    assert core_model.call["kwargs"]["schedule_params"] == {"num_steps": 2}
+    assert core_model.call["kwargs"]["sampler_params"] == {"sampler": "heun"}
+    assert core_model.call["kwargs"]["marker"] == "value"
 
 
 # ── EnsembleTraining: expand helper ────────────────────────────────────────────
@@ -1271,9 +1668,9 @@ def test_ensemble_expand_ens_dim_tiles_ensemble_dimension() -> None:
     forecaster.nens_per_device = 3
 
     b, t, e, g, v = 2, 1, 1, 4, 2
-    batch = {"data": torch.randn(b, t, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, t, e, g, v))
     expanded = forecaster._expand_ens_dim(batch)
-    assert expanded["data"].shape == (b, t, 3, g, v)
+    assert expanded["data"].data.shape == (b, t, 3, g, v)
 
 
 # ── EnsembleTraining._step integration ────────────────────────────────────────
@@ -1306,12 +1703,12 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
 
     def _stub_compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y: Batch,
         *_args: Any,
         **_kwargs: Any,
     ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
         ref = next(iter(y_pred.values()))
-        target_shapes.append(next(iter(y.values())).shape)
+        target_shapes.append(next(iter(y.values())).data.shape)
         return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _stub_compute_loss_metrics)
@@ -1319,7 +1716,7 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
 
     b, e_orig, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets=[0h, +6h] → 2 time steps; ensemble dim=1 (will be expanded to nens_per_device=2)
-    batch = {"data": torch.randn(b, 2, e_orig, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e_orig, g, v))
     output = forecaster._step(batch=batch, validation_mode=False)
 
     assert isinstance(output.loss, torch.Tensor)
@@ -1334,14 +1731,16 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
 
 
 class _RecordingModel:
-    """Wraps DummyModel and records a clone of every dict input it receives."""
+    """Wraps DummyModel and records a clone of every input payload it receives."""
 
     def __init__(self, inner: DummyModel) -> None:
         self._inner = inner
         self.recorded_x: list[dict[str, torch.Tensor]] = []
 
-    def __call__(self, x: dict[str, torch.Tensor] | torch.Tensor, **kw: Any) -> Any:
-        if isinstance(x, dict):
+    def __call__(self, x: Batch | dict[str, torch.Tensor] | torch.Tensor, **kw: Any) -> Any:
+        if isinstance(x, Batch):
+            self.recorded_x.append({k: v.clone() for k, v in x.data.items()})
+        elif isinstance(x, dict):
             self.recorded_x.append({k: v.clone() for k, v in x.items()})
         return self._inner(x, **kw)
 
@@ -1364,10 +1763,10 @@ def test_single_training_multi_rollout_accumulates_one_pred_per_step(
     )
     module = _make_single_training(task, data_indices)
 
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
     monkeypatch.setattr(
         module,
@@ -1376,7 +1775,7 @@ def test_single_training_multi_rollout_accumulates_one_pred_per_step(
     )
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 4, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 4, e, g, v))
     output = module._step(batch, validation_mode=False)
 
     assert len(output.predictions) == 3, f"Expected 3 y_pred entries for rollout=3, got {len(output.predictions)}"
@@ -1403,11 +1802,11 @@ def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
     module = _make_single_training(task, data_indices)
 
     captured_kwargs: list[dict] = []
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
-    def spy_get_targets(*_args: Any, **kwargs: Any) -> dict[str, torch.Tensor]:
+    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, Batch]:
         captured_kwargs.append(kwargs.copy())
-        return dummy_y
+        return dummy_target
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
     monkeypatch.setattr(task, "get_targets", spy_get_targets)
@@ -1420,7 +1819,7 @@ def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
     # offsets for rollout=2: [0h, +6h, +12h] → 3 time steps
-    batch = {"data": torch.randn(b, 3, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 3, e, g, v))
     module._step(batch, validation_mode=False)
 
     assert len(captured_kwargs) == 2, "get_targets must be called once per rollout step"
@@ -1447,7 +1846,7 @@ def test_single_training_rollout_step_kwarg_propagated_to_compute_loss_metrics(
     module = _make_single_training(task, data_indices)
 
     captured_kwargs: list[dict] = []
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     def spy_compute_loss_metrics(
         y_pred: dict[str, torch.Tensor],
@@ -1458,12 +1857,12 @@ def test_single_training_rollout_step_kwarg_propagated_to_compute_loss_metrics(
         return torch.tensor(0.0), {}, y_pred
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
     monkeypatch.setattr(module, "compute_loss_metrics", spy_compute_loss_metrics)
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 3, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 3, e, g, v))
     module._step(batch, validation_mode=False)
 
     assert len(captured_kwargs) == 2, "compute_loss_metrics must be called once per rollout step"
@@ -1494,12 +1893,16 @@ def test_single_training_model_receives_updated_input_at_each_rollout_step(
     recorder = _RecordingModel(module.model)
     module.model = recorder
 
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     # advance_input adds 1.0 so we can detect its result in the next input.
-    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: {k: v + 1.0 for k, v in x.items()})
+    monkeypatch.setattr(
+        task,
+        "advance_input",
+        lambda x, *_a, **_kw: x.with_data({dataset_name: view.data + 1.0 for dataset_name, view in x.items()}),
+    )
     monkeypatch.setattr(
         module,
         "compute_loss_metrics",
@@ -1507,7 +1910,7 @@ def test_single_training_model_receives_updated_input_at_each_rollout_step(
     )
 
     b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
     module._step(batch, validation_mode=False)
 
     assert len(recorder.recorded_x) == 2, "Model should be called exactly once per rollout step"
@@ -1563,11 +1966,11 @@ def test_ensemble_training_multi_rollout_accumulates_one_pred_per_step(
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
-    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(b, 1, 1, g, v)}
-    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    dummy_target = _make_target_pair(torch.zeros(b, 1, 1, g, v))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_target)
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
 
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, v))
     output = forecaster._step(batch=batch, validation_mode=False)
 
     assert len(output.predictions) == 2, f"Expected 2 y_pred entries for rollout=2, got {len(output.predictions)}"
@@ -1612,11 +2015,11 @@ def test_single_training_uses_data_full_target_layout(
 
     def _compute_loss_metrics_stub(
         y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y: Batch,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
         captured["pred_vars"] = y_pred["data"].shape[-1]
-        captured["target_vars"] = y["data"].shape[-1]
+        captured["target_vars"] = y["data"].data.shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
         ref = next(iter(y_pred.values()))
@@ -1628,7 +2031,7 @@ def test_single_training_uses_data_full_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, full_v), variables=list(name_to_index))
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
@@ -1670,10 +2073,10 @@ def test_ensemble_training_uses_data_full_target_layout(
 
     def _compute_loss_metrics_stub(
         y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y: Batch,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        captured["target_vars"] = y["data"].shape[-1]
+        captured["target_vars"] = y["data"].data.shape[-1]
         captured["target_layout"] = kwargs["target_layout"]
         ref = next(iter(y_pred.values()))
         return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
@@ -1684,7 +2087,7 @@ def test_ensemble_training_uses_data_full_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    batch = _make_gridded_batch(torch.randn(b, 2, e, g, full_v), variables=list(name_to_index))
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["target_layout"] == IndexSpace.DATA_FULL
@@ -1701,6 +2104,8 @@ def test_edm_transport_training_uses_data_full_target_layout(
     class _DummyTransportWrapper:
         def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
+            self.pre_processors = {"data": Processors([])}
+            self.post_processors = {"data": Processors([], inverse=True)}
 
     # Include an extra target (observation) variable to exercise the target-variable path.
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
@@ -1725,15 +2130,15 @@ def test_edm_transport_training_uses_data_full_target_layout(
     captured: dict[str, Any] = {}
 
     def _compute_loss_metrics_stub(
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        captured["pred_vars"] = y_pred["data"].shape[-1]
-        captured["target_vars"] = y["data"].shape[-1]
+    ) -> tuple[torch.Tensor, dict, Batch]:
+        captured["pred_vars"] = y_pred.data["data"].shape[-1]
+        captured["target_vars"] = y.data["data"].shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred["data"]
+        pred = y_pred.data["data"]
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
@@ -1741,7 +2146,14 @@ def test_edm_transport_training_uses_data_full_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    batch = Batch(
+        data={"data": torch.randn(b, 2, e, g, full_v)},
+        coordinates={"data": torch.zeros(g, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(name_to_index)},
+        statistics={"data": {}},
+    )
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
@@ -1760,9 +2172,9 @@ def test_transport_training_target_reduction_fast_paths() -> None:
     # Identity: model.output == data.output (no target/forcing/diagnostic), so no selection needed.
     data_indices_identity = {"data": _make_minimal_index_collection({"A": 0, "B": 1})}
     _wire_training_module(module, data_indices=data_indices_identity, config=_CFG_DIFFUSION)
-    y_identity = {"data": torch.randn((2, 1, 1, 4, 2), dtype=torch.float32)}
+    y_identity = _make_gridded_batch(torch.randn((2, 1, 1, 4, 2), dtype=torch.float32), variables=["A", "B"])
     y_model_identity = module.reduce_data_output_target_to_model_output(y_identity)
-    assert y_model_identity["data"] is y_identity["data"]
+    assert y_model_identity["data"].data is y_identity["data"].data
 
     # Non-contiguous: obs_A sits between A and B in the original variable ordering
     # (name_to_index = {A:0, obs_A:1, B:2}) so data.output is [A, obs_A, B] (sorted by index).
@@ -1774,16 +2186,19 @@ def test_transport_training_target_reduction_fast_paths() -> None:
         ),
     }
     _wire_training_module(module, data_indices=data_indices_non_contiguous, config=_CFG_DIFFUSION)
-    y_non_contiguous = {"data": torch.randn((2, 1, 1, 4, 3), dtype=torch.float32)}
+    y_non_contiguous = _make_gridded_batch(
+        torch.randn((2, 1, 1, 4, 3), dtype=torch.float32),
+        variables=["A", "obs_A", "B"],
+    )
     y_model_non_contiguous = module.reduce_data_output_target_to_model_output(y_non_contiguous)
-    expected_non_contiguous = y_non_contiguous["data"].index_select(
+    expected_non_contiguous = y_non_contiguous["data"].data.index_select(
         -1,
         torch.tensor([0, 2], dtype=torch.long),
     )
-    torch.testing.assert_close(y_model_non_contiguous["data"], expected_non_contiguous)
+    torch.testing.assert_close(y_model_non_contiguous["data"].data, expected_non_contiguous)
     assert (
-        y_model_non_contiguous["data"].untyped_storage().data_ptr()
-        != y_non_contiguous["data"].untyped_storage().data_ptr()
+        y_model_non_contiguous["data"].data.untyped_storage().data_ptr()
+        != y_non_contiguous["data"].data.untyped_storage().data_ptr()
     )
 
 
@@ -1795,6 +2210,8 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     class _DummyTransportWrapper:
         def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
+            self.pre_processors = {"data": Processors([])}
+            self.post_processors = {"data": Processors([], inverse=True)}
 
     name_to_index = {"A": 0, "B": 1, "obs_A": 2}
     data_indices = {"data": _make_minimal_index_collection(name_to_index, target=["obs_A"])}
@@ -1818,15 +2235,15 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
     captured: dict[str, Any] = {}
 
     def _compute_loss_metrics_stub(
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        captured["pred_vars"] = y_pred["data"].shape[-1]
-        captured["target_vars"] = y["data"].shape[-1]
+    ) -> tuple[torch.Tensor, dict, Batch]:
+        captured["pred_vars"] = y_pred.data["data"].shape[-1]
+        captured["target_vars"] = y.data["data"].shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred["data"]
+        pred = y_pred.data["data"]
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
@@ -1834,7 +2251,14 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = {"data": torch.randn(b, 2, e, g, full_v)}
+    batch = Batch(
+        data={"data": torch.randn(b, 2, e, g, full_v)},
+        coordinates={"data": torch.zeros(g, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(name_to_index)},
+        statistics={"data": {}},
+    )
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
@@ -1850,15 +2274,15 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
 
     class _DummyTransportObjective:
         def __init__(self) -> None:
-            self.conditioned_target: dict[str, torch.Tensor] | None = None
+            self.conditioned_target: Batch | None = None
 
         def prepare(self, prepared: PreparedPredictionTarget) -> PreparedTransportObjective:
-            self.conditioned_target = {
-                dataset_name: target + 3.0 for dataset_name, target in prepared.model_target.items()
+            conditioned_data = {
+                dataset_name: target + 3.0 for dataset_name, target in prepared.model_target.data.items()
             }
+            self.conditioned_target = prepared.model_target.with_data(conditioned_data)
             condition = {
-                dataset_name: torch.zeros_like(target[..., :1])
-                for dataset_name, target in self.conditioned_target.items()
+                dataset_name: torch.zeros_like(target[..., :1]) for dataset_name, target in conditioned_data.items()
             }
             return PreparedTransportObjective(
                 conditioned_target=self.conditioned_target,
@@ -1872,26 +2296,27 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
 
         def forward(
             self,
-            x: dict[str, torch.Tensor],
-            conditioned_target: dict[str, torch.Tensor],
+            x: Batch,
+            conditioned_target: Batch,
             condition: dict[str, torch.Tensor],
-        ) -> dict[str, torch.Tensor]:
-            del x, condition
+            target_forcing: Batch | None = None,
+        ) -> Batch:
+            del x, condition, target_forcing
             return conditioned_target
 
         def reconstruct_endpoint(
             self,
-            prediction: dict[str, torch.Tensor],
+            prediction: Batch,
             objective: PreparedTransportObjective,
-        ) -> dict[str, torch.Tensor]:
+        ) -> Batch:
             del objective
             return prediction
 
         def prepare_loss_prediction(
             self,
-            prediction: dict[str, torch.Tensor],
+            prediction: Batch,
             objective: PreparedTransportObjective,
-        ) -> dict[str, torch.Tensor]:
+        ) -> Batch:
             del objective
             return prediction
 
@@ -1900,6 +2325,10 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     forecaster = TransportTraining.__new__(TransportTraining)
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.model = SimpleNamespace(
+        pre_processors={"data": Processors([])},
+        post_processors={"data": Processors([], inverse=True)},
+    )
     objective = _DummyTransportObjective()
     forecaster._prediction_mode = StatePredictionMode(forecaster)
     forecaster._transport_objective = objective
@@ -1908,26 +2337,33 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     forecaster.target_dataset_names = forecaster.dataset_names
 
     def _compute_loss_metrics_stub(
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+    ) -> tuple[torch.Tensor, dict, Batch]:
         del y, kwargs
-        return torch.zeros(1, dtype=y_pred["data"].dtype), {}, y_pred
+        return torch.zeros(1, dtype=y_pred.data["data"].dtype), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
 
-    batch = {"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))}
+    batch = Batch(
+        data={"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))},
+        coordinates={"data": torch.zeros(4, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(_NAME_TO_INDEX)},
+        statistics={"data": {}},
+    )
     output = forecaster._step(batch=batch, validation_mode=True)
 
     assert objective.conditioned_target is not None
     auxiliary_output = output.plot_kwargs["auxiliary_output"]
     torch.testing.assert_close(
-        auxiliary_output["data"],
-        objective.conditioned_target["data"],
+        auxiliary_output["data"].data,
+        objective.conditioned_target["data"].data,
     )
-    assert auxiliary_output["data"].requires_grad is False
+    assert auxiliary_output["data"].data.requires_grad is False
 
 
 def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_target(
@@ -1938,6 +2374,8 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     class _DummyTransportWrapper:
         def __init__(self, inner: DummyTransportModel) -> None:
             self.model = inner
+            self.pre_processors = {"data": Processors([])}
+            self.post_processors = {"data": Processors([], inverse=True)}
 
     data_indices = _data_indices_single()
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
@@ -1958,8 +2396,19 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
 
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     n_model = len(data_indices["data"].model.output.full)
-    state_target = {"data": torch.randn(b, 1, e, g, v)}
-    tendency_target = {"data": torch.randn(b, 1, e, g, n_model)}
+
+    def _batch(data: torch.Tensor) -> Batch:
+        return Batch(
+            data={"data": data},
+            coordinates={"data": torch.zeros(g, 2)},
+            metadata={"static_coords": frozenset({"data"})},
+            layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+            variables={"data": list(_NAME_TO_INDEX)[: data.shape[-1]]},
+            statistics={"data": {}},
+        )
+
+    state_target = _batch(torch.randn(b, 1, e, g, v))
+    tendency_target = _batch(torch.randn(b, 1, e, g, n_model))
 
     class _DummyPredictionMode:
         def prepare_target(
@@ -1992,20 +2441,20 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     captured: dict[str, Any] = {}
 
     def _compute_loss_metrics_stub(
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
+        y_pred: Batch,
+        y: Batch,
         **kwargs: Any,
-    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
-        captured["pred_vars"] = y_pred["data"].shape[-1]
-        captured["target_vars"] = y["data"].shape[-1]
+    ) -> tuple[torch.Tensor, dict, Batch]:
+        captured["pred_vars"] = y_pred.data["data"].shape[-1]
+        captured["target_vars"] = y.data["data"].shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred["data"]
+        pred = y_pred.data["data"]
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
 
-    batch = {"data": torch.randn(b, 2, e, g, v)}
+    batch = _batch(torch.randn(b, 2, e, g, v))
     forecaster._step(batch=batch, validation_mode=False)
 
     assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
@@ -2072,8 +2521,14 @@ def test_edm_transport_tendency_training_compute_dataset_loss_metrics_uses_metri
     n_full = len(name_to_index)
     y_pred = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
     y = torch.randn(b, 1, e, g, len(data_indices["data"].data.output.full), dtype=torch.float32)
-    metric_prediction = {"data": torch.randn(b, 1, e, g, n_model, dtype=torch.float32)}
-    metric_target = {"data": torch.randn(b, 1, e, g, n_full, dtype=torch.float32)}
+    metric_prediction = _make_gridded_batch(
+        torch.randn(b, 1, e, g, n_model, dtype=torch.float32),
+        variables=["A", "B"],
+    )
+    metric_target = _make_gridded_batch(
+        torch.randn(b, 1, e, g, n_full, dtype=torch.float32),
+        variables=list(name_to_index),
+    )
     weights = {"data": torch.ones(b, 1, 1, 1, 1, dtype=torch.float32)}
 
     loss, metrics, _ = forecaster.compute_dataset_loss_metrics(
@@ -2096,7 +2551,7 @@ def test_edm_transport_tendency_training_compute_dataset_loss_metrics_uses_metri
     # Metrics use DATA_FULL because state targets come from get_targets() in DATA_FULL space
     assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
-    torch.testing.assert_close(captured["metric_target"], metric_target["data"])
+    torch.testing.assert_close(captured["metric_target"].data, metric_target["data"].data)
 
 
 def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse() -> None:
@@ -2126,10 +2581,17 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = _DummyModule()
 
-    metric_target = {"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)}
+    metric_target = Batch(
+        data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
+        coordinates={"data": torch.zeros(4, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": ["a", "b", "c"]},
+        statistics={"data": {}},
+    )
     prepared = PreparedPredictionTarget(
-        model_target={},
-        loss_target={},
+        model_target=metric_target,
+        loss_target=metric_target,
         loss_target_layout=IndexSpace.DATA_OUTPUT,
         metric_target=metric_target,
         aux={},
@@ -2139,7 +2601,23 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
 
     assert captured["dataset_name"] == "data"
     assert captured["post_processors"] == mode.module.model.post_processors
-    torch.testing.assert_close(prepared_metric_target["data"], metric_target["data"] + 7.0)
+    torch.testing.assert_close(prepared_metric_target.data["data"], metric_target.data["data"] + 7.0)
+
+
+def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
+    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
+    mode.module = SimpleNamespace()
+    sparse_batch = Batch(
+        data={"obs": [torch.zeros(2, 1)]},
+        coordinates={"obs": [torch.zeros(2, 2)]},
+        metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
+        layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        variables={"obs": ["a"]},
+        statistics={"obs": {}},
+    )
+
+    with pytest.raises(NotImplementedError, match=r"Tendency prediction mode.*sparse"):
+        mode.prepare_target(sparse_batch, sparse_batch)
 
 
 def test_tendency_prediction_mode_compute_tendency_target_uses_step_processors() -> None:
@@ -2333,8 +2811,14 @@ def test_stochastic_interpolant_training_compute_dataset_loss_metrics_uses_data_
     n_full = len(name_to_index)
     y_pred = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
     y = torch.randn(b, 1, e, g, n_model, dtype=torch.float32)
-    metric_prediction = {"data": torch.randn(b, 1, e, g, n_model, dtype=torch.float32)}
-    metric_target = {"data": torch.randn(b, 1, e, g, n_full, dtype=torch.float32)}
+    metric_prediction = _make_gridded_batch(
+        torch.randn(b, 1, e, g, n_model, dtype=torch.float32),
+        variables=["A", "B"],
+    )
+    metric_target = _make_gridded_batch(
+        torch.randn(b, 1, e, g, n_full, dtype=torch.float32),
+        variables=list(name_to_index),
+    )
 
     loss, metrics, _ = forecaster.compute_dataset_loss_metrics(
         y_pred=y_pred,
@@ -2353,7 +2837,7 @@ def test_stochastic_interpolant_training_compute_dataset_loss_metrics_uses_data_
     assert captured["loss_kwargs"]["target_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["metric_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
-    torch.testing.assert_close(captured["metric_target"], metric_target["data"])
+    torch.testing.assert_close(captured["metric_target"].data, metric_target["data"].data)
 
 
 def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
@@ -2363,49 +2847,51 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     forecaster = EnsembleTraining.__new__(EnsembleTraining)
     pl.LightningModule.__init__(forecaster)
 
-    forecaster.ens_comm_subgroup_size = 1
+    forecaster.ens_comm_subgroup_size = 2
     forecaster.ens_comm_subgroup = None
     forecaster.grid_shard_slice = {"data": None}
     forecaster.grid_dim = -2
     forecaster.grid_shard_sizes = {"data": None}
 
-    monkeypatch.setattr(
-        "anemoi.training.train.methods.ensemble.gather_tensor",
-        lambda input_, *_args, **_kwargs: input_,
-        raising=True,
-    )
-
     captured: dict[str, Any] = {}
+
+    def gather(input_: torch.Tensor, *, dim: int, sizes: list[int], mgroup: object) -> torch.Tensor:
+        assert sizes == [2, 2]
+        assert mgroup is None
+        captured["gather_dim"] = dim
+        return torch.cat([input_, input_], dim=dim)
+
+    monkeypatch.setattr("anemoi.training.train.methods.ensemble.gather_tensor", gather)
 
     def _prepare_tensors_stub(
         self: EnsembleTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         validation_mode: bool = False,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, slice]:
+    ) -> tuple[SourceView, SourceView, slice]:
         del self, validation_mode, dataset_name
         return y_pred, y, slice(0, 1)
 
     def _compute_loss_stub(
         self: EnsembleTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         **kwargs: Any,
     ) -> torch.Tensor:
         del self, y_pred
-        captured["loss_target_shape"] = y.shape
+        captured["loss_target_shape"] = y.data.shape
         captured["loss_kwargs"] = kwargs
         return torch.tensor(0.0)
 
     def _compute_metrics_stub(
         self: EnsembleTraining,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: SourceView,
+        y: SourceView,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         del self, y_pred
-        captured["metric_target_shape"] = y.shape
+        captured["metric_target_shape"] = y.data.shape
         captured["metric_kwargs"] = kwargs
         return {"dummy": torch.tensor(1.0)}
 
@@ -2413,8 +2899,8 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
     monkeypatch.setattr(EnsembleTraining, "_compute_loss", _compute_loss_stub, raising=True)
     monkeypatch.setattr(EnsembleTraining, "_compute_metrics", _compute_metrics_stub, raising=True)
 
-    y_pred = torch.randn(2, 1, 2, 4, 3)
-    y = torch.randn(2, 1, 1, 4, 3)
+    y_pred = _gridded_view(torch.randn(2, 1, 2, 4, 3), ["a", "b", "c"], {})
+    y = _gridded_view(torch.randn(2, 1, 1, 4, 3), ["a", "b", "c"], {})
     loss, metrics, y_pred_ens = forecaster.compute_dataset_loss_metrics(
         y_pred=y_pred,
         y=y,
@@ -2425,11 +2911,13 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
         target_layout=IndexSpace.DATA_FULL,
     )
 
+    assert captured["gather_dim"] == 2
+    assert y_pred_ens.layout == y_pred.layout
     assert isinstance(loss, torch.Tensor)
     assert isinstance(metrics["dummy"], torch.Tensor)
-    assert y_pred_ens.shape == y_pred.shape
-    assert captured["loss_target_shape"] == y.shape
-    assert captured["metric_target_shape"] == y.shape
+    assert y_pred_ens.data.shape == (2, 1, 4, 4, 3)
+    assert captured["loss_target_shape"] == y.data.shape
+    assert captured["metric_target_shape"] == y.data.shape
     assert captured["loss_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT
     assert captured["loss_kwargs"]["target_layout"] == IndexSpace.DATA_FULL
     assert captured["metric_kwargs"]["pred_layout"] == IndexSpace.MODEL_OUTPUT

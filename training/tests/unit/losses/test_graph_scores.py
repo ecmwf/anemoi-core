@@ -18,6 +18,9 @@ from pytest_mock import MockerFixture
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import GriddedSourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import CRPS
@@ -34,6 +37,19 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
+
+
+def _view(data: torch.Tensor) -> GriddedSourceView:
+    """Attach the layout and coordinates used by the score fixtures."""
+    return create_source_view(
+        name="data",
+        data=data,
+        variables=[f"v{i}" for i in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[-2], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+        coordinates_are_static=True,
+    )
 
 
 @pytest.fixture
@@ -390,8 +406,8 @@ def test_graph_edge_energy_centering_preserves_spatial_offset_invariance(
         ignore_nans=ignore_nans,
     )
 
-    score = loss(prediction, target, squash=False)
-    shifted_score = loss(shifted_prediction, target, squash=False)
+    score = loss(_view(prediction), _view(target), squash=False)
+    shifted_score = loss(_view(shifted_prediction), _view(target), squash=False)
 
     assert torch.isfinite(score).all()
     assert torch.isfinite(shifted_score).all()
@@ -413,9 +429,9 @@ def test_graph_scores_expand_the_graph_across_batch(
     target = torch.cat((target, target - 0.5), dim=0)
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
-    batched = loss(pred, target, squash=False)
+    batched = loss(_view(pred), _view(target), squash=False)
     separate = torch.stack(
-        [loss(pred[i : i + 1], target[i : i + 1], squash=False) for i in range(pred.shape[0])],
+        [loss(_view(pred[i : i + 1]), _view(target[i : i + 1]), squash=False) for i in range(pred.shape[0])],
     ).mean(dim=0)
 
     torch.testing.assert_close(batched, separate)
@@ -464,7 +480,7 @@ def test_graph_scores_have_finite_gradients(
     target = target.clone().requires_grad_()
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
-    result = loss(pred, target)
+    result = loss(_view(pred), _view(target))
     result.backward()
 
     assert result.ndim == 0
@@ -500,7 +516,7 @@ def test_graph_scores_align_mixed_input_dtypes(
         loss_graph=loss_graph,
         ignore_nans=ignore_nans,
     )
-    mixed_output = mixed_loss(mixed_prediction, mixed_target, squash=False)
+    mixed_output = mixed_loss(_view(mixed_prediction), _view(mixed_target), squash=False)
     mixed_output.sum().backward()
 
     reference_prediction = prediction_values.double().requires_grad_()
@@ -510,7 +526,7 @@ def test_graph_scores_align_mixed_input_dtypes(
         loss_graph=loss_graph,
         ignore_nans=ignore_nans,
     )
-    reference_output = reference_loss(reference_prediction, reference_target, squash=False)
+    reference_output = reference_loss(_view(reference_prediction), _view(reference_target), squash=False)
     reference_output.sum().backward()
 
     assert mixed_output.dtype == torch.float64
@@ -536,7 +552,7 @@ def test_graph_scores_align_mixed_input_dtypes(
         (torch.float32, torch.bfloat16),
     ],
 )
-def test_graph_scores_reject_unsupported_input_dtypes(
+def test_graph_scores_promote_low_precision_inputs(
     graph_data: HeteroData,
     loss_graph: dict[str, object],
     score_inputs: tuple[torch.Tensor, torch.Tensor],
@@ -546,11 +562,14 @@ def test_graph_scores_reject_unsupported_input_dtypes(
     prediction, target = score_inputs
     loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
 
-    with pytest.raises(TypeError, match="Graph score inputs must be float32 or float64") as exc_info:
-        loss(prediction.to(dtype=prediction_dtype), target.to(dtype=target_dtype))
-
-    assert f"prediction dtype {prediction_dtype}" in str(exc_info.value)
-    assert f"target dtype {target_dtype}" in str(exc_info.value)
+    prediction = prediction.to(prediction_dtype).requires_grad_()
+    target = target.to(target_dtype)
+    result = loss(_view(prediction), _view(target))
+    expected = loss(_view(prediction.float()), _view(target.float()))
+    assert result.dtype == torch.float32
+    torch.testing.assert_close(result, expected)
+    result.backward()
+    assert torch.isfinite(prediction.grad).all()
 
 
 def test_compile_config_uses_nested_graph_score_training_hook(
@@ -615,7 +634,7 @@ def test_graph_scores_compile_with_checkpointing_and_nans(
         ).cuda()
         if compiled:
             loss.compile_for_training(dynamic=False)
-        output = checkpoint(loss, prediction, target, use_reentrant=False)
+        output = checkpoint(loss, _view(prediction), _view(target), use_reentrant=False)
         output.backward()
         assert prediction.grad is not None
         assert target.grad is not None
@@ -645,9 +664,9 @@ def test_graph_scores_follow_standard_output_shape_contract(
     target = target[..., :num_variables]
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
-    scalar_loss = loss(pred, target)
-    per_variable_loss = loss(pred, target, squash=False)
-    summed_loss = loss(pred, target, squash_mode="sum")
+    scalar_loss = loss(_view(pred), _view(target))
+    per_variable_loss = loss(_view(pred), _view(target), squash=False)
+    summed_loss = loss(_view(pred), _view(target), squash_mode="sum")
 
     assert scalar_loss.shape == ()
     assert per_variable_loss.shape == (num_variables,)
@@ -665,8 +684,8 @@ def test_pointwise_graph_energy_matches_crps(
 ) -> None:
     pred, target = score_inputs
 
-    actual = GraphEnergyScoreLoss(fair=fair)(pred, target, squash=squash)
-    expected = CRPS(alpha=alpha)(pred, target, squash=squash)
+    actual = GraphEnergyScoreLoss(fair=fair)(_view(pred), _view(target), squash=squash)
+    expected = CRPS(alpha=alpha)(_view(pred), _view(target), squash=squash)
 
     torch.testing.assert_close(actual, expected)
 
@@ -691,10 +710,10 @@ def test_graph_edge_crps_matches_crps_in_edge_space(alpha: float) -> None:
         loss_graph=definition,
         graph_data=graph,
         alpha=alpha,
-    )(pred, target)
+    )(_view(pred), _view(target))
     edge_pred = pred[..., src, :] - pred[..., dst, :]
     edge_target = target[..., src, :] - target[..., dst, :]
-    expected = CRPS(alpha=alpha)(edge_pred, edge_target)
+    expected = CRPS(alpha=alpha)(_view(edge_pred), _view(edge_target))
 
     torch.testing.assert_close(actual, expected)
 
@@ -721,7 +740,7 @@ def test_fair_graph_variogram_matches_hand_calculation() -> None:
     # Each directed edge has observed variogram 2 and member variograms 1 and
     # 3. Its fair score is 2**2 - 2*2*((1+3)/2) + 1*3 = -1. Two reciprocal
     # edges therefore give a total score of -2.
-    torch.testing.assert_close(loss(pred, target), torch.tensor(-2.0, dtype=torch.float64))
+    torch.testing.assert_close(loss(_view(pred), _view(target)), torch.tensor(-2.0, dtype=torch.float64))
 
 
 @pytest.mark.parametrize(
@@ -744,7 +763,7 @@ def test_graph_scores_ignore_invalid_edges(
         ignore_nans=True,
     )
 
-    result = loss(pred, target)
+    result = loss(_view(pred), _view(target))
     result.backward()
 
     assert torch.isfinite(result)
@@ -879,7 +898,7 @@ def test_energy_scores_ignore_zero_weight_edges_without_nan_gradients(loss_cls: 
         },
     )
 
-    result = loss(pred, target)
+    result = loss(_view(pred), _view(target))
     result.backward()
 
     assert torch.isfinite(result)
@@ -897,7 +916,7 @@ def test_energy_scores_have_finite_zero_norm_gradients(
     target = torch.zeros(2, 2, 1, 3, 2, requires_grad=True)
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
-    result = loss(prediction, target)
+    result = loss(_view(prediction), _view(target))
     result.backward()
 
     torch.testing.assert_close(result, torch.tensor(0.0))
@@ -920,7 +939,7 @@ def test_graph_scores_require_graph_to_match_forecast_grid() -> None:
     )
 
     with pytest.raises(ValueError, match="does not match the forecast grid"):
-        loss(torch.zeros(1, 1, 2, 3, 1), torch.zeros(1, 1, 1, 3, 1))
+        loss(_view(torch.zeros(1, 1, 2, 3, 1)), _view(torch.zeros(1, 1, 1, 3, 1)))
 
 
 def test_graph_scores_require_one_node_index_space() -> None:
@@ -953,7 +972,7 @@ def test_energy_scores_stay_finite_for_large_values(
     target = torch.tensor([[[[[0.25e20], [-0.25e20], [0.0]]]]], dtype=torch.float32)
     loss = loss_cls(graph_data=graph_data, loss_graph=loss_graph)
 
-    result = loss(pred, target)
+    result = loss(_view(pred), _view(target))
     result.backward()
 
     assert torch.isfinite(result)
@@ -965,7 +984,7 @@ def test_graph_scores_require_current_tensor_layout(graph_data: HeteroData, loss
     loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
 
     with pytest.raises(ValueError, match="singleton target ensemble"):
-        loss(torch.zeros(1, 1, 2, 3, 1), torch.zeros(1, 1, 2, 3, 1))
+        loss(_view(torch.zeros(1, 1, 2, 3, 1)), _view(torch.zeros(1, 1, 2, 3, 1)))
 
 
 def test_graph_score_factory_and_nested_losses(
@@ -1015,10 +1034,10 @@ def test_graph_score_factory_and_nested_losses(
 
     assert isinstance(combined, CombinedLoss)
     assert all(loss.graph_provider is not None for loss in combined.losses)
-    assert torch.isfinite(combined(pred, target))
+    assert torch.isfinite(combined(_view(pred), _view(target)))
     assert isinstance(multiscale, MultiscaleLossWrapper)
     assert multiscale.needs_shard_layout_info
-    assert torch.isfinite(multiscale(pred, target)).all()
+    assert torch.isfinite(multiscale(_view(pred), _view(target))).all()
 
 
 def test_combined_multiscale_crps_with_filtered_multiscale_edge_crps(
@@ -1083,12 +1102,12 @@ def test_combined_multiscale_crps_with_filtered_multiscale_edge_crps(
     assert isinstance(loss.losses[1].loss, LossVariableMapper)
     assert isinstance(loss.losses[1].loss.loss, GraphEdgeCRPSLoss)
 
-    scalar_loss = loss(pred, target, **loss_kwargs)
-    per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
-    primary_scalar = loss.losses[0](pred, target, **loss_kwargs)
-    edge_scalar = loss.losses[1](pred, target, **loss_kwargs)
-    primary_per_variable = loss.losses[0](pred, target, squash=False, **loss_kwargs)
-    edge_per_variable = loss.losses[1](pred, target, squash=False, **loss_kwargs)
+    scalar_loss = loss(_view(pred), _view(target), **loss_kwargs)
+    per_variable_loss = loss(_view(pred), _view(target), squash=False, **loss_kwargs)
+    primary_scalar = loss.losses[0](_view(pred), _view(target), **loss_kwargs)
+    edge_scalar = loss.losses[1](_view(pred), _view(target), **loss_kwargs)
+    primary_per_variable = loss.losses[0](_view(pred), _view(target), squash=False, **loss_kwargs)
+    edge_per_variable = loss.losses[1](_view(pred), _view(target), squash=False, **loss_kwargs)
 
     torch.testing.assert_close(scalar_loss, primary_scalar + 0.1 * edge_scalar)
     torch.testing.assert_close(per_variable_loss, primary_per_variable + 0.1 * edge_per_variable)
@@ -1148,8 +1167,8 @@ def test_graph_score_uses_current_sharding_contract(
     loss = GraphEnergyScoreLoss(graph_data=graph_data, loss_graph=loss_graph)
 
     result = loss(
-        pred,
-        target,
+        _view(pred),
+        _view(target),
         grid_shard_slice=slice(0, 3),
         grid_shard_sizes=[3],
         grid_dim=3,

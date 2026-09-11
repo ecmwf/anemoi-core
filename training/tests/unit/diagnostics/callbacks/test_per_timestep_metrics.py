@@ -14,7 +14,11 @@ from unittest.mock import MagicMock
 import pytest
 import torch
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import SourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
+from anemoi.training.losses import MSELoss
 from anemoi.training.train.step_output import TrainingStepOutput
 
 BS = 2
@@ -239,3 +243,55 @@ class TestPerTimestepMetrics:
 
         callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
         pl_module._collapse_ens_dim.assert_called_once()
+
+
+def test_per_timestep_metrics_resolves_time_and_ensemble_axes(monkeypatch: pytest.MonkeyPatch) -> None:
+    layout = TensorLayout(batch=0, ensemble=1, grid=2, time=3, variables=4)
+    pred_data = torch.ones(2, 2, 3, 2, 1)
+    pred_data[:, :, :, 1, :] = 2.0
+    target_data = torch.zeros(2, 1, 3, 2, 1)
+
+    def view(data: torch.Tensor) -> SourceView:
+        return create_source_view(
+            name="data",
+            data=data,
+            variables=["a"],
+            statistics={},
+            coordinates=torch.zeros(3, 2),
+            layout=layout,
+            coordinates_are_static=True,
+        )
+
+    pred, target = view(pred_data), view(target_data)
+    module = MagicMock()
+    module.task.get_inputs.return_value = {"data": pred}
+    module.task.get_targets.return_value = ({"data": target}, None)
+    module.preprocess_inputs.side_effect = lambda x: x
+    module._expand_ens_dim.side_effect = lambda x: x
+    module.preprocess_targets.side_effect = lambda x: x
+    module.postprocess_targets.side_effect = lambda x: x
+    module.return_value = {"data": pred}
+    module.ens_comm_subgroup = object()
+    module.ens_comm_subgroup_size = 2
+    module.model.post_processors = {"data": lambda x, **_kwargs: x}
+    module.metrics = {"data": {"mse": MSELoss()}}
+    module.val_metric_ranges = {"data": {"all": [0]}}
+    module._grid_shard_slice.return_value = None
+    module.model_comm_group = None
+    module.logger_enabled = True
+
+    def gather(data: torch.Tensor, *, dim: int, sizes: list[int], mgroup: object) -> torch.Tensor:
+        assert mgroup is module.ens_comm_subgroup
+        assert dim == 1
+        assert sizes == [2, 2]
+        return torch.cat([data, data], dim=dim)
+
+    monkeypatch.setattr("anemoi.models.distributed.graph.gather_tensor", gather)
+    batch = MagicMock()
+    batch.size = 2
+    PerTimestepMetrics()._eval_per_timestep(module, batch)
+
+    assert module.log.call_count == 2
+    for step, (call, expected) in enumerate(zip(module.log.call_args_list, [3.0, 12.0], strict=True), start=1):
+        assert call.args[0] == f"val_mse_metric/data/all/t_{step}"
+        torch.testing.assert_close(call.args[1], torch.tensor(expected))

@@ -14,6 +14,8 @@ import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.views import SourceView
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -107,10 +109,11 @@ class BaseGraphScoreLoss(BaseLoss):
         group: ProcessGroup,
         grid_dim: int,
         grid_shard_sizes: ShardSizes,
+        layout: TensorLayout,
     ) -> tuple[torch.Tensor, torch.Tensor, list[int]]:
         """Gather all node values and shard the variable axis."""
-        channel_shard_sizes_pred = get_shard_sizes(y_pred_ens, TensorDim.VARIABLE, group)
-        channel_shard_sizes_target = get_shard_sizes(y_target, TensorDim.VARIABLE, group)
+        channel_shard_sizes_pred = get_shard_sizes(y_pred_ens, layout.axis(TensorDim.VARIABLE), group)
+        channel_shard_sizes_target = get_shard_sizes(y_target, layout.axis(TensorDim.VARIABLE), group)
         if channel_shard_sizes_pred != channel_shard_sizes_target:
             msg = (
                 "Prediction and target variable shard sizes must match for graph score losses: "
@@ -119,7 +122,7 @@ class BaseGraphScoreLoss(BaseLoss):
             raise ValueError(msg)
         y_pred_ens_full = all_to_all_transpose(
             y_pred_ens,
-            TensorDim.VARIABLE,
+            layout.axis(TensorDim.VARIABLE),
             channel_shard_sizes_pred,
             grid_dim,
             grid_shard_sizes,
@@ -127,7 +130,7 @@ class BaseGraphScoreLoss(BaseLoss):
         )
         y_target_full = all_to_all_transpose(
             y_target,
-            TensorDim.VARIABLE,
+            layout.axis(TensorDim.VARIABLE),
             channel_shard_sizes_target,
             grid_dim,
             grid_shard_sizes,
@@ -152,14 +155,14 @@ class BaseGraphScoreLoss(BaseLoss):
         )
 
     @staticmethod
-    def _validate_input_shapes(y_pred_ens: torch.Tensor, y_target: torch.Tensor) -> None:
-        if y_pred_ens.ndim != 5 or y_target.ndim != 5:
+    def _validate_input_shapes(y_pred_ens: torch.Tensor, y_target: torch.Tensor, layout: TensorLayout) -> None:
+        if y_pred_ens.ndim != 5 or y_target.ndim != 5 or layout.pattern != "batch time ensemble grid variables":
             msg = (
                 "Graph score losses expect prediction and target tensors with shape "
                 "(batch, time, ensemble, grid, variable)."
             )
             raise ValueError(msg)
-        if y_target.shape[TensorDim.ENSEMBLE_DIM] != 1:
+        if y_target.shape[layout.axis(TensorDim.ENSEMBLE_DIM)] != 1:
             msg = "Graph score losses require a singleton target ensemble dimension."
             raise ValueError(msg)
         if y_pred_ens.shape[:2] != y_target.shape[:2] or y_pred_ens.shape[3:] != y_target.shape[3:]:
@@ -169,10 +172,10 @@ class BaseGraphScoreLoss(BaseLoss):
             )
             raise ValueError(msg)
 
-    def _validate_graph_grid_size(self, y_pred_ens: torch.Tensor) -> None:
+    def _validate_graph_grid_size(self, y_pred_ens: torch.Tensor, layout: TensorLayout) -> None:
         if self.graph is None:
             return
-        grid_size = y_pred_ens.shape[TensorDim.GRID]
+        grid_size = y_pred_ens.shape[layout.axis(TensorDim.GRID)]
         expected_shape = (grid_size, grid_size)
         if self.graph.shape != expected_shape:
             msg = (
@@ -239,6 +242,7 @@ class BaseGraphScoreLoss(BaseLoss):
     def _format_and_scale_score(
         self,
         score: torch.Tensor,
+        layout: TensorLayout,
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -248,6 +252,7 @@ class BaseGraphScoreLoss(BaseLoss):
         return self.scale(
             score,
             scaler_indices,
+            layout=layout,
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
@@ -256,6 +261,7 @@ class BaseGraphScoreLoss(BaseLoss):
         self,
         y_pred_ens: torch.Tensor,
         y_target: torch.Tensor,
+        layout: TensorLayout,
         *,
         scaler_indices: tuple[int, ...] | None = None,
         without_scalers: list[str] | list[int] | None = None,
@@ -264,8 +270,9 @@ class BaseGraphScoreLoss(BaseLoss):
         grid_dim: int | None = None,
         grid_shard_sizes: ShardSizes = None,
     ) -> tuple[torch.Tensor, bool]:
-        self._validate_input_shapes(y_pred_ens, y_target)
-        assert y_pred_ens.shape[TensorDim.ENSEMBLE_DIM] > 1, "Ensemble size must be greater than 1."
+        layout = layout.normalized(y_pred_ens.ndim)
+        self._validate_input_shapes(y_pred_ens, y_target, layout)
+        assert y_pred_ens.shape[layout.axis(TensorDim.ENSEMBLE_DIM)] > 1, "Ensemble size must be greater than 1."
 
         is_sharded = grid_shard_slice is not None
         is_model_sharded = self.graph is not None and is_sharded
@@ -287,10 +294,11 @@ class BaseGraphScoreLoss(BaseLoss):
                 group,
                 grid_dim,
                 grid_shard_sizes,
+                layout,
             )
 
-        self._validate_graph_grid_size(pred_for_score)
-        target_for_score = target_for_score.squeeze(TensorDim.ENSEMBLE_DIM)
+        self._validate_graph_grid_size(pred_for_score, layout)
+        target_for_score = target_for_score.squeeze(layout.axis(TensorDim.ENSEMBLE_DIM))
         pred_for_score, target_for_score = self._align_input_dtypes(
             pred_for_score,
             target_for_score,
@@ -319,16 +327,22 @@ class BaseGraphScoreLoss(BaseLoss):
             )
         score = self._format_and_scale_score(
             score,
+            layout,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
         )
         return score, is_sharded
 
-    def forward(
+    def forward(self, pred: SourceView, target: SourceView, squash: bool = True, **kwargs) -> torch.Tensor:
+        """Evaluate the score using the source views' tensor layout."""
+        return pred.apply_loss(target, self._evaluate_loss_tensor, squash=squash, **kwargs)
+
+    def _forward_impl(
         self,
         y_pred_ens: torch.Tensor,
         y_target: torch.Tensor,
+        layout: TensorLayout,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -340,9 +354,11 @@ class BaseGraphScoreLoss(BaseLoss):
         squash_mode: Squash_mode = "avg",
         **kwargs,  # noqa: ARG002
     ) -> torch.Tensor:
+        layout = layout.normalized(y_pred_ens.ndim)
         score, is_sharded = self._score_tensor(
             y_pred_ens,
             y_target,
+            layout,
             scaler_indices=scaler_indices,
             without_scalers=without_scalers,
             grid_shard_slice=grid_shard_slice,
@@ -354,6 +370,7 @@ class BaseGraphScoreLoss(BaseLoss):
             score = torch.where(torch.isnan(score), torch.zeros_like(score), score)
         return self.reduce(
             score,
+            layout=layout,
             squash=squash,
             squash_mode=squash_mode,
             group=group if is_sharded else None,

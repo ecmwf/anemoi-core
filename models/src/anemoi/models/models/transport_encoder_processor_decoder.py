@@ -9,6 +9,7 @@
 
 
 import logging
+from typing import TYPE_CHECKING
 from typing import Callable
 from typing import Optional
 
@@ -18,9 +19,10 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.data import HeteroData
 
 from anemoi.models.data import Batch
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -29,6 +31,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import latlons_to_sincos
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
@@ -38,11 +41,17 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
+from anemoi.models.transport.data_helpers import Data
+from anemoi.models.transport.data_helpers import data_device
+from anemoi.models.transport.data_helpers import map_data
 from anemoi.utils.config import DotDict
+
+if TYPE_CHECKING:
+    from anemoi.models.data.views import SourceView
 
 LOGGER = logging.getLogger(__name__)
 
-SamplingData = tuple[dict[str, torch.Tensor], ...]
+SamplingData = tuple[Batch, ...]
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
@@ -52,11 +61,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         *,
         model_config: DictConfig,
+        model_graph_config: DictConfig,
         data_indices: dict,
         statistics: dict,
+        is_dataset_static: dict[str, bool],
+        data_layouts: dict[str, TensorLayout],
         n_step_input: int,
         n_step_output: int,
-        graph_data: HeteroData,
     ) -> None:
 
         model_config = DotDict(model_config)
@@ -74,9 +85,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         super().__init__(
             model_config=model_config,
+            model_graph_config=model_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            graph_data=graph_data,
+            is_dataset_static=is_dataset_static,
+            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -90,6 +103,19 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         input_dim = base_input_dim + output_dim  # input history plus corrupted target
         return input_dim
 
+    def _calculate_target_dim(self, dataset_name: str) -> int:
+        target_dim = super()._calculate_target_dim(dataset_name)
+        if "encoded_data" not in self._decoder_target_feature_names(dataset_name):
+            # In addition to the deterministic decoder inputs (output-time
+            # target features), the transport decoder
+            # consumes the corrupted target values at the target locations.
+            target_dim += super()._calculate_output_dim(dataset_name)
+        return target_dim
+
+    def _decoder_target_feature_names(self, dataset_name: str) -> set[str]:
+        decoder_name = self.dataset2decoder[dataset_name]
+        return {feature.name for feature in self.decoders_target_input[decoder_name].features}
+
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
         mlp.add_module("linear1_no_gradscaling", nn.Linear(self.noise_channels, self.noise_channels))
@@ -99,43 +125,70 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: "SourceView",
+        y_noised: "SourceView",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-        coordinates: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, None, ShardSizes]:
+    ) -> tuple[torch.Tensor, torch.Tensor, None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse, coordinates=coordinates)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+        x_features = x.flatten()
+        y_noised_features = y_noised.flatten()
+        grid_shard_sizes = x_features.shard_sizes
+        same_coordinates = torch.equal(x_features.coordinates, y_noised_features.coordinates)
+        if same_coordinates:
+            data_coords = x_features.coordinates
+            x_input_features = x_features.data
+        else:
+            if not isinstance(x.data, list) or not isinstance(y_noised.data, list):
+                msg = "Input and conditioned target coordinates must match for dense transport data."
+                raise AssertionError(msg)
+            data_coords = y_noised_features.coordinates
+            x_input_features = torch.zeros(
+                y_noised_features.data.shape[0],
+                x_features.data.shape[-1],
+                device=y_noised_features.data.device,
+                dtype=y_noised_features.data.dtype,
+            )
 
-        # Combine input history, corrupted target, and node position features
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
+        inputs = [
+            x_input_features,
+            y_noised_features.data,
+            latlons_to_sincos(data_coords),
+        ]
+
+        if dataset_name in self.node_attributes:
+            node_attributes_data = self.node_attributes(dataset_name, batch_size=bse).to(y_noised_features.data.device)
+            if node_attributes_data.shape[0] != y_noised_features.data.shape[0]:
+                msg = (
+                    "Trainable node attributes are not implemented for dynamic sparse transport nodes. "
+                    f"Dataset '{dataset_name}' has {y_noised_features.data.shape[0]} target nodes, "
+                    f"but static node attributes provide {node_attributes_data.shape[0]} rows."
+                )
+                raise NotImplementedError(msg)
+            if grid_shard_sizes is not None:
+                node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+            inputs.append(node_attributes_data)
+
+        x_data_latent = torch.cat(inputs, dim=-1)
+
+        return (
+            data_coords,
+            x_data_latent,
+            None,
+            grid_shard_sizes,
+            y_noised_features.batch_sizes,
+            y_noised_features.timedeltas,
         )
 
-        return x_data_latent, None, grid_shard_sizes
+    def _assemble_output(self, x_out, x_skip, target: "SourceView", dtype: torch.dtype, dataset_name: str):
+        del x_skip
+        pred = target.unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        pred = self.boundings[dataset_name](pred)
 
-    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
-        x_out = einops.rearrange(
-            x_out,
-            "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
-            batch=batch_size,
-            ensemble=ensemble_size,
-            time=self.n_step_output,
-        ).to(dtype=dtype)
-
-        return x_out
+        return pred
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         assert noise_emb.ndim in (4, 5), "noise_emb must be 4D or 5D."
@@ -151,6 +204,24 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
         return self.noise_cond_mlp(self.noise_embedder(sigma))
+
+    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "SourceView") -> torch.Tensor:
+        """Repeat noise embeddings over the actual flattened nodes in a source view."""
+        if not isinstance(view.data, list):
+            grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
+            return self._make_noise_emb(noise_emb, repeat=grid_size)
+
+        noise_base = noise_emb[:, 0, :, 0, :]
+        if noise_base.shape[1] != view.ensemble_size:
+            msg = "Sparse transport noise embeddings must match the source view's ensemble size."
+            raise ValueError(msg)
+        chunks = []
+        for sample_index, sample in enumerate(view.data):
+            num_nodes = sample.shape[view.layout.axis("grid", ndim=sample.ndim)]
+            # Flatten in the same (sample, member, node) order as TabularSourceView.
+            sample_noise = noise_base[sample_index, :, None, :].expand(-1, num_nodes, -1)
+            chunks.append(sample_noise.reshape(-1, noise_base.shape[-1]).to(sample.device))
+        return torch.cat(chunks, dim=0)
 
     def _assert_condition_shapes(self, condition: dict[str, torch.Tensor]) -> tuple[int, int]:
         dataset_names = list(condition)
@@ -174,10 +245,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         noise_cond: torch.Tensor,
         dataset_name: str,
+        data_view: Optional["SourceView"] = None,
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
 
-        c_data = self._make_noise_emb(noise_cond, repeat=self._graph_data[dataset_name].num_nodes)
+        if data_view is None:
+            c_data = self._make_noise_emb(noise_cond, repeat=self._graph_data[dataset_name].num_nodes)
+        else:
+            c_data = self._make_noise_emb_for_view(noise_cond, data_view)
         c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[self._graph_name_hidden].num_nodes)
 
         if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
@@ -204,12 +279,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_conditioning_kwargs(
         self,
-        x: dict[str, torch.Tensor],
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         self._assert_condition_shapes(condition)
-        dataset_names = list(x.keys())
+        dataset_names = list(conditioned_target.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
@@ -219,11 +294,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         noise_cond_base = self._embed_noise_conditioning(condition_base)
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in x:
+        for dataset_name in dataset_names:
             # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
-                noise_cond, dataset_name=dataset_name, edge_conditioning=False
+                noise_cond,
+                dataset_name=dataset_name,
+                data_view=conditioned_target[dataset_name],
+                edge_conditioning=False,
             )
             c_data_shard_sizes = get_shard_sizes(c_data, 0, model_comm_group=model_comm_group)
             c_hidden_shard_sizes = get_shard_sizes(c_hidden, 0, model_comm_group=model_comm_group)
@@ -239,12 +317,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def forward(
         self,
         x: Batch,
-        conditioned_target: dict[str, torch.Tensor],
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        target_forcing: Optional[Batch] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         return self.transport_model_objective.forward(
             self,
             x,
@@ -252,37 +331,35 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             condition,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            target_forcing=target_forcing,
             **kwargs,
         )
 
     def _forward_transport_network(
         self,
         batch: Batch,
-        conditioned_target: dict[str, torch.Tensor],
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        target_forcing: Optional[Batch] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         # Multi-dataset case
-        x = batch.data
-        dataset_names = list(x.keys())
+        dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
+        batch_size = self._get_consistent_dim(batch, 0)
+        ensemble_size = self._get_consistent_dim(batch, 2)
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
-            grid_shard_sizes=grid_shard_sizes,
-        )
+        in_out_sharded = self._resolve_in_out_sharded(batch)
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # Embed the current noise level or bridge time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            x, condition, model_comm_group=model_comm_group
+            conditioned_target, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
@@ -291,7 +368,19 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
+        hidden_coordinates = self._hidden_coordinates().to(
+            batch.device
+        )  # todo Simon, do we need this device movement here?
+        hidden_coordinates_batched = einops.repeat(hidden_coordinates, "n f -> (repeat n) f", repeat=bse)
+        hidden_batch_sizes = (hidden_coordinates.shape[0],) * bse
+        x_hidden_latent = latlons_to_sincos(hidden_coordinates)
+        x_hidden_latent = einops.repeat(x_hidden_latent, "n f -> (repeat n) f", repeat=bse)
+        hidden_trainable_parameters = self.node_attributes(self._graph_name_hidden, batch_size=bse)
+        if hidden_trainable_parameters is not None:
+            hidden_trainable_parameters = hidden_trainable_parameters.to(
+                x_hidden_latent.device
+            )  # todo Simon, do we need this device movement?
+            x_hidden_latent = torch.cat([x_hidden_latent, hidden_trainable_parameters], dim=-1)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
 
@@ -299,14 +388,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             if dataset_name not in self.input_datasets:
                 continue
 
-            dataset_coords = batch.node_coords(dataset_name)
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                conditioned_target[dataset_name],
-                bse,
-                grid_shard_sizes,
-                model_comm_group,
-                dataset_name,
+            data_coords, x_data_latent, x_skip, shard_sizes_data, data_batch_sizes, data_timedeltas = (
+                self._assemble_input(
+                    batch[dataset_name],
+                    conditioned_target[dataset_name],
+                    bse,
+                    grid_shard_sizes,
+                    model_comm_group,
+                    dataset_name,
+                )
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
@@ -317,10 +407,18 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 enc_edge_shard_sizes,
             ) = self.encoder_graph_provider[dataset_name].get_edges(
                 batch_size=bse,
-                src_coords=dataset_coords,
-                dst_coords=None,
+                src_coords=data_coords,
+                dst_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
+                src_timedeltas=data_timedeltas,
                 model_comm_group=model_comm_group,
+                **(
+                    {"src_batch_sizes": data_batch_sizes, "dst_batch_sizes": hidden_batch_sizes}
+                    if data_batch_sizes is not None
+                    else {}
+                ),
             )
+            encoder_edge_attr = encoder_edge_attr.to(x_data_latent.device)  # todo SL: remove device movement
+            encoder_edge_index = encoder_edge_index.to(x_data_latent.device)
 
             enc_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
@@ -343,7 +441,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             x_data_latent_dict[dataset_name] = x_data_latent
 
         # Combine all dataset latents
-        x_latent = self.latent_aggregator(dataset_latents)
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         # Processor
         (
@@ -351,9 +449,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             processor_edge_index,
             proc_edge_shard_sizes,
         ) = self.processor_graph_provider.get_edges(
+            src_coords=hidden_coordinates,
+            dst_coords=hidden_coordinates,
             batch_size=bse,
             model_comm_group=model_comm_group,
         )
+        processor_edge_attr = processor_edge_attr.to(x_latent.device)  # todo SL: remove device movement
+        processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
             x=x_latent,
@@ -370,8 +472,39 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         # Decoder
-        x_out_dict = {}
+        out_batch = conditioned_target
         for dataset_name in self.target_datasets:
+            target_feature_names = self._decoder_target_feature_names(dataset_name)
+            decoder_target_view = conditioned_target[dataset_name]
+            if "target_forcings" in target_feature_names:
+                if target_forcing is None or dataset_name not in target_forcing:
+                    msg = (
+                        f"Dataset '{dataset_name}' configures the 'target_forcings' decoder feature; "
+                        "a 'target_forcing' batch with the output-time forcings is required."
+                    )
+                    raise ValueError(msg)
+                decoder_target_view = target_forcing[dataset_name]
+
+            target_coords, target_data_latent, shard_sizes_target, target_batch_sizes, target_timedeltas = (
+                self._assemble_target(
+                    batch[dataset_name],
+                    x_data_latent_dict.get(dataset_name),
+                    decoder_target_view,
+                    batch_size=bse,
+                    model_comm_group=model_comm_group,
+                    dataset_name=dataset_name,
+                )
+            )
+            if "encoded_data" not in target_feature_names:
+                conditioned_target_data = (
+                    conditioned_target[dataset_name]
+                    .flatten()
+                    .data.to(
+                        device=target_data_latent.device,
+                        dtype=target_data_latent.dtype,
+                    )
+                )
+                target_data_latent = torch.cat([conditioned_target_data, target_data_latent], dim=-1)
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -379,20 +512,28 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 dec_edge_shard_sizes,
             ) = self.decoder_graph_provider[dataset_name].get_edges(
                 batch_size=bse,
-                src_coords=None,
-                dst_coords=batch.node_coords(dataset_name),
+                src_coords=hidden_coordinates_batched if target_batch_sizes is not None else hidden_coordinates,
+                dst_coords=target_coords,
+                dst_timedeltas=target_timedeltas,
                 model_comm_group=model_comm_group,
+                **(
+                    {"src_batch_sizes": hidden_batch_sizes, "dst_batch_sizes": target_batch_sizes}
+                    if target_batch_sizes is not None
+                    else {}
+                ),
             )
+            decoder_edge_attr = decoder_edge_attr.to(x_latent.device)  # todo SL: remove device movement
+            decoder_edge_index = decoder_edge_index.to(x_latent.device)
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_sizes_target,  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, target_data_latent),
                 batch_size=bse,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
@@ -402,11 +543,18 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 **bwd_mapper_kwargs[dataset_name],
             )
 
-            x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
+            target_view = conditioned_target[dataset_name]
+            target_data = target_view.data[0] if isinstance(target_view.data, list) else target_view.data
+            out_view = self._assemble_output(
+                x_out,
+                x_skip_dict.get(dataset_name),
+                target_view,
+                target_data.dtype,
+                dataset_name,
             )
+            out_batch = out_batch.update_source(dataset_name, out_view)
 
-        return x_out_dict
+        return out_batch
 
     def _before_sampling(
         self,
@@ -455,24 +603,31 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             xs[dataset_name] = x
 
-        return (xs,), grid_shard_sizes
+        return (
+            self._make_sampling_batch(
+                xs,
+                variable_space="input",
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=grid_shard_sizes,
+            ),
+        ), grid_shard_sizes
 
     def _after_sampling(
         self,
-        out: dict[str, torch.Tensor],
+        out: Batch,
         post_processors: dict[str, nn.Module],
         before_sampling_data: SamplingData,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Data]:
         """Post-process sampled output and gather shards when needed.
 
         Parameters
         ----------
-        out : dict[str, torch.Tensor]
-            Sampled output tensor.
+        out : Batch
+            Sampled output batch.
         post_processors : dict[str, nn.Module]
             Post-processing module.
         before_sampling_data : SamplingData
@@ -489,42 +644,197 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         Returns
         -------
-        torch.Tensor
-            Post-processed output.
+        dict[str, Data]
+            Post-processed output data.
         """
+        out_data: dict[str, Data] = {}
         for dataset_name in out.keys():
-            out[dataset_name] = post_processors[dataset_name](out[dataset_name], in_place=False)
+            processed = post_processors[dataset_name](out[dataset_name], in_place=False)
+            dataset_data = processed.data
 
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
-                out[dataset_name] = gather_tensor(
-                    out[dataset_name],
+                if isinstance(dataset_data, list):
+                    msg = "Distributed gather is not supported for sparse transport sampling outputs."
+                    raise NotImplementedError(msg)
+                dataset_data = gather_tensor(
+                    dataset_data,
                     -2,
                     grid_shard_sizes[dataset_name],
                     model_comm_group,
                 )
 
-        return out
+            out_data[dataset_name] = dataset_data
+
+        return out_data
+
+    def _sampling_variables(self, dataset_name: str, variable_space: str) -> list[str]:
+        if variable_space == "input":
+            indices = self.data_indices[dataset_name].model.input
+        elif variable_space == "output":
+            indices = self.data_indices[dataset_name].model.output
+        else:
+            msg = f"Unknown sampling variable space {variable_space!r}; expected 'input' or 'output'."
+            raise ValueError(msg)
+        return list(indices.ordered_names)
+
+    def _sampling_statistics(self, dataset_name: str, variable_space: str) -> dict:
+        variables = self._sampling_variables(dataset_name, variable_space)
+        name_to_index = self.data_indices[dataset_name].name_to_index
+        positions = [name_to_index[name] for name in variables]
+        return {key: values[positions] for key, values in self.statistics[dataset_name].items()}
+
+    def _sampling_coordinates(
+        self,
+        dataset_name: str,
+        dataset_data: Data,
+        *,
+        layout: TensorLayout,
+        template: Batch | None,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> torch.Tensor | list[torch.Tensor]:
+        if template is not None and dataset_name in template.coordinates:
+            coordinates = template.coordinates[dataset_name]
+            dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
+            if dataset_grid_shard_sizes is None:
+                return coordinates
+            if isinstance(dataset_data, list) or isinstance(coordinates, list):
+                msg = "Grid sharding is not supported for sparse transport sampling templates."
+                raise NotImplementedError(msg)
+
+            coordinates = coordinates.to(data_device(dataset_data))
+            data_grid_size = dataset_data.shape[layout.axis("grid", ndim=dataset_data.ndim)]
+            if coordinates.ndim == 2:
+                coordinate_grid_dim = 0
+            elif coordinates.ndim == 3:
+                coordinate_grid_dim = 1
+            else:
+                msg = (
+                    "Sampling template coordinates must have shape (grid, 2) or (batch, grid, 2), "
+                    f"got {tuple(coordinates.shape)} for dataset '{dataset_name}'."
+                )
+                raise ValueError(msg)
+
+            coordinate_grid_size = coordinates.shape[coordinate_grid_dim]
+            if coordinate_grid_size == data_grid_size:
+                return coordinates
+
+            full_grid_size = sum(dataset_grid_shard_sizes)
+            if coordinate_grid_size == full_grid_size:
+                return shard_tensor(coordinates, coordinate_grid_dim, dataset_grid_shard_sizes, model_comm_group)
+
+            msg = (
+                f"Sampling template coordinates for dataset '{dataset_name}' have grid size "
+                f"{coordinate_grid_size}, but sampled data has grid size {data_grid_size} and full sharded grid size "
+                f"{full_grid_size}."
+            )
+            raise ValueError(msg)
+
+        if isinstance(dataset_data, list):
+            msg = (
+                "Sparse transport sampling requires a Batch template carrying per-sample coordinates. "
+                f"Dataset '{dataset_name}' has sparse data but no template coordinates."
+            )
+            raise NotImplementedError(msg)
+
+        if not self.is_dataset_static.get(dataset_name, False):
+            msg = (
+                "Transport inference for non-static gridded datasets requires a Batch template carrying coordinates. "
+                f"Dataset '{dataset_name}' has no template coordinates."
+            )
+            raise NotImplementedError(msg)
+
+        if dataset_name not in self._graph_data.node_types or "x" not in self._graph_data[dataset_name]:
+            msg = (
+                f"Cannot infer sampling coordinates for dataset '{dataset_name}' from the graph. "
+                "Pass a Batch with coordinates instead."
+            )
+            raise ValueError(msg)
+
+        coordinates = self._graph_data[dataset_name].x.to(data_device(dataset_data))
+        if grid_shard_sizes is not None and grid_shard_sizes.get(dataset_name) is not None:
+            coordinates = shard_tensor(coordinates, 0, grid_shard_sizes[dataset_name], model_comm_group)
+        return coordinates
+
+    def _make_sampling_batch(
+        self,
+        data: dict[str, Data],
+        *,
+        variable_space: str,
+        template: Batch | None = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> Batch:
+        source_layouts = template.layouts if template is not None else self.data_layouts
+        layouts = {}
+        coordinates = {}
+        variables = {}
+        statistics = {}
+        grid_sizes = {}
+        for dataset_name, dataset_data in data.items():
+            layouts[dataset_name] = source_layouts[dataset_name]
+
+            coordinates[dataset_name] = self._sampling_coordinates(
+                dataset_name,
+                dataset_data,
+                layout=layouts[dataset_name],
+                template=template,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=grid_shard_sizes,
+            )
+            variables[dataset_name] = self._sampling_variables(dataset_name, variable_space)
+            statistics[dataset_name] = self._sampling_statistics(dataset_name, variable_space)
+            grid_sizes[dataset_name] = (
+                sum(sample.shape[layouts[dataset_name].axis("grid", ndim=sample.ndim)] for sample in dataset_data)
+                if isinstance(dataset_data, list)
+                else dataset_data.shape[layouts[dataset_name].axis("grid", ndim=dataset_data.ndim)]
+            )
+
+        if template is not None:
+            metadata = dict(template.metadata)
+            static_coords = template.static_coord_datasets & set(data)
+        else:
+            metadata = {}
+            static_coords = frozenset(name for name in data if self.is_dataset_static.get(name, False))
+        metadata[STATIC_COORDS_META_KEY] = frozenset(static_coords)
+
+        return Batch(
+            data=data,
+            coordinates=coordinates,
+            metadata=metadata,
+            grid_sizes=grid_sizes,
+            timedeltas=(
+                {}
+                if template is None
+                else {name: template.timedeltas[name] for name in data if name in template.timedeltas}
+            ),
+            shard_sizes={} if grid_shard_sizes is None else grid_shard_sizes,
+            layouts=layouts,
+            variables=variables,
+            statistics=statistics,
+        )
 
     def build_sampling_source(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Data]:
         """Build the starting/source field used by transport sampling."""
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
-                n_step_output=self.n_step_output,
+                target_template.data,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    x.data,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),
@@ -540,12 +850,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
         n_step_input: int,
+        target_template: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
+        target_forcing: Optional[Batch] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run inference by sampling from the selected transport objective.
@@ -560,6 +872,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Post-processing module.
         n_step_input : int
             Number of input timesteps.
+        target_template : Batch
+            Output Batch template carrying the coordinates, sparse observation
+            boundaries, timedeltas and layouts to sample onto.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
@@ -574,6 +889,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Pre-processing module for tendencies (used by subclasses).
         post_processors_tendencies : Optional[dict[str, nn.Module]]
             Post-processing module for tendencies (used by subclasses).
+        target_forcing : Optional[Batch]
+            Output-time decoding forcings (raw values) at the target locations.
+            Normalized here with the input pre-processors and used to condition
+            the decoder. Required for datasets that decode from target-side
+            features (e.g. observations).
         **kwargs
             Additional sampling parameters.
 
@@ -603,16 +923,34 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             x = before_sampling_data[0]
 
+            if target_forcing is not None:
+                # Normalize the output-time decoding forcings like the model inputs.
+                for dataset_name in list(target_forcing.keys()):
+                    if dataset_name in pre_processors:
+                        target_forcing = target_forcing.update_source(
+                            dataset_name,
+                            pre_processors[dataset_name](target_forcing[dataset_name], in_place=False),
+                        )
+
             out = self.sample(
                 x,
-                model_comm_group,
+                target_template=target_template,
+                model_comm_group=model_comm_group,
                 grid_shard_sizes=grid_shard_sizes,
                 schedule_params=schedule_params,
                 sampler_params=sampler_params,
+                target_forcing=target_forcing,
                 **kwargs,
             )
-            for dataset_name in out:
-                out[dataset_name] = out[dataset_name].to(batch[dataset_name].dtype)
+            out = out.with_data(
+                {
+                    dataset_name: map_data(
+                        out.data[dataset_name],
+                        lambda sample, name=dataset_name: sample.to(batch[name].dtype),
+                    )
+                    for dataset_name in out.keys()
+                },
+            )
 
             # After sampling hook
             out = self._after_sampling(
@@ -631,17 +969,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def sample(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         """Run the sampler selected by the transport objective."""
         return self.transport_model_objective.sample(
             self,
             x,
+            target_template=target_template,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
             schedule_params=schedule_params,
@@ -667,22 +1008,26 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self,
         *,
         model_config: DictConfig,
+        model_graph_config: DictConfig,
         data_indices: dict,
         statistics: dict,
+        is_dataset_static: dict[str, bool],
+        data_layouts: dict[str, TensorLayout],
         n_step_input: int,
         n_step_output: int,
-        graph_data: HeteroData,
     ) -> None:
         model_config = DotDict(model_config)
 
         self.condition_on_residual = model_config.model.condition_on_residual
         super().__init__(
             model_config=model_config,
+            model_graph_config=model_graph_config,
             data_indices=data_indices,
             statistics=statistics,
+            is_dataset_static=is_dataset_static,
+            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
-            graph_data=graph_data,
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -702,43 +1047,45 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: "SourceView",
+        y_noised: "SourceView",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-        coordinates: Optional[torch.Tensor] = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, ShardSizes]:
+    ) -> tuple[
+        torch.Tensor, torch.Tensor, torch.Tensor | None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None
+    ]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse, coordinates=coordinates)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
+        if isinstance(x.data, list) or isinstance(y_noised.data, list):
+            msg = "Tendency transport is not implemented for sparse observation datasets."
+            raise NotImplementedError(msg)
 
-        # Shard node attributes if grid sharding is enabled
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
-        # Combine input history, corrupted target, and node position features
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
+        data_coords, x_data_latent, _x_skip, shard_sizes_data, batch_sizes, timedeltas = super()._assemble_input(
+            x,
+            y_noised,
+            bse,
+            grid_shard_sizes=grid_shard_sizes,
+            model_comm_group=model_comm_group,
+            dataset_name=dataset_name,
         )
+
+        x_skip = None
         if self.condition_on_residual:
+            x_skip = self.residual[dataset_name](
+                x.data,
+                shard_sizes_data,
+                model_comm_group,
+                n_step_output=self.n_step_output,
+            )[..., self._internal_input_idx[dataset_name]]
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
             x_data_latent = torch.cat(
                 (x_data_latent, einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars")), dim=-1
             )
 
-        return x_data_latent, x_skip, grid_shard_sizes
+        return data_coords, x_data_latent, x_skip, shard_sizes_data, batch_sizes, timedeltas
 
     def compute_tendency(
         self,
@@ -924,29 +1271,42 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             xs[dataset_name] = x_in
             x_t0s[dataset_name] = x_t0
 
-        return (xs, x_t0s), grid_shard_sizes
+        x_batch = self._make_sampling_batch(
+            xs,
+            variable_space="input",
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+        )
+        x_t0_batch = self._make_sampling_batch(
+            x_t0s,
+            variable_space="input",
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+        )
+        return (x_batch, x_t0_batch), grid_shard_sizes
 
     def build_sampling_source(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
+        *,
+        target_template: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, Data]:
         """Build the starting/source field for tendency-space transport sampling."""
         # Tendency prediction can use Gaussian noise, zeros, or the latest
         # input state projected to the variables the model predicts.
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                x,
-                n_step_output=self.n_step_output,
+                target_template.data,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x,
+                    x.data,
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),
@@ -958,7 +1318,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _after_sampling(
         self,
-        out: dict[str, torch.Tensor],
+        out: Batch,
         post_processors: dict[str, nn.Module],
         before_sampling_data: SamplingData,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -973,14 +1333,15 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         else:
             raise ValueError("Expected before_sampling_data to contain x_t0s")
 
-        x_t0s = self.apply_reference_state_truncation(x_t0s, grid_shard_sizes, model_comm_group)
+        x_t0s = self.apply_reference_state_truncation(x_t0s.data, grid_shard_sizes, model_comm_group)
         x_refs = {}
         for dataset_name, ref in x_t0s.items():
             assert ref.ndim == 5, f"Expected 5D reference state for '{dataset_name}', got {ref.ndim}D."
             x_refs[dataset_name] = ref[:, -1]
         assert post_processors_tendencies is not None, "Per-step tendency processors must be provided."
 
-        for dataset_name, out_dataset in out.items():
+        out_data = dict(out.data)
+        for dataset_name, out_dataset in out_data.items():
             post_tend = post_processors_tendencies[dataset_name]
             assert post_tend is not None, "Tendency processors must be provided per dataset."
             if not isinstance(post_tend, StepwiseProcessors):
@@ -1017,9 +1378,9 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                     grid_shard_sizes[dataset_name],
                     model_comm_group,
                 )
-            out[dataset_name] = out_dataset
+            out_data[dataset_name] = out_dataset
 
-        return out
+        return out_data
 
     def apply_reference_state_truncation(
         self,

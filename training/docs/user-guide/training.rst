@@ -795,8 +795,8 @@ directly will crash or silently mis-pair tensors when used with:
 
 -  **Imputers** (e.g. ``ConstantImputer``), which register scratch
    buffers whose shapes change on the first forward pass.
--  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
-   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+-  **Custom updating loss scalers**, which can re-register scaler buffers
+   via ``ScaleTensor.update_scaler`` —
    shuffling the buffer order in the live model relative to the averaged
    model's snapshot.
 

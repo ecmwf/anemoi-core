@@ -28,8 +28,8 @@ from anemoi.models.distributed.graph_fusion import build_fused_source_index
 from anemoi.models.distributed.graph_fusion import fuse_encoder_edges
 from anemoi.models.distributed.graph_fusion import fuse_source_features
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -372,11 +372,28 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[Tensor, ShardSizes]:
+    ) -> tuple[Tensor, Tensor, ShardSizes, tuple[int, ...] | None, Tensor | None]:
         """Assemble the decoder destination features for a single dataset.
 
         Concatenates the feature blocks listed in ``decoders_target_input`` for this dataset's
         decoder into the per-node vector fed to the decoder as ``x_dst``.
+
+        Parameters
+        ----------
+        x_input_data : SourceView
+            Input data view used by decoder features derived from model inputs.
+        x_encoded_data : Tensor or None
+            Encoder-updated source features, when requested by the decoder configuration.
+        x_target : SourceView
+            Target-side data and coordinates used by decoder target features.
+        batch_size : int
+            Flattened batch size used to assemble target features.
+        grid_shard_sizes : DatasetShardSizes or None, optional
+            Optional explicit shard metadata; target-view metadata determines the assembled layout.
+        model_comm_group : ProcessGroup or None, optional
+            Model communication group used for sharding and gathering.
+        dataset_name : str or None, optional
+            Dataset whose decoder destination features are assembled.
 
         Returns
         -------
@@ -443,11 +460,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # clone to make sure we return a copy, not a view
         # a view cannot be modified in-place by the residual add below without breaking autograd!
-        pred = target.unflatten(x_out)
         output_names = self.data_indices[dataset_name].model.output.ordered_names
         output_positions = [self.data_indices[dataset_name].name_to_index[name] for name in output_names]
         output_statistics = {name: values[output_positions] for name, values in self.statistics[dataset_name].items()}
-        pred = pred.clone(variables=output_names, statistics=output_statistics)
+        output_dtype = torch.promote_types(dtype, torch.float32)
+        pred = target.unflatten(x_out.to(output_dtype), variables=output_names, statistics=output_statistics)
 
         if x_skip is not None:
             assert (
@@ -705,7 +722,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         target : Batch
             Decoder conditioning: the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
+        **kwargs
+            Additional keyword arguments forwarded to the mappers and processor.
 
         Returns
         -------
@@ -722,6 +741,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         in_out_sharded = self._resolve_in_out_sharded(batch)
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+
+        # The graph and mappers operate on one node copy per sample and member.
+        batch_size *= ensemble_size
 
         # Latents produced by the encoders, keyed by latent key (dataset name today; a joint
         # encoder will contribute a single entry under its own name)
@@ -791,7 +813,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             batch_size=batch_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(dtype=x_latent.dtype)
+        processor_edge_attr = processor_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
+        processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
             x=x_latent,

@@ -210,53 +210,6 @@ def test_rollout_eval_logs_loss_and_metrics():
     ]
 
 
-def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
-    from omegaconf import DictConfig
-
-    import anemoi.training.diagnostics.callbacks.plot as plot_mod
-    from anemoi.models.data_indices.collection import IndexCollection
-    from anemoi.training.losses.loss import get_loss_function
-
-    data_indices = IndexCollection(DictConfig({"forcing": [], "diagnostic": []}), {"a": 0, "b": 1})
-    combined_loss = get_loss_function(
-        DictConfig(
-            {
-                "_target_": "anemoi.training.losses.CombinedLoss",
-                "losses": [
-                    {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
-                    {"_target_": "anemoi.training.losses.MAELoss", "scalers": ["nan_mask_weights"]},
-                ],
-                "loss_weights": [1.0, 1.0],
-                "scalers": ["*"],
-            },
-        ),
-        scalers={"nan_mask_weights": ((0, 3, 4), torch.ones(1, 3, 2))},
-        data_indices=data_indices,
-    )
-
-    callback = plot_mod.LossCurvePlot.__new__(plot_mod.LossCurvePlot)
-    callback.every_n_batches = 1
-    callback.dataset_names = ["data"]
-    callback.parameter_groups = {}
-
-    pl_module = MagicMock()
-    pl_module.loss = {"data": combined_loss}
-    pl_module.grid_dim = -2
-    pl_module.grid_indices = {"data": MagicMock()}
-    pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
-
-    # _prepare_batch is overridden in LossCurvePlot to snapshot and gather nan_mask_weights
-    # before delegating batch preparation to the plot adapter. Call it directly.
-    callback._prepare_batch(pl_module, batch={"data": torch.zeros((1, 1, 1, 3, 2))})
-
-    assert pl_module.allgather_batch.call_count == 2
-    for child_loss in callback.loss["data"].losses:
-        torch.testing.assert_close(
-            child_loss.loss.scaler.get_scaler_tensor("nan_mask_weights"),
-            torch.full((1, 3, 2), 2.0),
-        )
-
-
 # Progress bar callback tests
 progress_bar_config = """
 training:

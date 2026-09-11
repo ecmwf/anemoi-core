@@ -20,6 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -44,6 +45,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
         is_dataset_static: dict[str, bool],
+        data_layouts: dict[str, TensorLayout],
         n_step_input: int,
         n_step_output: int,
     ) -> None:
@@ -55,6 +57,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             is_dataset_static=is_dataset_static,
+            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -82,11 +85,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         return base_input_dim
 
     def _condition_source(self, source: EncoderSource, fcstep: int) -> EncoderSource:
-        """
-            Append the ensemble conditioning channels to an assembled encoder source.
-            
-            We concat first the forecast step, then the residual's prognostic channels if
-            `condition_on_residual` is set.
+        """Append the ensemble conditioning channels to an assembled encoder source.
+
+        We concat first the forecast step, then the residual's prognostic channels if
+        `condition_on_residual` is set.
         """
         x_data_latent = source.x_data_latent
 
@@ -129,7 +131,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
-        **kwargs,
+        **_kwargs,
     ) -> Batch:
         """Forward pass of the ensemble model.
 

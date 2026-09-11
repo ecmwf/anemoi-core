@@ -24,10 +24,10 @@ from anemoi.models.distributed.graph import shard_tensor
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.data.flat import FlatView
-    from anemoi.models.models.base import BaseGraphModel
     from anemoi.models.data.views import SourceView
+    from anemoi.models.distributed.shapes import ShardSizes
+    from anemoi.models.models.base import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
 

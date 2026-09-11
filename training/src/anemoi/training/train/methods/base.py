@@ -14,7 +14,6 @@ import importlib
 import logging
 from abc import ABC
 from abc import abstractmethod
-from dataclasses import replace as dataclass_replace
 from functools import cached_property
 from typing import TYPE_CHECKING
 from typing import Any
@@ -38,9 +37,6 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
 from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
-from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
-from anemoi.training.losses.scalers.base_scaler import BaseScaler
-from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
@@ -56,12 +52,17 @@ _trainable_edge_perm_fix_migration = importlib.import_module(
 ).migrate
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data.views import SourceView
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
+    from anemoi.training.losses.scalers.base_scaler import BaseScaler
+    from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
     from anemoi.training.train.step_output import TrainingStepOutput
@@ -96,14 +97,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Configuration object defining all parameters.
     task : BaseTask
         Training task that defines the prediction workflow.
-    graph_data : HeteroData
-        Graph-structured input data containing node and edge features, keyed by dataset name.
     statistics : dict
         Dictionary of training statistics (mean, std, etc.) used for normalization.
     statistics_tendencies : dict
         Statistics related to tendencies (if used).
     data_indices : dict[str, IndexCollection]
         Maps feature names to index ranges used for training and loss functions.
+    data_readers : dict
+        Dataset readers used to construct the model interface.
     metadata : dict
         Dictionary with metadata such as dataset provenance and variable descriptions.
     supporting_arrays : dict
@@ -171,14 +172,14 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Job configuration
         task : BaseTask
             Training task.
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
         statistics : dict
             Statistics of the training data
         statistics_tendencies : dict
             Statistics of data tendencies.
         data_indices : dict[str, IndexCollection]
-            Indices of the training data,
+            Indices of the training data.
+        data_readers : dict
+            Dataset readers used to construct the model interface.
         metadata : dict
             Provenance information
         supporting_arrays : dict
@@ -251,8 +252,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
-            # TODO : How to handle the graph_data objects that are now being used here?
-            fused = True  # TODO: ??? uses_fused_dataset_graph(graph_data, self.dataset_names)
+            # Graph ownership remains unresolved; dataset-specific node names are assumed here.
+            fused = True
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
 
             # Create dataset-specific metadata extractor
@@ -287,7 +288,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                # graph_data=graph_data,
                 data_node_name=data_node_name,
             )
 
@@ -299,7 +299,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                # graph_data=graph_data,
                 data_node_name=data_node_name,
             )
             self._initialise_updating_scalers(
@@ -698,6 +697,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         return y_pred_full, y_full, final_grid_shard_slice
 
+    @staticmethod
+    def _evaluate_loss(loss: Callable, pred: SourceView, target: SourceView, **kwargs) -> torch.Tensor:
+        """Check training precision before promoting inputs and evaluating the loss."""
+        assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
+        assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
+        dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
+        pred = pred.apply_func(lambda data, **_: data.to(dtype), in_place=True)
+        target = target.apply_func(lambda data, **_: data.to(dtype), in_place=True)
+        with torch.autocast(device_type=pred.device.type, enabled=False):
+            return loss(pred, target, **kwargs)
+
     def _compute_loss(
         self,
         y_pred: SourceView,
@@ -749,10 +759,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             loss_kwargs.update(
                 grid_dim=self.grid_dim,
                 grid_shard_sizes=self._grid_shard_sizes(y),
-                # grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
             )
 
-        return loss(y_pred, y, **loss_kwargs)
+        return self._evaluate_loss(loss, y_pred, y, **loss_kwargs)
 
     def _compute_metrics(
         self,
@@ -1034,33 +1043,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         layout: IndexSpace | str | None,
         dataset_name: str,
     ) -> SourceView:
-        """Realign a view's variable metadata to the variables of a given index space.
+        """Select the data and metadata for the requested variable index space.
 
-        A prediction view produced by the model inherits the full target metadata
-        (variables / name_to_index / statistics) even though its tensor only
-        holds the model-output (or data-output) subset of variables. Computing
-        per-variable normalisation parameters from the full metadata would then
-        produce tensors that do not broadcast against the (smaller) data tensor.
-
-        The alignment is driven entirely by the layout and the view's metadata, so it
-        works regardless both gridded fields and sparse obs.
-
-        When the metadata already matches the layout variable set
-        (e.g. a full data-space target), the view is returned unchanged.
-
-        Parameters
-        ----------
-        view : SourceView
-            View whose metadata may describe more variables than its tensor holds.
-        layout : IndexSpace | str | None
-            Index space the view's tensor lives in. None is treated as `IndexSpace.DATA_FULL`.
-        dataset_name : str
-            Dataset the view belongs to, used to look up the data indices.
-
-        Returns
-        -------
-        SourceView
-            View with metadata aligned to the layout variable set.
+        Views already in that space are returned unchanged.
         """
         layout = IndexSpace.DATA_FULL if layout is None else IndexSpace(layout)
         data_indices = self.data_indices[dataset_name]
@@ -1076,11 +1061,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             return view
 
         positions = [view.name_to_index[name] for name in names]
-        return dataclass_replace(
-            view,
-            variables=names,
-            statistics={key: value[positions] for key, value in view.statistics.items()},
-        )
+        return view.select(variables=positions)
 
     def calculate_val_metrics(
         self,
@@ -1176,7 +1157,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     metric_kwargs.update(
                         grid_dim=self.grid_dim,
                         grid_shard_sizes=self._grid_shard_sizes(y),
-                        # grid_shard_sizes=self.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None,
                     )
 
                 metric_value = metric(y_pred_postprocessed, y_postprocessed, **metric_kwargs)

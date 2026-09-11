@@ -22,22 +22,22 @@ import numpy as np
 import torch
 from torch.distributed import ProcessGroup
 
+from anemoi.models.data.flat import FlatView
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.data.flat import FlatView
 
 LOGGER = logging.getLogger(__name__)
 
 
 def create_source_view(**kwargs) -> "SourceView":
     """Factory function to create a SourceView for a source dataset."""
-    if kwargs.pop("is_static"):
-        return GriddedSourceView(**kwargs)
+    if kwargs["layout"].time_in_grid:
+        return TabularSourceView(**kwargs)
 
-    return TabularSourceView(**kwargs)
+    return GriddedSourceView(**kwargs)
 
 
 def _fancy_variable_index(
@@ -80,15 +80,25 @@ class SourceView(ABC):
     statistics: dict[str, torch.Tensor]
     coordinates: torch.Tensor | list[torch.Tensor] | None
     layout: TensorLayout
+    coordinates_are_static: bool = False
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     boundaries: list[tuple[slice, ...]] | None = None
     shard_sizes: ShardSizes | list[ShardSizes] = None
 
     def __post_init__(self) -> None:
-        """
-        Dispatch to the concrete (gridded / tabular) view's validation.
-        Required for the __post_init__ overrides to be called on the SourceView subclasses.
-        """
+        """Validate the metadata needed to interpret every materialized tensor."""
+        if self.variables is None or len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"Source {self.name!r} requires unique variable names.")
+        samples = self.data if isinstance(self.data, list) else [self.data]
+        for sample in samples:
+            layout = self.layout.normalized(sample.ndim)
+            if sample.shape[layout.variables] != len(self.variables):
+                raise ValueError(
+                    f"Source {self.name!r} has {sample.shape[layout.variables]} variable channels "
+                    f"but {len(self.variables)} names."
+                )
+        if samples and any(sample.dtype != samples[0].dtype for sample in samples):
+            raise ValueError(f"Source {self.name!r} requires the same dtype for every sample.")
 
     @cached_property
     def name_to_index(self) -> dict[str, int]:
@@ -96,7 +106,7 @@ class SourceView(ABC):
         return {name: idx for idx, name in enumerate(self.variables)}
 
     def clone(self, **kwargs) -> "SourceView":
-        """Return a deep copy of this view (clones the data tensor)."""
+        """Return a new view with replacements, sharing fields that are not replaced."""
         return replace(self, **kwargs)
 
     def select(self, **kwargs) -> "SourceView":
@@ -138,7 +148,7 @@ class SourceView(ABC):
         pass
 
     @abstractmethod
-    def unflatten(self, data: torch.Tensor) -> "SourceView":
+    def unflatten(self, data: torch.Tensor, **metadata) -> "SourceView":
         """Unflatten a 2D data tensor back to the original grid shape."""
         pass
 
@@ -211,10 +221,10 @@ class SourceView(ABC):
 class GriddedSourceView(SourceView):
     """SourceView for gridded datasets, where time is an explicit dimension."""
 
-    is_static: bool = True
     pattern_for_2d: str = "(batch ensemble grid) (time variables)"
 
     def __post_init__(self):
+        super().__post_init__()
         if self.layout.time is None:
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
@@ -233,16 +243,42 @@ class GriddedSourceView(SourceView):
         return self.data.dtype
 
     def flatten(self) -> FlatView:
-        current_pattern = self.layout.pattern
+        current_pattern = self.layout.normalized(self.data.ndim).pattern
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
         device = self.data.device
 
-        batch_size = self.data.shape[self.layout.batch]
-        ensemble_size = self.data.shape[self.layout.ensemble] if self.layout.ensemble is not None else 1
-        # effective batch size: we must account for both batch and ensemble dimensions
-        coordinates = einops.repeat(
-            self.coordinates, "grid latlon -> (repeat grid) latlon", repeat=batch_size * ensemble_size
-        )
+        if self.coordinates is None:
+            msg = f"{self.__class__.__name__} requires coordinates for flattening."
+            raise ValueError(msg)
+        if isinstance(self.coordinates, list):
+            msg = f"{self.__class__.__name__} coordinates must be a tensor, not a list."
+            raise TypeError(msg)
+
+        batch_size = self.data.shape[self.layout.axis("batch", ndim=self.data.ndim)]
+        ensemble_size = self.data.shape[self.layout.axis("ensemble", ndim=self.data.ndim)]
+        grid_size = self.data.shape[self.layout.axis("grid", ndim=self.data.ndim)]
+        if self.coordinates.ndim not in (2, 3):
+            msg = (
+                f"{self.__class__.__name__} coordinates must have shape (grid, 2) "
+                f"or (batch, grid, 2), got {tuple(self.coordinates.shape)}."
+            )
+            raise ValueError(msg)
+        expected_shape = (grid_size, 2) if self.coordinates.ndim == 2 else (batch_size, grid_size, 2)
+        if tuple(self.coordinates.shape) != expected_shape:
+            raise ValueError(f"Source {self.name!r} coordinates must have shape {expected_shape}.")
+        if self.coordinates.ndim == 2:
+            coordinates = einops.repeat(
+                self.coordinates,
+                "grid latlon -> (batch ensemble grid) latlon",
+                batch=batch_size,
+                ensemble=ensemble_size,
+            )
+        else:
+            coordinates = einops.repeat(
+                self.coordinates,
+                "batch grid latlon -> (batch ensemble grid) latlon",
+                ensemble=ensemble_size,
+            )
 
         return FlatView(
             data=flattened_data,
@@ -250,7 +286,11 @@ class GriddedSourceView(SourceView):
             timedeltas=None,
             device=device,
             shard_sizes=self.shard_sizes,
-            batch_sizes=None,
+            batch_sizes=(
+                (self.data.shape[self.layout.grid],) * (batch_size * ensemble_size)
+                if not self.coordinates_are_static
+                else None
+            ),
         )
 
     @property
@@ -258,15 +298,15 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.ndim
 
-    def unflatten(self, data: torch.Tensor) -> "GriddedSourceView":
+    def unflatten(self, data: torch.Tensor, **metadata) -> "GriddedSourceView":
         new_data = einops.rearrange(
             data,
-            f"{self.pattern_for_2d} -> {self.layout.pattern}",
+            f"{self.pattern_for_2d} -> {self.layout.normalized(self.data.ndim).pattern}",
             batch=self.data.shape[self.layout.batch],
             ensemble=self.data.shape[self.layout.ensemble],
             time=self.data.shape[self.layout.time],
         )
-        return self.clone(data=new_data)
+        return self.clone(data=new_data, **metadata)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSourceView":
         """Apply a function to this view, returning a new view with the same metadata."""
@@ -278,8 +318,12 @@ class GriddedSourceView(SourceView):
         )
         return self.clone(data=new_data)
 
-    def apply_loss(self, other: "GriddedSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
+    def apply_loss(
+        self, other: "GriddedSourceView", loss_func: Callable, *, per_sample_kwargs=None, **kwargs
+    ) -> torch.Tensor:
         """Apply a loss function to this view and another view, returning the result."""
+        if per_sample_kwargs is not None:
+            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
         assert isinstance(
             other, GriddedSourceView
         ), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
@@ -287,9 +331,10 @@ class GriddedSourceView(SourceView):
             self.layout == other.layout
         ), f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
         # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-        assert torch.all(
-            self.coordinates == other.coordinates
-        ), f"Both views must have the same coordinates; got {self.coordinates} and {other.coordinates}."
+        if self.coordinates is None or other.coordinates is None:
+            assert self.coordinates is other.coordinates, "Both views must agree on whether coordinates are available."
+        else:
+            assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
         return loss_func(
             self.data,
             other.data,
@@ -360,7 +405,7 @@ class GriddedSourceView(SourceView):
         if gathered_coords is not None:
             gathered_coords = gather_tensor(
                 gathered_coords,
-                dim=0,
+                dim=-2,
                 sizes=self.shard_sizes,
                 mgroup=group,
             )
@@ -423,9 +468,8 @@ class GriddedSourceView(SourceView):
 class TabularSourceView(SourceView):
     """SourceView for tabular datasets, where time is represented by boundaries."""
 
-    is_static: bool = False
-
     def __post_init__(self):
+        super().__post_init__()
         if not self.layout.time_in_grid:
             msg = f"TabularSourceView requires a layout with time_in_grid=True; got {self.layout!r}."
             raise ValueError(msg)
@@ -481,6 +525,11 @@ class TabularSourceView(SourceView):
         return sample.flatten(ensemble_axis, grid_axis)
 
     def flatten(self) -> FlatView:
+        if not isinstance(self.coordinates, list) or len(self.coordinates) != len(self.data):
+            raise ValueError(f"Source {self.name!r} requires one coordinate tensor per sample for flattening.")
+        for data, coordinates in zip(self.data, self.coordinates, strict=True):
+            if tuple(coordinates.shape) != (data.shape[self.layout.grid], 2):
+                raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
         if not self.data:
             msg = f"{self.__class__.__name__} cannot flatten an empty batch."
             raise ValueError(msg)
@@ -489,9 +538,7 @@ class TabularSourceView(SourceView):
         folded = [self._fold_members(sample) for sample in self.data]
         # coordinates and timedeltas are repeated per member to line up with the folded data
         repeated_coords = [coords.repeat(members, 1) for coords in self.coordinates]
-        repeated_timedeltas = (
-            None if self.timedeltas is None else [td.repeat(members) for td in self.timedeltas]
-        )
+        repeated_timedeltas = None if self.timedeltas is None else [td.repeat(members) for td in self.timedeltas]
 
         if len(folded) > 1:
             data = torch.cat(folded, dim=0)
@@ -530,12 +577,10 @@ class TabularSourceView(SourceView):
             timedeltas=None if timedeltas is None else timedeltas.to(device),
             device=device,
             shard_sizes=flat_shard_sizes,
-            batch_sizes=tuple(
-                sample.shape[self.layout.grid] for sample in self.data for _ in range(members)
-            ),
+            batch_sizes=tuple(sample.shape[self.layout.grid] for sample in self.data for _ in range(members)),
         )
 
-    def unflatten(self, data: torch.Tensor) -> "TabularSourceView":
+    def unflatten(self, data: torch.Tensor, **metadata) -> "TabularSourceView":
         """Split a flattened (rows, features) tensor back into per-sample tensors."""
         assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
         members = self.ensemble_size
@@ -549,7 +594,7 @@ class TabularSourceView(SourceView):
             if self.layout.ensemble is not None:
                 chunk = chunk.unflatten(0, (members, node_counts[sample_index]))
             new_data.append(chunk)
-        return self.clone(data=new_data)
+        return self.clone(data=new_data, **metadata)
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":
         """Apply a function to this view, returning a new view with the same metadata."""
@@ -564,7 +609,14 @@ class TabularSourceView(SourceView):
         ]
         return self.clone(data=new_data)
 
-    def apply_loss(self, other: "TabularSourceView", loss_func: Callable, **kwargs) -> torch.Tensor:
+    def apply_loss(
+        self,
+        other: "TabularSourceView",
+        loss_func: Callable,
+        *,
+        per_sample_kwargs: dict[str, Sequence[Any]] | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
         """Apply a loss function to this view and another view, returning the result."""
         assert isinstance(
             other, TabularSourceView
@@ -577,6 +629,13 @@ class TabularSourceView(SourceView):
         ), f"Both views must have the same number of samples; got {len(self.data)} and {len(other.data)}."
         # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
 
+        per_sample_kwargs = {} if per_sample_kwargs is None else per_sample_kwargs
+        if kwargs.keys() & per_sample_kwargs.keys():
+            raise ValueError("Loss arguments cannot be both shared and per-sample.")
+        for name, values in per_sample_kwargs.items():
+            if len(values) != len(self.data):
+                raise ValueError(f"Loss argument {name!r} requires one value per sample ({len(self.data)}).")
+
         losses = []
         non_empty = []
         for i, (pred, target) in enumerate(zip(self.data, other.data)):
@@ -588,6 +647,7 @@ class TabularSourceView(SourceView):
             assert torch.all(
                 self.coordinates[i] == other.coordinates[i]
             ), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
+            sample_kwargs = kwargs | {name: values[i] for name, values in per_sample_kwargs.items()}
 
             losses.append(
                 loss_func(
@@ -596,18 +656,22 @@ class TabularSourceView(SourceView):
                     layout=self.layout,
                     statistics=self.statistics,
                     name_to_index=self.name_to_index,
-                    **kwargs,
+                    **sample_kwargs,
                 )
             )
             # Handle empty batches: a fully-empty worker returns a graph-connected 0
             non_empty.append(pred.shape[self.layout.grid] > 0)
+
+        if not losses:
+            msg = "Cannot apply a loss to an empty sparse source view."
+            raise ValueError(msg)
 
         stacked = torch.stack(losses)
         num_non_empty = sum(non_empty)
         # Divide by the number of non-empty samples (>= 1) rather than the batch size.
         # When every sample is empty, the stacked tensor is all-zero and graph-connected,
         # so summing and dividing by 1 preserves the zero gradient path.
-        return stacked.sum() / max(num_non_empty, 1)
+        return stacked.sum(dim=0) / max(num_non_empty, 1)
 
     def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
         """Allgather this view across the given process group.
