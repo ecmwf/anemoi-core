@@ -42,9 +42,10 @@ class DASingleTraining(SingleTraining):
         super().__init__(graph_data=graph_data, **kwargs)
         self.corrector = torch.nn.ModuleDict()
         self._init_correctors(graph_data)
-        # Cache of DATA_FULL -> model-output column indices, keyed by dataset name,
-        # used to slice targets down to output variables before the loss checkpoint.
-        self._model_output_idx_cache: dict[str, torch.Tensor] = {}
+        # Cache of DATA_FULL -> data-output column indices, keyed by dataset name,
+        # used to slice targets down to the loss-relevant variables (model outputs
+        # plus any ``target``-category observation columns) before the loss checkpoint.
+        self._loss_target_idx_cache: dict[str, torch.Tensor] = {}
 
         # forward() swallows unknown kwargs, so a model that ignores skip_input would
         # silently train against the observation-copied residual base instead.
@@ -213,18 +214,20 @@ class DASingleTraining(SingleTraining):
             )
         return y_for_loss
 
-    def _model_output_idx(self, dataset_name: str, device: torch.device) -> torch.Tensor:
-        """Return (and cache) the DATA_FULL column indices of the model-output variables.
+    def _loss_target_idx(self, dataset_name: str, device: torch.device) -> torch.Tensor:
+        """Return (and cache) the DATA_FULL column indices of the data-output variables.
 
-        Selecting these columns from a DATA_FULL target yields the model-output
-        variables in model-output order, so the sliced tensor pairs with
-        ``target_layout=IndexSpace.MODEL_OUTPUT`` (identity mapping) in the loss.
+        Selecting these columns from a DATA_FULL target yields the DATA_OUTPUT layout
+        (prognostic + diagnostic + ``target`` variables, in data order), so the sliced
+        tensor pairs with ``target_layout=IndexSpace.DATA_OUTPUT`` in the loss. Without
+        ``target`` variables this is exactly the model-output set, so the loss is
+        unchanged; with them, observation-operator losses can read their columns.
         """
-        idx = self._model_output_idx_cache.get(dataset_name)
+        idx = self._loss_target_idx_cache.get(dataset_name)
         if idx is None or idx.device != device:
-            positions = self.data_indices[dataset_name].model_output_positions_in_data_full
+            positions = self.data_indices[dataset_name].data_output_positions_in_data_full
             idx = torch.as_tensor(positions, dtype=torch.long, device=device)
-            self._model_output_idx_cache[dataset_name] = idx
+            self._loss_target_idx_cache[dataset_name] = idx
         return idx
 
     def _step(
@@ -259,10 +262,10 @@ class DASingleTraining(SingleTraining):
             if weight > 0:
                 # Corrector needs the full DATA_FULL target (reads input.corrector columns).
                 y_for_loss = self._apply_corrector(y_pred, y)
-                # Slice the target to model-output variables BEFORE the checkpoint so the
+                # Slice the target to data-output variables BEFORE the checkpoint so the
                 # activation checkpoint saves only the reduced target rather than every
-                # DATA_FULL channel (forcings/obs/corrector) for each DA + rollout step.
-                y_target = {name: t.index_select(-1, self._model_output_idx(name, t.device)) for name, t in y.items()}
+                # DATA_FULL channel (forcings/corrector) for each DA + rollout step.
+                y_target = {name: t.index_select(-1, self._loss_target_idx(name, t.device)) for name, t in y.items()}
                 loss_next, metrics_next, _ = checkpoint(
                     self.compute_loss_metrics,
                     y_for_loss,
@@ -270,7 +273,7 @@ class DASingleTraining(SingleTraining):
                     rollout_step=rollout_step,
                     validation_mode=validation_mode,
                     pred_layout=IndexSpace.MODEL_OUTPUT,
-                    target_layout=IndexSpace.MODEL_OUTPUT,
+                    target_layout=IndexSpace.DATA_OUTPUT,
                     use_reentrant=False,
                 )
                 if loss_next is not None:

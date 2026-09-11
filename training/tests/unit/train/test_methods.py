@@ -2367,7 +2367,7 @@ def _make_da_single_training(task: Any, data_indices: dict[str, IndexCollection]
     module.loss_supports_sharding = False
     module.metrics_support_sharding = True
     module.corrector = torch.nn.ModuleDict()
-    module._model_output_idx_cache = {}
+    module._loss_target_idx_cache = {}
     return module
 
 
@@ -2486,3 +2486,60 @@ def test_da_single_training_no_skip_input_when_flag_off(monkeypatch: pytest.Monk
 
     assert len(forward_calls) == 4
     assert all("skip_input" not in kwargs for kwargs in forward_calls)
+
+
+def test_da_single_training_target_layout_is_data_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DASingleTraining._step slices targets to DATA_OUTPUT and declares that layout.
+
+    With a ``target``-category variable (observation column used only by the loss)
+    the sliced target must keep it, drop forcing columns, and preserve data order,
+    so observation-operator losses can resolve their columns while the model-output
+    variables still align one-to-one with the prediction.
+    """
+    name_to_index = {"prog_0": 0, "forcing_0": 1, "obs_0": 2, "prog_1": 3}
+    data_indices = {
+        "data": _make_minimal_index_collection(name_to_index, forcing=["forcing_0"], target=["obs_0"]),
+    }
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "maximum": 1},
+        da_cycles=1,
+        da_loss_weight=0.0,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": None}
+    module.output_mask = {"data": NoOutputMask()}
+
+    captured: dict[str, Any] = {}
+
+    def _compute_loss_metrics_stub(
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, dict, dict[str, torch.Tensor]]:
+        captured["target"] = y["data"]
+        captured["pred_layout"] = kwargs["pred_layout"]
+        captured["target_layout"] = kwargs["target_layout"]
+        ref = next(iter(y_pred.values()))
+        return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
+
+    monkeypatch.setattr(module, "compute_loss_metrics", _compute_loss_metrics_stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    b, e, g = 1, 1, 3
+    batch = {"data": torch.randn(b, 3, e, g, len(name_to_index))}
+    module._step(batch, validation_mode=False)
+
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_OUTPUT
+    target = captured["target"]
+    # DATA_OUTPUT = prognostic + diagnostic + target, in data order: prog_0, obs_0, prog_1.
+    assert target.shape[-1] == 3
+    # The forecast step (rollout_step=1, after one DA cycle) targets batch time index 2.
+    expected = batch["data"][:, 2:3][..., [0, 2, 3]]
+    torch.testing.assert_close(target, expected)
