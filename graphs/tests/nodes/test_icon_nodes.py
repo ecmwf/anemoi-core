@@ -18,7 +18,7 @@ from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
 from anemoi.graphs.nodes import ICONCellGridNodes
 from anemoi.graphs.nodes import ICONMultiMeshNodes
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
-from anemoi.graphs.testing import DatasetMock
+from anemoi.graphs.testing import _DatasetMock
 
 
 @pytest.mark.parametrize("max_level", [0, 1, 2])
@@ -26,7 +26,7 @@ from anemoi.graphs.testing import DatasetMock
 def test_init(monkeypatch, max_level: int, node_builder_cls: type[BaseNodeBuilder]):
     """Test ICON node builders initialization."""
 
-    monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
+    monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
     node_builder = node_builder_cls(
         name="test_nodes",
         grid_filename="test.nc",
@@ -42,7 +42,7 @@ def test_init(monkeypatch, max_level: int, node_builder_cls: type[BaseNodeBuilde
 @pytest.mark.parametrize("node_builder_cls", [ICONCellGridNodes, ICONMultiMeshNodes])
 def test_node_builder_dependencies(monkeypatch, node_builder_cls: type[BaseNodeBuilder]):
     """Test that the `node_builder` depends on the presence of ICON node builders."""
-    monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
+    monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
     node_builder = node_builder_cls(name="data_nodes", max_level=0, grid_filename="test.nc")
 
     graph = HeteroData()
@@ -60,7 +60,7 @@ def test_wrong_filename(node_builder_cls: type[BaseNodeBuilder]):
 
 def test_register_nodes(monkeypatch):
     """Test ICON node builders register correctly the nodes."""
-    monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
+    monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
 
     node_builder = ICONMultiMeshNodes(name="test_icon_nodes", grid_filename="test.nc", max_level=0)
 
@@ -83,7 +83,7 @@ def test_register_attributes(
     graph_with_nodes: HeteroData,
 ):
     """Test ICONNodes register correctly the weights."""
-    monkeypatch.setattr(netCDF4, "Dataset", DatasetMock)
+    monkeypatch.setattr(netCDF4, "Dataset", _DatasetMock)
     nodes = ICONCellGridNodes(name="test_nodes", max_level=0, grid_filename="test.nc")
     config = {"test_attr": {"_target_": "anemoi.graphs.nodes.attributes.UniformWeights"}}
 

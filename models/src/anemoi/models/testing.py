@@ -32,7 +32,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 
 
-def run_distributed_test(
+def _run_distributed_test(
     rank_fn: Callable[..., None],
     *,
     backend: str,
