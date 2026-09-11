@@ -93,7 +93,10 @@ def test_graph_build_forwards_full_dataset_config_to_node_builder() -> None:
     mock_creator = MagicMock()
     mock_creator.create_graph.return_value = HeteroData()
 
-    with patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator) as mock_gc_cls:
+    with patch(
+        "anemoi.training.train.train.GraphCreator.initialize_from_config",
+        return_value=mock_creator,
+    ) as mock_gc_cls:
         trainer.graph_data
 
     # GraphCreator is called with the modified graph_config as first positional arg
@@ -130,7 +133,10 @@ def test_graph_build_drops_schema_keys_from_node_builder() -> None:
     mock_creator = MagicMock()
     mock_creator.create_graph.return_value = HeteroData()
 
-    with patch("anemoi.training.train.train.GrapBuilder", return_value=mock_creator) as mock_gc_cls:
+    with patch(
+        "anemoi.training.train.train.GraphCreator.initialize_from_config",
+        return_value=mock_creator,
+    ) as mock_gc_cls:
         trainer.graph_data
 
     graph_config_arg = mock_gc_cls.call_args[0][0]
