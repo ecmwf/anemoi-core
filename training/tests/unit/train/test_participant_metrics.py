@@ -20,7 +20,7 @@ def _values(results: dict[str, dict[str, torch.Tensor]]) -> dict[str, dict[str, 
 def test_weighted_means_per_participant() -> None:
     acc = ParticipantMetrics()
     acc.update("h1", {"mse": torch.tensor(1.0), "loss": torch.tensor(10.0)}, batch_size=2)
-    acc.update("h1", {"mse": torch.tensor(4.0), "loss": torch.tensor(40.0)}, batch_size=1)
+    acc.update("h1", {"mse": torch.tensor([4.0]), "loss": torch.tensor(40.0)}, batch_size=1)  # shape [1] as scalar
     acc.update("h2", {"mse": torch.tensor(7.0)}, batch_size=3)
 
     assert _values(acc.compute()) == {"h1": {"mse": 2.0, "loss": 20.0}, "h2": {"mse": 7.0}}

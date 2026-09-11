@@ -45,7 +45,7 @@ class ParticipantMetrics:
         accumulated = self._sums.setdefault(participant, {})
         for name, value in metrics.items():
             weight = torch.tensor(batch_size, dtype=torch.float64, device=value.device)
-            entry = torch.stack([value.detach().double() * weight, weight])
+            entry = torch.stack([value.detach().double().reshape(()) * weight, weight])
             accumulated[name] = accumulated[name] + entry if name in accumulated else entry
 
     def compute(self, device: torch.device | str | None = None) -> dict[str, dict[str, torch.Tensor]]:
