@@ -47,7 +47,7 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
     def __init__(self, dataset: DictConfig | str, name: str, attributes: list[BaseNodeAttribute] | None = None) -> None:
         LOGGER.info("Reading the dataset from %s.", dataset)
         self.dataset = dataset if isinstance(dataset, str) else OmegaConf.to_container(dataset)
-        super().__init__(name, attributes)
+        super().__init__(name=name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"dataset"}
 
     def get_coordinates(self) -> torch.Tensor:
@@ -245,7 +245,7 @@ class XArrayNodes(BaseNodeBuilder):
         lon_key: str = "lon",
         attributes: list[BaseNodeAttribute] | None = None,
     ) -> None:
-        super().__init__(name, attributes)
+        super().__init__(name=name, attributes=attributes)
         self.dataset = dataset
         self.lat_key = lat_key
         self.lon_key = lon_key

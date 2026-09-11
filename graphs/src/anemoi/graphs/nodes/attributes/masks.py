@@ -26,7 +26,7 @@ class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     """Base class for computing mask based on a variable in an Anemoi dataset."""
 
     def __init__(self, variable: str, name: str | None = None) -> None:
-        super().__init__(name)
+        super().__init__(namne=name)
         self.variable = variable
 
     @abstractmethod
@@ -99,7 +99,7 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
     grids: list[int] | None = None
 
     def __init__(self, name: str | None = None) -> None:
-        super().__init__(name)
+        super().__init__(name=name)
         if self.grids is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
 
@@ -113,7 +113,7 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
         return open_dataset(nodes["_dataset"]).grids
 
     @staticmethod
-    def get_mask_from_grid_sizes(grid_sizes: tuple[int, ...], masked_grids_posisitons: list[int]):
+    def get_mask_from_grid_sizes(grid_sizes: tuple[int], masked_grids_posisitons: list[int]):
         assert isinstance(masked_grids_posisitons, list), "masked_grids_positions must be a list"
         assert min(masked_grids_posisitons) >= 0, "masked_grids_positions must be non-negative"
         assert max(masked_grids_posisitons) < len(grid_sizes), f"masked_grids_positions must be < {len(grid_sizes)}"
@@ -140,7 +140,7 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
 
     def __init__(self, name: str | None = None) -> None:
         self.grids = [0]  # It sets as true the nodes from the first (index=0) grid
-        super().__init__(name)
+        super().__init__(name=name)
 
 
 class GridsMask(BaseCombineAnemoiDatasetsMask):
@@ -161,7 +161,7 @@ class GridsMask(BaseCombineAnemoiDatasetsMask):
 
     def __init__(self, grids: int | list[int] = 0, name: str | None = None) -> None:
         self.grids = [grids] if isinstance(grids, int) else grids
-        super().__init__(name)
+        super().__init__(name=name)
 
 
 class LimitedAreaMask(BooleanBaseNodeAttribute):
@@ -177,7 +177,7 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
     """
 
     def __init__(self, name: str | None = None) -> None:
-        super().__init__(name)
+        super().__init__(name=name)
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert nodes["node_type"] in [
