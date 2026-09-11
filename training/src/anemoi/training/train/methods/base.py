@@ -1287,8 +1287,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if projector.output_grid_size != dataset_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
-                    f"{projector.output_grid_size} points, but the dataset's graph node set "
-                    f"has {dataset_grid_size}. Check that the projection matrix matches the graph."
+                    f"{projector.output_grid_size} points, but its graph node set {dataset_name!r} has "
+                    f"{dataset_grid_size}. The encoder runs after projection, so this node set must be "
+                    f"built on the projector's output grid. Check that the graph node set is correctly "
+                    "constructed and that the projection matrix matches the graph."
                 )
                 raise ValueError(msg)
 
