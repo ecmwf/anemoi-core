@@ -191,7 +191,10 @@ def _gt_bwd_dst_pass(
     COLPTR_ptr,  # [N_dst + 1]
     D_OUT_ptr,  # [N_dst * H * C]
     D_Q_ptr,  # OUT
-    D_ptr,  # [N_dst * H]
+    D_E_ptr,  # OUT [M * H * C] per-edge dE; stores are contiguous in CSC order here
+    ALPHA_ptr,  # OUT [M * H] fp32 per-edge alpha, written to CSR slots for the src pass
+    DS_ptr,  # OUT [M * H] fp32 per-edge dS (alpha folded in), written to CSR slots
+    CSRPOS_ptr,  # [M] CSC edge id -> CSR slot; makes the src pass's reads contiguous
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
@@ -212,9 +215,7 @@ def _gt_bwd_dst_pass(
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        # store D_j = <d_out, out> = 0 and dQ = 0
-        zeros = tl.zeros((H_pad,), dtype=tl.float32)
-        tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
+        # no incident edges: dQ = 0, and there are no per-edge outputs to write
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
@@ -227,6 +228,9 @@ def _gt_bwd_dst_pass(
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+
+    # m_j is per-destination, so it is loaded once instead of on every edge
+    m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
@@ -242,7 +246,6 @@ def _gt_bwd_dst_pass(
 
         ke = k + e
         # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
         s_ij = tl.sum(q * ke, axis=-1) * qk_scale
         alpha_ij = tl.exp(s_ij - m_j)
 
@@ -254,12 +257,36 @@ def _gt_bwd_dst_pass(
 
         dq += dS[:, None] * ke * qk_scale
 
+        # Hand (alpha, dS) over to the src pass: both are computed here anyway, so
+        # the src pass then needs neither its k/v/e/m/D loads nor a second q.ke dot
+        # product. They are scattered to CSR slots, which turns the src pass's
+        # per-edge reads into a contiguous stream -- a scattered store is
+        # fire-and-forget, whereas a scattered load would sit on the critical path
+        # of the latency-bound src pass.
+        pos = tl.load(CSRPOS_ptr + e_idx)
+        ah_off = pos * H + tl.arange(0, H_pad)
+        tl.store(ALPHA_ptr + ah_off, alpha_ij, mask=H_mask)
+        tl.store(DS_ptr + ah_off, dS, mask=H_mask)
+
+        # dE is written here too, where the per-edge stores are contiguous in CSC
+        # order; the src pass would have had to scatter them.
+        dV_edge = alpha_ij[:, None] * d_out
+        dK_edge = dS[:, None] * q * qk_scale
+        tl.store(
+            D_E_ptr + e_idx * H * C + H_C_off,
+            (dV_edge + dK_edge)
+            .to(out_dtype)
+            .reshape(
+                H_pad * C_pad,
+            ),
+            mask=H_C_mask,
+        )
+
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
 
-    # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
+    # store dQ
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -271,93 +298,86 @@ def _gt_bwd_dst_pass(
 
 @triton.jit
 def _gt_bwd_src_pass(
-    Q_ptr,
-    K_ptr,
-    V_ptr,
-    E_ptr,
+    Q_ptr,  # [N_dst * H * C]
     ROWPTR_ptr,  # [N_src+1]
-    EDGE_IDS_ptr,  # [M] edge id list grouped by src
-    EDGE_DST_ptr,  # [M] dst node for each edge
-    D_ptr,  # [N_dst * H] D_j from pass dst-pass
-    M_ptr,  # [N_dst * H] saved m_j from fwd
+    EDGE_DST_ptr,  # [M] dst node per CSR slot (contiguous reads)
+    ALPHA_ptr,  # [M * H] fp32 per-edge alpha from the dst pass, CSR order
+    DS_ptr,  # [M * H] fp32 per-edge dS (alpha folded in) from the dst pass, CSR order
     D_OUT_ptr,  # [N_dst * H * C]
-    D_K_ptr,  # [N_src * H * C]
-    D_V_ptr,  # [N_src * H * C]
-    D_E_ptr,  # [M * H * C]
+    D_K_ptr,  # OUT [N_src * H * C]
+    D_V_ptr,  # OUT [N_src * H * C]
     N_src,
     H: tl.constexpr,
     C: tl.constexpr,
     out_dtype: tl.constexpr,
+    BLOCK_E: tl.constexpr,
 ):
+    """Accumulate dK and dV per source node from the dst pass's per-edge (alpha, dS).
+
+    Everything this pass needs is precomputed by ``_gt_bwd_dst_pass``, so it only
+    gathers the dst-side ``q``/``d_out`` rows and streams ``alpha``/``dS`` in CSR
+    order. ``dE`` is written by the dst pass, where those stores are contiguous.
+    """
     src_idx = tl.program_id(0)
     if src_idx >= N_src:
         return
 
     H_pad: tl.constexpr = triton.next_power_of_2(H)
     C_pad: tl.constexpr = triton.next_power_of_2(C)
-    _, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
+    H_mask, H_C_mask, H_C_off = build_masks_and_offsets(H, C, H_pad, C_pad)
 
     start = tl.load(ROWPTR_ptr + src_idx)
     end = tl.load(ROWPTR_ptr + src_idx + 1)
     num_edges = end - start
 
+    src_off = src_idx * H * C + H_C_off
+
     if num_edges == 0:
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
-        tl.store(D_K_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
-        tl.store(D_V_ptr + src_idx * H * C + H_C_off, zeros, mask=H_C_mask)
+        tl.store(D_K_ptr + src_off, zeros, mask=H_C_mask)
+        tl.store(D_V_ptr + src_off, zeros, mask=H_C_mask)
         return
-
-    # src-side k, v (shared for all edges)
-    src_off = src_idx * H * C + H_C_off
-    k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-    v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
     accK = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
 
-    # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
-    for i in range(num_edges):
-        # for i in tl.range(0, num_edges, warp_specialize=True):
-        # indexing into edge list + corresponding dst node
-        e_idx = tl.load(EDGE_IDS_ptr + start + i)
-        dst = tl.load(EDGE_DST_ptr + e_idx)
+    # Tiled over the source node's edge list: this kernel launches few programs, each
+    # running a long serial chain of indirect gathers (edge_dst -> q/d_out row), and
+    # tiling lets BLOCK_E of those gathers be in flight at once. The forward and dst
+    # passes are already bandwidth-saturated and gain nothing from the same treatment,
+    # but this one runs well below the HBM floor.
+    num_tiles = (num_edges + BLOCK_E - 1) // BLOCK_E
+    for t in range(num_tiles):
+        csr_slots = start + t * BLOCK_E + tl.arange(0, BLOCK_E)
+        e_mask = csr_slots < end
+        dst = tl.load(EDGE_DST_ptr + csr_slots, mask=e_mask, other=0)
 
-        # get saved tensors for dst node
-        dst_off = dst * H * C + H_C_off
-        q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
-        Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
+        # [BLOCK_E, H_pad * C_pad] gathers of the dst-side rows. The H/C padding mask
+        # only exists when H or C is not a power of two; combining it with a plain
+        # `True` would not broadcast, hence the constexpr branches.
+        row_offs = dst[:, None] * H * C + H_C_off[None, :]
+        if H == H_pad and C == C_pad:
+            row_mask = e_mask[:, None]
+        else:
+            row_mask = e_mask[:, None] & H_C_mask[None, :]
 
-        e_off = e_idx * H * C + H_C_off
-        e = tl.load(E_ptr + e_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
+        ah_offs = csr_slots[:, None] * H + tl.arange(0, H_pad)[None, :]
+        if H == H_pad:
+            ah_mask = e_mask[:, None]
+        else:
+            ah_mask = e_mask[:, None] & H_mask[None, :]
 
-        ke = k + e
-        ve = v + e
+        q = tl.load(Q_ptr + row_offs, mask=row_mask, other=0.0).to(tl.float32).reshape((BLOCK_E, H_pad, C_pad))
+        d_out = tl.load(D_OUT_ptr + row_offs, mask=row_mask, other=0.0).to(tl.float32).reshape((BLOCK_E, H_pad, C_pad))
 
-        # some recomputations from dst-pass
-        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
-        dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
+        # contiguous streaming reads (CSR order); masked-off lanes contribute zero
+        alpha_ij = tl.load(ALPHA_ptr + ah_offs, mask=ah_mask, other=0.0)
+        dS = tl.load(DS_ptr + ah_offs, mask=ah_mask, other=0.0)
 
-        # per-edge k, v contributions, summing up to per-edge e contribution
-        dV_edge = alpha_ij[:, None] * d_out
-        dK_edge = dS[:, None] * q * qk_scale
-        dE_edge = dV_edge + dK_edge
-
-        tl.store(
-            D_E_ptr + e_off,
-            dE_edge.to(out_dtype).reshape(
-                H_pad * C_pad,
-            ),
-            mask=H_C_mask,
-        )
-
-        accK += dK_edge
-        accV += dV_edge
+        accK += tl.sum(tl.reshape(dS, (BLOCK_E, H_pad, 1)) * q, axis=0) * qk_scale
+        accV += tl.sum(tl.reshape(alpha_ij, (BLOCK_E, H_pad, 1)) * d_out, axis=0)
 
     # write final accumulated per-src grads
     tl.store(
@@ -396,8 +416,8 @@ def graph_transformer_attention(
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
+    edge_dst_csr: Tensor,
+    csr_pos: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Opaque custom op wrapping the Triton GraphTransformer attention.
 
@@ -437,8 +457,8 @@ def _graph_transformer_attention_fake(
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
+    edge_dst_csr: Tensor,
+    csr_pos: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor]:
     N_dst, H, C = q.shape
     out = torch.empty((N_dst, H, C), device=q.device, dtype=q.dtype)
@@ -460,8 +480,8 @@ def graph_transformer_attention_backward(
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
+    edge_dst_csr: Tensor,
+    csr_pos: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     """Opaque custom op wrapping the Triton GraphTransformer backward kernels.
 
@@ -489,13 +509,28 @@ def graph_transformer_attention_backward(
     dK = torch.empty_like(k)
     dV = torch.empty_like(v)
     dE = torch.empty_like(e)
-    D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
-    # Pass A: destination nodes (computes D and dQ)
-    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+    # Per-edge (alpha, dS) handoff from the dst pass to the src pass. The dst pass
+    # computes both anyway, which lets the src pass drop its k/v/e/m/D loads and its
+    # recomputation of the scores. Kept in CSR order so the src pass reads them as a
+    # contiguous stream. This costs 2 * M * H fp32, i.e. 2/C of the dE allocated above.
+    num_edges = row.shape[0]
+    alpha_e = torch.empty((num_edges, H), device=q.device, dtype=torch.float32)
+    dS_e = torch.empty((num_edges, H), device=q.device, dtype=torch.float32)
 
-    # Pass B: source nodes (accumulate dK, dV, dE)
-    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
+    # Pass A: destination nodes (computes dQ and dE, and emits the per-edge handoff)
+    _gt_bwd_dst_pass[(N_dst,)](
+        q, k, v, e, out_saved, m, row, colptr, d_out, dQ, dE, alpha_e, dS_e, csr_pos, N_dst, H, C, grad_dtype
+    )
+
+    # Pass B: source nodes (accumulate dK, dV)
+    # The tile width follows the mean source degree: high-degree sources are few
+    # programs with long gather chains and profit from concurrent gathers, whereas at
+    # degree ~1 the masked-off lanes are pure overhead.
+    block_e = 4 if num_edges >= 4 * N_src else 1
+    _gt_bwd_src_pass[(N_src,)](
+        q, rowptr, edge_dst_csr, alpha_e, dS_e, d_out, dK, dV, N_src, H, C, grad_dtype, BLOCK_E=block_e
+    )
 
     return dQ, dK, dV, dE
 
@@ -512,8 +547,8 @@ def _graph_transformer_attention_backward_fake(
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
-    edge_ids: Tensor,
-    edge_dst: Tensor,
+    edge_dst_csr: Tensor,
+    csr_pos: Tensor,
 ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
     return (
         torch.empty_like(q),
@@ -526,18 +561,18 @@ def _graph_transformer_attention_backward_fake(
 def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
     # Only the gradient w.r.t. the user-facing ``out`` is used; ``out_saved`` and
     # ``m`` are internal saved tensors that are not consumed downstream.
-    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_dst_csr, csr_pos = ctx.saved_tensors
 
     dQ, dK, dV, dE = graph_transformer_attention_backward(
-        d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
+        d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_dst_csr, csr_pos
     )
 
-    # Gradients for (q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst).
+    # Gradients for (q, k, v, e, row, colptr, rowptr, edge_dst_csr, csr_pos).
     return dQ, dK, dV, dE, None, None, None, None, None
 
 
 def _graph_transformer_attention_setup_context(ctx, inputs, output):
-    q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
+    q, k, v, e, row, colptr, rowptr, edge_dst_csr, csr_pos = inputs
     _out, out_saved, m = output
 
     # The forward op makes contiguous copies internally, but those are not the tensors
@@ -545,9 +580,9 @@ def _graph_transformer_attention_setup_context(ctx, inputs, output):
     # versions so the Triton backward kernels, which assume a contiguous layout, receive
     # contiguous inputs.
     q, k, v, e = (x.contiguous() for x in (q, k, v, e))
-    row, colptr, rowptr, edge_ids, edge_dst = (x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst))
+    row, colptr, rowptr, edge_dst_csr, csr_pos = (x.contiguous() for x in (row, colptr, rowptr, edge_dst_csr, csr_pos))
 
-    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_dst_csr, csr_pos)
 
 
 graph_transformer_attention.register_autograd(
@@ -567,10 +602,13 @@ def graph_transformer_attention_conv(
     value: Tensor,
     edges: Tensor,
     csc: tuple[Tensor, Tensor],
-    reverse: tuple[Tensor, Tensor, Tensor],
+    reverse: tuple[Tensor, Tensor, Tensor, Tensor],
 ) -> Tensor:
     """torch.compile-friendly GraphTransformer attention."""
     row, colptr = csc
-    rowptr, edge_ids, edge_dst = reverse
-    out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
+    # edge_ids is only needed to build the two CSR-ordered tensors below
+    rowptr, _edge_ids, edge_dst_csr, csr_pos = reverse
+    out, _out_saved, _m = graph_transformer_attention(
+        query, key, value, edges, row, colptr, rowptr, edge_dst_csr, csr_pos
+    )
     return out
