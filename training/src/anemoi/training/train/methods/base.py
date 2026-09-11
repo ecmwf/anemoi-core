@@ -33,6 +33,8 @@ from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.batch_meta import meta_participant
+from anemoi.training.data.batch_meta import split_meta
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
@@ -313,6 +315,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
 
         self.is_first_step = True
+        self._current_meta = None  # metadata of the batch being processed (see batch_meta.split_meta)
 
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.effective_lr = (
@@ -878,7 +881,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def on_after_batch_transfer(self, batch: dict[str, torch.Tensor], _: int) -> dict[str, torch.Tensor]:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
-        Also normalize the batch in-place if needed.
+        Also normalize the batch in-place if needed. Batch metadata (reserved
+        key ``META_KEY``, e.g. the participant a multi-domain batch was sampled
+        from) is split off first and stashed in ``self._current_meta``, so
+        nothing downstream sees anything but tensors keyed by dataset name.
 
         Parameters
         ----------
@@ -890,6 +896,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dict[str, torch.Tensor]
             Batch after transfer
         """
+        batch, self._current_meta = split_meta(batch)
+        participant = meta_participant(self._current_meta)  # also checks the batch is participant-pure
+        if participant is not None:
+            LOGGER.debug("Batch sampled from participant '%s'", participant)
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)

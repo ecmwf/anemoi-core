@@ -15,6 +15,8 @@ from collections.abc import Mapping
 import numpy as np
 import torch
 
+from anemoi.training.data.batch_meta import META_KEY
+from anemoi.training.data.batch_meta import PARTICIPANT_FIELD
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.datasets import AnemoiDataset
 from anemoi.training.data.datasets.anemoidataset import normalize_participant_readers
@@ -252,10 +254,15 @@ class MultiDomainDataset(AnemoiDataset):
 
         Returns
         -------
-            dict[str, torch.Tensor]: The sample retrieved from the specified domain and index.
+            dict[str, torch.Tensor | dict]: ``{dataset_name: tensor, META_KEY: {"participant": domain_name}}``.
+            The tensor is keyed by the DATASET name (as in ``MultiDataset``); the
+            participant travels as batch metadata (see ``anemoi.training.data.batch_meta``).
         """
         sequence, position = (int(value) for value in self.anchors[domain_name][index])
-        return {domain_name: self._read(self.dataset_name, sequence, position, participant=domain_name)}
+        return {
+            self.dataset_name: self._read(self.dataset_name, sequence, position, participant=domain_name),
+            META_KEY: {PARTICIPANT_FIELD: domain_name},
+        }
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Yield samples from independently partitioned domains in domain-pure blocks.
@@ -272,7 +279,7 @@ class MultiDomainDataset(AnemoiDataset):
         Returns
         -------
         Generator[dict[str, torch.Tensor], None, None]
-            A generator yielding dictionaries containing tensor samples and their corresponding domain names
+            A generator yielding ``{dataset_name: tensor, META_KEY: {"participant": name}}`` samples
         """
         sampler = MultiDomainSampler(
             self.valid_date_indices,

@@ -27,6 +27,7 @@ from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import StochasticInterpolantSettings
 from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceSettings
+from anemoi.training.data.batch_meta import META_KEY
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
@@ -844,6 +845,49 @@ def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
     pl.LightningModule.__init__(module)
     module.task = task
     assert module.plot_adapter is task._plot_adapter
+
+
+# ── on_after_batch_transfer: batch metadata seam ──────────────────────────────
+
+
+def _make_batch_transfer_module() -> SingleTraining:
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    _wire_training_module(module, data_indices=_data_indices_single(), config=_CFG_EMPTY)
+    module.keep_batch_sharded = False
+    module.model = SimpleNamespace(pre_processors={"data": lambda x: x})
+    module.allgather_batch = MagicMock(side_effect=lambda tensor, _name: tensor)
+    module.update_scalers = MagicMock()
+    module.is_first_step = False
+    return module
+
+
+def test_on_after_batch_transfer_strips_meta_before_sharding_and_normalisation() -> None:
+    module = _make_batch_transfer_module()
+    tensor = torch.zeros(2, 1, 1, 4, 3)
+    batch = {"data": tensor, META_KEY: {"participant": ["h1", "h1"]}}
+
+    out = module.on_after_batch_transfer(batch, 0)
+
+    assert set(out) == {"data"}
+    assert module._current_meta == {"participant": ["h1", "h1"]}
+    module.allgather_batch.assert_called_once()
+    assert module.allgather_batch.call_args.args[1] == "data"
+    assert META_KEY in batch  # the dataloader batch itself is left untouched
+
+
+def test_on_after_batch_transfer_without_meta() -> None:
+    module = _make_batch_transfer_module()
+    out = module.on_after_batch_transfer({"data": torch.zeros(2, 1, 1, 4, 3)}, 0)
+    assert set(out) == {"data"}
+    assert module._current_meta is None
+
+
+def test_on_after_batch_transfer_rejects_mixed_participants() -> None:
+    module = _make_batch_transfer_module()
+    batch = {"data": torch.zeros(2, 1, 1, 4, 3), META_KEY: {"participant": ["h1", "h2"]}}
+    with pytest.raises(ValueError, match="mixes participants"):
+        module.on_after_batch_transfer(batch, 0)
 
 
 # ── SingleTraining._step integration ──────────────────────────────────────────

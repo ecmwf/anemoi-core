@@ -12,6 +12,9 @@ import numpy as np
 import pytest
 from pytest_mock import MockFixture
 
+from anemoi.training.data.batch_meta import META_KEY
+from anemoi.training.data.batch_meta import meta_participant
+from anemoi.training.data.batch_meta import split_meta
 from anemoi.training.data.datasets import MultiDomainDataset
 from anemoi.training.data.datasets.multidomain import MultiDomainSampler
 
@@ -126,12 +129,15 @@ class TestMultiDomain:
 
     def test_get_sample_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
         readers = multi_domain.participant_readers["data"]
-        multi_domain.get_sample("dataset_a", 0)
+        sample = multi_domain.get_sample("dataset_a", 0)
 
+        # keyed by DATASET name, participant carried as metadata
+        assert sample == {"data": readers["dataset_a"].get_sample.return_value, META_KEY: {"participant": "dataset_a"}}
         readers["dataset_a"].get_sample.assert_called_once()
         readers["dataset_b"].get_sample.assert_not_called()
 
-        multi_domain.get_sample("dataset_b", 2)
+        sample = multi_domain.get_sample("dataset_b", 2)
+        assert meta_participant(split_meta(sample)[1]) == "dataset_b"
         readers["dataset_b"].get_sample.assert_called_once()
 
     def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDomainDataset) -> None:

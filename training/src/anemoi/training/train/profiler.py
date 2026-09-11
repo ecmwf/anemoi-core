@@ -24,6 +24,7 @@ from omegaconf import DictConfig
 from pytorch_lightning.utilities import rank_zero_only
 from rich.console import Console
 
+from anemoi.training.data.batch_meta import split_meta
 from anemoi.training.diagnostics.profilers import BenchmarkProfiler
 from anemoi.training.diagnostics.profilers import ProfilerProgressBar
 from anemoi.training.train.train import AnemoiTrainer
@@ -304,6 +305,7 @@ class AnemoiProfiler(AnemoiTrainer):
         batch = next(iter(self.datamodule.train_dataloader()))
         if type(batch) in [list, tuple]:
             batch = batch[0]
+        batch, _ = split_meta(batch)
 
         example_input_array = {}
         for dataset_name in batch:
