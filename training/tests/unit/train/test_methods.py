@@ -439,29 +439,24 @@ def test_spatial_processor_grid_sizes_skips_without_datamodule() -> None:
     module._validate_spatial_processor_grid_sizes()
 
 
-def test_spatial_processor_grid_sizes_skips_unknown_dataset() -> None:
+def test_spatial_processor_grid_sizes_rejects_unknown_dataset() -> None:
     module = _spatial_grid_module(input_grid_size=8, reader_grid_sizes={"other": 10})
 
-    module._validate_spatial_processor_grid_sizes()
+    with pytest.raises(ValueError, match=r"in_lres.*no corresponding training data reader"):
+        module._validate_spatial_processor_grid_sizes()
 
 
-def _target_grid_module(output_grid_size: int | None, encoder_node_set: str = "in_lres") -> SingleTraining:
+def _target_grid_module(output_grid_size: int | None) -> SingleTraining:
     class Projector(torch.nn.Module):
         @property
         def output_grid_size(self) -> int:
             return output_grid_size
-
-    class InnerModel(torch.nn.Module):
-        def encoder_node_set(self, dataset_name: str) -> str:
-            del dataset_name
-            return encoder_node_set
 
     class ModelWithProjector(torch.nn.Module):
         def __init__(self) -> None:
             super().__init__()
             processors = {} if output_grid_size is None else {"in_lres": Projector()}
             self.spatial_pre_processors = torch.nn.ModuleDict(processors)
-            self.model = InnerModel()
 
     module = SingleTraining.__new__(SingleTraining)
     pl.LightningModule.__init__(module)
@@ -476,13 +471,13 @@ def _graph_with_nodes(**node_counts: int) -> HeteroData:
     return graph
 
 
-def test_spatial_processor_target_grid_accepts_matching_encoder_nodes() -> None:
+def test_spatial_processor_target_grid_accepts_matching_dataset_nodes() -> None:
     module = _target_grid_module(output_grid_size=4)
 
     module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4))
 
 
-def test_spatial_processor_target_grid_rejects_mismatched_encoder_nodes() -> None:
+def test_spatial_processor_target_grid_rejects_mismatched_dataset_nodes() -> None:
     """The encoder concatenates node attributes, so a mismatch dies mid-forward instead."""
     module = _target_grid_module(output_grid_size=4)
 
@@ -490,11 +485,16 @@ def test_spatial_processor_target_grid_rejects_mismatched_encoder_nodes() -> Non
         module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=6))
 
 
-def test_spatial_processor_target_grid_uses_encoder_node_set_not_dataset_name() -> None:
-    """Downscaler conditioning inputs are encoded on their target's grid, not their own."""
-    module = _target_grid_module(output_grid_size=4, encoder_node_set="out_hres")
+def test_spatial_processor_target_grid_uses_each_datasets_nodes() -> None:
+    module = _target_grid_module(output_grid_size=4)
+    other_projector = torch.nn.Module()
+    other_projector.output_grid_size = 6
+    module.model.spatial_pre_processors["other"] = other_projector
 
-    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=2, out_hres=4))
+    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4, other=6))
+
+    with pytest.raises(ValueError, match=r"other.*6.*4"):
+        module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4, other=4))
 
 
 def test_spatial_processor_target_grid_skips_without_processors() -> None:

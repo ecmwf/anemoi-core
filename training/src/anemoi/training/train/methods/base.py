@@ -1281,15 +1281,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
     def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
-        """Check each spatial projector's target grid against the encoder's node set."""
+        """Check each spatial projector's target grid against its dataset's graph nodes."""
         for dataset_name, projector in self.model.spatial_pre_processors.items():
-            node_set = self.model.model.encoder_node_set(dataset_name)
-            encoder_grid_size = graph_data[node_set].num_nodes
-            if projector.output_grid_size != encoder_grid_size:
+            dataset_grid_size = graph_data[dataset_name].num_nodes
+            if projector.output_grid_size != dataset_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
-                    f"{projector.output_grid_size} points, but the encoder node set {node_set!r} "
-                    f"has {encoder_grid_size}. Check that the projection matrix matches the graph."
+                    f"{projector.output_grid_size} points, but its graph node set {dataset_name!r} has "
+                    f"{dataset_grid_size}. The encoder runs after projection, so this node set must be "
+                    f"built on the projector's output grid. Check that the graph node set is correctly "
+                    "constructed and that the projection matrix matches the graph."
                 )
                 raise ValueError(msg)
 
@@ -1307,7 +1308,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         for dataset_name, projector in self.model.spatial_pre_processors.items():
             reader = data_readers.get(dataset_name)
             if reader is None:
-                continue
+                msg = (
+                    f"Spatial processor configured for dataset {dataset_name!r}, "
+                    "but no corresponding training data reader exists. "
+                    "Check data.datasets and dataloader.training.datasets."
+                )
+                raise ValueError(msg)
 
             if reader.grid_size != projector.input_grid_size:
                 msg = (
