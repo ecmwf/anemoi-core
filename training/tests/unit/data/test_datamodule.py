@@ -18,6 +18,7 @@ from pytest_mock import MockFixture
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.data.datamodule import reference_participant
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
@@ -231,6 +232,13 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         batch_size=2,
         reference_participants={},
     )
+
+
+def test_reference_participant() -> None:
+    participants = {"h1": {"dataset_config": "h1.zarr"}, "h2": {"dataset_config": "h2.zarr"}}
+    assert reference_participant(DictConfig({"dataset_config": "a.zarr"})) is None
+    assert reference_participant(DictConfig({"participants": participants})) == "h1"
+    assert reference_participant(DictConfig({"participants": participants, "statistics_from": "h2"})) == "h2"
 
 
 def test_get_dataset_builds_one_reader_per_participant(mocker: MockFixture) -> None:

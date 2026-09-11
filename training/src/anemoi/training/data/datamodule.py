@@ -45,6 +45,16 @@ def iter_participant_configs(datareader_config: dict[str, Any]) -> Iterator[tupl
             yield dataset_name, dataset_name, dataset_config
 
 
+def reference_participant(dataset_config: Any) -> str | None:
+    """Return the reference participant of a ``participants:`` block, ``None`` for a bare reader.
+
+    The reference participant is ``statistics_from`` if set, else the first participant.
+    """
+    if "participants" not in dataset_config:
+        return None
+    return dataset_config.get("statistics_from") or next(iter(dataset_config["participants"]))
+
+
 def reference_participants(datareader_config: dict[str, Any]) -> dict[str, str]:
     """Return ``{dataset_name: participant}`` for datasets that set ``statistics_from``.
 

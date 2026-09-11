@@ -36,6 +36,7 @@ from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.data.datamodule import reference_participant
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.diagnostics.logger import get_mlflow_logger
@@ -218,7 +219,19 @@ class AnemoiTrainer(ABC):
             if len(dataset_names) == 1:
                 dataset_configs = get_multiple_datasets_config(self.config.dataloader.training)
                 dataset_name = dataset_names[0]
-                reader_cfg = dataset_configs[dataset_name].dataset_config
+                dataset_cfg = dataset_configs[dataset_name]
+                participant = reference_participant(dataset_cfg)
+                if participant is not None:
+                    # Phase 1: participants share the grid, so one graph built from the
+                    # reference participant (statistics_from, else first) serves all of them.
+                    LOGGER.info(
+                        "Dataset '%s' has participants %s; building the graph from participant '%s'.",
+                        dataset_name,
+                        list(dataset_cfg.participants),
+                        participant,
+                    )
+                    dataset_cfg = dataset_cfg.participants[participant]
+                reader_cfg = dataset_cfg.dataset_config
                 dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
                 if dataset_path is None:
                     msg = f"Dataset source is None for dataset '{dataset_name}'."

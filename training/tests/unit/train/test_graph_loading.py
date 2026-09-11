@@ -11,6 +11,7 @@ from pathlib import Path
 from unittest.mock import MagicMock
 from unittest.mock import patch
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
@@ -147,3 +148,39 @@ def test_graph_build_drops_schema_keys_from_node_builder() -> None:
     )
     assert captured_dataset["dataset"] == dataset_config["dataset"]
     assert captured_dataset["check_variables_compatibility"] == dataset_config["check_variables_compatibility"]
+
+
+@pytest.mark.parametrize(
+    ("statistics_from", "expected"),
+    [("h2", "/path/h2.zarr"), (None, "/path/h1.zarr")],
+)
+def test_graph_build_uses_reference_participant(
+    statistics_from: str | None,
+    expected: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """With participants, the single graph is built from the reference participant (statistics_from, else first)."""
+    trainer = _build_trainer_config_with_dataset_config({"dataset": "unused"})
+    trainer.config.dataloader.training.datasets.data = OmegaConf.create(
+        {
+            "statistics_from": statistics_from,
+            "participants": {
+                "h1": {"dataset_config": {"dataset": "/path/h1.zarr"}},
+                "h2": {"dataset_config": {"dataset": "/path/h2.zarr"}},
+            },
+        },
+    )
+
+    mock_creator = MagicMock()
+    mock_creator.create.return_value = HeteroData()
+
+    with (
+        patch("anemoi.training.train.train.GraphCreator", return_value=mock_creator) as mock_gc_cls,
+        caplog.at_level("INFO", logger="anemoi.training.train.train"),
+    ):
+        trainer.graph_data
+
+    graph_config_arg = mock_gc_cls.call_args[0][0]
+    captured_dataset = OmegaConf.to_container(graph_config_arg.nodes[DEFAULT_DATASET_NAME].node_builder.dataset)
+    assert captured_dataset == {"dataset": expected}
+    assert f"building the graph from participant '{Path(expected).stem}'" in caplog.text
