@@ -508,8 +508,6 @@ class BaseGraphModel(nn.Module):
 
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
-
-            # Perform forward pass
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
