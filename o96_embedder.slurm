@@ -3,7 +3,7 @@
 #SBATCH --account=deste_340_26
 #SBATCH --partition=boost_usr_prod
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=1
+#SBATCH --ntasks-per-node=4
 #SBATCH --gres=gpu:4
 #SBATCH --cpus-per-task=32
 #SBATCH --time=04:00:00
