@@ -87,7 +87,7 @@ repos:
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
 - repo: https://github.com/ecmwf/ci-infrastructure
-  rev: 743379b48062bc07774f5ad04151b2ca9acc5bfa
+  rev: 68dc4e5c55ddf18db3caab916e66b96f2dab5284
   hooks:
   - id: check-ci-approval # Workflows that can run fork code must hang off require-ci-approval
 ci:
