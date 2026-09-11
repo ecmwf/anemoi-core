@@ -52,7 +52,7 @@ class TestMultiScaleEdgesTransform:
     def tri_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with MultiScaleEdges."""
         graph = HeteroData()
-        graph = TriNodes(2, "test_tri_nodes").update_graph(graph)
+        TriNodes(2, "test_tri_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
@@ -61,7 +61,7 @@ class TestMultiScaleEdgesTransform:
     def hex_ico_graph(self) -> HeteroData:
         """Return a HeteroData object with TriNodes."""
         graph = HeteroData()
-        graph = HexNodes(1, "test_hex_nodes").update_graph(graph)
+        HexNodes(1, "test_hex_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
@@ -70,8 +70,9 @@ class TestMultiScaleEdgesTransform:
         """Test MultiScaleEdges update method."""
 
         edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, None)
-        graph = edges.update_graph(tri_ico_graph)
-        assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
+        assert ("test_tri_nodes", "to", "test_tri_nodes") not in tri_ico_graph.edge_types
+        edges.update_graph(tri_ico_graph)
+        assert ("test_tri_nodes", "to", "test_tri_nodes") in tri_ico_graph.edge_types
 
     @pytest.mark.parametrize("edge_resolutions", [[0], [0, 1, 2], [0, 2], [2]])
     def test_fast_1_hop_method(selg, tri_ico_graph: HeteroData, edge_resolutions):
@@ -100,18 +101,22 @@ class TestMultiScaleEdgesTransform:
         """Test MultiScaleEdges update method."""
 
         edges = MultiScaleEdges("test_hex_nodes", "test_hex_nodes", 1, None)
-        graph = edges.update_graph(hex_ico_graph)
-        assert ("test_hex_nodes", "to", "test_hex_nodes") in graph.edge_types
+        assert ("test_hex_nodes", "to", "test_hex_nodes") not in hex_ico_graph.edge_types
+        edges.update_graph(hex_ico_graph)
+        assert ("test_hex_nodes", "to", "test_hex_nodes") in hex_ico_graph.edge_types
 
     @pytest.mark.parametrize("scale_resolutions", [1, [1], [1, 2], None])
     def test_transform_with_scale_resolutions(self, tri_ico_graph: HeteroData, scale_resolutions):
         """Test MultiScaleEdges with different scale_resolutions configurations."""
         edges = MultiScaleEdges("test_tri_nodes", "test_tri_nodes", 1, scale_resolutions=scale_resolutions)
-        graph = edges.update_graph(tri_ico_graph)
 
-        assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
-        assert len(graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
-        assert graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
+        assert ("test_tri_nodes", "to", "test_tri_nodes") not in tri_ico_graph.edge_types
+
+        edges.update_graph(tri_ico_graph)
+
+        assert ("test_tri_nodes", "to", "test_tri_nodes") in tri_ico_graph.edge_types
+        assert len(tri_ico_graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
+        assert tri_ico_graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
 
     def test_transform_fail_nodes(self, tri_ico_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""
@@ -134,15 +139,19 @@ class TestMultiScaleEdgesStretched:
 
         mocker.patch.object(node_builder.area_mask_builder, "fit", return_value=None)
 
-        graph = node_builder.update_graph(graph)
+        node_builder.update_graph(graph)
         return graph
 
     def test_edges(self, tri_graph: HeteroData):
         """Test MultiScaleEdges update method."""
         edges = MultiScaleEdges("hidden", "hidden", x_hops=1, scale_resolutions=None)
-        graph = edges.update_graph(tri_graph)
-        assert ("hidden", "to", "hidden") in graph.edge_types
-        assert len(graph[("hidden", "to", "hidden")].edge_index) > 0
+
+        assert ("hidden", "to", "hidden") not in tri_graph.edge_types
+
+        edges.update_graph(tri_graph)
+
+        assert ("hidden", "to", "hidden") in tri_graph.edge_types
+        assert len(tri_graph[("hidden", "to", "hidden")].edge_index) > 0
 
     @pytest.mark.parametrize("edge_resolutions", [[1], [0, 1, 2, 3, 4, 5, 6], [4, 6], [6]])
     def test_fast_1_hop_method(selg, tri_graph: HeteroData, edge_resolutions):

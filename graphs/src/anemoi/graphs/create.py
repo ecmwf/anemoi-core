@@ -30,52 +30,40 @@ class GraphBuilder:
 
     def __init__(
         self,
-        nodes: list[BaseNodeBuilder] | None = None,
-        edges: list[BaseEdgeBuilder] | None = None,
+        node_builders: list[BaseNodeBuilder] | None = None,
+        edge_builders: list[BaseEdgeBuilder] | None = None,
         post_processors: list[PostProcessor] | None = None,
     ):
-        self.nodes = nodes or []
-        self.edges = edges or []
+        self.node_builders = node_builders or []
+        self.edge_builders = edge_builders or []
         self.post_processors = post_processors or []
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData) -> None:
         """Update the graph.
 
-        It iterates over the node builders and edge builders and applies them to the graph.
+        It iterates over the node builders and edge builders and applies them to the graph (in-place).
 
         Parameters
         ----------
         graph : HeteroData
             The input graph to be updated.
-
-        Returns
-        -------
-        HeteroData
-            The updated graph with new nodes and edges added.
         """
-        for node in self.nodes:
-            graph = node.update_graph(graph)
+        for node_builder in self.node_builders:
+            node_builder.update_graph(graph)
 
-        for edge in self.edges:
-            graph = edge.update_graph(graph)
+        for edge_builder in self.edge_builders:
+            edge_builder.update_graph(graph)
 
         if graph.num_nodes == 0:
             LOGGER.warning("The graph that was created has no nodes.")
 
-        return graph
-
-    def clean(self, graph: HeteroData) -> HeteroData:
-        """Remove private attributes used during creation from the graph.
+    def clean(self, graph: HeteroData) -> None:
+        """Remove private attributes used during creation from the graph in-place.
 
         Parameters
         ----------
         graph : HeteroData
             Generated graph
-
-        Returns
-        -------
-        HeteroData
-            Cleaned graph
         """
         LOGGER.info("Cleaning graph.")
         for type_name in chain(graph.node_types, graph.edge_types):
@@ -84,10 +72,8 @@ class GraphBuilder:
                 del graph[type_name][attr_name]
                 LOGGER.info(f"{attr_name} deleted from graph.")
 
-        return graph
-
-    def post_process(self, graph: HeteroData) -> HeteroData:
-        """Allow post-processing of the resulting graph.
+    def post_process(self, graph: HeteroData) -> None:
+        """Allow post-processing of the resulting graph in-place.
 
         This method applies any post-processors to the graph,
         which can modify or enhance the graph structure or attributes.
@@ -96,16 +82,9 @@ class GraphBuilder:
         ----------
         graph : HeteroData
             The graph to be post-processed.
-
-        Returns
-        -------
-        HeteroData
-            The post-processed graph.
         """
         for processor in self.post_processors:
-            graph = processor.update_graph(graph)
-
-        return graph
+            processor.update_graph(graph)
 
     def save(self, graph: HeteroData, save_path: Path, overwrite: bool = False) -> None:
         """Save the generated graph to the output path.
@@ -133,7 +112,7 @@ class GraphBuilder:
             )
 
     def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
-        """Create the graph and save it to the output path.
+        """Create the graph and optionally save it to the output path.
 
         Parameters
         ----------
@@ -148,9 +127,9 @@ class GraphBuilder:
             created graph object
         """
         graph = HeteroData()
-        graph = self.update_graph(graph)
-        graph = self.clean(graph)
-        graph = self.post_process(graph)
+        self.update_graph(graph)
+        self.clean(graph)
+        self.post_process(graph)
 
         if save_path is None:
             LOGGER.warning("No output path specified. The graph will not be saved.")
@@ -165,19 +144,19 @@ class GraphCreator(GraphBuilder):
 
     def __init__(self, config: str | Path | DotDict | DictConfig):
         if isinstance(config, Path) or isinstance(config, str):
-            config = DotDict.from_file(config)
+            config = DotDict.from_file(str(config))
         elif isinstance(config, DictConfig):
             config = DotDict(config)
 
         self.config = config
 
-        nodes = _parse_nodes(config)
-        edges = _parse_edges(config)
+        node_builders = _parse_nodes(config)
+        edge_builders = _parse_edges(config)
         post_processors = _parse_post_processors(config)
 
         super().__init__(
-            nodes=nodes,
-            edges=edges,
+            node_builders=node_builders,
+            edge_builders=edge_builders,
             post_processors=post_processors,
         )
 

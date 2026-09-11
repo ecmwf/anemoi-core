@@ -43,7 +43,7 @@ class TestHEALPixMultiScaleEdgesTransform:
     def healpix_graph(self) -> HeteroData:
         """Return a HeteroData object with HEALPixMultiScaleEdges."""
         graph = HeteroData()
-        graph = HEALPixNodes(1, "test_tri_nodes").update_graph(graph)
+        HEALPixNodes(1, "test_tri_nodes").update_graph(graph)
         graph["fail_nodes"].x = [1, 2, 3]
         graph["fail_nodes"].node_type = "FailNodes"
         return graph
@@ -52,18 +52,21 @@ class TestHEALPixMultiScaleEdgesTransform:
         """Test HEALPixMultiScaleEdges update method."""
 
         edges = HEALPixMultiScaleEdges("test_tri_nodes", "test_tri_nodes", None)
-        graph = edges.update_graph(healpix_graph)
-        assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
+        edges.update_graph(healpix_graph)
+        assert ("test_tri_nodes", "to", "test_tri_nodes") in healpix_graph.edge_types
 
     @pytest.mark.parametrize("scale_resolutions", [1, [1], [1, 2], None])
     def test_transform_with_scale_resolutions(self, healpix_graph: HeteroData, scale_resolutions):
         """Test HEALPixMultiScaleEdges with different scale_resolutions configurations."""
         edges = HEALPixMultiScaleEdges("test_tri_nodes", "test_tri_nodes", scale_resolutions=scale_resolutions)
-        graph = edges.update_graph(healpix_graph)
 
-        assert ("test_tri_nodes", "to", "test_tri_nodes") in graph.edge_types
-        assert len(graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
-        assert graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
+        assert ("test_tri_nodes", "to", "test_tri_nodes") not in healpix_graph.edge_types
+
+        edges.update_graph(healpix_graph)
+
+        assert ("test_tri_nodes", "to", "test_tri_nodes") in healpix_graph.edge_types
+        assert len(healpix_graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index) > 0
+        assert healpix_graph[("test_tri_nodes", "to", "test_tri_nodes")].edge_index.dim() == 2
 
     def test_transform_fail_nodes(self, healpix_graph: HeteroData):
         """Test MultiScaleEdges update method with wrong node type."""

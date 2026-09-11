@@ -34,9 +34,9 @@ class LatLonNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 

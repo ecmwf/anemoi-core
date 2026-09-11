@@ -86,14 +86,14 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         attributes: list | None = None,
     ) -> None:
 
-        super().__init__(resolution, name, attributes=attributes)
+        super().__init__(resolution=resolution, name=name, attributes=attributes)
         self.hidden_attributes = self.hidden_attributes | {"area_mask_builder"}
 
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
+        super().register_nodes(graph)
 
 
 class TriNodes(IcosahedralNodes):

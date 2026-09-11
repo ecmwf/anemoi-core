@@ -73,18 +73,13 @@ class BaseEdgeBuilder(ABC):
         edge_index = self.compute_edge_index(source_nodes, target_nodes)
         return edge_index.to(dtype=torch.int32, device=self.device)
 
-    def register_edges(self, graph: HeteroData) -> HeteroData:
-        """Register edges in the graph.
+    def register_edges(self, graph: HeteroData) -> None:
+        """Register edges in the graph in-place.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the edges.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered edges.
         """
         edge_index = self.get_edge_index(graph)
         edge_type = type(self).__name__
@@ -94,15 +89,14 @@ class BaseEdgeBuilder(ABC):
             graph[self.name].edge_index = concat_edges(graph[self.name].edge_index, edge_index)
             if edge_type not in graph[self.name].edge_type:
                 graph[self.name].edge_type = graph[self.name].edge_type + "," + edge_type
-            return graph
+            return
 
         # Register new edge indices
         graph[self.name].edge_index = edge_index
         graph[self.name].edge_type = edge_type
-        return graph
 
-    def register_attributes(self, graph: HeteroData, attributes: list[BaseEdgeAttributeBuilder]) -> HeteroData:
-        """Register attributes in the edges of the graph specified.
+    def register_attributes(self, graph: HeteroData, attributes: list[BaseEdgeAttributeBuilder]) -> None:
+        """Register attributes in the edges of the graph specified (in-place).
 
         Parameters
         ----------
@@ -110,25 +104,19 @@ class BaseEdgeBuilder(ABC):
             The graph to register the attributes.
         attributes : list
             List of instantiated attribute objects.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered attributes.
         """
         for attr_obj in attributes:
             edge_index = graph[self.name].edge_index
             graph[self.name][attr_obj.name] = attr_obj(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
-        return graph
 
     def update_graph(
         self,
         graph: HeteroData,
         attributes: list[BaseEdgeAttributeBuilder] | None = None,
-    ) -> HeteroData:
-        """Update the graph with the edges.
+    ) -> None:
+        """Update the graph with the edges in-place.
 
         Parameters
         ----------
@@ -143,7 +131,7 @@ class BaseEdgeBuilder(ABC):
             The graph with the edges.
         """
         t0 = time.time()
-        graph = self.register_edges(graph)
+        self.register_edges(graph)
         t1 = time.time()
         LOGGER.debug("Time to register edge indices (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
@@ -151,11 +139,9 @@ class BaseEdgeBuilder(ABC):
 
         if attributes:
             t0 = time.time()
-            graph = self.register_attributes(graph, attributes)
+            self.register_attributes(graph, attributes)
             t1 = time.time()
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
-
-        return graph
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):

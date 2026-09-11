@@ -47,18 +47,13 @@ class BaseNodeBuilder(ABC):
         self.area_mask_builder = None
         self.device = get_distributed_device()
 
-    def register_nodes(self, graph: HeteroData) -> HeteroData:
-        """Register nodes in the graph.
+    def register_nodes(self, graph: HeteroData) -> None:
+        """Register nodes in the graph in-place.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the nodes.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered nodes.
         """
         graph[self.name].x = self.get_coordinates().to(dtype=torch.float32, device=self.device)
         graph[self.name].node_type = type(self).__name__
@@ -69,10 +64,8 @@ class BaseNodeBuilder(ABC):
         else:
             LOGGER.warning(f"{self.__class__.__name__} registered {graph[self.name].num_nodes} nodes.")
 
-        return graph
-
-    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> HeteroData:
-        """Register attributes in the nodes of the graph specified.
+    def register_attributes(self, graph: HeteroData, attributes: list | None = None) -> None:
+        """Register attributes in the nodes of the graph specified (in-place).
 
         Parameters
         ----------
@@ -80,11 +73,6 @@ class BaseNodeBuilder(ABC):
             The graph to register the attributes.
         attributes : list
             List of instantiated attribute objects.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered attributes.
         """
         for hidden_attr in self.hidden_attributes:
             graph[self.name][f"_{hidden_attr}"] = getattr(self, hidden_attr)
@@ -93,8 +81,6 @@ class BaseNodeBuilder(ABC):
 
         for attr_obj in attributes:
             graph[self.name][attr_obj.name] = attr_obj.compute(graph, self.name)
-
-        return graph
 
     @abstractmethod
     def get_coordinates(self) -> torch.Tensor: ...
@@ -129,8 +115,8 @@ class BaseNodeBuilder(ABC):
         self,
         graph: HeteroData,
         attributes: list[BaseNodeAttribute] | None = None,
-    ) -> HeteroData:
-        """Update the graph with new nodes.
+    ) -> None:
+        """Update the graph in-place with new nodes.
 
         Parameters
         ----------
@@ -138,20 +124,13 @@ class BaseNodeBuilder(ABC):
             Input graph.
         attributes : list[BaseNodeAttribute], optional
             Attributes to register instead of the attributes stored on the builder.
-
-        Returns
-        -------
-        HeteroData
-            The graph with new nodes included.
         """
         t0 = time.time()
-        graph = self.register_nodes(graph)
+        self.register_nodes(graph)
         t1 = time.time()
         LOGGER.debug("Time to register node coordinates (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         t0 = time.time()
-        graph = self.register_attributes(graph, self.attributes if attributes is None else attributes)
+        self.register_attributes(graph, self.attributes if attributes is None else attributes)
         t1 = time.time()
         LOGGER.debug("Time to register node attributes (%s): %.2f s", self.__class__.__name__, t1 - t0)
-
-        return graph

@@ -26,7 +26,7 @@ class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     """Base class for computing mask based on a variable in an Anemoi dataset."""
 
     def __init__(self, variable: str, name: str | None = None) -> None:
-        super().__init__(namne=name)
+        super().__init__(name=name)
         self.variable = variable
 
     @abstractmethod

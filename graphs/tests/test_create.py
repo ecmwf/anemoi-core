@@ -36,9 +36,8 @@ def assert_graph_tensors(graph: HeteroData) -> None:
 
 
 class AddProcessedFlag:
-    def update_graph(self, graph: HeteroData) -> HeteroData:
+    def update_graph(self, graph: HeteroData) -> None:
         graph["data"].processed = torch.ones((graph["data"].num_nodes, 1), dtype=torch.float32)
-        return graph
 
 
 class TestGraphCreator:
@@ -90,8 +89,8 @@ class TestGraphCreator:
         )
 
         graph = GraphBuilder(
-            nodes=[data_nodes, hidden_nodes],
-            edges=[
+            node_builders=[data_nodes, hidden_nodes],
+            edge_builders=[
                 CutOffEdges(
                     source_name="data",
                     target_name="hidden",
@@ -130,7 +129,7 @@ class TestGraphCreator:
     def test_post_processors_are_applied(self):
         """Test that Python API post-processors are applied during graph creation."""
         graph = GraphBuilder(
-            nodes=[
+            node_builders=[
                 LatLonNodes(
                     latitudes=[45.0, 45.0],
                     longitudes=[5.0, 10.0],

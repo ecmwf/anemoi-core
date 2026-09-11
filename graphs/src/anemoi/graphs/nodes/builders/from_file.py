@@ -38,9 +38,9 @@ class AnemoiDatasetNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
@@ -121,9 +121,9 @@ class NPZFileNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
@@ -189,11 +189,11 @@ class LimitedAreaNPZFileNodes(NPZFileNodes):
 
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
-    def register_nodes(self, graph: HeteroData) -> HeteroData:
+    def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
+        super().register_nodes(graph)
 
-    def get_coordinates(self) -> np.ndarray:
+    def get_coordinates(self) -> torch.Tensor:
         coords = super().get_coordinates()
 
         LOGGER.info(
@@ -231,9 +231,9 @@ class XArrayNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 

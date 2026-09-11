@@ -41,9 +41,9 @@ class MultiScaleEdges(BaseEdgeBuilder):
     -------
     register_edges(graph)
         Register the edges in the graph.
-    register_attributes(graph, config)
+    register_attributes(graph, attributes)
         Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
+    update_graph(graph, attributes)
         Update the graph with the edges.
 
     Note

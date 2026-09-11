@@ -31,7 +31,7 @@ class PostProcessor(ABC):
     """Base PostProcessor class."""
 
     @abstractmethod
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> None:
         raise NotImplementedError(f"The {self.__class__.__name__} class does not implement the method update_graph().")
 
 
@@ -47,49 +47,43 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
         self.save_mask_indices_to_attr = save_mask_indices_to_attr
         super().__init__()
 
-    def removing_nodes(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
-        """Remove nodes based on the mask passed."""
+    def remove_nodes(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> None:
+        """Remove nodes based on the mask passed in place from graph in-place."""
         for attr_name in graph[nodes_name].node_attrs():
             graph[nodes_name][attr_name] = graph[nodes_name][attr_name][mask]
 
-        return graph
-
-    def remove_edges(self, graph: HeteroData, mask: torch.Tensor, edges_name: tuple[str, str, str]) -> HeteroData:
-        """Remove edges based on the mask passed."""
+    def remove_edges(self, graph: HeteroData, mask: torch.Tensor, edges_name: tuple[str, str, str]) -> None:
+        """Remove edges based on the mask passed from graph in-place."""
         for attr_name in graph[edges_name].edge_attrs():
             if attr_name == "edge_index":
                 graph[edges_name][attr_name] = graph[edges_name][attr_name][:, mask]
             else:
                 graph[edges_name][attr_name] = graph[edges_name][attr_name][mask]
 
-        return graph
-
     def create_indices_mapper_from_mask(self, mask: torch.Tensor) -> dict[int, int]:
         return dict(zip(torch.where(mask)[0].tolist(), list(range(mask.sum()))))
 
-    def update_edge_indices(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
-        """Update the edge indices to the new position of the nodes."""
+    def update_edge_indices(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> None:
+        """Update the edge indices of graph in-place to the new position of the nodes."""
         idx_mapping = self.create_indices_mapper_from_mask(mask)
         for edges_name in graph.edge_types:
             if edges_name[0] == nodes_name:
                 valid_edges_mask = mask[graph[edges_name].edge_index[0].cpu()]
                 if valid_edges_mask.any():
-                    graph = self.remove_edges(graph, valid_edges_mask, edges_name)
+                    self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[0] = graph[edges_name].edge_index[0].cpu().apply_(idx_mapping.get)
 
             if edges_name[2] == nodes_name:
                 valid_edges_mask = mask[graph[edges_name].edge_index[1].cpu()]
                 if valid_edges_mask.any():
-                    graph = self.remove_edges(graph, valid_edges_mask, edges_name)
+                    self.remove_edges(graph, valid_edges_mask, edges_name)
                 graph[edges_name].edge_index[1] = graph[edges_name].edge_index[1].cpu().apply_(idx_mapping.get)
-
-        return graph
 
     @abstractmethod
     def compute_mask(self, graph: HeteroData, nodes_name: str) -> torch.Tensor: ...
 
-    def add_attribute(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> HeteroData:
-        """Add an attribute of the mask indices as node attribute."""
+    def add_attribute(self, graph: HeteroData, mask: torch.Tensor, nodes_name: str) -> None:
+        """Add an attribute of the mask indices as node attribute in a graph in-place."""
         if self.save_mask_indices_to_attr is not None:
             LOGGER.info(
                 f"An attribute {self.save_mask_indices_to_attr} has been added with the indices to mask the nodes from the original graph."
@@ -97,10 +91,8 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
             mask_indices = torch.where(mask)[0].reshape((graph[nodes_name].num_nodes, -1))
             graph[nodes_name][self.save_mask_indices_to_attr] = mask_indices
 
-        return graph
-
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
-        """Post-process the graph.
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> None:
+        """Post-process the graph in-place.
 
         Parameters
         ----------
@@ -108,19 +100,13 @@ class BaseNodeMaskingProcessor(PostProcessor, ABC):
             The graph to post-process.
         kwargs: Any
             Additional keyword arguments.
-
-        Returns
-        -------
-        HeteroData
-            The post-processed graph.
         """
         for nodes_name in self.nodes_names:
             mask = self.compute_mask(graph, nodes_name).cpu()
             LOGGER.info(f"Removing {(~mask).sum()} nodes from {nodes_name}.")
-            graph = self.removing_nodes(graph, mask, nodes_name)
-            graph = self.update_edge_indices(graph, mask, nodes_name)
-            graph = self.add_attribute(graph, mask, nodes_name)
-        return graph
+            self.remove_nodes(graph, mask, nodes_name)
+            self.update_edge_indices(graph, mask, nodes_name)
+            self.add_attribute(graph, mask, nodes_name)
 
 
 class RemoveUnconnectedNodes(BaseNodeMaskingProcessor):
@@ -265,18 +251,13 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
     def sort_by_indices(x: torch.Tensor, indices: torch.Tensor, dim: int = 1) -> torch.Tensor:
         return x.index_select(dim=dim, index=indices)
 
-    def update_graph(self, graph: HeteroData) -> HeteroData:
-        """Sort all edge indices in the graph.
+    def update_graph(self, graph: HeteroData) -> None:
+        """Sort all edge indices in the graph in-place.
 
         Parameters
         ----------
         graph: HeteroData
             The graph to post-process.
-
-        Returns
-        -------
-        HeteroData
-            The post-processed graph.
         """
         for (src, to, dst), edges in graph.edge_items():
             sort_indices = self.get_sorting_mask(edges)
@@ -284,7 +265,6 @@ class BaseSortEdgeIndex(PostProcessor, ABC):
                 dim = BaseSortEdgeIndex.get_edge_dim(edge_attr_name)
                 edge_attr = BaseSortEdgeIndex.sort_by_indices(edges[edge_attr_name], sort_indices, dim=dim)
                 graph[(src, to, dst)][edge_attr_name] = edge_attr
-        return graph
 
 
 class SortEdgeIndexBySourceNodes(BaseSortEdgeIndex):
@@ -318,20 +298,18 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
         self.edge_attributes = edge_attributes or {}
         super().__init__()
 
-    def removing_edges(self, graph: HeteroData, mask: torch.Tensor) -> HeteroData:
-        """Remove edges based on the mask passed."""
+    def remove_edges(self, graph: HeteroData, mask: torch.Tensor) -> None:
+        """Remove edges from a graph (in-place) based on the mask passed."""
         for attr_name in graph[self.edges_name].edge_attrs():
             if attr_name == "edge_index":
                 graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name].cpu()[:, mask]
             else:
                 graph[self.edges_name][attr_name] = graph[self.edges_name][attr_name].cpu()[mask, :]
 
-        return graph
-
     @abstractmethod
     def compute_mask(self, graph: HeteroData) -> torch.Tensor: ...
 
-    def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> HeteroData:
+    def recompute_attributes(self, graph: HeteroData, graph_config: dict) -> None:
         """Recompute attributes"""
         edge_attributes = self.edge_attributes
         if not edge_attributes:
@@ -342,10 +320,9 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
             graph[self.edges_name][attr_name] = instantiate(edge_attr_builder)(
                 x=(graph[self.source_name], graph[self.target_name]), edge_index=graph[self.edges_name].edge_index
             )
-        return graph
 
-    def update_graph(self, graph: HeteroData, **kwargs: Any) -> HeteroData:
-        """Post-process the graph.
+    def update_graph(self, graph: HeteroData, **kwargs: Any) -> None:
+        """Post-process the graph in-place.
 
         Parameters
         ----------
@@ -353,22 +330,16 @@ class BaseEdgeMaskingProcessor(PostProcessor, ABC):
             The graph to post-process.
         kwargs: Any
             Additional keyword arguments.
-
-        Returns
-        -------
-        HeteroData
-            The post-processed graph.
         """
         mask = self.compute_mask(graph).cpu()
         LOGGER.info(f"Removing {(~mask).sum()} edges from {self.edges_name}.")
-        graph = self.removing_edges(graph, mask)
+        self.remove_edges(graph, mask)
         graph_config = kwargs.get("graph_config", {})
-        graph = self.recompute_attributes(graph, graph_config)
-        return graph
+        self.recompute_attributes(graph, graph_config)
 
 
 class RestrictEdgeLength(BaseEdgeMaskingProcessor):
-    """Remove edges longer than a given treshold from the graph.
+    """Remove edges longer than a given threshold from the graph.
 
     Attributes
     ----------

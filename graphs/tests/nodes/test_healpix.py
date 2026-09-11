@@ -38,7 +38,7 @@ def test_register_nodes(resolution: int):
     node_builder = HEALPixNodes(resolution, "test_nodes")
     graph = HeteroData()
 
-    graph = node_builder.register_nodes(graph)
+    node_builder.register_nodes(graph)
 
     assert graph["test_nodes"].x is not None
     assert isinstance(graph["test_nodes"].x, torch.Tensor)
@@ -53,8 +53,8 @@ def test_register_attributes(graph_with_nodes: HeteroData, attr_class, resolutio
     node_builder = HEALPixNodes(resolution, "test_nodes")
 
     attr = attr_class(name="test_attr")
-    graph = node_builder.register_attributes(graph_with_nodes, [attr])
+    node_builder.register_attributes(graph_with_nodes, [attr])
 
-    assert graph["test_nodes"]["test_attr"] is not None
-    assert isinstance(graph["test_nodes"]["test_attr"], torch.Tensor)
-    assert graph["test_nodes"]["test_attr"].shape[0] == graph["test_nodes"].x.shape[0]
+    assert graph_with_nodes["test_nodes"]["test_attr"] is not None
+    assert isinstance(graph_with_nodes["test_nodes"]["test_attr"], torch.Tensor)
+    assert graph_with_nodes["test_nodes"]["test_attr"].shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
