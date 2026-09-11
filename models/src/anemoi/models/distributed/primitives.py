@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import List
 from typing import Optional
 
 import torch
@@ -304,11 +305,11 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
 @torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
 def _alltoall_op(
-    input_list: list[Tensor],
-    output_shapes_flat: list[int],
+    input_list: List[Tensor],
+    output_shapes_flat: List[int],
     ndim: int,
     group_name: str,
-) -> list[Tensor]:
+) -> List[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     torch.compile() cannot trace ``dist.all_to_all`` with list inputs.
