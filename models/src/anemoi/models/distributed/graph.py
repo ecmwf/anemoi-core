@@ -64,7 +64,7 @@ def ensure_sharded(
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup, gather_in_backward: bool = True
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
 ) -> Tensor:
     """Shard tensor.
 
@@ -78,8 +78,8 @@ def shard_tensor(
         dimension along which to shard
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
     gather_in_backward : bool
         perform gather in backward, default True
 
@@ -91,7 +91,7 @@ def shard_tensor(
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -104,8 +104,8 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
 
     Returns
     -------
@@ -115,7 +115,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
 
-def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
+def reduce_tensor(input_: Tensor, mgroup: ProcessGroup | None) -> Tensor:
     """Reduce tensor.
 
     Reduces tensor across ranks.
@@ -124,8 +124,8 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     ----------
     input_ : Tensor
         Input
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
 
     Returns
     -------
@@ -139,7 +139,7 @@ def sync_tensor(
     input_: Tensor,
     dim: int,
     sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
     gather_in_fwd: bool = True,
 ) -> Tensor:
     """Sync tensor.
@@ -154,8 +154,8 @@ def sync_tensor(
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
 
     Returns
     -------
@@ -165,7 +165,7 @@ def sync_tensor(
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -178,8 +178,8 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
 
     Returns
     -------
@@ -195,7 +195,7 @@ def all_to_all_transpose(
     split_sizes: ShardSizes,
     dim_concat: int,
     concat_sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
 ) -> Tensor:
     """All-to-all transpose.
 
@@ -213,8 +213,8 @@ def all_to_all_transpose(
         Dimension along which to concatenate the transposed tensors.
     concat_sizes : ShardSizes
         Shapes of the concatenated tensors.
-    mgroup : ProcessGroup
-        Model communication group.
+    mgroup : ProcessGroup or None
+        Model communication group. Pass ``None`` explicitly for the local identity fallback.
 
     Returns
     -------

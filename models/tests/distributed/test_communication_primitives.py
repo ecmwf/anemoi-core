@@ -24,6 +24,8 @@ import pytest
 import torch
 import torch.distributed as dist
 from distributed_runner import run_distributed_test
+from distributed_test_utils import shard_sizes_from_pattern
+from distributed_test_utils import torch_version_less_than
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.primitives import _alltoall_transpose
@@ -37,12 +39,6 @@ GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
 
 
-def _torch_version_less_than(major: int, minor: int) -> bool:
-    # TODO: Move to shared util or remove.
-    version_parts = torch.__version__.split("+", maxsplit=1)[0].split(".")
-    return (int(version_parts[0]), int(version_parts[1])) < (major, minor)
-
-
 def _test_split_rank(
     *,
     rank: int,
@@ -51,14 +47,16 @@ def _test_split_rank(
     group: dist.ProcessGroup,
     shape: tuple[int, ...],
     dim: int,
+    shard_sizes: list[int] | None = None,
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
-    sizes = get_balanced_partition_sizes(full.size(dim), world_size)
+    if shard_sizes is None:
+        shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
 
-    actual = _split(full, dim_=dim, sizes_=sizes, group=group)
-    expected = torch.split(full, sizes, dim=dim)[rank].contiguous()
+    actual = _split(full, dim_=dim, sizes_=shard_sizes, group=group)
+    expected = torch.split(full, shard_sizes, dim=dim)[rank].contiguous()
 
     assert actual.size() == expected.size()
     assert actual.dtype == expected.dtype
@@ -74,11 +72,14 @@ def _test_split_rank(
         pytest.param((1025, 1024), 0, id="dim0_uneven_1m"),
         pytest.param((1024, 1025), 1, id="dim1_uneven_1m"),
         pytest.param((64, 129, 128), 1, id="3d_middle_dim_1m"),
-        pytest.param((64, 128, 129), -1, id="negative_last_dim_1m"),
+        pytest.param((64, 128, 128), -1, id="negative_last_dim_even_1m"),
     ],
 )
 def test_split_distributes_full_tensor_to_rank_local_slice(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     run_distributed_test(
         _test_split_rank,
@@ -86,6 +87,30 @@ def test_split_distributes_full_tensor_to_rank_local_slice(
         world_size=distributed_world_size,
         shape=shape,
         dim=dim,
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    "shard_size_pattern",
+    [
+        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
+    ],
+)
+def test_split_supports_explicit_shard_sizes(
+    shard_size_pattern: tuple[int, ...],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
+    run_distributed_test(
+        _test_split_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(sum(shard_sizes), 1024),
+        dim=0,
+        shard_sizes=shard_sizes,
     )
 
 
@@ -97,14 +122,16 @@ def _test_gather_rank(
     group: dist.ProcessGroup,
     shape: tuple[int, ...],
     dim: int,
+    shard_sizes: list[int] | None = None,
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
-    sizes = get_balanced_partition_sizes(full.size(dim), world_size)
-    local = torch.split(full, sizes, dim=dim)[rank].contiguous()
+    if shard_sizes is None:
+        shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
+    local = torch.split(full, shard_sizes, dim=dim)[rank].contiguous()
 
-    actual = _gather(local, dim_=dim, sizes=sizes, group=group)
+    actual = _gather(local, dim_=dim, sizes=shard_sizes, group=group)
 
     assert actual.size() == full.size()
     assert actual.dtype == full.dtype
@@ -120,11 +147,14 @@ def _test_gather_rank(
         pytest.param((1025, 1024), 0, id="dim0_uneven_padding_1m"),
         pytest.param((1024, 1024), 1, id="dim1_even_default_1m"),
         pytest.param((1024, 1025), 1, id="dim1_uneven_padding_1m"),
-        pytest.param((64, 128, 129), -1, id="negative_last_dim_1m"),
+        pytest.param((64, 128, 128), -1, id="negative_last_dim_even_1m"),
     ],
 )
 def test_gather_reconstructs_full_tensor_from_rank_local_slices(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     run_distributed_test(
         _test_gather_rank,
@@ -132,6 +162,30 @@ def test_gather_reconstructs_full_tensor_from_rank_local_slices(
         world_size=distributed_world_size,
         shape=shape,
         dim=dim,
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    "shard_size_pattern",
+    [
+        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
+    ],
+)
+def test_gather_supports_explicit_shard_sizes(
+    shard_size_pattern: tuple[int, ...],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
+    run_distributed_test(
+        _test_gather_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(sum(shard_sizes), 1024),
+        dim=0,
+        shard_sizes=shard_sizes,
     )
 
 
@@ -232,22 +286,24 @@ def _test_expand_sharded_tensor_rank(
     group: dist.ProcessGroup,
     shape: tuple[int, ...],
     dim: int,
+    shard_sizes: list[int] | None = None,
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
-    sizes = get_balanced_partition_sizes(full.size(dim), world_size)
-    local = torch.split(full, sizes, dim=dim)[rank].contiguous().clone()
+    if shard_sizes is None:
+        shard_sizes = get_balanced_partition_sizes(full.size(dim), world_size)
+    local = torch.split(full, shard_sizes, dim=dim)[rank].contiguous().clone()
 
-    actual = _expand_sharded_tensor(local, dim_=dim, sizes=sizes, group=group)
+    actual = _expand_sharded_tensor(local, dim_=dim, sizes=shard_sizes, group=group)
 
     assert actual.size() == full.size()
     assert actual.dtype == full.dtype
     assert actual.device == full.device
 
     normalized_dim = dim % full.dim()
-    start = sum(sizes[:rank])
-    actual_local_slice = actual.narrow(normalized_dim, start, sizes[rank])
+    start = sum(shard_sizes[:rank])
+    actual_local_slice = actual.narrow(normalized_dim, start, shard_sizes[rank])
 
     assert actual_local_slice.size() == local.size()
     assert actual_local_slice.dtype == local.dtype
@@ -262,11 +318,14 @@ def _test_expand_sharded_tensor_rank(
         pytest.param((1025, 1024), 0, id="dim0_uneven_1m"),
         pytest.param((1024, 1025), 1, id="dim1_uneven_1m"),
         pytest.param((64, 129, 128), 1, id="3d_middle_dim_1m"),
-        pytest.param((64, 128, 129), -1, id="negative_last_dim_1m"),
+        pytest.param((64, 128, 128), -1, id="negative_last_dim_even_1m"),
     ],
 )
 def test_expand_sharded_tensor_populates_only_rank_local_slice(
-    shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
+    shape: tuple[int, ...],
+    dim: int,
+    distributed_backend: str,
+    distributed_world_size: int,
 ) -> None:
     run_distributed_test(
         _test_expand_sharded_tensor_rank,
@@ -274,6 +333,30 @@ def test_expand_sharded_tensor_populates_only_rank_local_slice(
         world_size=distributed_world_size,
         shape=shape,
         dim=dim,
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    "shard_size_pattern",
+    [
+        pytest.param((128, 384, 256, 512), id="dim=0,irregular-shard-sizes=[128,384,256,512]"),
+        pytest.param((256, 0, 256, 256), id="dim=0,empty-shard-sizes=[256,0,256,256]"),
+    ],
+)
+def test_expand_sharded_tensor_supports_explicit_shard_sizes(
+    shard_size_pattern: tuple[int, ...],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
+    run_distributed_test(
+        _test_expand_sharded_tensor_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(sum(shard_sizes), 1024),
+        dim=0,
+        shard_sizes=shard_sizes,
     )
 
 
@@ -286,23 +369,27 @@ def _test_alltoall_transpose_rank(
     shape: tuple[int, ...],
     dim_split: int,
     dim_concat: int,
+    split_shard_sizes: list[int] | None = None,
+    concat_shard_sizes: list[int] | None = None,
     atol: float = GLOBAL_DEFAULT_ATOL,
     rtol: float = GLOBAL_DEFAULT_RTOL,
 ) -> None:
     full = torch.arange(torch.Size(shape).numel(), dtype=torch.float32, device=device).reshape(shape)
-    split_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
-    concat_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
-    local = torch.split(full, concat_sizes, dim=dim_concat)[rank].contiguous()
+    if split_shard_sizes is None:
+        split_shard_sizes = get_balanced_partition_sizes(full.size(dim_split), world_size)
+    if concat_shard_sizes is None:
+        concat_shard_sizes = get_balanced_partition_sizes(full.size(dim_concat), world_size)
+    local = torch.split(full, concat_shard_sizes, dim=dim_concat)[rank].contiguous()
 
     actual = _alltoall_transpose(
         local,
         dim_split=dim_split,
-        split_sizes=split_sizes,
+        split_sizes=split_shard_sizes,
         dim_concat=dim_concat,
-        concat_sizes=concat_sizes,
+        concat_sizes=concat_shard_sizes,
         group=group,
     )
-    expected = torch.split(full, split_sizes, dim=dim_split)[rank].contiguous()
+    expected = torch.split(full, split_shard_sizes, dim=dim_split)[rank].contiguous()
 
     assert actual.size() == expected.size()
     assert actual.dtype == expected.dtype
@@ -319,7 +406,7 @@ def _test_alltoall_transpose_rank(
         pytest.param((1024, 1025), 0, 1, id="even_split_uneven_concat_1m"),
         pytest.param((1025, 1025), 0, 1, id="uneven_split_uneven_concat_1m"),
         pytest.param((64, 129, 128), 1, 2, id="3d_middle_to_last_1m"),
-        pytest.param((64, 128, 129), 1, -1, id="negative_concat_dim_1m"),
+        pytest.param((64, 128, 128), -2, -1, id="negative_dims_equal_even_1m"),
     ],
 )
 def test_alltoall_transpose_redistributes_between_sharded_layouts(
@@ -329,7 +416,7 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
     run_distributed_test(
         _test_alltoall_transpose_rank,
@@ -338,6 +425,49 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
         shape=shape,
         dim_split=dim_split,
         dim_concat=dim_concat,
+    )
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("split_shard_size_pattern", "concat_shard_size_pattern"),
+    [
+        pytest.param(
+            (128, 384, 256, 512),
+            (512, 256, 128, 384),
+            id=(
+                "split-dim=0,irregular-split-shard-sizes=[128,384,256,512],"
+                "concat-dim=1,concat-shard-sizes=[512,256,128,384]"
+            ),
+        ),
+        pytest.param(
+            (256, 0, 256, 256),
+            (0, 256, 256, 256),
+            id=(
+                "split-dim=0,empty-split-shard-sizes=[256,0,256,256]," "concat-dim=1,concat-shard-sizes=[0,256,256,256]"
+            ),
+        ),
+    ],
+)
+def test_alltoall_transpose_supports_explicit_shard_sizes(
+    split_shard_size_pattern: tuple[int, ...],
+    concat_shard_size_pattern: tuple[int, ...],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
+    split_shard_sizes = shard_sizes_from_pattern(split_shard_size_pattern, distributed_world_size)
+    concat_shard_sizes = shard_sizes_from_pattern(concat_shard_size_pattern, distributed_world_size)
+    run_distributed_test(
+        _test_alltoall_transpose_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shape=(sum(split_shard_sizes), sum(concat_shard_sizes)),
+        dim_split=0,
+        dim_concat=1,
+        split_shard_sizes=split_shard_sizes,
+        concat_shard_sizes=concat_shard_sizes,
     )
 
 
@@ -747,10 +877,58 @@ def _test_alltoallwrapper_rank(
 def test_alltoallwrapper_exchanges_rank_ordered_tensor_lists(
     distributed_backend: str, distributed_world_size: int
 ) -> None:
-    if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoallwrapper requires torch >= 2.6.")
     run_distributed_test(
         _test_alltoallwrapper_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
+    )
+
+
+def _test_alltoallwrapper_custom_message_sizes_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    message_sizes: list[int],
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    input_list = [
+        torch.full((message_sizes[dst], message_sizes[rank]), rank * 10 + dst, dtype=torch.float32, device=device)
+        for dst in range(world_size)
+    ]
+    output_list = [
+        torch.empty((message_sizes[rank], message_sizes[src]), dtype=torch.float32, device=device)
+        for src in range(world_size)
+    ]
+
+    _alltoallwrapper(output_list, input_list, group=group)
+
+    for src, output in enumerate(output_list):
+        expected = torch.full_like(output, src * 10 + rank)
+        torch.testing.assert_close(output, expected, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    "message_size_pattern",
+    [
+        pytest.param((128, 384, 256, 512), id="irregular-message-sizes=[128,384,256,512]"),
+        pytest.param((256, 0, 256, 256), id="empty-message-sizes=[256,0,256,256]"),
+    ],
+)
+def test_alltoallwrapper_supports_custom_message_sizes(
+    message_size_pattern: tuple[int, ...], distributed_backend: str, distributed_world_size: int
+) -> None:
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo alltoallwrapper requires torch >= 2.6.")
+    message_sizes = shard_sizes_from_pattern(message_size_pattern, distributed_world_size)
+    run_distributed_test(
+        _test_alltoallwrapper_custom_message_sizes_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        message_sizes=message_sizes,
     )
