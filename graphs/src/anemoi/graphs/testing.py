@@ -19,7 +19,7 @@ class _DatasetMock:
     E: edge
     V: vertex
 
-    Cell C2 with its additional vertex V4 and edges E4 and E4 were added as
+    Cell C2 with its additional vertex V4 and edges E4 and E5 were added as
     a first refinement.
 
     [V1: 0, 1]🢀-E3--[V3: 1, 1]
