@@ -36,13 +36,14 @@ class IcosahedralNodes(BaseNodeBuilder, ABC):
         self,
         resolution: int | list[int],
         name: str,
+        attributes: list | None = None,
     ) -> None:
         if isinstance(resolution, int):
             self.resolutions = list(range(resolution + 1))
         else:
             self.resolutions = resolution
 
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {
             "resolutions",
             "nx_graph",
@@ -82,16 +83,17 @@ class LimitedAreaIcosahedralNodes(IcosahedralNodes, ABC):
         name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: list | None = None,
     ) -> None:
 
-        super().__init__(resolution, name)
+        super().__init__(resolution=resolution, name=name, attributes=attributes)
         self.hidden_attributes = self.hidden_attributes | {"area_mask_builder"}
 
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
+        super().register_nodes(graph)
 
 
 class TriNodes(IcosahedralNodes):
@@ -178,6 +180,7 @@ class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
         reference_node_name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: list | None = None,
     ) -> None:
         super().__init__(
             resolution=lam_resolution,
@@ -185,6 +188,7 @@ class StretchedIcosahedronNodes(LimitedAreaIcosahedralNodes, ABC):
             mask_attr_name=mask_attr_name,
             margin_radius_km=margin_radius_km,
             name=name,
+            attributes=attributes,
         )
         self.global_resolution = global_resolution
 

@@ -9,12 +9,30 @@
 
 
 import contextlib
+import re
 from enum import Enum
 
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
+
+
+def camel_to_snake(name: str) -> str:
+    """Convert camel case to snake case.
+
+    Parameters
+    ----------
+    name : str
+        Camel case string.
+
+    Returns
+    -------
+    str
+        Snake case string.
+    """
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def get_distributed_device() -> torch.device:

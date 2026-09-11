@@ -10,7 +10,6 @@
 
 import logging
 
-import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
@@ -36,16 +35,16 @@ class HEALPixNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, resolution: int, name: str) -> None:
+    def __init__(self, resolution: int, name: str, attributes: list | None = None) -> None:
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
         assert isinstance(resolution, int), "Resolution must be an integer."
@@ -75,20 +74,21 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
 
     def __init__(
         self,
-        resolution: str,
+        resolution: int,
         reference_node_name: str,
         name: str,
         mask_attr_name: str | None = None,
         margin_radius_km: float = 100.0,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(resolution, name)
+        super().__init__(resolution=resolution, name=name, attributes=attributes)
         self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)
-        return super().register_nodes(graph)
+        super().register_nodes(graph)
 
-    def get_coordinates(self) -> np.ndarray:
+    def get_coordinates(self) -> torch.Tensor:
         coords = super().get_coordinates()
 
         LOGGER.info(

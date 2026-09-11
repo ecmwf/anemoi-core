@@ -25,8 +25,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     """Base class for computing mask based on a variable in an Anemoi dataset."""
 
-    def __init__(self, variable: str) -> None:
-        super().__init__()
+    def __init__(self, variable: str, name: str | None = None) -> None:
+        super().__init__(name=name)
         self.variable = variable
 
     @abstractmethod
@@ -61,8 +61,8 @@ class NonmissingAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
         Compute the attribute for each node.
     """
 
-    def __init__(self, variable: str) -> None:
-        super().__init__(variable)
+    def __init__(self, variable: str, name: str | None = None) -> None:
+        super().__init__(variable, name)
         self.variable = variable
 
     def _get_mask(self, ds) -> np.ndarray:
@@ -85,8 +85,8 @@ class NonzeroAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
         Computer the attribute for each node.
     """
 
-    def __init__(self, variable: str) -> None:
-        super().__init__(variable)
+    def __init__(self, variable: str, name: str | None = None) -> None:
+        super().__init__(variable, name)
         self.variable = variable
 
     def _get_mask(self, ds) -> np.ndarray:
@@ -98,8 +98,8 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
 
     grids: list[int] | None = None
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, name: str | None = None) -> None:
+        super().__init__(name=name)
         if self.grids is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
 
@@ -138,9 +138,9 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
         Compute the attribute for each node.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, name: str | None = None) -> None:
         self.grids = [0]  # It sets as true the nodes from the first (index=0) grid
-        super().__init__()
+        super().__init__(name=name)
 
 
 class GridsMask(BaseCombineAnemoiDatasetsMask):
@@ -159,9 +159,9 @@ class GridsMask(BaseCombineAnemoiDatasetsMask):
         Compute the attribute for each node.
     """
 
-    def __init__(self, grids: int | list[int] = 0) -> None:
+    def __init__(self, grids: int | list[int] = 0, name: str | None = None) -> None:
         self.grids = [grids] if isinstance(grids, int) else grids
-        super().__init__()
+        super().__init__(name=name)
 
 
 class LimitedAreaMask(BooleanBaseNodeAttribute):
@@ -175,6 +175,9 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
     compute(self, graph, nodes_name)
         Compute the attribute for each node.
     """
+
+    def __init__(self, name: str | None = None) -> None:
+        super().__init__(name=name)
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert nodes["node_type"] in [
