@@ -20,7 +20,6 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
@@ -334,22 +333,6 @@ class MultiDataset(IterableDataset):
             seed,
             sanity_rnd,
         )
-
-    @cached_property
-    def shard_shapes(self) -> dict[str, list]:
-        """Return shard shapes for all data readers."""
-        shard_shapes = {}
-        for name, dataset in self.data_readers.items():
-            shard_shapes[name] = get_balanced_partition_sizes(dataset.grid_size, self.reader_group_size)
-        return shard_shapes
-
-    def get_shard_slice(self, dataset_name: str, reader_group_rank: int) -> slice:
-        """Get the grid shard slice according to the reader rank."""
-        start, end = get_partition_range(
-            partition_sizes=self.shard_shapes[dataset_name],
-            partition_id=reader_group_rank,
-        )
-        return slice(start, end)
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         sequence, position = (int(v) for v in self.anchors[index])
