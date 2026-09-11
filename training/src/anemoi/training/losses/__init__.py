@@ -23,6 +23,7 @@ from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
 from .nan_aware_mse import NaNAwareMSELoss
+from .refractivity import RefractivityOperatorLoss
 from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
@@ -54,6 +55,7 @@ __all__ = [
     "NaNAwareMSELoss",
     "PowerSpectrumLoss",
     "RMSELoss",
+    "RefractivityOperatorLoss",
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
     "TimeAggregateLossWrapper",
