@@ -11,6 +11,7 @@ import os
 
 import torch
 from omegaconf import DictConfig
+from packaging import version
 
 from anemoi.models.utils.compile import mark_for_compilation
 
@@ -67,7 +68,7 @@ def subset_tensor(
     return torch.index_select(x, dim=subset_dim, index=subset_index), subset_index, subset_dim
 
 
-def check_env_and_warn() -> None:
+def _check_env_and_warn() -> None:
     """Reads env for settings which interfere with compilation and gives a warning.
 
     checks 'PYTORCH_CUDA_ALLOC_CONF' for 'expandable_segments:true', this can cause
@@ -96,15 +97,67 @@ def check_env_and_warn() -> None:
         )
 
 
+def _set_num_threads(num_threads: int) -> None:
+    """Sets the number of threads for PyTorch and the OMP environment variable.
+
+    Otherwise Pytorch Lightning sets it multiple times during runtime, leading to
+    spurious recompilations due to 'global state (num_threads)' changing.
+    """
+    torch.set_num_threads(num_threads)
+    os.environ["OMP_NUM_THREADS"] = str(num_threads)
+
+
+def _check_gradient_checkpointing(model_config: DictConfig) -> bool:
+    """Checks if gradient checkpointing is enabled in the model configuration."""
+    mapper_configs = (
+        component.get("mapper", {})
+        for components in (model_config.get("encoders", {}), model_config.get("decoders", {}))
+        for component in components.values()
+    )
+    return any(getattr(mapper, "activation_checkpointing", False) for mapper in mapper_configs) or getattr(
+        model_config.get("processor", {}),
+        "activation_checkpointing",
+        False,
+    )
+
+
 def prepare_compilation(
     model: torch.nn.Module,
     model_config: DictConfig,
     training_config: DictConfig,
 ) -> torch.nn.Module:
     """Reads model_config and marks the matching submodules in model for compilation."""
+    _set_num_threads(16)  # Set the number of threads for PyTorch and OMP
+
+    gradient_checkpointing_enabled = _check_gradient_checkpointing(model_config)
+    if gradient_checkpointing_enabled:
+        LOGGER.warning(
+            "Gradient checkpointing is enabled. Be aware that using torch.compile() with gradient checkpointing "
+            "can lead to non-deterministic errors stemming from micro-benchmarks leading to different compilation"
+            "decisions for checkpointed code, which can lead to 'checkpoint metadata does not match' errors."
+            "\"mode='max-autotune'\" in particular can error due to different block sizes based on micro-benchmarks.",
+        )
+        # non-deterministic shape padding can error when using torch compile inside checkpointed regions
+        torch._inductor.config.shape_padding = False
+        LOGGER.info("Disabled non-deterministic shape padding due to gradient checkpointing being enabled.")
+
+    # disable LRU cache, this is a fix for https://github.com/pytorch/pytorch/issues/166926
+    # The runtime impact of this should be marginal
+    if version.parse(torch.__version__) >= version.parse("2.10.0"):
+        torch._C._dynamo.eval_frame._set_lru_cache(False)
+        LOGGER.info("disabling LRU cache")
+    else:
+        LOGGER.warning(
+            "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may"
+            "result in runtime errors when using torch.compile() alongside activation checkpointing. If you encounter"
+            "errors, consider either upgrading to torch >= 2.10.0, or disabling torch.compile() (model.compile=[])"
+            " or disabling activation checkpointing (e.g. model.processor.gradient_checkpointing=False).",
+            "For more information, see 'https://github.com/pytorch/pytorch/issues/166926'",
+        )
+
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
-        check_env_and_warn()  # warn if env settings interfere with compilation
+        _check_env_and_warn()  # warn if env settings interfere with compilation
     recompile_limit = getattr(model_config, "recompile_limit", None)
     if hasattr(training_config, "recompile_limit"):
         LOGGER.warning(
