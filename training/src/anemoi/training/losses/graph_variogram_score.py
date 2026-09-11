@@ -10,12 +10,18 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_edge_operations import aggregate_edge_values
+from anemoi.training.losses.graph_edge_operations import compute_edge_validity
+from anemoi.training.losses.graph_edge_operations import compute_node_validity
+from anemoi.training.losses.graph_edge_operations import edge_difference
+from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
+class GraphVariogramScoreLoss(BaseGraphScoreLoss):
     """Variogram score over node pairs stored by a CSR graph."""
+
+    uses_edge_tensors: bool = True
 
     def __init__(
         self,
@@ -51,14 +57,14 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         destination_index: torch.Tensor,
         edge_valid: torch.Tensor | None,
     ) -> torch.Tensor:
-        edge_difference = self._edge_difference(node_values, source_index, destination_index)
+        edge_values = edge_difference(node_values, source_index, destination_index)
         if edge_valid is not None:
-            edge_difference = torch.where(
+            edge_values = torch.where(
                 edge_valid,
-                edge_difference,
-                torch.zeros_like(edge_difference),
+                edge_values,
+                torch.zeros_like(edge_values),
             )
-        return torch.abs(edge_difference).pow(self.p)
+        return torch.abs(edge_values).pow(self.p)
 
     def _compute_local_score_tensor(
         self,
@@ -74,9 +80,13 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         assert destination_index is not None
         assert edge_weights is not None
         ensemble_size = y_pred_ens.shape[2]
-        node_valid, edge_valid, valid_weight_sum = self._compute_edge_validity(
+        node_valid = compute_node_validity(
             y_pred_ens,
             y_target,
+            ignore_nans=self.ignore_nans,
+        )
+        edge_valid, valid_weight_sum = compute_edge_validity(
+            node_valid,
             source_index,
             destination_index,
             edge_weights,
@@ -115,7 +125,7 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
         else:
             edge_score = (member_mean - observed_variogram).square()
 
-        return self._aggregate_edge_values(
+        return aggregate_edge_values(
             edge_score,
             destination_index,
             edge_weights,
@@ -123,4 +133,5 @@ class GraphVariogramScoreLoss(BaseGraphEdgeScoreLoss):
             node_valid=node_valid,
             edge_valid=edge_valid,
             valid_weight_sum=valid_weight_sum,
+            row_normalize=self.row_normalize,
         )
