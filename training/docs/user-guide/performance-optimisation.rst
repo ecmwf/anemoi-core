@@ -238,7 +238,7 @@ results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
 To determine whether a configuration is dataloader-bound, run the same
-configurationwith ``dataloader.fake_dataloading=True``. This loads the
+configuration with ``dataloader.fake_dataloading=True``. This loads the
 first real sample and reuses it for subsequent batches, preserving valid
 shapes and numerical values while removing repeated dataset reads.
 A significant increase in throughput indicates that dataloading is the
