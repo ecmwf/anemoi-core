@@ -16,7 +16,7 @@ These can either be used individually or both at the same time.
 
 Data-parallel training (DDP) is the default and most common way to
 scale Anemoi Training across multiple GPUs. Each GPU holds a *full
-replica* of the model and processes a distinct shard of every mini-batch
+replica* of the model and processes a distinct subset of every batch
 in parallel. After the backward pass the gradients are averaged across
 all replicas with a collective ``all-reduce`` before the optimiser step,
 so every replica stays in sync.
