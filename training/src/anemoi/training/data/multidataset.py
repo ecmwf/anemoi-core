@@ -46,6 +46,7 @@ class MultiDataset(IterableDataset):
         label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
+        fake_dataloading: bool = False,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -64,6 +65,8 @@ class MultiDataset(IterableDataset):
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
             Rollout length represented by the loaded relative date indices, by default 1
+        fake_dataloading : bool, optional
+            Load one real sample and reuse it for subsequent accesses, by default False
         """
         self.data_readers = data_readers
         self.label = label
@@ -71,6 +74,7 @@ class MultiDataset(IterableDataset):
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
+        self.fake_dataloading = fake_dataloading
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
         # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
@@ -396,9 +400,17 @@ class MultiDataset(IterableDataset):
             shuffled_chunk_indices[:10],
         )
 
+        initial_batch = None
+
         # TODO(): improve this...
         for i in shuffled_chunk_indices:
-            yield self.get_sample(i)
+            if not self.fake_dataloading:
+                yield self.get_sample(i)
+            elif initial_batch is None:
+                initial_batch = self.get_sample(i)
+                yield initial_batch
+            else:
+                yield initial_batch
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
