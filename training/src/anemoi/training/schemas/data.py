@@ -14,6 +14,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
 from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
+from anemoi.models.schemas.spatial_processors import SpatialProcessorSchema  # noqa: TC002
 
 
 class DatasetDataSchema(PydanticBaseModel):
@@ -33,6 +34,11 @@ class DatasetDataSchema(PydanticBaseModel):
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
         Processors including imputers and normalizers are applied in order of definition. (single dataset mode)"
+    spatial_processor: SpatialProcessorSchema | None = Field(default=None)
+    (
+        "Spatial preprocessor applied to this dataset before normalization "
+        "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
+    )
 
 
 class DataSchema(PydanticBaseModel):

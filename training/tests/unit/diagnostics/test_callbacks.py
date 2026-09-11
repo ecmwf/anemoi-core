@@ -243,6 +243,7 @@ def test_plot_loss_gathers_nan_mask_weights_from_nested_losses():
     pl_module.loss = {"data": combined_loss}
     pl_module.grid_dim = -2
     pl_module.grid_indices = {"data": MagicMock()}
+    pl_module.grid_shard_sizes = {"data": None}
     pl_module.allgather_batch.side_effect = lambda tensor, *_args: tensor + 1.0
 
     # _prepare_batch is overridden in LossCurvePlot to snapshot and gather nan_mask_weights
