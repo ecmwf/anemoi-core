@@ -850,7 +850,7 @@ The benchmarking tests can also be run locally.
 
    cd anemoi-core
    pip install -e training[tests]
-   pytest -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
+   pytest -o tmp_path_retention_policy=all -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
 
 The server location is read from a file
 "~/.config/anemoi/anemoi-benchmark.yaml". The expected format is
