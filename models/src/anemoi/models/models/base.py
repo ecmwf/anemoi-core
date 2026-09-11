@@ -35,6 +35,9 @@ from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
+#: Strategies for combining the ``source_datasets`` of a single encoder.
+SUPPORTED_ENCODER_FUSING_STRATEGIES = ("not_supported",)
+
 
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
@@ -158,8 +161,11 @@ class BaseGraphModel(nn.Module):
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-            if fusing_strategy not in ("not_supported"):
-                raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
+            if fusing_strategy not in SUPPORTED_ENCODER_FUSING_STRATEGIES:
+                raise ValueError(
+                    f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
+                    f"Supported strategies: {sorted(SUPPORTED_ENCODER_FUSING_STRATEGIES)}."
+                )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():

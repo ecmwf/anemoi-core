@@ -142,6 +142,11 @@ def _make_bare_model(
     )
     model.target_dataset_names = ["out_hres"]
     model.target_dataset_name = "out_hres"
+    # Encoder/decoder config names deliberately differ from the dataset name,
+    # as in the graphtransformer_multi_* configs.
+    model.dataset2encoder = {"out_hres": "enc0"}
+    model.dataset2decoder = {"out_hres": "dec0"}
+    model.decoders_target_input = {"dec0": SimpleNamespace(dim=0)}
     model._roles_by_target = {
         "out_hres": {"reference": "in_lres", "target": "out_hres", "conditioning": "in_hres"},
     }
@@ -215,6 +220,77 @@ def test_forward_transport_network_resolves_encoder_and_decoder_by_routing_name(
 
     assert calls == ["encoder", "decoder"]
     assert "out_hres" in out
+
+
+def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the_encoder() -> None:
+    """Exercise the forward pass with the *real* input/output assembly.
+
+    Every other test stubs ``_assemble_input``/``_assemble_output`` out, which
+    leaves the contract between ``_calculate_input_dim`` (what the encoder is
+    built for) and ``_assemble_input`` (what the encoder is handed) untested.
+    Only the neural modules are stubbed here; they assert on the shapes they
+    receive.
+    """
+    batch, ensemble, grid, num_channels = 2, 1, 4, 5
+    model = _make_bare_model(n_step_input=1, n_step_output=1, grid=grid)
+    model._graph_name_hidden = "hidden"
+    model.node_attributes.attr_ndims["hidden"] = 1
+    model.latent_skip = True
+    model._calculate_shapes_and_indices(model.data_indices)
+
+    model.dataset2encoder = {"out_hres": "enc0"}
+    model.dataset2decoder = {"out_hres": "dec0"}
+
+    seen: dict[str, tuple[int, ...]] = {}
+
+    def _encoder(pair: tuple[torch.Tensor, torch.Tensor], **_kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
+        x_src, x_dst = pair
+        seen["encoder_src"] = tuple(x_src.shape)
+        return x_src, torch.ones(x_dst.shape[0], num_channels)
+
+    def _decoder(pair: tuple[torch.Tensor, torch.Tensor], **_kwargs: Any) -> torch.Tensor:
+        x_src, x_dst = pair
+        seen["decoder_src"] = tuple(x_src.shape)
+        seen["decoder_dst"] = tuple(x_dst.shape)
+        return torch.zeros(x_dst.shape[0], model.output_dim["out_hres"])
+
+    model.encoder = {"enc0": _encoder}
+    model.decoder = {"dec0": _decoder}
+
+    edges = (None, None, None)
+    provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
+    model.encoder_graph_provider = {"out_hres": provider}
+    model.decoder_graph_provider = {"out_hres": provider}
+    model.processor_graph_provider = provider
+    model.processor = lambda x, **_kwargs: x
+    # Mirrors SumAggregator for a single source; the real one is an nn.Module and
+    # cannot be attached to a model built via __new__.
+    model.latent_aggregator = lambda _hidden, latents: next(iter(latents.values()))
+    model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
+        {"out_hres": {}},
+        {},
+        {"out_hres": {}},
+    )
+
+    x = {
+        "in_lres": torch.full((batch, 1, ensemble, grid, 2), 1.0),
+        "in_hres": torch.full((batch, 1, ensemble, grid, 1), 2.0),
+    }
+    conditioned_target = {"out_hres": torch.full((batch, 1, ensemble, grid, 2), 7.0)}
+
+    out = model._forward_transport_network(
+        x=x,
+        conditioned_target=conditioned_target,
+        condition={"out_hres": torch.zeros(batch, 1, ensemble, 1, 1)},
+    )
+
+    # The encoder must receive exactly the width the model was sized for.
+    assert seen["encoder_src"] == (batch * ensemble * grid, model.input_dim["out_hres"])
+    # The decoder's destination features are the encoder-updated data tensor.
+    assert seen["decoder_dst"] == (batch * ensemble * grid, model.input_dim["out_hres"])
+    assert seen["decoder_src"] == (batch * ensemble * grid, num_channels)
+    # Output is reassembled back into (batch, time, ensemble, grid, vars).
+    assert out["out_hres"].shape == (batch, 1, ensemble, grid, model.num_output_channels["out_hres"])
 
 
 # ── role inference ────────────────────────────────────────────────────────────
@@ -334,6 +410,28 @@ def test_calculate_shapes_and_indices_only_sizes_target_but_channels_for_all() -
     # in_lres and in_hres have no output channels, so their output_dim is 0.
     # Only the target's output_dim is used to construct the decoder.
     assert set(model.output_dim) == {"out_hres"}
+
+
+def test_calculate_shapes_and_indices_populates_base_forcing_attributes() -> None:
+    """``ForcingsFeature`` reads ``_forcing_input_idx`` / ``num_input_channels_forcings``.
+
+    Any override of ``_calculate_shapes_and_indices`` must keep populating them,
+    otherwise ``decoders.*.target_node_features: ["forcings"]`` raises
+    ``AttributeError`` deep inside the decoder build.
+    """
+    model = _make_bare_model(n_step_input=2, n_step_output=1)
+    model._graph_name_hidden = "hidden"
+    model.node_attributes.attr_ndims["hidden"] = 1
+
+    model._calculate_shapes_and_indices(model.data_indices)
+
+    assert set(model._forcing_input_idx) == set(model.data_indices)
+    assert set(model.num_input_channels_forcings) == set(model.data_indices)
+    # Only in_hres declares a forcing variable (``z``).
+    assert model.num_input_channels_forcings == {"in_lres": 0, "in_hres": 1, "out_hres": 0}
+    # Indices address the model *input* tensor layout, as ForcingsFeature expects.
+    for dataset_name, dataset_indices in model.data_indices.items():
+        assert list(model._forcing_input_idx[dataset_name]) == list(dataset_indices.model.input.forcing)
 
 
 # ── input assembly ────────────────────────────────────────────────────────────

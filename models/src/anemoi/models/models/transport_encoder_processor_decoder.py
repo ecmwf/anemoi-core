@@ -1215,10 +1215,10 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         self.num_input_channels = {}
         self.num_output_channels = {}
         self.num_input_channels_prognostic = {}
-        self.num_input_channels_decoding_forcings = {}
+        self.num_input_channels_forcings = {}
         self._internal_input_idx = {}
         self._internal_output_idx = {}
-        self._decoding_forcing_input_idx = {}
+        self._forcing_input_idx = {}
         self.input_dim = {}
         self.input_dim_latent = self._calculate_input_dim_latent()
         self.target_dim = {}
@@ -1227,15 +1227,11 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         for dataset_name, dataset_indices in data_indices.items():
             self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
             self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-            self._decoding_forcing_input_idx[dataset_name] = [
-                dataset_indices.name_to_index[name] for name in dataset_indices.model._forcing
-            ]
+            self._forcing_input_idx[dataset_name] = dataset_indices.model.input.forcing
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
             self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_decoding_forcings[dataset_name] = len(
-                self._decoding_forcing_input_idx[dataset_name]
-            )
+            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
         # ``_calculate_input_dim`` for each target sums ``num_input_channels`` across
