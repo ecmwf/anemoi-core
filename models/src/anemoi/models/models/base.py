@@ -213,6 +213,7 @@ class BaseGraphModel(nn.Module):
 
     def _get_n_step_output(self, dataset_name: str) -> int:
         return self.n_step_output[dataset_name] if isinstance(self.n_step_output, dict) else self.n_step_output
+
     @staticmethod
     def _as_hidden_node_names(
         hidden_nodes_name: str | list[str] | ListConfig,

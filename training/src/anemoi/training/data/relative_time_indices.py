@@ -121,9 +121,7 @@ def resolve_task_target_relative_indices(
     """Return task output offsets as indices on the shared model grid."""
     target_relative_indices: set[int] = set()
     for step_kwargs in task.steps(mode):
-        target_relative_indices.update(
-            int(offset // timestep) for offset in task.get_output_offsets(**step_kwargs)
-        )
+        target_relative_indices.update(int(offset // timestep) for offset in task.get_output_offsets(**step_kwargs))
     return sorted(target_relative_indices)
 
 

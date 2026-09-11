@@ -79,10 +79,7 @@ class RolloutEval(Callback):
                     if isinstance(n_step_output_by_dataset, dict)
                     else pl_module.n_step_output
                 )
-                required = (
-                    self.max_rollout * n_step_output
-                    + n_step_input
-                )
+                required = self.max_rollout * n_step_output + n_step_input
                 assert batch_tensor.shape[1] >= required, (
                     f"Batch length for dataset '{dataset_name}' is not sufficient for requested validation "
                     f"rollout length! Set `task.validation_rollout` to at least {self.max_rollout}"

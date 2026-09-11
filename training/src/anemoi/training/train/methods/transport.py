@@ -153,9 +153,9 @@ class TendencyPredictionMode(PredictionMode):
             assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-            assert len(lead_times) == n_step_output, (
-                f"Expected {n_step_output} tendency statistics entries, got {len(lead_times)}."
-            )
+            assert (
+                len(lead_times) == n_step_output
+            ), f"Expected {n_step_output} tendency statistics entries, got {len(lead_times)}."
             assert all(
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
@@ -328,9 +328,7 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        zero_output_datasets = [
-            name for name, count in self.n_step_output_by_dataset.items() if count == 0
-        ]
+        zero_output_datasets = [name for name, count in self.n_step_output_by_dataset.items() if count == 0]
         if zero_output_datasets:
             msg = (
                 "Transport training does not support encoder-only datasets without transported targets. "

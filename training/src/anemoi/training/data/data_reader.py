@@ -522,10 +522,7 @@ class RelativeTimeReader:
         if self.available_native_dates is None:
             return None
         available_indices, available_dates_ns = self.available_native_dates
-        return {
-            int(date_ns): int(idx)
-            for idx, date_ns in zip(available_indices, available_dates_ns, strict=True)
-        }
+        return {int(date_ns): int(idx) for idx, date_ns in zip(available_indices, available_dates_ns, strict=True)}
 
     @property
     def uses_mixed_frequency_alignment(self) -> bool:

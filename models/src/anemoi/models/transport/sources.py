@@ -37,9 +37,7 @@ def reference_state_sampling_source(
     """Use the latest input state as the source field, selecting model-output variables."""
     sources = {}
     for dataset_name, x_data in x.items():
-        dataset_n_step_output = (
-            n_step_output[dataset_name] if isinstance(n_step_output, dict) else n_step_output
-        )
+        dataset_n_step_output = n_step_output[dataset_name] if isinstance(n_step_output, dict) else n_step_output
         output_names = data_indices[dataset_name].model.output.ordered_names
         try:
             input_positions = data_indices[dataset_name].model.input.positions_for_names(output_names)

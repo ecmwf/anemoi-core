@@ -396,9 +396,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if dataset_name in loss_configs and loss_configs[dataset_name] is not None
         ]
         zero_target_datasets = [
-            dataset_name
-            for dataset_name in loss_datasets
-            if self.n_step_output_by_dataset[dataset_name] == 0
+            dataset_name for dataset_name in loss_datasets if self.n_step_output_by_dataset[dataset_name] == 0
         ]
         if zero_target_datasets:
             msg = (
