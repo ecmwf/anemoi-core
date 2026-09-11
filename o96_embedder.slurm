@@ -17,4 +17,4 @@ source venv/bin/activate
 
 export MLFLOW_ALLOW_FILE_STORE=true
 
-anemoi-training train +experiment=o96_era5_transformer
+srun anemoi-training train +experiment=o96_era5_transformer
