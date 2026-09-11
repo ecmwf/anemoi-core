@@ -273,7 +273,7 @@ class QueryDataset(Dataset):
             lead_time=lead_time,
             provenance=field.provenance,
             unit=field.units or "unknown",
-            output_frequency=target_reader.frequency,
+            output_frequency=self.task.output_frequency or target_reader.frequency,
             model_type={"surface": "sfc", "pressure": "pl", "model": "ml"}.get(
                 field.level_type,
                 field.level_type,

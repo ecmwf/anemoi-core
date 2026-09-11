@@ -22,6 +22,7 @@ class QueryForecasting:
         input_history: str,
         samples_per_epoch: int,
         reference_provenance: str,
+        output_frequency: str | None = None,
         target_variables: list[str] | None = None,
         input_variables: list[str] | None = None,
         source_dropout: float = 0.0,
@@ -47,6 +48,10 @@ class QueryForecasting:
         self.lead_times = [frequency_to_timedelta(value) for value in lead_times]
         if any(value <= timedelta(0) for value in self.lead_times):
             msg = "Query lead_times must all be positive."
+            raise ValueError(msg)
+        self.output_frequency = None if output_frequency is None else frequency_to_timedelta(output_frequency)
+        if self.output_frequency is not None and self.output_frequency <= timedelta(0):
+            msg = "Query output_frequency must be positive."
             raise ValueError(msg)
         self.input_history = frequency_to_timedelta(input_history)
         self.samples_per_epoch = samples_per_epoch
@@ -91,6 +96,9 @@ class QueryForecasting:
         metadata["metadata_inference"]["task"] = self.name
         metadata["metadata_inference"]["query"] = {
             "lead_times_seconds": [int(value.total_seconds()) for value in self.lead_times],
+            "output_frequency_seconds": (
+                None if self.output_frequency is None else int(self.output_frequency.total_seconds())
+            ),
             "input_history_seconds": int(self.input_history.total_seconds()),
             "reference_provenance": self.reference_provenance,
             "availability_policy": self.availability_policy,

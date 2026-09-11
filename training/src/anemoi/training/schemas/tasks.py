@@ -93,6 +93,8 @@ class QueryForecastingSchema(BaseModel):
         alias="_target_",
     )
     lead_times: list[str] = Field(min_length=1)
+    output_frequency: str | None = None
+    "Optional fixed output spacing encoded in every sampled training query."
     input_history: str
     samples_per_epoch: PositiveInt
     reference_provenance: str

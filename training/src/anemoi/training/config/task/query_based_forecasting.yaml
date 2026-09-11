@@ -1,6 +1,9 @@
 _target_: anemoi.training.tasks.QueryForecasting
 
 lead_times: [1h, 3h, 6h]
+# null uses each target archive's cadence; set a duration to condition every
+# sampled query on one requested output spacing.
+output_frequency: null
 input_history: 12h
 max_input_times: 4
 samples_per_epoch: 64

@@ -147,6 +147,9 @@ class QueryForecaster(nn.Module):
             self.value_adapter.provenance_embedding,
             self.value_adapter.unit_embedding,
             len(catalogue.get("grids", ["__custom__", *self.dataset_names])),
+            model_config.query.lead_time_fourier_features,
+            model_config.query.lead_time_min_period_hours,
+            model_config.query.lead_time_max_period_hours,
         )
         self.query_to_latent = nn.Linear(adapter_hidden, hidden)
         self.ensemble_noise_std = float(model_config.query.ensemble_noise_std)

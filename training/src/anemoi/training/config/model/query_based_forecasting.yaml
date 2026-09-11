@@ -10,6 +10,10 @@ model:
 
 query:
   metadata_hidden_dim: 64
+  # Continuous query leads use log-spaced periods between one hour and one week.
+  lead_time_fourier_features: 8
+  lead_time_min_period_hours: 1.0
+  lead_time_max_period_hours: 168.0
   adapter_node_chunk_size: 4096
   processor_mesh_resolution: 4
   encoder_neighbours: 12

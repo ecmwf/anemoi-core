@@ -102,6 +102,10 @@ class QueryModelConfig(BaseModel):
     """Dimensions and geometry choices specific to the experimental query model."""
 
     metadata_hidden_dim: PositiveInt = 64
+    lead_time_fourier_features: PositiveInt = 8
+    "Number of log-spaced Fourier periods used by the continuous query lead-time encoder."
+    lead_time_min_period_hours: PositiveFloat = 1.0
+    lead_time_max_period_hours: PositiveFloat = 168.0
     adapter_node_chunk_size: PositiveInt = 4096
     processor_mesh_resolution: PositiveInt = 5
     encoder_neighbours: PositiveInt = 12

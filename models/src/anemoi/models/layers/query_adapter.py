@@ -50,6 +50,9 @@ CONTINUOUS_METADATA = (
     "aggregation_type_other",
 )
 
+TIME_OFFSET_NORMALIZATION_HOURS = 168.0
+_TIME_OFFSET_INDEX = CONTINUOUS_METADATA.index("time_offset_hours")
+
 
 def encode_bbox_metadata(
     bbox: tuple[float, float, float, float] | list[float] | None,
@@ -217,17 +220,52 @@ class QueryMetadataAdapter(nn.Module):
         provenance_embedding: nn.Embedding,
         unit_embedding: nn.Embedding,
         num_grids: int,
+        lead_time_fourier_features: int,
+        lead_time_min_period_hours: float,
+        lead_time_max_period_hours: float,
     ) -> None:
         super().__init__()
         self.variable_embedding = variable_embedding
         self.provenance_embedding = provenance_embedding
         self.unit_embedding = unit_embedding
         self.grid_embedding = nn.Embedding(num_grids, hidden_dim)
+        if lead_time_min_period_hours > lead_time_max_period_hours:
+            raise ValueError(
+                "lead_time_min_period_hours must not exceed lead_time_max_period_hours."
+            )
+        periods = torch.logspace(
+            math.log10(lead_time_min_period_hours),
+            math.log10(lead_time_max_period_hours),
+            lead_time_fourier_features,
+        )
+        self.register_buffer("lead_time_periods_hours", periods, persistent=True)
+        self.lead_time_encoder = nn.Sequential(
+            nn.Linear(1 + 2 * lead_time_fourier_features, hidden_dim),
+            nn.SiLU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
         self.net = nn.Sequential(
-            nn.Linear(metadata_dim + 4 * hidden_dim, hidden_dim),
+            nn.Linear(metadata_dim - 1 + 5 * hidden_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
+
+    def _lead_time_features(
+        self, metadata: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Separate continuous lead time from metadata and encode it smoothly."""
+        normalized = metadata[..., _TIME_OFFSET_INDEX : _TIME_OFFSET_INDEX + 1]
+        lead_time_hours = normalized * TIME_OFFSET_NORMALIZATION_HOURS
+        phase = 2 * math.pi * lead_time_hours / self.lead_time_periods_hours
+        features = torch.cat((normalized, torch.sin(phase), torch.cos(phase)), dim=-1)
+        remaining = torch.cat(
+            (
+                metadata[..., :_TIME_OFFSET_INDEX],
+                metadata[..., _TIME_OFFSET_INDEX + 1 :],
+            ),
+            dim=-1,
+        )
+        return remaining, lead_time_hours, self.lead_time_encoder(features)
 
     def forward(
         self,
@@ -237,14 +275,16 @@ class QueryMetadataAdapter(nn.Module):
         unit_ids: torch.Tensor,
         grid_ids: torch.Tensor,
     ) -> torch.Tensor:
+        remaining_metadata, _, lead_time_embedding = self._lead_time_features(metadata)
         return self.net(
             torch.cat(
                 (
-                    metadata,
+                    remaining_metadata,
                     self.variable_embedding(variable_ids),
                     self.provenance_embedding(provenance_ids),
                     self.unit_embedding(unit_ids),
                     self.grid_embedding(grid_ids),
+                    lead_time_embedding,
                 ),
                 dim=-1,
             )
@@ -264,9 +304,17 @@ class QueryMetadataAdapter(nn.Module):
         provenance = self.provenance_embedding(provenance_ids)
         unit = self.unit_embedding(unit_ids)
         grid = self.grid_embedding(grid_ids)
-        joint_input = torch.cat((metadata, variable, provenance, unit, grid), dim=-1)
+        remaining_metadata, lead_time_hours, lead_time_embedding = (
+            self._lead_time_features(metadata)
+        )
+        joint_input = torch.cat(
+            (remaining_metadata, variable, provenance, unit, grid, lead_time_embedding),
+            dim=-1,
+        )
         return {
             "continuous": metadata.detach(),
+            "lead_time_hours": lead_time_hours.detach(),
+            "lead_time_embedding": lead_time_embedding.detach(),
             "variable": variable.detach(),
             "provenance": provenance.detach(),
             "unit": unit.detach(),
