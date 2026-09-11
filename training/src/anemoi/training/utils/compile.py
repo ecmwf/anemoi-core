@@ -96,16 +96,24 @@ def _check_env_and_warn() -> None:
             "or try upgrading your PyTorch.",
         )
 
+
 def _set_num_threads(num_threads: int) -> None:
     """Sets the number of threads for PyTorch and the OMP environment variable.
-    Otherwise Pytorch Lightning sets it multiple times during runtime, leading to 
-    spurious recompilations due to 'global state (num_threads)' changing."""
+    Otherwise Pytorch Lightning sets it multiple times during runtime, leading to
+    spurious recompilations due to 'global state (num_threads)' changing.
+    """
     torch.set_num_threads(num_threads)
     os.environ["OMP_NUM_THREADS"] = str(num_threads)
 
+
 def _check_gradient_checkpointing(model_config: DictConfig) -> bool:
     """Checks if gradient checkpointing is enabled in the model configuration."""
-    return getattr(model_config.encoder, "activation_checkpointing", False) or getattr(model_config.decoder, "activation_checkpointing", False) or getattr(model_config.processor, "activation_checkpointing", False) 
+    return (
+        getattr(model_config.encoder, "activation_checkpointing", False)
+        or getattr(model_config.decoder, "activation_checkpointing", False)
+        or getattr(model_config.processor, "activation_checkpointing", False)
+    )
+
 
 def prepare_compilation(
     model: torch.nn.Module,
@@ -121,7 +129,7 @@ def prepare_compilation(
             "Gradient checkpointing is enabled. Be aware that using torch.compile() with gradient checkpointing "
             "can lead to non-deterministic errors stemming from micro-benchmarks leading to different compilation"
             "decisions for checkpointed code, which can lead to 'checkpoint metadata does not match' errors."
-            "\"mode='max-autotune'\" in particular can cause issues due to different block sizes based on micro-benchmarks."
+            "\"mode='max-autotune'\" in particular can cause issues due to different block sizes based on micro-benchmarks.",
         )
         torch._inductor.config.shape_padding = False  # non-deterministic shape padding can cause recompile errors when using torch compile inside checkpointed regions
         LOGGER.info("Disabled non-deterministic shape padding due to gradient checkpointing being enabled.")
