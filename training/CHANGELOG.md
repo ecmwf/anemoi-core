@@ -8,6 +8,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.1](https://github.com/ecmwf/anemoi-core/compare/training-0.17.0...training-0.17.1) (2026-09-11)
+
+
+### Features
+
+* Spatial preprocessor ([#1305](https://github.com/ecmwf/anemoi-core/issues/1305)) ([89f26fa](https://github.com/ecmwf/anemoi-core/commit/89f26fadd5d0daa9054776b538569da80e713a20))
+
+
+### Bug Fixes
+
+* **training:** Benchmark tests run again ([#1382](https://github.com/ecmwf/anemoi-core/issues/1382)) ([3594d55](https://github.com/ecmwf/anemoi-core/commit/3594d559c8c477c6811a2cc33fdb0bc8154d028a))
+* **training:** Replace memory efficient but unstable graph edge energ score formulation ([#1354](https://github.com/ecmwf/anemoi-core/issues/1354)) ([d7519f6](https://github.com/ecmwf/anemoi-core/commit/d7519f6b170e06d9c6e6d2e3d4e6fa435a48f678))
+* **training:** Update transformer.yaml ([#1389](https://github.com/ecmwf/anemoi-core/issues/1389)) ([396e1bb](https://github.com/ecmwf/anemoi-core/commit/396e1bb93883d3627510b1aa2b66a66f548e5b9c))
+
+
+### Performance Improvements
+
+* **training:** Fake dataloading ([#1387](https://github.com/ecmwf/anemoi-core/issues/1387)) ([53dcf12](https://github.com/ecmwf/anemoi-core/commit/53dcf12f123434eb0cb6bf4a3304f42ae0bcdc30))
+
+
+### Documentation
+
+* **training:** Link User Journey items in user-guide overview ([#1388](https://github.com/ecmwf/anemoi-core/issues/1388)) ([08b0a64](https://github.com/ecmwf/anemoi-core/commit/08b0a64d71b74b1007a73838456aa9791d7ffe78))
+
 ## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/training-0.16.0...training-0.17.0) (2026-09-07)
 
 
