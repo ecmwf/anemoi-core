@@ -17,6 +17,8 @@ from typing import Literal
 from typing import Optional
 from typing import Union
 
+from omegaconf import DictConfig
+from omegaconf import OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 from pydantic import NonNegativeFloat
@@ -25,8 +27,12 @@ from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import model_validator
 
+from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 
+from .aggregator import AggregatorSchema  # noqa: TC001
+from .bounding import BoundingSchema
 from .decoder import GNNDecoderSchema  # noqa: TC001
 from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
 from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
@@ -60,10 +66,6 @@ class DefinedModels(str, Enum):
         "anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportTendModelEncProcDec"
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
-    ANEMOI_MODEL_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER = "anemoi.models.models.autoencoder.AnemoiModelHierarchicalAutoEncoder"
-    ANEMOI_MODEL_HIER_AUTOENCODER_SHORT = "anemoi.models.models.AnemoiModelHierarchicalAutoEncoder"
 
 
 class Model(BaseModel):
@@ -143,99 +145,6 @@ class TransportModel(Model):
     "Transport model objective, path, conditioning, and inference configuration."
 
 
-class TrainableParameters(PydanticBaseModel):
-    data: NonNegativeInt = Field(example=8)
-    "Size of the learnable data node tensor. Default to 8."
-    hidden: NonNegativeInt = Field(example=8)
-    "Size of the learnable hidden node tensor. Default to 8."
-
-
-class ReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.ReluBounding"] = Field(..., alias="_target_")
-    "Relu bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the Relu method."
-
-
-class LeakyReluBoundingSchema(ReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-class FractionBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.FractionBounding"] = Field(..., alias="_target_")
-    "Fraction bounding object defined in anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh fraction method."
-    min_val: float
-    "The minimum value for the HardTanh activation. Correspond to the minimum fraction of the total_var."
-    max_val: float
-    "The maximum value for the HardTanh activation. Correspond to the maximum fraction of the total_var."
-    total_var: str
-    "Variable from which the secondary variables are derived. \
-    For example, convective precipitation should be a fraction of total precipitation."
-
-
-class LeakyFractionBoundingSchema(FractionBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyFractionBounding"] = Field(..., alias="_target_")
-    "Leaky fraction bounding object defined in anemoi.models.layers.bounding."
-
-
-class HardtanhBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.HardtanhBounding"] = Field(..., alias="_target_")
-    "Hard tanh bounding method function from anemoi.models.layers.bounding."
-    variables: list[str]
-    "List of variables to bound using the hard tanh method."
-    min_val: float
-    "The minimum value for the HardTanh activation."
-    max_val: float
-    "The maximum value for the HardTanh activation."
-
-
-class LeakyHardtanhBoundingSchema(HardtanhBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.LeakyHardtanhBounding"] = Field(..., alias="_target_")
-    "Leaky hard tanh bounding method function from anemoi.models.layers.bounding."
-
-
-class NormalizedReluBoundingSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedReluBounding"] = Field(..., alias="_target_")
-    variables: list[str]
-    min_val: list[float]
-    normalizer: list[str]
-
-    @model_validator(mode="after")
-    def check_num_normalizers_and_min_val_matches_num_variables(
-        self,
-    ) -> NormalizedReluBoundingSchema:
-        error_msg = f"""{self.__class__} requires that number of normalizers ({len(self.normalizer)}) or
-        match the number of variables ({len(self.variables)})"""
-        assert len(self.normalizer) == len(self.variables), error_msg
-        error_msg = f"""{self.__class__} requires that number of min_val ({len(self.min_val)}) or  match
-        the number of variables ({len(self.variables)})"""
-        assert len(self.min_val) == len(self.variables), error_msg
-        return self
-
-
-class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
-    target_: Literal["anemoi.models.layers.bounding.NormalizedLeakyReluBounding"] = Field(..., alias="_target_")
-    "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
-
-
-Bounding = Annotated[
-    Union[
-        ReluBoundingSchema,
-        LeakyReluBoundingSchema,
-        FractionBoundingSchema,
-        LeakyFractionBoundingSchema,
-        HardtanhBoundingSchema,
-        LeakyHardtanhBoundingSchema,
-        NormalizedReluBoundingSchema,
-        NormalizedLeakyReluBoundingSchema,
-    ],
-    Field(discriminator="target_"),
-]
-
-
 class NoOutputMaskSchema(BaseModel):
     target_: Literal["anemoi.training.utils.masks.NoOutputMask"] = Field(..., alias="_target_")
 
@@ -248,23 +157,61 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class EncodersSchema(BaseModel):
+    """Encoder schema"""
+
+    source_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the encoder is applicable."
+    dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
+    "Dataset fusing strategy. Default to 'not_supported'."
+    mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
+class DecodersSchema(BaseModel):
+    """Decoder schema"""
+
+    target_datasets: list[str] = Field(..., example=["dataset1", "dataset2"])
+    "List of datasets for which the decoder is applicable."
+    target_node_features: list[Literal[tuple(sorted(VALID_TARGET_FEATURES))]] = Field(
+        default_factory=lambda: ["encoded_data"]
+    )
+    "Whether to use the encoded latents from the encoder."
+    mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+
+
 class BaseModelSchema(PydanticBaseModel):
-    num_channels: NonNegativeInt = Field(example=512)
-    "Feature tensor size in the hidden space."
     keep_batch_sharded: bool = Field(default=True)
     "Keep the input batch and the output of the model sharded"
     sparse_projector: SparseProjectorSchema = Field(default_factory=SparseProjectorSchema)
     "Sparse projection settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
-    trainable_parameters: TrainableParameters = Field(default_factory=TrainableParameters)
+    node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])
     "Learnable node and edge parameters."
-    bounding: list[Bounding]
+    bounding: DatasetDict[list[BoundingSchema]]
     "List of bounding configuration applied in order to the specified variables."
-    output_mask: OutputMaskSchemas  # !TODO CHECK!
+    output_mask: DatasetDict[OutputMaskSchemas]  # !TODO CHECK!
     "Output mask"
     latent_skip: bool = True
     "Add skip connection in latent space before/after processor."
+    latent_aggregator: AggregatorSchema
+    "Latent aggregator schema."
     processor: Union[
         NoOpProcessorSchema,
         GNNProcessorSchema,
@@ -275,36 +222,29 @@ class BaseModelSchema(PydanticBaseModel):
         ...,
         discriminator="target_",
     )
-    "GNN processor schema."
-    encoder: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN encoder schema."
-    decoder: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
-        ...,
-        discriminator="target_",
-    )
-    "GNN decoder schema.",
-    residual: ResidualConnectionSchema = Field(
-        ...,
-        discriminator="target_",
-    )
+    "Model processor schema."
+    encoders: dict[str, EncodersSchema]
+    "Model encoders schemas."
+    decoders: dict[str, DecodersSchema]
+    "Model decoders schemas."
+    residual: DatasetDict[ResidualConnectionSchema]
     "Residual connection schema."
     compile: Optional[list[dict[str, Any]]] = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+
+    @model_validator(mode="before")
+    @classmethod
+    def cast_encoder_decoder_keys_to_str(cls, data: Any) -> Any:
+        """Cast encoder/decoder dict keys to str (YAML may parse them as int)."""
+        for field in ("encoders", "decoders"):
+            if field in data:
+                if isinstance(data[field], dict):
+                    data[field] = {str(k): v for k, v in data[field].items()}
+                elif isinstance(data[field], DictConfig):
+                    data[field] = OmegaConf.create({str(k): v for k, v in data[field].items()})
+        return data
 
 
 class NoOpNoiseInjectorSchema(BaseModel):
@@ -374,12 +314,22 @@ class TransportModelSchema(BaseModelSchema):
     @model_validator(mode="after")
     def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
         if self.bounding:
-            msg = (
-                "Transport models do not support bounding layers. "
-                f"Found {len(self.bounding)} bounding configuration(s). "
-                "Please remove all bounding configurations for transport models."
-            )
-            raise ValueError(msg)
+            if "datasets" in self.bounding:
+                for dataset_name, bounding_list in self.bounding["datasets"].items():
+                    if (bounding_list is not None) and len(bounding_list) > 0:
+                        msg = (
+                            "Transport models do not support bounding layers. "
+                            f"Found {len(bounding_list)} bounding configuration(s) for dataset '{dataset_name}'. "
+                            f"Please remove all bounding configurations for transport models."
+                        )
+                        raise ValueError(msg)
+            elif len(self.bounding) > 0:
+                msg = (
+                    "Transport models do not support bounding layers. "
+                    f"Found {len(self.bounding)} bounding configuration(s). "
+                    f"Please remove all bounding configurations for transport models."
+                )
+                raise ValueError(msg)
         return self
 
 
@@ -393,6 +343,42 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Toggle to do message passing at every downscaling and upscaling step"
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
+    upscale_mapper: Union[
+        GNNEncoderSchema,
+        GraphTransformerEncoderSchema,
+        TransformerEncoderSchema,
+        PointWiseForwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+    "Mapper used to upscale from a lower level to a higher level in the hierarchy."
+    downscale_mapper: Union[
+        GNNDecoderSchema,
+        GraphTransformerDecoderSchema,
+        TransformerDecoderSchema,
+        PointWiseBackwardMapperSchema,
+    ] = Field(
+        ...,
+        discriminator="target_",
+    )
+    "Mapper used to downscale from a higher level to a lower level in the hierarchy."
+
+    @model_validator(mode="before")
+    @classmethod
+    def default_num_channels_in_hierarchical_mapper(cls, data: Any) -> Any:
+        """Allow num_channels to be omitted.
+
+        It will be set at model build time.
+        """
+        for mapper_field in ("upscale_mapper", "downscale_mapper"):
+            if mapper_field in data:
+                mapper = data[mapper_field]
+                if isinstance(data, dict):
+                    mapper["num_channels"] = 1
+                elif isinstance(data, DictConfig):
+                    OmegaConf.update(mapper, "num_channels", 1, force_add=True)
+        return data
 
 
 ModelSchema = Union[
