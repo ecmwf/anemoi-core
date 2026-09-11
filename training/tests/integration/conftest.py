@@ -878,6 +878,17 @@ def offset_forecaster_tendency_transport_config(
 
 @pytest.fixture(scope="session")
 def partial_metadata_schema() -> dict[str, Any]:
+    """Defines the expected structure of the metadata dictionary produced by the trainer.
+
+    We only check a partial schema here, since we are in the process of consolidating the metadata structure
+    and content.
+    The goal is to prevent regressions in the metadata structure we are establishing for anemoi-inference
+    while allowing flexibility in the rest of the metadata content and structure as we iterate towards
+    a complete schema.
+    After the consolidation is complete, we can migrate to a complete schema and potentially
+    use pydantic for validation.
+    Before making changes to the partial schema below, check whether the change is compatible with anemoi-inference.
+    """
     return {
         "version": None,
         "config": None,
