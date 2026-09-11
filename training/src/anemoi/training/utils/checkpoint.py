@@ -21,7 +21,7 @@ from pytorch_lightning import Callback
 from pytorch_lightning import LightningModule
 from pytorch_lightning import Trainer
 
-from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import CkptMigrator
 from anemoi.models.preprocessing.imputer import BaseImputer
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
 from anemoi.utils.checkpoints import save_metadata
@@ -216,7 +216,7 @@ class RegisterMigrations(Callback):
     """Callback that register all existing migrations to a checkpoint before storing it."""
 
     def __init__(self):
-        self.migrator = Migrator()
+        self.migrator = CkptMigrator()
 
     def on_save_checkpoint(
         self,
