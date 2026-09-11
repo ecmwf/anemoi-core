@@ -75,6 +75,8 @@ class MultiDataset(IterableDataset):
         self.epoch = epoch
         self.rollout = rollout
         self.fake_dataloading = fake_dataloading
+        if self.fake_dataloading:
+            LOGGER.info("Using fake dataloading")
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
         # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
