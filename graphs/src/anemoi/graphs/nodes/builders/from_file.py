@@ -10,7 +10,6 @@
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -19,10 +18,8 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.masks import AreaMaskBuilder
+from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
-
-if TYPE_CHECKING:
-    from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
 
