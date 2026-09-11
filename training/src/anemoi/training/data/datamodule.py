@@ -131,6 +131,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        dataset_options = {}
+        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
+        if dataloader_config.get("fake_dataloading", False):
+            dataset_options["fake_dataloading"] = True
 
         return MultiDataset(
             data_readers=data_readers,
@@ -139,7 +143,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             label=label,
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
-            fake_dataloading=self.config.dataloader.fake_dataloading,
+            **dataset_options,
         )
 
     def set_epoch(self, epoch: int) -> None:
