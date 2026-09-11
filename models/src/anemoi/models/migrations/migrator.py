@@ -16,25 +16,26 @@ import importlib
 import importlib.util
 import logging
 import sys
-from collections.abc import Callable, MutableMapping, Sequence
+from collections.abc import Callable
+from collections.abc import MutableMapping
+from collections.abc import Sequence
 from copy import deepcopy
 from inspect import getsource
 from os import PathLike
 from pathlib import Path
 from pickle import Unpickler
 from types import ModuleType
-from typing import Any, Self, TypedDict
-
-from anemoi.utils.migrations import (
-    IncompleteMigrationScript,
-    Migration,
-    MigrationMetadata,
-    Migrator,
-    SerializedMigration,
-)
+from typing import Any
+from typing import Self
+from typing import TypedDict
 
 from anemoi.models import __version__
 from anemoi.models.migrations.setup_context import MigrationContext
+from anemoi.utils.migrations import IncompleteMigrationScript
+from anemoi.utils.migrations import Migration
+from anemoi.utils.migrations import MigrationMetadata
+from anemoi.utils.migrations import Migrator
+from anemoi.utils.migrations import SerializedMigration
 
 MIGRATION_PATH = Path(__file__).parent / "scripts"
 
@@ -52,9 +53,7 @@ CkptType = MutableMapping[str, Any]
 
 # migration is the version of the migration module to allow future update of
 # the script and keep backward compatibility
-MigrationVersions = TypedDict(
-    "MigrationVersions", {"migration": str, "anemoi-models": str}
-)
+MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-models": str})
 
 
 def _get_code_digest(content: str) -> str:
@@ -91,9 +90,7 @@ class CkptMigration(Migration[CkptType, CkptType, MigrationVersions]):
 
     @classmethod
     def from_migration(cls, name: str, migration: ModuleType) -> Self:
-        if not hasattr(migration, "metadata") or not isinstance(
-            migration.metadata, MigrationMetadata
-        ):
+        if not hasattr(migration, "metadata") or not isinstance(migration.metadata, MigrationMetadata):
             raise IncompleteMigrationScript("Migration script is missing metadata.")
 
         metadata = migration.metadata
@@ -192,9 +189,7 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
     return UnpicklerWrapper
 
 
-def _load_ckpt(
-    path: str | PathLike, replace_attrs: dict[str, list[str]] | bool = False
-) -> CkptType:
+def _load_ckpt(path: str | PathLike, replace_attrs: dict[str, list[str]] | bool = False) -> CkptType:
     """Loads a checkpoint
 
     Parameters
@@ -214,9 +209,7 @@ def _load_ckpt(
     import torch
 
     pickle_module = _get_unpickler(replace_attrs)
-    ckpt = torch.load(
-        path, map_location="cpu", pickle_module=pickle_module, weights_only=False
-    )
+    ckpt = torch.load(path, map_location="cpu", pickle_module=pickle_module, weights_only=False)
     if "pytorch-lightning_version" not in ckpt:
         raise ValueError(
             "You can only migrate training checkpoint. If you need a migrated inference checkpoint, fisrt "
@@ -242,9 +235,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         if migrations is None:
             # remove the ".migrator" at the end to get parent folder as migration package
             migration_pkg, _, _ = __name__.rpartition(".")
-            migrations = self._migrations_from_path(
-                CkptMigration, MIGRATION_PATH, f"{migration_pkg}.scripts"
-            )
+            migrations = self._migrations_from_path(CkptMigration, MIGRATION_PATH, f"{migration_pkg}.scripts")
 
         super().__init__(migrations, obj_migration_key or _CKPT_MIGRATION_KEY)
 
@@ -281,9 +272,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
                 raise IncompatibleCheckpointException(
                     f"Checkpoint cannot be migrated. Extra migrations are registered. ({registered_migration['name']})"
                 )
-            migrations.append(
-                compat_group[self._migration_refs[registered_migration["name"]]]
-            )
+            migrations.append(compat_group[self._migration_refs[registered_migration["name"]]])
         return migrations
 
     def missing_migrations(self, obj: CkptType) -> list[CkptMigration]:
@@ -294,9 +283,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             raise IncompatibleCheckpointException(
                 f"Checkpoint cannot be migrated. Extra migrations are registered. ({obj[self._obj_migration_key][-1]['name']})"
             )
-        last_registered_migration = self._migration_refs[
-            obj[self._obj_migration_key][-1]["name"]
-        ]
+        last_registered_migration = self._migration_refs[obj[self._obj_migration_key][-1]["name"]]
         return compat_group[last_registered_migration + 1 :]
 
     def _check_registered_script_changed(self, ckpt: CkptType) -> bool:
@@ -313,22 +300,11 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         bool
             Whether one script in the history has been modified.
         """
-        migration_signatures = {
-            migration.name: migration.signature
-            for migration in self.missing_migrations(ckpt)
-        }
-        history = (
-            ckpt.get("hyper_parameters", {})
-            .get("metadata", {})
-            .get("migrations", {})
-            .get("history", [])
-        )
+        migration_signatures = {migration.name: migration.signature for migration in self.missing_migrations(ckpt)}
+        history = ckpt.get("hyper_parameters", {}).get("metadata", {}).get("migrations", {}).get("history", [])
         has_run_modified_migrations = False
         for executed_migration in history:
-            if (
-                executed_migration["signature"]
-                != migration_signatures[executed_migration["name"]]
-            ):
+            if executed_migration["signature"] != migration_signatures[executed_migration["name"]]:
                 LOGGER.warning(
                     "Your checkpoint has executed migration %s, but the script has changed. "
                     "Re-run the migrations if possible to use the new updated script.",
@@ -354,9 +330,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         group = self._current_group(ckpt)
         if group == len(self._compatibility_groups) - 1:
             return None
-        return self._compatibility_groups[group + 1][0].metadata.versions[
-            "anemoi-models"
-        ]
+        return self._compatibility_groups[group + 1][0].metadata.versions["anemoi-models"]
 
     def _resolve_context(self, context: MigrationContext) -> None:
         """Resolves the final context object after all setup callbacks have been executed.
@@ -381,12 +355,8 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             full_attribute_path_end,
             attribute_path_start,
         ) in context.attribute_paths.items():
-            attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(
-                "."
-            )
-            attribute_path_end, _, mod_name_end = full_attribute_path_end.rpartition(
-                "."
-            )
+            attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(".")
+            attribute_path_end, _, mod_name_end = full_attribute_path_end.rpartition(".")
             LOGGER.debug(
                 "Move attribute %s from %s to %s.",
                 mod_name_start,
@@ -398,9 +368,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             mod_start = sys.modules[attribute_path_start]
             setattr(mod_start, mod_name_start, attr_end)
 
-    def sync(
-        self, path: str | PathLike
-    ) -> tuple[CkptType, CkptType, list[CkptMigration]]:
+    def sync(self, path: str | PathLike) -> tuple[CkptType, CkptType, list[CkptMigration]]:
         """Migrate or rollbacks the checkpoint using provided migrations
 
         Parameters
@@ -441,9 +409,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             replace_attrs["deleted_attributes"] = context.deleted_attributes
         # Force reloading checkpoint without obfuscating import issues.
         ckpt = _load_ckpt(path, replace_attrs)
-        ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault(
-            "history", []
-        )
+        ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for migration in missing_migrations:
             if migration.migrate is None:
                 raise IncompatibleCheckpointException(
@@ -481,9 +447,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
                 "No compatible migration available: the checkpoint is too old. "
                 f"Use a version of anemoi-models < {first_incompatible_version}."
             )
-        return list(self.registered_migrations(ckpt)), list(
-            self.missing_migrations(ckpt)
-        )
+        return list(self.registered_migrations(ckpt)), list(self.missing_migrations(ckpt))
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
         """Registers a list of migration to the checkpoint.
@@ -513,9 +477,7 @@ class SaveCkpt:
     def __init__(self, ckpt_dir: Path):
         self.ckpt_dir = ckpt_dir
 
-    def __call__(
-        self, ckpt: CkptType, migrations: list[dict[str, Any]], name: str = "model.ckpt"
-    ) -> Path:
+    def __call__(self, ckpt: CkptType, migrations: list[dict[str, Any]], name: str = "model.ckpt") -> Path:
         import torch
 
         ckpt_migrations: list[SerializedMigration] = []
