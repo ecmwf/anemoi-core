@@ -43,5 +43,28 @@ diagnostics:
       tracking_uri: ${system.output.root}/mlflow  # local file store, no server needed
       offline: True  # no server to sync to - stays local
 
+data:
+  # JointVariableNormalizer instead of the default InputNormalizer: pools mean/stdev across all
+  # pressure levels of the same physical variable, instead of normalizing each level on its own -
+  # see JointVariableNormalizer's docstring. Keeps the rest of zarr.yaml's normalizer.config as-is
+  # (default method, per-variable overrides), only the _target_ changes.
+  datasets:
+    data:
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.joint_variable_normalizer.JointVariableNormalizer
+
+model:
+  # Replaces the raw per-variable input the encoder would otherwise see with a learned
+  # embedding (per physical variable + pressure level) before the encoder mapper runs -
+  # see model.input_transform hook in AnemoiModelEncProcDec._assemble_input.
+  # mean/std intentionally omitted: JointVariableNormalizer above already normalizes upstream,
+  # so FeatureTokenizer's own defaults (mean=0, std=1 - i.e. a no-op) are what we want here.
+  input_transform:
+    _target_: anemoi.models.layers.embedder.Embedder
+    dim: 16
+    d_model: 64
+    nhead: 4
+
 # multi_scale.yaml's hidden mesh (TriNodes, resolution: 5, ~10k nodes) is the standard
 # pairing for O96 data (~40k grid points) - left as default, no override needed here.
