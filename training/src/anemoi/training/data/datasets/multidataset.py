@@ -36,6 +36,7 @@ class MultiDataset(AnemoiDataset):
         label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
+        batch_size: int = 1,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -54,6 +55,9 @@ class MultiDataset(AnemoiDataset):
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
             Rollout length represented by the loaded relative date indices, by default 1
+        batch_size : int, optional
+            Per-GPU batch size, by default 1. Not used by this dataset (every sample
+            already contains all readers); accepted for a uniform constructor.
         """
         super().__init__(
             data_readers=data_readers,
@@ -61,6 +65,7 @@ class MultiDataset(AnemoiDataset):
             label=label,
             epoch=epoch,
             rollout=rollout,
+            batch_size=batch_size,
         )
         self._check_no_mixed_sequence_types()
         self._set_relative_date_indices(relative_date_indices)

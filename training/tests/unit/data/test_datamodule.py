@@ -204,6 +204,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule.epoch = 7
     datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
+    datamodule.config = DictConfig({"dataloader": {"batch_size": {"training": 4, "validation": 2, "test": 1}}})
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
@@ -225,6 +226,7 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         label="validation",
         epoch=7,
         rollout=2,
+        batch_size=2,
     )
 
 

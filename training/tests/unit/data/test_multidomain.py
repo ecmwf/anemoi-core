@@ -143,6 +143,156 @@ class TestMultiDomain:
 
         assert list(first) == list(second)
 
+    @staticmethod
+    def _batches(samples: list[tuple[str, int]], batch_size: int) -> list[list[tuple[str, int]]]:
+        """Group consecutive samples the way the DataLoader collates one worker's iterator."""
+        return [samples[start : start + batch_size] for start in range(0, len(samples), batch_size)]
+
+    @pytest.mark.parametrize("batch_size", [1, 2, 4])
+    def test_sampler_batches_are_domain_pure(self, batch_size: int) -> None:
+        valid_date_indices = {"dataset_a": np.arange(23), "dataset_b": np.arange(9), "dataset_c": np.arange(4)}
+        chunk_index_range = {domain: np.arange(len(indices)) for domain, indices in valid_date_indices.items()}
+
+        sampler = MultiDomainSampler(
+            valid_date_indices,
+            chunk_index_range,
+            np.random.default_rng(7),
+            batch_size=batch_size,
+        )
+        samples = list(sampler)
+
+        assert len(samples) == len(sampler)
+        assert len(samples) % batch_size == 0
+        for batch in self._batches(samples, batch_size):
+            assert len({domain for domain, _ in batch}) == 1
+        # every kept sample is unique
+        assert len(set(samples)) == len(samples)
+
+    @pytest.mark.parametrize("batch_size", [1, 2, 4])
+    def test_sampler_drops_only_trailing_remainder_per_domain(self, batch_size: int) -> None:
+        valid_date_indices = {"dataset_a": np.arange(23), "dataset_b": np.arange(9)}
+        chunk_index_range = {domain: np.arange(len(indices)) for domain, indices in valid_date_indices.items()}
+
+        sampler = MultiDomainSampler(
+            valid_date_indices,
+            chunk_index_range,
+            np.random.default_rng(7),
+            batch_size=batch_size,
+        )
+        samples = list(sampler)
+
+        for domain, indices in valid_date_indices.items():
+            n_kept = sum(1 for sampled_domain, _ in samples if sampled_domain == domain)
+            assert n_kept == (len(indices) // batch_size) * batch_size
+            assert sampler.num_blocks(domain) == len(indices) // batch_size
+            assert sampler.num_dropped(domain) == len(indices) % batch_size
+        assert len(sampler) == sum((len(indices) // batch_size) * batch_size for indices in valid_date_indices.values())
+
+    def test_sampler_blocks_are_proportional_to_domain_size(self) -> None:
+        valid_date_indices = {"dataset_a": np.arange(40), "dataset_b": np.arange(20), "dataset_c": np.arange(10)}
+        chunk_index_range = {domain: np.arange(len(indices)) for domain, indices in valid_date_indices.items()}
+
+        sampler = MultiDomainSampler(valid_date_indices, chunk_index_range, np.random.default_rng(3), batch_size=2)
+        batches = self._batches(list(sampler), 2)
+        domain_batches = {domain: sum(1 for batch in batches if batch[0][0] == domain) for domain in valid_date_indices}
+
+        assert domain_batches == {"dataset_a": 20, "dataset_b": 10, "dataset_c": 5}
+
+    def test_sampler_shuffles_block_order_not_only_within_blocks(self) -> None:
+        valid_date_indices = {"dataset_a": np.arange(16), "dataset_b": np.arange(16)}
+        chunk_index_range = {domain: np.arange(len(indices)) for domain, indices in valid_date_indices.items()}
+
+        sampler = MultiDomainSampler(valid_date_indices, chunk_index_range, np.random.default_rng(11), batch_size=4)
+        domain_sequence = [batch[0][0] for batch in self._batches(list(sampler), 4)]
+
+        # without block shuffling all dataset_a batches would precede all dataset_b batches
+        assert domain_sequence != sorted(domain_sequence)
+
+    def test_sampler_without_shuffle_yields_full_blocks_in_order(self) -> None:
+        sampler = MultiDomainSampler(
+            {"dataset_a": np.arange(5), "dataset_b": np.arange(3)},
+            {"dataset_a": np.arange(5), "dataset_b": np.arange(3)},
+            np.random.default_rng(42),
+            shuffle=False,
+            batch_size=2,
+        )
+
+        assert len(sampler) == 6
+        assert list(sampler) == [
+            ("dataset_a", 0),
+            ("dataset_a", 1),
+            ("dataset_a", 2),
+            ("dataset_a", 3),
+            ("dataset_b", 0),
+            ("dataset_b", 1),
+        ]
+
+    def test_sampler_same_seed_gives_same_domain_sequence_across_sample_groups(self) -> None:
+        """All DDP ranks (sample comm groups) must see the same domain per step for batch_size > 1."""
+        valid_date_indices = {"dataset_a": np.arange(16), "dataset_b": np.arange(8)}
+        group_0_ranges = {"dataset_a": np.arange(0, 8), "dataset_b": np.arange(0, 4)}
+        group_1_ranges = {"dataset_a": np.arange(8, 16), "dataset_b": np.arange(4, 8)}
+
+        group_0 = list(MultiDomainSampler(valid_date_indices, group_0_ranges, np.random.default_rng(5), batch_size=4))
+        group_1 = list(MultiDomainSampler(valid_date_indices, group_1_ranges, np.random.default_rng(5), batch_size=4))
+
+        assert [domain for domain, _ in group_0] == [domain for domain, _ in group_1]
+        for domain in valid_date_indices:
+            group_0_indices = {index for sampled_domain, index in group_0 if sampled_domain == domain}
+            group_1_indices = {index for sampled_domain, index in group_1 if sampled_domain == domain}
+            assert group_0_indices.isdisjoint(group_1_indices)
+
+    def test_sampler_reshuffles_for_different_seed(self) -> None:
+        valid_date_indices = {"dataset_a": np.arange(16), "dataset_b": np.arange(8)}
+        chunk_index_range = {domain: np.arange(len(indices)) for domain, indices in valid_date_indices.items()}
+
+        first = list(MultiDomainSampler(valid_date_indices, chunk_index_range, np.random.default_rng(1), batch_size=2))
+        second = list(MultiDomainSampler(valid_date_indices, chunk_index_range, np.random.default_rng(2), batch_size=2))
+
+        assert first != second
+        assert set(first) == set(second)
+
+    def test_sampler_rejects_invalid_batch_size(self) -> None:
+        with pytest.raises(ValueError, match="batch_size must be >= 1"):
+            MultiDomainSampler(
+                {"dataset_a": np.arange(4)},
+                {"dataset_a": np.arange(4)},
+                np.random.default_rng(0),
+                batch_size=0,
+            )
+
+    def test_dataset_iter_yields_domain_pure_batches(
+        self,
+        multi_domain: MultiDomainDataset,
+        mocker: MockFixture,
+    ) -> None:
+        """End-to-end: dataset __iter__ honours batch_size and epoch changes reshuffle the block order."""
+        mocker.patch("anemoi.training.data.datasets.anemoidataset.get_base_seed", return_value=1000)
+        dataset = MultiDomainDataset(
+            data_readers=multi_domain.data_readers,
+            relative_date_indices=multi_domain.relative_date_indices,
+            batch_size=2,
+        )
+        # make the yielded sample identify (domain, index) so the order can be inspected
+        mocker.patch.object(dataset, "get_sample", side_effect=lambda domain, index: (domain, index))
+
+        dataset.set_epoch(0)
+        dataset.per_worker_init(n_workers=1, worker_id=0)
+        epoch_0 = list(dataset)
+
+        # dataset_a has 14 anchors -> 7 blocks, dataset_b has 4 anchors -> 2 blocks
+        assert len(epoch_0) == 18
+        assert len(set(epoch_0)) == 18
+        for batch in self._batches(epoch_0, 2):
+            assert len({domain for domain, _ in batch}) == 1
+
+        dataset.set_epoch(1)
+        dataset.per_worker_init(n_workers=1, worker_id=0)
+        epoch_1 = list(dataset)
+
+        assert epoch_1 != epoch_0
+        assert set(epoch_1) == set(epoch_0)
+
     def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.data_readers["dataset_b"].metadata["variables_metadata"]["10u"]["units"] = "km/h"
 

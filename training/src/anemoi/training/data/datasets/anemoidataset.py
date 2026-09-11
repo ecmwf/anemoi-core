@@ -53,6 +53,7 @@ class AnemoiDataset(IterableDataset, ABC):
         label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
+        batch_size: int = 1,
     ) -> None:
         """Initialize a dataset backed by one or more data readers.
 
@@ -69,13 +70,20 @@ class AnemoiDataset(IterableDataset, ABC):
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
             Rollout length represented by the loaded relative date indices, by default 1
+        batch_size : int, optional
+            Per-GPU batch size the DataLoader will collate from this dataset, by default 1.
+            Subclasses whose sampling order must respect batch boundaries use it.
         """
+        if batch_size < 1:
+            msg = f"batch_size must be >= 1, got {batch_size}"
+            raise ValueError(msg)
         self.data_readers = data_readers
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
+        self.batch_size = batch_size
         self.relative_date_indices: dict[str, TimeIndices] = {}
         self._lazy_init_model_and_reader_group_info()
 

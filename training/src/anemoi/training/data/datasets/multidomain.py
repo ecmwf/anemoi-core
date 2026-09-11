@@ -25,7 +25,15 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MultiDomainSampler:
-    """Sample domain and index pairs for a multi-domain worker."""
+    """Sample domain and index pairs for a multi-domain worker in domain-pure blocks.
+
+    Each domain's worker slice is cut into consecutive blocks of ``batch_size``
+    samples; blocks are then interleaved across domains. Because the DataLoader
+    collates ``batch_size`` consecutive samples from ONE worker's iterator, every
+    batch contains a single domain. Trailing samples that do not fill a block
+    are dropped for the current epoch (they are reshuffled into blocks in later
+    epochs when ``shuffle`` is on).
+    """
 
     def __init__(
         self,
@@ -33,31 +41,49 @@ class MultiDomainSampler:
         chunk_index_range: Mapping[str, np.ndarray],
         rng: np.random.Generator,
         shuffle: bool = True,
+        batch_size: int = 1,
     ) -> None:
+        if batch_size < 1:
+            msg = f"batch_size must be >= 1, got {batch_size}"
+            raise ValueError(msg)
         self.valid_date_indices = valid_date_indices
         self.chunk_index_range = chunk_index_range
         self.shuffle = shuffle
         self.rng = rng
+        self.batch_size = batch_size
+
+    def num_blocks(self, domain: str) -> int:
+        """Return the number of full blocks this worker yields for ``domain``."""
+        return len(self.chunk_index_range[domain]) // self.batch_size
+
+    def num_dropped(self, domain: str) -> int:
+        """Return the number of trailing samples of ``domain`` that do not fill a block."""
+        return len(self.chunk_index_range[domain]) % self.batch_size
 
     def __len__(self) -> int:
-        """Return the number of samples assigned to the worker."""
-        return sum(len(indices) for indices in self.chunk_index_range.values())
+        """Return the number of samples yielded to the worker (full blocks only)."""
+        return sum(self.num_blocks(domain) for domain in self.chunk_index_range) * self.batch_size
+
+    def _domain_blocks(self, domain: str) -> list[list[tuple[str, int]]]:
+        """Return this worker's slice of ``domain`` cut into blocks of ``batch_size``."""
+        indices = self.valid_date_indices[domain]
+        if self.shuffle:
+            indices = self.rng.choice(indices, size=len(indices), replace=False)
+        indices = indices[self.chunk_index_range[domain]]
+        n_full = self.num_blocks(domain) * self.batch_size
+        return [
+            [(domain, int(index)) for index in indices[start : start + self.batch_size]]
+            for start in range(0, n_full, self.batch_size)
+        ]
 
     def __iter__(self) -> Generator[tuple[str, int], None, None]:
-        """Yield domain and index pairs in worker sampling order."""
-        domain_indices = {
-            domain: (
-                self.rng.choice(indices, size=len(indices), replace=False)[self.chunk_index_range[domain]]
-                if self.shuffle
-                else indices[self.chunk_index_range[domain]]
-            )
-            for domain, indices in self.valid_date_indices.items()
-        }
-        samples = [(domain, int(index)) for domain, indices in domain_indices.items() for index in indices]
+        """Yield domain and index pairs block by block in worker sampling order."""
+        blocks = [block for domain in self.valid_date_indices for block in self._domain_blocks(domain)]
         if self.shuffle:
-            order = self.rng.choice(len(samples), size=len(samples), replace=False)
-            samples = [samples[int(index)] for index in order]
-        yield from samples
+            order = self.rng.permutation(len(blocks))
+            blocks = [blocks[int(index)] for index in order]
+        for block in blocks:
+            yield from block
 
 
 class MultiDomainDataset(AnemoiDataset):
@@ -80,6 +106,7 @@ class MultiDomainDataset(AnemoiDataset):
         label: str = "multidomain",
         epoch: int = 0,
         rollout: int = 1,
+        batch_size: int = 1,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
         """A dataset that combines multiple data_readers together.
@@ -98,6 +125,9 @@ class MultiDomainDataset(AnemoiDataset):
             Epoch used for deterministic shuffling, by default 0.
         rollout : int, optional
             Rollout length represented by the relative date indices, by default 1.
+        batch_size : int, optional
+            Per-GPU batch size the DataLoader collates, by default 1. Samples are
+            yielded in domain-pure blocks of this size so every batch holds one domain.
         check_variables_compatibility : Mapping[str, object], optional
             Options forwarded to ``Variable.check_compatibility``. The options
             follow ``CheckVariablesCompatibilitySchema``.
@@ -108,6 +138,7 @@ class MultiDomainDataset(AnemoiDataset):
             label=label,
             epoch=epoch,
             rollout=rollout,
+            batch_size=batch_size,
         )
         self._check_no_mixed_sequence_types()
         self._set_relative_date_indices(relative_date_indices)
@@ -204,29 +235,42 @@ class MultiDomainDataset(AnemoiDataset):
         return {domain_name: self._read(domain_name, sequence, position)}
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
-        """Yield samples from independently partitioned domains.
+        """Yield samples from independently partitioned domains in domain-pure blocks.
 
-        Each domain is shuffled before its worker slice is selected. The slices
-        are then combined and shuffled again, giving sampling proportional to
-        each domain's available samples. All sample communication groups use the
-        same seed and therefore process domains in the same order, avoiding
-        mismatched collective operations. ``MultiDomainSampler`` owns this
-        ordering because PyTorch does not support a DataLoader sampler for
-        ``IterableDataset``.
+        Each domain is shuffled before its worker slice is selected and cut into
+        blocks of ``batch_size``. The blocks of all domains are then shuffled
+        together, giving sampling proportional to each domain's available
+        samples while keeping every DataLoader batch within a single domain.
+        All sample communication groups use the same seed and therefore process
+        domains in the same order, avoiding mismatched collective operations.
+        ``MultiDomainSampler`` owns this ordering because PyTorch does not
+        support a DataLoader sampler for ``IterableDataset``.
 
         Returns
         -------
         Generator[dict[str, torch.Tensor], None, None]
             A generator yielding dictionaries containing tensor samples and their corresponding domain names
         """
-        labeled_samples = list(
-            MultiDomainSampler(
-                self.valid_date_indices,
-                self.chunk_index_range,
-                self.rng,
-                self.shuffle,
-            ),
+        sampler = MultiDomainSampler(
+            self.valid_date_indices,
+            self.chunk_index_range,
+            self.rng,
+            self.shuffle,
+            batch_size=self.batch_size,
         )
+        for domain_name in self.dataset_names:
+            if sampler.num_dropped(domain_name):
+                LOGGER.info(
+                    "Worker %d (%s): dropping %d trailing sample(s) of domain '%s' that do not fill a "
+                    "batch of %d (%d full batches kept).",
+                    self.worker_id,
+                    self.label,
+                    sampler.num_dropped(domain_name),
+                    domain_name,
+                    self.batch_size,
+                    sampler.num_blocks(domain_name),
+                )
+        labeled_samples = list(sampler)
 
         LOGGER.debug(
             (

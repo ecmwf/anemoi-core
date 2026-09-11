@@ -164,6 +164,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             label=label,
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
+            batch_size=self.config.dataloader.batch_size[label],
         )
 
     def set_epoch(self, epoch: int) -> None:
