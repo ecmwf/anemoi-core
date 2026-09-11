@@ -13,6 +13,7 @@ import os
 import random
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Iterator
 from collections.abc import Mapping
 from functools import cached_property
 
@@ -76,7 +77,10 @@ class AnemoiDataset(IterableDataset, ABC):
     participant across all datasets; selection policies work on rows.
     Everything keyed by ``dataset_name`` only (relative date indices, shard
     sizes, statistics, metadata, ...) is a per-dataset quantity taken from the
-    dataset's reference participant (:attr:`reference_readers`).
+    dataset's reference participant (:attr:`reference_readers`; configured via
+    ``statistics_from``, default: the first participant). Participants of a
+    dataset must expose the same variables and frequency; their statistics
+    should agree with the reference (a warning is logged otherwise).
     """
 
     def __init__(
@@ -87,6 +91,7 @@ class AnemoiDataset(IterableDataset, ABC):
         epoch: int = 0,
         rollout: int = 1,
         batch_size: int = 1,
+        reference_participants: Mapping[str, str] | None = None,
     ) -> None:
         """Initialize a dataset backed by one or more data readers.
 
@@ -106,12 +111,20 @@ class AnemoiDataset(IterableDataset, ABC):
         batch_size : int, optional
             Per-GPU batch size the DataLoader will collate from this dataset, by default 1.
             Subclasses whose sampling order must respect batch boundaries use it.
+        reference_participants : Mapping[str, str], optional
+            ``{dataset_name: participant}`` naming the participant that provides the
+            per-dataset quantities (statistics, metadata, variable indices, relative date
+            indices) of a dataset with several participants (config: ``statistics_from``).
+            Datasets not listed use their first participant.
         """
         if batch_size < 1:
             msg = f"batch_size must be >= 1, got {batch_size}"
             raise ValueError(msg)
         self.participant_readers = normalize_participant_readers(data_readers)
         self.dataset_names = list(self.participant_readers.keys())
+        self.reference_participants = self._resolve_reference_participants(reference_participants or {})
+        self._check_participants_compatible()
+        self._warn_on_statistics_mismatch()
         self.label = label
         self.shuffle = shuffle
         self.epoch = epoch
@@ -119,6 +132,98 @@ class AnemoiDataset(IterableDataset, ABC):
         self.batch_size = batch_size
         self.relative_date_indices: dict[str, TimeIndices] = {}
         self._lazy_init_model_and_reader_group_info()
+
+    def _resolve_reference_participants(self, requested: Mapping[str, str]) -> dict[str, str]:
+        """Return ``{dataset_name: participant}`` for every dataset (default: first participant)."""
+        unknown = set(requested) - set(self.participant_readers)
+        if unknown:
+            msg = f"reference_participants given for unknown dataset(s) {sorted(unknown)}; known: {self.dataset_names}"
+            raise ValueError(msg)
+        reference = {}
+        for dataset_name, participants in self.participant_readers.items():
+            participant = requested.get(dataset_name, next(iter(participants)))
+            if participant not in participants:
+                msg = (
+                    f"Dataset '{dataset_name}': reference participant (statistics_from) '{participant}' is not one "
+                    f"of its participants {list(participants)}."
+                )
+                raise ValueError(msg)
+            reference[dataset_name] = participant
+        return reference
+
+    def _multi_participant_datasets(self) -> Iterator[tuple[str, str, dict[str, BaseAnemoiReader]]]:
+        """Yield ``(dataset_name, reference_participant, participants)`` for datasets with >1 participant."""
+        for dataset_name, participants in self.participant_readers.items():
+            if len(participants) > 1:
+                yield dataset_name, self.reference_participants[dataset_name], participants
+
+    def _check_participants_compatible(self) -> None:
+        """Participants of a dataset must expose the same variables (names and order) and frequency."""
+        for dataset_name, reference, participants in self._multi_participant_datasets():
+            ref_reader = participants[reference]
+            ref_variables = list(ref_reader.variables)
+            for participant, reader in participants.items():
+                if participant == reference:
+                    continue
+                variables = list(reader.variables)
+                if variables != ref_variables:
+                    missing = sorted(set(ref_variables) - set(variables))
+                    extra = sorted(set(variables) - set(ref_variables))
+                    detail = (
+                        f"missing {missing}, extra {extra}"
+                        if missing or extra
+                        else f"same variables in a different order: {variables} vs {ref_variables}"
+                    )
+                    msg = (
+                        f"Dataset '{dataset_name}': participant '{participant}' does not have the variables of "
+                        f"reference participant '{reference}' ({detail})."
+                    )
+                    raise ValueError(msg)
+                if reader.frequency != ref_reader.frequency:
+                    msg = (
+                        f"Dataset '{dataset_name}': participant '{participant}' has frequency {reader.frequency}, "
+                        f"reference participant '{reference}' has {ref_reader.frequency}."
+                    )
+                    raise ValueError(msg)
+
+    def _warn_on_statistics_mismatch(self, tolerance: float = 1e-3, top: int = 5) -> None:
+        """Warn when a participant's statistics deviate from the reference used for normalisation.
+
+        The deviation of a variable is ``max(|mean - mean_ref|, |stdev - stdev_ref|) / stdev_ref``.
+        """
+        for dataset_name, reference, participants in self._multi_participant_datasets():
+            ref_reader = participants[reference]
+            ref_stats = ref_reader.statistics
+            if not all(key in ref_stats for key in ("mean", "stdev")):
+                continue
+            variables = list(ref_reader.variables)
+            ref_mean = np.asarray(ref_stats["mean"], dtype=float)
+            ref_stdev = np.asarray(ref_stats["stdev"], dtype=float)
+            scale = np.maximum(np.abs(ref_stdev), np.finfo(float).tiny)
+            for participant, reader in participants.items():
+                if participant == reference:
+                    continue
+                stats = reader.statistics
+                if not all(key in stats for key in ("mean", "stdev")):
+                    continue
+                deviation = (
+                    np.maximum(
+                        np.abs(np.asarray(stats["mean"], dtype=float) - ref_mean),
+                        np.abs(np.asarray(stats["stdev"], dtype=float) - ref_stdev),
+                    )
+                    / scale
+                )
+                if deviation.max() <= tolerance:
+                    continue
+                worst = np.argsort(deviation)[::-1][:top]
+                LOGGER.warning(
+                    "Dataset '%s': statistics of participant '%s' differ from reference participant '%s' (used for "
+                    "normalisation); largest relative deviations: %s",
+                    dataset_name,
+                    participant,
+                    reference,
+                    ", ".join(f"{variables[i]}={deviation[i]:.3g}" for i in worst),
+                )
 
     def participant_row(self, participant: str | None = None) -> dict[str, BaseAnemoiReader]:
         """Return the readers of one participant across all datasets: ``{dataset_name: reader}``.
@@ -143,13 +248,16 @@ class AnemoiDataset(IterableDataset, ABC):
 
     @property
     def reference_readers(self) -> dict[str, BaseAnemoiReader]:
-        """Return one representative reader per dataset (its first participant).
+        """Return the reference reader of every dataset (see ``reference_participants``).
 
         All participants of a dataset share frequency and variables, so this is
         the reader to use for per-dataset quantities such as relative date indices,
         statistics and variable indices.
         """
-        return {name: next(iter(participants.values())) for name, participants in self.participant_readers.items()}
+        return {
+            name: participants[self.reference_participants[name]]
+            for name, participants in self.participant_readers.items()
+        }
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -249,8 +357,21 @@ class AnemoiDataset(IterableDataset, ABC):
 
     @cached_property
     def metadata(self) -> dict[str, dict]:
-        """Return combined metadata from all data readers."""
-        return self._collect("metadata")
+        """Return metadata per dataset.
+
+        For a dataset with several participants this is the reference participant's
+        metadata extended with ``participants`` (every participant's metadata) and
+        ``statistics_from`` (the reference participant), so checkpoints record how
+        the dataset was composed.
+        """
+        metadata = self._collect("metadata")
+        for dataset_name, reference, participants in self._multi_participant_datasets():
+            metadata[dataset_name] = {
+                **metadata[dataset_name],
+                "participants": {participant: reader.metadata for participant, reader in participants.items()},
+                "statistics_from": reference,
+            }
+        return metadata
 
     @cached_property
     def supporting_arrays(self) -> dict[str, dict]:

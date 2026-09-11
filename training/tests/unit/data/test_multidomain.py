@@ -32,6 +32,8 @@ class TestMultiDomain:
         mock_dataset_a.frequency = "3h"
         mock_dataset_a.grid_size = 5
         mock_dataset_a.num_sequences = 1
+        mock_dataset_a.variables = ["10u", "2t"]
+        mock_dataset_a.statistics = {"mean": np.array([1.0, 280.0]), "stdev": np.array([2.0, 10.0])}
         mock_dataset_a.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
         mock_dataset_a.compute_anchors.return_value = np.array(
             [[0, 0], *[[0, index] for index in range(11, 24)]],
@@ -40,9 +42,11 @@ class TestMultiDomain:
         mock_dataset_b = mocker.MagicMock()
         mock_dataset_b.missing = set()
         mock_dataset_b.dates = list(range(20, 60))
-        mock_dataset_b.frequency = "1h"
+        mock_dataset_b.frequency = "3h"
         mock_dataset_b.grid_size = 8
         mock_dataset_b.num_sequences = 1
+        mock_dataset_b.variables = ["10u", "2t"]
+        mock_dataset_b.statistics = {"mean": np.array([1.0, 280.0]), "stdev": np.array([2.0, 10.0])}
         mock_dataset_b.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
         mock_dataset_b.compute_anchors.return_value = np.array([[0, 0], [0, 1], [0, 2], [0, 3]])
 
@@ -58,14 +62,106 @@ class TestMultiDomain:
         assert multi_domain.dataset_name == "data"
         assert multi_domain.dataset_names == ["data"]
         assert multi_domain.participants == ["dataset_a", "dataset_b"]
+        assert multi_domain.reference_participants == {"data": "dataset_a"}
         assert multi_domain.reference_readers == {"data": readers["dataset_a"]}
         assert multi_domain.participant_row("dataset_b") == {"data": readers["dataset_b"]}
         assert set(multi_domain.relative_date_indices) == {"data"}
         # dataset-level properties are keyed by dataset name (reference participant) ...
-        assert multi_domain.metadata == {"data": readers["dataset_a"].metadata}
+        assert multi_domain.statistics == {"data": readers["dataset_a"].statistics}
+        assert multi_domain.name_to_index == {"data": readers["dataset_a"].name_to_index}
         assert set(multi_domain.shard_shapes) == {"data"}
         # ... per-participant values stay available
         assert multi_domain._collect_participants("grid_size") == {"data": {"dataset_a": 5, "dataset_b": 8}}
+
+    def test_metadata_records_participants(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
+        assert multi_domain.metadata == {
+            "data": {
+                **readers["dataset_a"].metadata,
+                "participants": {p: readers[p].metadata for p in ("dataset_a", "dataset_b")},
+                "statistics_from": "dataset_a",
+            },
+        }
+        # reader metadata is not mutated
+        assert "participants" not in readers["dataset_a"].metadata
+
+    def test_statistics_from_selects_reference_participant(self, multi_domain: MultiDomainDataset) -> None:
+        readers = multi_domain.participant_readers["data"]
+        dataset = MultiDomainDataset(
+            data_readers=multi_domain.participant_readers,
+            relative_date_indices=multi_domain.relative_date_indices,
+            reference_participants={"data": "dataset_b"},
+        )
+        assert dataset.reference_participants == {"data": "dataset_b"}
+        assert dataset.reference_readers == {"data": readers["dataset_b"]}
+        assert dataset.statistics == {"data": readers["dataset_b"].statistics}
+        assert dataset.metadata["data"]["statistics_from"] == "dataset_b"
+
+    def test_unknown_reference_participant_raises(self, multi_domain: MultiDomainDataset) -> None:
+        with pytest.raises(ValueError, match="'dataset_c' is not one of its participants"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+                reference_participants={"data": "dataset_c"},
+            )
+        with pytest.raises(ValueError, match="unknown dataset"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+                reference_participants={"other": "dataset_a"},
+            )
+
+    @pytest.mark.parametrize(
+        ("variables", "match"),
+        [
+            (["10u"], r"missing \['2t'\], extra \[\]"),
+            (["2t", "10u"], "different order"),
+        ],
+    )
+    def test_participant_variables_must_match(
+        self,
+        multi_domain: MultiDomainDataset,
+        variables: list[str],
+        match: str,
+    ) -> None:
+        multi_domain.participant_readers["data"]["dataset_b"].variables = variables
+        with pytest.raises(ValueError, match=f"participant 'dataset_b' does not have the variables.*{match}"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
+
+    def test_participant_frequency_must_match(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.participant_readers["data"]["dataset_b"].frequency = "1h"
+        with pytest.raises(ValueError, match="participant 'dataset_b' has frequency 1h, reference participant"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
+
+    def test_statistics_mismatch_warns(
+        self,
+        multi_domain: MultiDomainDataset,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        readers = multi_domain.participant_readers["data"]
+        readers["dataset_b"].statistics = {"mean": np.array([1.0, 285.0]), "stdev": np.array([2.0, 10.0])}
+        with caplog.at_level("WARNING"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
+        assert "statistics of participant 'dataset_b' differ from reference participant 'dataset_a'" in caplog.text
+        assert "2t=0.5" in caplog.text
+
+        caplog.clear()
+        readers["dataset_b"].statistics = dict(readers["dataset_a"].statistics)
+        with caplog.at_level("WARNING"):
+            MultiDomainDataset(
+                data_readers=multi_domain.participant_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
+        assert "differ from reference" not in caplog.text
 
     def test_rejects_several_datasets(self, multi_domain: MultiDomainDataset) -> None:
         readers = multi_domain.participant_readers["data"]

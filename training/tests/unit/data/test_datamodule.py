@@ -229,11 +229,12 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         epoch=7,
         rollout=2,
         batch_size=2,
+        reference_participants={},
     )
 
 
 def test_get_dataset_builds_one_reader_per_participant(mocker: MockFixture) -> None:
-    """A participants block yields nested readers; relative date indices come from the first participant."""
+    """A participants block yields nested readers; ``statistics_from`` names the reference participant."""
     datamodule = AnemoiDatasetsDataModule.__new__(AnemoiDatasetsDataModule)
     datamodule.epoch = 0
     datamodule.task = mocker.Mock()
@@ -253,13 +254,21 @@ def test_get_dataset_builds_one_reader_per_participant(mocker: MockFixture) -> N
 
     config = {"_target_": "anemoi.training.data.datasets.MultiDomainDataset"}
     datareader_config = DictConfig(
-        {"data": {"statistics_from": "h1", "participants": {"h1": {"name": "h1"}, "h2": {"name": "h2"}}}},
+        {"data": {"statistics_from": "h2", "participants": {"h1": {"name": "h1"}, "h2": {"name": "h2"}}}},
     )
     datamodule._get_dataset(config, datareader_config, shuffle=True, label="training")
 
-    compute_indices.assert_called_once_with(datamodule.task, {"data": readers["h1"]}, mode="training")
+    compute_indices.assert_called_once_with(datamodule.task, {"data": readers["h2"]}, mode="training")
     assert instantiate.call_args.kwargs["data_readers"] == {"data": {"h1": readers["h1"], "h2": readers["h2"]}}
+    assert instantiate.call_args.kwargs["reference_participants"] == {"data": "h2"}
     assert instantiate.call_args.kwargs["batch_size"] == 2
+
+    # without statistics_from the first participant is the reference
+    compute_indices.reset_mock()
+    del datareader_config["data"]["statistics_from"]
+    datamodule._get_dataset(config, datareader_config, shuffle=True, label="training")
+    compute_indices.assert_called_once_with(datamodule.task, {"data": readers["h1"]}, mode="training")
+    assert instantiate.call_args.kwargs["reference_participants"] == {}
 
 
 def test_state_dict_restores_dataloader_epoch() -> None:

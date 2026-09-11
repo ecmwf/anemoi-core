@@ -40,6 +40,7 @@ class MultiDataset(AnemoiDataset):
         epoch: int = 0,
         rollout: int = 1,
         batch_size: int = 1,
+        reference_participants: Mapping[str, str] | None = None,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -61,6 +62,8 @@ class MultiDataset(AnemoiDataset):
         batch_size : int, optional
             Per-GPU batch size, by default 1. Not used by this dataset (every sample
             already contains all readers); accepted for a uniform constructor.
+        reference_participants : Mapping[str, str], optional
+            See :class:`AnemoiDataset`. Trivial here since every dataset has one participant.
         """
         super().__init__(
             data_readers=data_readers,
@@ -69,6 +72,7 @@ class MultiDataset(AnemoiDataset):
             epoch=epoch,
             rollout=rollout,
             batch_size=batch_size,
+            reference_participants=reference_participants,
         )
         for dataset_name, participants in self.participant_readers.items():
             if len(participants) != 1:

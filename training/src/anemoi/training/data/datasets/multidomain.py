@@ -116,6 +116,7 @@ class MultiDomainDataset(AnemoiDataset):
         epoch: int = 0,
         rollout: int = 1,
         batch_size: int = 1,
+        reference_participants: Mapping[str, str] | None = None,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
         """A dataset that interchanges the participants of one dataset.
@@ -137,6 +138,10 @@ class MultiDomainDataset(AnemoiDataset):
         batch_size : int, optional
             Per-GPU batch size the DataLoader collates, by default 1. Samples are
             yielded in participant-pure blocks of this size so every batch holds one participant.
+        reference_participants : Mapping[str, str], optional
+            ``{dataset_name: participant}`` selecting the participant whose statistics,
+            metadata and variable indices represent the dataset (config: ``statistics_from``).
+            Defaults to the first participant.
         check_variables_compatibility : Mapping[str, object], optional
             Options forwarded to ``Variable.check_compatibility``. The options
             follow ``CheckVariablesCompatibilitySchema``.
@@ -157,6 +162,7 @@ class MultiDomainDataset(AnemoiDataset):
             epoch=epoch,
             rollout=rollout,
             batch_size=batch_size,
+            reference_participants=reference_participants,
         )
         self._check_no_mixed_sequence_types()
         self._set_relative_date_indices(relative_date_indices)

@@ -45,6 +45,19 @@ def iter_participant_configs(datareader_config: dict[str, Any]) -> Iterator[tupl
             yield dataset_name, dataset_name, dataset_config
 
 
+def reference_participants(datareader_config: dict[str, Any]) -> dict[str, str]:
+    """Return ``{dataset_name: participant}`` for datasets that set ``statistics_from``.
+
+    The named participant provides the per-dataset quantities (statistics, metadata,
+    variable indices, relative date indices); datasets without it use their first participant.
+    """
+    return {
+        dataset_name: dataset_config["statistics_from"]
+        for dataset_name, dataset_config in datareader_config.items()
+        if "participants" in dataset_config and dataset_config.get("statistics_from") is not None
+    }
+
+
 class AnemoiDatasetsDataModule(pl.LightningDataModule):
     """Anemoi Datasets data module for PyTorch Lightning."""
 
@@ -173,8 +186,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         data_readers: dict[str, dict[str, BaseAnemoiReader]] = {name: {} for name in datareader_config}
         for name, participant, reader_config in iter_participant_configs(datareader_config):
             data_readers[name][participant] = create_dataset(reader_config, task=self.task)
-        # Relative date indices are a per-dataset quantity (participants share the frequency).
-        reference_readers = {name: next(iter(participants.values())) for name, participants in data_readers.items()}
+        # Relative date indices are a per-dataset quantity (participants share the frequency),
+        # taken from the reference participant (``statistics_from``, default: first).
+        references = reference_participants(datareader_config)
+        reference_readers = {
+            name: participants[references.get(name, next(iter(participants)))]
+            for name, participants in data_readers.items()
+        }
         relative_date_indices = compute_relative_date_indices(self.task, reference_readers, mode=label)
 
         return instantiate_with_runtime_kwargs(
@@ -186,6 +204,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
             batch_size=self.config.dataloader.batch_size[label],
+            reference_participants=references,
         )
 
     def set_epoch(self, epoch: int) -> None:
