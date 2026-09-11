@@ -27,6 +27,7 @@ MODEL_LEVEL_TYPES = {"ml", "model", "hybrid", "hybridLevel"}
 HEIGHT_LEVEL_TYPES = {"hl", "heightAboveGround", "heightAboveSea", "height"}
 SURFACE_LEVEL_TYPES = {"sfc", "surface", "meanSea"}
 LAYER_LEVEL_TYPES = {"sol", "soil", "depthBelowLandLayer", "depth_below_land_layer", "layer"}
+ACCUMULATED_PARAMETERS = {"tp"}
 
 
 def _hours(value: Any) -> float:
@@ -329,10 +330,23 @@ class QueryCatalogue:
 
                 variable = self.aliases.get(variable, variable)
 
-                aggregation_type = str(mars.get("process") or field_metadata.get("process") or "instantaneous")
+                declared_process = mars.get("process") or field_metadata.get("process")
+                period = mars.get("period", field_metadata.get("period"))
+                if declared_process is None and variable in ACCUMULATED_PARAMETERS:
+                    # Older archives can omit GRIB process/period metadata even
+                    # for unambiguously accumulated parameters such as total
+                    # precipitation. Use that archive's native field interval.
+                    declared_process = "accumulation"
+                    period = reader.frequency if period is None else period
+                    LOGGER.warning(
+                        "Dataset %s field %s omits accumulation metadata; inferring a %s window from its cadence.",
+                        dataset_name,
+                        field_name,
+                        reader.frequency,
+                    )
+                aggregation_type = str(declared_process or "instantaneous")
                 if aggregation_type == "average":
                     aggregation_type = "mean"
-                period = mars.get("period", field_metadata.get("period"))
                 if period is None:
                     temporal_aggregation_window_hours = None
                 elif isinstance(period, (str, int, float, timedelta, np.timedelta64)):
