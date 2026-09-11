@@ -6,10 +6,15 @@ This module defines pydantic schemas, which are used to validate the
 configuration before a training run is started. The top-level config
 yaml matches the BaseSchema.
 
-.. automodule:: anemoi.training.schemas.base_schema
+.. autoclass:: anemoi.training.schemas.base_schema.BaseSchema()
    :members:
+   :exclude-members: task
    :no-undoc-members:
    :show-inheritance:
+
+.. py:attribute:: anemoi.training.schemas.base_schema.BaseSchema.task
+
+   Task configuration.
 
 The below schemas are organised below identically to the training config
 files,

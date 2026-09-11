@@ -120,6 +120,7 @@ class NoiseConditioning(BaseNoiseInjector):
         edge_weight_attribute: Optional[str] = None,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
+        sparse_projector_num_chunks: int = 1,
         num_channels: Optional[int] = None,
         graph_data: Optional[HeteroData] = None,
     ) -> None:
@@ -159,7 +160,7 @@ class NoiseConditioning(BaseNoiseInjector):
                 edge_weight_attribute=edge_weight_attribute,
                 row_normalize=row_normalize_noise_matrix,
             )
-            self._sparse_projector = SparseProjector(autocast=autocast)
+            self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
             LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
 
         if noise_matrix is not None:
@@ -167,7 +168,7 @@ class NoiseConditioning(BaseNoiseInjector):
                 file_path=noise_matrix,
                 row_normalize=row_normalize_noise_matrix,
             )
-            self._sparse_projector = SparseProjector(autocast=autocast)
+            self._sparse_projector = SparseProjector(autocast=autocast, num_chunks=sparse_projector_num_chunks)
             LOGGER.info("Noise projector matrix shape = %s", self.noise_graph_provider.projection_matrix.shape)
 
         LOGGER.info("processor noise channels = %d", self.noise_channels)

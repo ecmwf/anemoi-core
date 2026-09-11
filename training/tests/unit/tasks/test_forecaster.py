@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
+from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -49,6 +50,9 @@ def _data_indices_multi() -> dict[str, IndexCollection]:
         "meps": _make_minimal_index_collection(_NAME_TO_INDEX),
         "radar": _make_minimal_index_collection(_NAME_TO_INDEX),
     }
+
+
+# ── Forecaster: offsets and steps ─────────────────────────────────────────────
 
 
 def test_forecaster_single_input_offset() -> None:
@@ -146,6 +150,9 @@ def test_forecaster_metric_name_encodes_rollout_step() -> None:
     assert task.get_metric_name(rollout_step=3) == "_rstep3"
 
 
+# ── Forecaster: rollout curriculum ────────────────────────────────────────────
+
+
 def test_forecaster_rollout_increases_on_epoch_end() -> None:
     """on_train_epoch_end increments rollout.step up to maximum."""
     task = Forecaster(
@@ -159,6 +166,25 @@ def test_forecaster_rollout_increases_on_epoch_end() -> None:
     task.on_train_epoch_end(0)
     assert task.rollout.step == 2
     task.on_train_epoch_end(1)
+    assert task.rollout.step == 3
+
+
+def test_forecaster_rollout_increases_after_configured_number_of_epochs() -> None:
+    """epoch_increment counts completed epochs before increasing the rollout."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 2, "maximum": 3},
+    )
+
+    task.on_train_epoch_end(0)
+    assert task.rollout.step == 1
+    task.on_train_epoch_end(1)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(2)
+    assert task.rollout.step == 2
+    task.on_train_epoch_end(3)
     assert task.rollout.step == 3
 
 
@@ -270,6 +296,7 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
+    # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     batch = {"data": torch.randn(b, 3, e, g, v)}
     x = task.get_inputs(batch, data_indices)
     assert x["data"].shape[1] == 2  # multistep_input=2
@@ -284,12 +311,37 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     assert y["data"].shape[1] == 1  # multistep_output=1
 
 
+def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> None:
+    """A batch sized for an earlier rollout fails before producing an empty slice."""
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
+    )
+    batch = {"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))}
+    assert task.get_targets(batch, rollout_step=0)["data"].shape[1] == 1
+
+    task.rollout.increase(current_epoch=0)
+
+    with pytest.raises(ValueError, match="requires index 3") as exc_info:
+        task.get_targets(batch, rollout_step=1)
+
+    assert str(exc_info.value) == (
+        "Batch for dataset 'data' contains 3 time steps, but requires index 3 (indices [3]). "
+        "The dataloader's time window does not match the task rollout."
+    )
+
+
 def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
     """Input and target time indices do not overlap for a single-step forecaster."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     input_indices = task.get_batch_input_indices()
     output_indices = task.get_batch_output_indices(rollout_step=0)
     assert set(input_indices).isdisjoint(set(output_indices))
+
+
+# ── Forecaster: _advance_dataset_input ────────────────────────────────────────
 
 
 def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times() -> None:
@@ -421,6 +473,7 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
     output_mask = Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask")
     task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
 
+    # tensor dims: (batch, time, ens, grid, variable)
     x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
     batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
@@ -437,52 +490,295 @@ def test_rollout_advance_input_reapplies_boundary_truth_and_refreshes_forcing() 
         grid_shard_slice=slice(None),
     )
 
+    # prognostic variable, 1st grid point (cutout_mask=True) should be from y_pred,
+    # 2nd grid point (cutout_mask=False) should be from batch
     torch.testing.assert_close(updated[0, -1, 0, :, 0], torch.tensor([10.0, 200.0]))
+    # forcing variable should be refreshed from batch for both grid points
     torch.testing.assert_close(updated[0, -1, 0, :, 1], torch.tensor([1000.0, 2000.0]))
 
 
-def test_forecaster_preserves_datamodule_mixed_frequency_timing_metadata() -> None:
+# ── OffsetForecaster: equivalence with Forecaster on a regular grid ────────────
+
+_TIMESTEP_HOURS = 6
+
+
+def _offset_equivalent(
+    multistep_input: int,
+    multistep_output: int,
+    timestep_hours: int = _TIMESTEP_HOURS,
+) -> OffsetForecaster:
+    """Build the ``OffsetForecaster`` equivalent to ``Forecaster(N, M, timestep)``.
+
+    A regular forecaster reading ``N`` steps and predicting ``M`` steps on a grid of
+    spacing ``timestep`` maps onto input offsets ``[-(N-1)T, ..., 0]``, output offsets
+    ``[T, ..., MT]`` and a rollout shift of ``MT``.
+    """
+    input_offsets = [f"{-i * timestep_hours}h" for i in range(multistep_input)]
+    output_offsets = [f"{(i + 1) * timestep_hours}h" for i in range(multistep_output)]
+    rollout_shift = f"{multistep_output * timestep_hours}h"
+    return OffsetForecaster(
+        input_offsets=input_offsets,
+        output_offsets=output_offsets,
+        rollout_shift=rollout_shift,
+    )
+
+
+@pytest.mark.parametrize(
+    ("n_step_input", "n_step_output", "expected"),
+    [
+        (1, 1, [2.0]),
+        (2, 2, [3.0, 4.0]),
+        (2, 3, [4.0, 5.0]),
+        (3, 2, [3.0, 4.0, 5.0]),
+        (3, 1, [2.0, 3.0, 4.0]),
+        (1, 2, [3.0]),
+    ],
+)
+def test_offset_forecaster_advance_matches_forecaster(
+    n_step_input: int,
+    n_step_output: int,
+    expected: list[float],
+) -> None:
+    """OffsetForecaster._advance_dataset_input matches the legacy Forecaster on a regular grid."""
+    data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
+    legacy = Forecaster(multistep_input=n_step_input, multistep_output=n_step_output, timestep="6h")
+    offset = _offset_equivalent(n_step_input, n_step_output)
+
+    b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
+    x = torch.zeros((b, n_step_input, e, g, v), dtype=torch.float32)
+    for step in range(n_step_input):
+        x[:, step] = float(step + 1)
+
+    y_pred = torch.stack(
+        [
+            torch.full((b, e, g, v), float(n_step_input + step + 1), dtype=torch.float32)
+            for step in range(n_step_output)
+        ],
+        dim=1,
+    )
+    batch = torch.zeros((b, n_step_input + n_step_output, e, g, v), dtype=torch.float32)
+
+    out_legacy = legacy._advance_dataset_input(
+        x.clone(),
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+    out_offset = offset._advance_dataset_input(
+        x.clone(),
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+
+    torch.testing.assert_close(out_offset, out_legacy)
+    # Anchor against the known-correct legacy behaviour so a shared bug cannot hide.
+    assert out_offset[0, :, 0, 0, 0].tolist() == expected
+
+
+def test_offset_forecaster_advance_matches_forecaster_with_boundary_and_forcing() -> None:
+    """Equivalence also holds on the boundary-mask and forcing-refresh code paths."""
+    name_to_index = {"prog": 0, "force": 1}
+    data_indices = _make_minimal_index_collection(name_to_index, forcing=["force"])
+    legacy = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    offset = _offset_equivalent(2, 1)
+
+    def _make_inputs() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        # tensor dims: (batch, time, ens, grid, variable)
+        x = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
+        y_pred = torch.tensor([[[[[10.0], [20.0]]]]], dtype=torch.float32)
+        batch = torch.zeros((1, 3, 1, 2, 2), dtype=torch.float32)
+        batch[:, 2, 0, :, 0] = torch.tensor([100.0, 200.0])
+        batch[:, 2, 0, :, 1] = torch.tensor([1000.0, 2000.0])
+        return x, y_pred, batch
+
+    x, y_pred, batch = _make_inputs()
+    out_legacy = legacy._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask=Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask"),
+        grid_shard_slice=slice(None),
+    )
+
+    x, y_pred, batch = _make_inputs()
+    out_offset = offset._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask=Boolean1DMask({"cutout_mask": torch.tensor([True, False])}, "cutout_mask"),
+        grid_shard_slice=slice(None),
+    )
+
+    torch.testing.assert_close(out_offset, out_legacy)
+
+
+# ── OffsetForecaster: advance on irregular grids (no Forecaster equivalent) ────
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "expected"),
+    [
+        # Mixed advance: input slot 0 is reused from the input window (inin),
+        # slot 1 is filled from the first prediction (outin). Shift inferred as 6h.
+        (["-6h", "0h"], ["6h", "9h"], [2.0, 10.0]),
+        # Two reused input slots plus one prediction. Shift inferred as 6h.
+        (["-12h", "-6h", "0h"], ["6h", "9h"], [2.0, 3.0, 10.0]),
+        # Both slots refreshed from non-adjacent predictions. Shift inferred as 10h.
+        (["-6h", "0h"], ["4h", "6h", "10h"], [10.0, 30.0]),
+    ],
+)
+def test_offset_forecaster_advance_irregular_offsets(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    expected: list[float],
+) -> None:
+    """_advance_dataset_input handles irregular grids that no legacy Forecaster can represent."""
+    data_indices = _make_minimal_index_collection(_NAME_TO_INDEX)
+    task = OffsetForecaster(input_offsets=input_offsets, output_offsets=output_offsets)
+
+    n_input = len(input_offsets)
+    n_output = len(output_offsets)
+    b, e, g, v = 1, 1, 2, len(_NAME_TO_INDEX)
+    x = torch.zeros((b, n_input, e, g, v), dtype=torch.float32)
+    for step in range(n_input):
+        x[:, step] = float(step + 1)
+
+    y_pred = torch.stack(
+        [torch.full((b, e, g, v), float(10 * (step + 1)), dtype=torch.float32) for step in range(n_output)],
+        dim=1,
+    )
+    batch = torch.zeros((b, n_input + n_output, e, g, v), dtype=torch.float32)
+
+    updated = task._advance_dataset_input(
+        x,
+        y_pred,
+        batch,
+        rollout_step=0,
+        output_mask=NoOutputMask(),
+        data_indices=data_indices,
+    )
+    assert updated[0, :, 0, 0, 0].tolist() == expected
+
+
+# ── OffsetForecaster: _convert_and_validate ───────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "rollout_shift", "match"),
+    [
+        # duplicate offsets are not well-formed
+        (["0h", "0h"], ["6h"], "default", "input_offsets contains duplicate"),
+        (["0h"], ["6h", "6h"], "default", "output_offsets contains duplicate"),
+        # the latest input defines the forecast initialisation time
+        (["-12h", "-6h"], ["6h"], "default", "latest input offset must be 0h"),
+        (["6h"], ["12h"], "default", "latest input offset must be 0h"),
+        # an output must come strictly after every input for a forecasting task
+        (["-6h", "0h"], ["0h", "12h"], "default", "strictly greater"),
+        (["-6h", "0h"], ["-3h", "3h"], "default", "strictly greater"),
+        # no valid shift exists
+        (["-6h", "0h"], ["7h", "10h"], "default", "No valid autoregressive rollout shift"),
+        # outputs from consecutive rollout steps must not overlap or interleave
+        (["-6h", "0h"], ["6h", "12h"], "6h", "is not a valid autoregressive"),
+        (["0h"], ["2h", "5h"], "2h", "is not a valid autoregressive"),
+    ],
+)
+def test_offset_convert_and_validate_rejects_invalid(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    rollout_shift: str,
+    match: str,
+) -> None:
+    """_convert_and_validate raises ValueError for ill-formed or inconsistent offsets."""
+    with pytest.raises(ValueError, match=match):
+        OffsetForecaster._convert_and_validate(input_offsets, output_offsets, rollout_shift)
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "rollout_shift", "expected_hours"),
+    [
+        # single step: only valid shift equals the output horizon
+        (["0h"], ["6h"], "default", 6),
+        # regular grid: default infers the output horizon M*T
+        (["-6h", "0h"], ["6h", "12h"], "default", 12),
+        # same, but supplied explicitly
+        (["-6h", "0h"], ["6h", "12h"], "12h", 12),
+        # irregular grid with several valid shifts: default picks the largest
+        (["0h"], ["6h", "10h"], "default", 10),
+        # ...and a smaller valid shift is accepted when requested
+        (["0h"], ["6h", "10h"], "6h", 6),
+    ],
+)
+def test_offset_convert_and_validate_returns_expected_rollout_shift(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    rollout_shift: str,
+    expected_hours: int,
+) -> None:
+    """_convert_and_validate returns the expected rollout shift for valid offsets."""
+    _, _, shift = OffsetForecaster._convert_and_validate(input_offsets, output_offsets, rollout_shift)
+    assert shift == datetime.timedelta(hours=expected_hours)
+
+
+def _hours(*values: float) -> list[datetime.timedelta]:
+    return [datetime.timedelta(hours=v) for v in values]
+
+
+@pytest.mark.parametrize(
+    ("input_offsets", "output_offsets", "expected_inputs", "expected_outputs"),
+    [
+        # strings are parsed and sorted ascending
+        (["0h", "-6h"], ["12h", "6h"], _hours(-6, 0), _hours(6, 12)),
+        # single offsets
+        (["0h"], ["6h"], _hours(0), _hours(6)),
+        # mixed units are normalised to timedeltas
+        (["-360m", "0h"], ["720m", "6h"], _hours(-6, 0), _hours(6, 12)),
+        # fractional-hour (sub-grid) offsets
+        (["0h"], ["45m", "90m"], _hours(0), _hours(0.75, 1.5)),
+    ],
+)
+def test_offset_convert_and_validate_returns_sorted_timedeltas(
+    input_offsets: list[str],
+    output_offsets: list[str],
+    expected_inputs: list[datetime.timedelta],
+    expected_outputs: list[datetime.timedelta],
+) -> None:
+    """_convert_and_validate parses offset strings into sorted timedeltas."""
+    converted_inputs, converted_outputs, _ = OffsetForecaster._convert_and_validate(
+        input_offsets,
+        output_offsets,
+        "default",
+    )
+    assert converted_inputs == expected_inputs
+    assert converted_outputs == expected_outputs
+    assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
+
+
+def test_mixed_frequency_rollout_keeps_input_only_dataset_context() -> None:
     task = Forecaster(
         multistep_input=1,
         multistep_output=1,
         timestep="5m",
-        rollout={"start": 1, "maximum": 2},
+        rollout={"start": 2, "maximum": 2},
     )
     metadata = {
         "metadata_inference": {
-            "dataset_names": ["data"],
-            "data": {
+            "dataset_names": ["context"],
+            "context": {
                 "timesteps": {
-                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
-                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
-                },
-            },
-        },
-    }
-
-    task.fill_metadata(metadata)
-    assert task.dataset_time_maps == {}
-    task.configure_from_metadata(metadata)
-
-    timesteps = metadata["metadata_inference"]["data"]["timesteps"]
-    assert timesteps["relative_date_indices_training_by_dataset"]["data"] == [0, 2]
-    assert task.dataset_time_maps["data"] == {0: 0, 2: 1}
-
-
-def test_forecaster_advance_input_reuses_latest_available_mixed_frequency_timestep() -> None:
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="5m",
-        rollout={"start": 1, "maximum": 2},
-    )
-    metadata = {
-        "metadata_inference": {
-            "dataset_names": ["data"],
-            "data": {
-                "timesteps": {
-                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
-                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
+                    "model_timestep": "5m",
+                    "relative_date_input_indices_training_by_dataset": {"context": [0]},
+                    "relative_date_target_indices_training_by_dataset": {"context": []},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"context": [[], []]},
+                    "relative_date_indices_training_by_dataset": {"context": [0]},
                 },
             },
         },
@@ -490,127 +786,101 @@ def test_forecaster_advance_input_reuses_latest_available_mixed_frequency_timest
     task.fill_metadata(metadata)
     task.configure_from_metadata(metadata)
     data_indices = {
-        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
+        "context": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
     }
-
-    batch = {
-        "data": torch.tensor(
-            [
-                [
-                    [[[1.0, 10.0]]],
-                    [[[3.0, 30.0]]],
-                ],
-            ],
-            dtype=torch.float32,
-        ),
-    }
+    batch = {"context": torch.tensor([[[[[1.0, 10.0]]]]])}
     x = task.get_inputs(batch, data_indices)
-    y = task.get_targets(batch, rollout_step=1)
-    y_pred = {"data": torch.tensor([[[[[100.0]]]]], dtype=torch.float32)}
 
     updated = task.advance_input(
         x,
-        y_pred,
+        {},
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask={"context": NoOutputMask()},
+        grid_shard_slice={"context": None},
+    )
+
+    assert updated["context"].shape == (1, 1, 1, 1, 2)
+    torch.testing.assert_close(updated["context"], batch["context"])
+
+
+def test_mixed_frequency_rollout_preserves_previous_predictions() -> None:
+    task = Forecaster(
+        multistep_input=3,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 2, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "model_timestep": "5m",
+                    "relative_date_input_indices_training_by_dataset": {"data": [-2, -1, 0]},
+                    "relative_date_target_indices_training_by_dataset": {"data": [1, 2]},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"data": [[1], [2]]},
+                    "relative_date_indices_training_by_dataset": {"data": [-2, -1, 0, 1, 2]},
+                },
+            },
+        },
+    }
+    task.configure_from_metadata(metadata)
+    data_indices = {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
+    batch = {
+        "data": torch.tensor([10.0, 11.0, 12.0, 13.0, 14.0]).reshape(1, 5, 1, 1, 1).expand(-1, -1, -1, -1, 2),
+    }
+    x = task.get_inputs(batch, data_indices)
+
+    x = task.advance_input(
+        x,
+        {"data": torch.full((1, 1, 1, 1, 2), 100.0)},
         batch,
         rollout_step=0,
         data_indices=data_indices,
         output_mask={"data": NoOutputMask()},
         grid_shard_slice={"data": None},
     )
-
-    torch.testing.assert_close(y["data"][0, 0, 0, 0, 0], torch.tensor(3.0))
-    torch.testing.assert_close(updated["data"][0, 0, 0, 0, 0], torch.tensor(100.0))
-    torch.testing.assert_close(updated["data"][0, 0, 0, 0, 1], torch.tensor(10.0))
-
-
-def test_forecaster_mixed_frequency_advance_input_preserves_ensemble_dimension() -> None:
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="5m",
-        rollout={"start": 1, "maximum": 2},
-    )
-    metadata = {
-        "metadata_inference": {
-            "dataset_names": ["data"],
-            "data": {
-                "timesteps": {
-                    "relative_date_indices_training_by_dataset": {"data": [0, 2]},
-                    "relative_date_indices_validation_by_dataset": {"data": [0, 2]},
-                },
-            },
-        },
-    }
-    task.fill_metadata(metadata)
-    task.configure_from_metadata(metadata)
-    data_indices = {
-        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
-    }
-
-    batch = {
-        "data": torch.tensor(
-            [
-                [
-                    [[[1.0, 10.0]]],
-                    [[[3.0, 30.0]]],
-                ],
-            ],
-            dtype=torch.float32,
-        ),
-    }
-    x = task.get_inputs(batch, data_indices)
-    y_pred = {"data": torch.tensor([[[[[100.0]], [[200.0]]]]], dtype=torch.float32)}
-
-    updated = task.advance_input(
+    x = task.advance_input(
         x,
-        y_pred,
+        {"data": torch.full((1, 1, 1, 1, 2), 200.0)},
         batch,
-        rollout_step=0,
+        rollout_step=1,
         data_indices=data_indices,
         output_mask={"data": NoOutputMask()},
         grid_shard_slice={"data": None},
     )
 
-    assert updated["data"].shape == (1, 1, 2, 1, 2)
-    torch.testing.assert_close(updated["data"][0, 0, :, 0, 0], torch.tensor([100.0, 200.0]))
-    torch.testing.assert_close(updated["data"][0, 0, :, 0, 1], torch.tensor([10.0, 10.0]))
+    assert x["data"][0, :, 0, 0, 0].tolist() == [12.0, 100.0, 200.0]
 
 
-def test_forecaster_mixed_frequency_advance_input_checks_batch_bounds() -> None:
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="5m",
-        rollout={"start": 1, "maximum": 4},
+def test_mixed_frequency_plotting_uses_dataset_time_positions() -> None:
+    task = OffsetForecaster(
+        input_offsets=["-12h", "0h"],
+        output_offsets=["6h", "12h"],
+        rollout_shift="12h",
     )
     metadata = {
         "metadata_inference": {
-            "dataset_names": ["data"],
-            "data": {
+            "dataset_names": ["coarse"],
+            "coarse": {
                 "timesteps": {
-                    "relative_date_indices_training_by_dataset": {"data": [0, 2, 4]},
-                    "relative_date_indices_validation_by_dataset": {"data": [0, 2, 4]},
+                    "model_timestep": "6h",
+                    "relative_date_input_indices_training_by_dataset": {"coarse": [-2, 0]},
+                    "relative_date_target_indices_training_by_dataset": {"coarse": [2]},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"coarse": [[2]]},
+                    "relative_date_indices_training_by_dataset": {"coarse": [-2, 0, 2]},
                 },
             },
         },
     }
-    task.fill_metadata(metadata)
     task.configure_from_metadata(metadata)
-    data_indices = {
-        "data": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
-    }
+    data = torch.tensor([[10.0], [20.0], [30.0]])
+    output = torch.tensor([[[40.0]]])
 
-    x = {"data": torch.zeros((1, 1, 1, 1, 2), dtype=torch.float32)}
-    y_pred = {"data": torch.zeros((1, 1, 1, 1, 1), dtype=torch.float32)}
-    batch = {"data": torch.zeros((1, 2, 1, 1, 2), dtype=torch.float32)}
+    samples = list(task._plot_adapter.iter_plot_samples(data, output, dataset_name="coarse"))
 
-    with pytest.raises(ValueError, match="batch only has 2 time steps"):
-        task.advance_input(
-            x,
-            y_pred,
-            batch,
-            rollout_step=3,
-            data_indices=data_indices,
-            output_mask={"data": NoOutputMask()},
-            grid_shard_slice={"data": None},
-        )
+    assert len(samples) == 1
+    x, y_true, y_pred, tag = samples[0]
+    assert (x.item(), y_true.item(), y_pred.item(), tag) == (20.0, 30.0, 40.0, "rstep00_out00")

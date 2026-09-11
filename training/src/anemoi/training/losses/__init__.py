@@ -9,6 +9,11 @@
 
 from .aggregate import TimeAggregateLossWrapper
 from .combined import CombinedLoss
+from .energy_score import EnergyScoreLoss
+from .graph_edge_crps import GraphEdgeCRPSLoss
+from .graph_edge_energy_score import GraphEdgeEnergyScoreLoss
+from .graph_energy_score import GraphEnergyScoreLoss
+from .graph_variogram_score import GraphVariogramScoreLoss
 from .huber import HuberLoss
 from .kcrps import CRPS
 from .logcosh import LogCoshLoss
@@ -20,16 +25,21 @@ from .rmse import RMSELoss
 from .spectral import FourierCorrelationLoss
 from .spectral import LogFFT2Distance
 from .spectral import LogSpectralDistance
+from .spectral import PowerSpectrumLoss
 from .spectral import SpectralAMSELoss
 from .spectral import SpectralCRPSLoss
-from .spectral import SpectralL2Loss
 from .variable_mapper import LossVariableMapper
 from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
     "CombinedLoss",
+    "EnergyScoreLoss",
     "FourierCorrelationLoss",
+    "GraphEdgeCRPSLoss",
+    "GraphEdgeEnergyScoreLoss",
+    "GraphEnergyScoreLoss",
+    "GraphVariogramScoreLoss",
     "HuberLoss",
     "LogCoshLoss",
     "LogFFT2Distance",
@@ -38,10 +48,10 @@ __all__ = [
     "MAELoss",
     "MSELoss",
     "MultiscaleLossWrapper",
+    "PowerSpectrumLoss",
     "RMSELoss",
     "SpectralAMSELoss",
     "SpectralCRPSLoss",
-    "SpectralL2Loss",
     "TimeAggregateLossWrapper",
     "WeightedMSELoss",
     "get_loss_function",

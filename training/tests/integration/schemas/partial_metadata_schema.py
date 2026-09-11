@@ -18,6 +18,7 @@ PARTIAL_METADATA_SCHEMA = {
     "version": None,
     "config": None,
     "seed": None,
+    "base_seed": None,
     "run_id": None,
     "dataset": None,
     "data_indices": None,
@@ -25,6 +26,7 @@ PARTIAL_METADATA_SCHEMA = {
     "timestamp": None,
     "metadata_inference": {
         "seed": None,
+        "base_seed": None,
         "run_id": None,
         "dataset_names": list,  # list of datasets
         "task": None,
@@ -34,6 +36,11 @@ PARTIAL_METADATA_SCHEMA = {
                 "input_relative_date_indices": None,
                 "output_relative_date_indices": None,
                 "timestep": None,
+                # extra entries populated by offset-forecaster only
+                "input_offsets": None,
+                "output_offsets": None,
+                "rollout_shift": None,
+                "advance_map": None,
             },
             "data_indices": {
                 "input": None,

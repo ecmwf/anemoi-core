@@ -27,6 +27,8 @@ from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import RelativeTimeReader
 from anemoi.training.data.data_reader import dates_to_unix_ns
 from anemoi.training.data.usable_indices import compute_valid_anchors
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
@@ -106,16 +108,15 @@ class MultiDataset(IterableDataset):
             self._lazy_init_model_and_reader_group_info()
             return
 
-        if frequency is None:
-            msg = "`frequency` is required when `relative_date_indices` are provided on the shared model grid."
+        if multi_seq:
+            msg = (
+                "Mixed-frequency alignment currently supports only datasets with a global time axis. "
+                f"Trajectory datasets are unsupported: {multi_seq}."
+            )
             raise ValueError(msg)
 
-        self.model_relative_date_indices = np.array(
-            sorted({int(idx) for idx in relative_date_indices}),
-            dtype=np.int64,
-        )
-        if len(self.model_relative_date_indices) == 0:
-            msg = "`relative_date_indices` cannot be empty."
+        if frequency is None:
+            msg = "`frequency` is required when `relative_date_indices` are provided on the shared model grid."
             raise ValueError(msg)
 
         try:
@@ -123,6 +124,44 @@ class MultiDataset(IterableDataset):
         except ValueError as e:
             msg = f"Error in frequency, {frequency}"
             raise ValueError(msg) from e
+
+        self._lazy_init_model_and_reader_group_info()
+        self._set_mixed_frequency_indices(relative_date_indices)
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: list[int] | dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        self.chunk_index_range = None
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+
+        if self.relative_date_indices_are_native:
+            self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+            self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+            self.relative_date_indices = {
+                name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+            }
+            return
+
+        self._set_mixed_frequency_indices(relative_date_indices)
+
+    def _set_mixed_frequency_indices(self, relative_date_indices: list[int]) -> None:
+        """Refresh mixed-frequency indices, readers, and valid anchors."""
+        self.model_relative_date_indices = np.array(
+            sorted({int(idx) for idx in relative_date_indices}),
+            dtype=np.int64,
+        )
+        if len(self.model_relative_date_indices) == 0:
+            msg = "`relative_date_indices` cannot be empty."
+            raise ValueError(msg)
 
         self.model_relative_date_indices_by_dataset = self._build_model_relative_indices_by_dataset()
         self.data_relative_date_indices_by_dataset = {
@@ -133,35 +172,10 @@ class MultiDataset(IterableDataset):
             name: normalize_time_indices(indices.tolist())
             for name, indices in self.data_relative_date_indices_by_dataset.items()
         }
-
-        self._lazy_init_model_and_reader_group_info()
         self._anchor_dataset_name = self._resolve_anchor_dataset_name()
         self.sample_readers = self._build_sample_readers()
         self.anchors = self._compute_mixed_frequency_anchors()
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-    def set_epoch(
-        self,
-        epoch: int,
-        *,
-        rollout: int | None = None,
-        relative_date_indices: dict[str, TimeIndices] | None = None,
-    ) -> None:
-        """Set epoch-dependent sampling state before DataLoader workers are launched."""
-        self.epoch = epoch
-        if rollout is not None:
-            self.rollout = rollout
-        if relative_date_indices is None:
-            return
-
-        # Recompute valid (sequence, position) anchors for the updated rollout.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -407,7 +421,9 @@ class MultiDataset(IterableDataset):
         )
 
         base_seed = get_base_seed()
-        seed = base_seed + self.epoch
+        # The datamodule checkpoints this epoch and restores it before new workers
+        # start, so resuming from an epoch checkpoint derives the same seed.
+        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
 
         torch.manual_seed(seed)
         random.seed(seed)

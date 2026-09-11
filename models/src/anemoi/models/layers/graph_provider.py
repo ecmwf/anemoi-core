@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import copy
 import logging
 from abc import ABC
 from abc import abstractmethod
@@ -17,6 +18,9 @@ from typing import Union
 
 import numpy as np
 import torch
+from scipy.sparse import coo_matrix
+from scipy.sparse import load_npz
+from scipy.sparse import spmatrix
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -471,6 +475,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         src_node_weight_attribute: Optional[str] = None,
         file_path: Optional[str | Path] = None,
         row_normalize: bool = False,
+        edge_mask: Optional[Tensor] = None,
     ) -> None:
         """Initialize ProjectionGraphProvider.
 
@@ -488,6 +493,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Path to .npz file with projection matrix
         row_normalize : bool
             Whether to normalize weights per row (target node) so each row sums to 1
+        edge_mask : Tensor, optional
+            Boolean mask which selects graph edges before constructing the matrix
         """
         super().__init__()
 
@@ -504,18 +511,35 @@ class ProjectionGraphProvider(BaseGraphProvider):
             assert (
                 graph is not None and edges_name is not None
             ), "Must provide graph and edges_name if file_path not given"
-            self._build_from_graph(graph, edges_name, edge_weight_attribute, src_node_weight_attribute, row_normalize)
+            self._build_from_graph(
+                graph,
+                edges_name,
+                edge_weight_attribute,
+                src_node_weight_attribute,
+                edge_mask,
+                row_normalize,
+            )
+
+    def __deepcopy__(self, memo: dict) -> "ProjectionGraphProvider":
+        """Deepcopy that shares the static projection matrix by reference.
+
+        ``projection_matrix`` holds a sparse CSR tensor. Sparse CSR tensors cannot
+        be deepcopied (``NotImplementedError: Cannot access storage of
+        SparseCsrTensorImpl``), which breaks ``copy.deepcopy(pl_module.loss)``
+        during validation/plotting. It is a constant lookup table, so sharing it
+        by reference is safe and avoids the copy.
+        """
+        cls = self.__class__
+        new = cls.__new__(cls)
+        memo[id(self)] = new
+        memo[id(self.projection_matrix)] = self.projection_matrix
+        for key, value in self.__dict__.items():
+            new.__dict__[key] = copy.deepcopy(value, memo)
+        return new
 
     def _build_from_file(self, file_path: str | Path, row_normalize: bool) -> None:
         """Load projection matrix from file."""
-        from scipy.sparse import load_npz
-
-        truncation_data = load_npz(file_path)
-        edge_index = torch.tensor(np.vstack(truncation_data.nonzero()), dtype=torch.long)
-        weights = torch.tensor(truncation_data.data, dtype=torch.float32)
-        src_size, dst_size = truncation_data.shape
-
-        self._create_matrix(edge_index, weights, src_size, dst_size, row_normalize)
+        self._create_csr_matrix_from_scipy(load_npz(file_path), row_normalize)
 
     def _build_from_graph(
         self,
@@ -523,78 +547,85 @@ class ProjectionGraphProvider(BaseGraphProvider):
         edges_name: tuple[str, str, str],
         edge_weight_attribute: Optional[str],
         src_node_weight_attribute: Optional[str],
+        edge_mask: Optional[Tensor],
         row_normalize: bool,
     ) -> None:
-        """Build projection matrix from graph."""
+        """Build projection matrix from graph.
+
+        The matrix is initially built in COO format
+        and then converted to CSR format for efficient sparse operations.
+        """
         sub_graph = graph[edges_name]
+        edge_index = sub_graph.edge_index
 
         if edge_weight_attribute:
-            weights = sub_graph[edge_weight_attribute].squeeze()
+            weights = sub_graph[edge_weight_attribute].reshape(-1)
         else:
-            weights = torch.ones(sub_graph.edge_index.shape[1], device=sub_graph.edge_index.device)
+            weights = torch.ones(edge_index.shape[1], device=edge_index.device)
 
         if src_node_weight_attribute:
-            weights *= graph[edges_name[0]][src_node_weight_attribute][sub_graph.edge_index[0]]
+            weights = weights * graph[edges_name[0]][src_node_weight_attribute].reshape(-1)[edge_index[0]]
 
-        # PyG convention: edge_index[0]=source, edge_index[1]=target
-        # For M @ x, we need matrix shape (targets, sources) with:
-        #   - row indices = targets
-        #   - col indices = sources
-        # -> swap edge_index to [targets, sources] for COO tensor
-        edge_index_for_coo = torch.stack([sub_graph.edge_index[1], sub_graph.edge_index[0]])
+        if edge_mask is not None:
+            edge_index = edge_index[:, edge_mask]
+            weights = weights[edge_mask]
 
-        self._create_matrix(
-            edge_index_for_coo,
-            weights,
-            graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
-            graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
-            row_normalize,
+        matrix = coo_matrix(
+            (
+                weights.detach().to(dtype=torch.float32, device="cpu").contiguous().numpy(),
+                (
+                    edge_index[1].detach().cpu().contiguous().numpy(),
+                    edge_index[0].detach().cpu().contiguous().numpy(),
+                ),
+            ),
+            shape=(
+                graph[edges_name[2]].num_nodes,  # dst_size (targets) = rows
+                graph[edges_name[0]].num_nodes,  # src_size (sources) = cols
+            ),
+            dtype=np.float32,
         )
+        self._create_csr_matrix_from_scipy(matrix, row_normalize)
 
-    def _create_matrix(
-        self,
-        edge_index: Tensor,
-        weights: Tensor,
-        src_size: int,
-        dst_size: int,
-        row_normalize: bool,
-    ) -> None:
-        """Create sparse projection matrix."""
-        row_index = edge_index[0].long()
-        edge_index = torch.stack([row_index, edge_index[1].long()])
+    def _create_csr_matrix_from_scipy(self, matrix: spmatrix, row_normalize: bool) -> None:
+        """Create sparse projection CSR matrix from a SciPy sparse matrix."""
+        matrix = matrix.astype(np.float32, copy=False).tocsr()
+        matrix.sum_duplicates()  # coalesce duplicate entries
 
         if row_normalize:
-            weights = self._row_normalize_weights(edge_index, weights, src_size)
+            matrix = self._row_normalize_matrix(matrix)
 
-        self.projection_matrix = torch.sparse_coo_tensor(
-            edge_index,
-            weights,
-            (src_size, dst_size),
-            device=edge_index.device,
-        ).coalesce()
-
-        self._edge_dim = self.projection_matrix.shape[1]
-
-        row_sums = torch.zeros(src_size, device=weights.device).scatter_add_(0, row_index, weights)
-        if not torch.allclose(row_sums, torch.ones_like(row_sums), atol=1e-5):
+        row_sums = np.asarray(matrix.sum(axis=1)).ravel()
+        if not np.allclose(row_sums, np.ones_like(row_sums), atol=1e-5):
             LOGGER.warning(
                 "Projection matrix rows do not sum to 1 (min=%.4f, max=%.4f, mean=%.4f). "
                 "This is unexpected; please check your matrix. "
-                "Consider using row_normalize=True or pre-normalized weights.",
+                "Consider using pre-normalized weights or row_normalize=True.",
                 row_sums.min().item(),
                 row_sums.max().item(),
                 row_sums.mean().item(),
             )
 
+        self.projection_matrix = torch.sparse_csr_tensor(
+            torch.from_numpy(matrix.indptr),
+            torch.from_numpy(matrix.indices),
+            torch.from_numpy(matrix.data),
+            size=matrix.shape,
+        )
+        self._edge_dim = self.projection_matrix.shape[1]
+
     @staticmethod
-    def _row_normalize_weights(edge_index: Tensor, weights: Tensor, num_rows: int) -> Tensor:
-        """Normalize weights per row (target node) so each row sums to 1."""
-        total = torch.zeros(num_rows, device=weights.device)
-        row_index = edge_index[0].long()
-        # edge_index[0] contains row indices (targets) for COO tensor format
-        norm = total.scatter_add_(0, row_index, weights)
-        norm = norm[row_index]
-        return weights / (norm + 1e-8)
+    def _row_normalize_matrix(matrix: spmatrix) -> spmatrix:
+        """Normalize weights per row (target node) so each row sums to 1.
+
+        Converts the input matrix to CSR format, computes the sum of each row, and divides each non-zero row by its sum. Rows that sum to zero remain unchanged.
+        """
+        matrix = matrix.tocsr(copy=True)
+        row_sums = np.asarray(matrix.sum(axis=1)).ravel()
+        inv_row_sums = np.zeros_like(row_sums, dtype=np.float32)
+        non_zero = row_sums != 0
+        inv_row_sums[non_zero] = 1.0 / row_sums[non_zero]
+        matrix = matrix.multiply(inv_row_sums[:, None])
+        return matrix.tocsr()
 
     @property
     def edge_dim(self) -> int:
@@ -614,6 +645,7 @@ class ProjectionGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         """Return the sparse projection matrix.
 
@@ -631,15 +663,17 @@ class ProjectionGraphProvider(BaseGraphProvider):
             Unused for sparse providers
         device : torch.device, optional
             Target device for matrix
+        dtype : torch.dtype, optional
+            Target dtype for matrix
 
         Returns
         -------
         Tensor
             Sparse projection matrix
         """
-        if device is not None:
-            # sparse tensors can't be registered as buffers with ddp, so move on demand
-            self.projection_matrix = self.projection_matrix.to(device)
+        if device is not None or dtype is not None:
+            # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand
+            self.projection_matrix = self.projection_matrix.to(device=device, dtype=dtype)
         return self.projection_matrix
 
     @classmethod

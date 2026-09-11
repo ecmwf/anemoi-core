@@ -96,7 +96,7 @@ def sht_setup(request):
 
 @pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_direct_inverse(sht_setup):
-    """direct followed by inverse returns the original (band-limited) field."""
+    """Direct followed by inverse returns the original (band-limited) field."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]
@@ -114,7 +114,7 @@ def test_idempotency_direct_inverse(sht_setup):
 
 @pytest.mark.parametrize("sht_setup", ["regular", "reduced", "octahedral"], indirect=True)
 def test_idempotency_inverse_direct(sht_setup):
-    """inverse followed by direct returns the original spectral coefficients."""
+    """Inverse followed by direct returns the original spectral coefficients."""
     truncation = sht_setup["truncation"]
     dtype = sht_setup["dtype"]
     tolerance = sht_setup["tolerance"]

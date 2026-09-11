@@ -15,8 +15,10 @@ from abc import abstractmethod
 import numpy as np
 import torch
 from scipy.spatial import ConvexHull
+from scipy.spatial import QhullError
 from scipy.spatial import SphericalVoronoi
 from scipy.spatial import Voronoi
+from scipy.spatial import cKDTree
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.datasets import open_dataset
@@ -25,6 +27,10 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 LOGGER = logging.getLogger(__name__)
+
+# Max vertex distance, in units of a node's median neighbour distance, for its Voronoi
+# cell to be trusted. Interior lattice cells pass at any aspect ratio; edge cells fail.
+TRUST_FACTOR = 1.2
 
 
 class BaseAreaWeights(BaseNodeAttribute, ABC):
@@ -98,68 +104,113 @@ class PlanarAreaWeights(BaseAreaWeights):
         Compute the area attributes for each node.
     """
 
-    def _compute_mean_nearest_distance(self, points: np.ndarray) -> float:
-        """Compute mean distance to nearest neighbor for each point.
+    @staticmethod
+    def _median_neighbour_distance(v: Voronoi, points: np.ndarray) -> np.ndarray:
+        """Median distance from each point to its natural (Delaunay) neighbours."""
+        ridge = v.ridge_points
+        ridge_length = np.linalg.norm(points[ridge[:, 0]] - points[ridge[:, 1]], axis=1)
+        owner = np.concatenate([ridge[:, 0], ridge[:, 1]])
+        distance = np.tile(ridge_length, 2)
+        order = np.lexsort((distance, owner))
+        owner, distance = owner[order], distance[order]
+
+        counts = np.bincount(owner, minlength=len(points))
+        starts = np.concatenate([[0], np.cumsum(counts)[:-1]])
+        median = np.full(len(points), np.inf)  # a point without neighbours trusts nothing
+        occupied = counts > 0
+        lower = distance[starts[occupied] + (counts[occupied] - 1) // 2]
+        upper = distance[starts[occupied] + counts[occupied] // 2]
+        median[occupied] = (lower + upper) / 2
+        return median
+
+    @staticmethod
+    def _flatten_regions(v: Voronoi, point_indices: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Vertex indices of the given points' regions, flattened, with each region's length."""
+        region_indices = v.point_region[point_indices]
+        regions = [v.regions[idx] if idx >= 0 else [] for idx in region_indices]
+        lengths = np.array([len(region) for region in regions], dtype=np.intp)
+        flat = np.fromiter(
+            (vertex_idx for region in regions for vertex_idx in region),
+            dtype=np.intp,
+            count=int(lengths.sum()),
+        )
+        return lengths, flat
+
+    def _trusted_cells(self, v: Voronoi, points: np.ndarray) -> np.ndarray:
+        """Mask of the cells that are bounded, with every vertex within reach of their node."""
+        n_points = len(points)
+        median = self._median_neighbour_distance(v, points)
+        lengths, flat = self._flatten_regions(v, np.arange(n_points))
+        owner = np.repeat(np.arange(n_points), lengths)
+
+        # -1 marks a vertex at infinity; the clamp keeps indexing valid, the first term rejects it
+        reach = np.linalg.norm(v.vertices[np.maximum(flat, 0)] - points[owner], axis=1)
+        far = (flat < 0) | (reach > TRUST_FACTOR * median[owner])
+        return (lengths >= 3) & (np.bincount(owner[far], minlength=n_points) == 0)
+
+    @staticmethod
+    def _voronoi_region_areas(v: Voronoi, point_indices: np.ndarray) -> np.ndarray:
+        """Polygon area of the Voronoi regions of ``point_indices``, vectorised.
+
+        Uses the shoelace formula instead of a per-node :class:`scipy.spatial.ConvexHull`.
+        SciPy returns each 2-D region's vertices in boundary order, so for a convex cell
+        this matches ``ConvexHull(...).volume`` to float-rounding level. A region whose
+        stored vertex order is not convex would make shoelace under-count, so those are
+        detected and recomputed exactly with ``ConvexHull``.
 
         Parameters
         ----------
-        points : np.ndarray
-            Array of point coordinates (N x 2)
-
-        Returns
-        -------
-        float
-            Mean nearest neighbor distance
-        """
-        from scipy.spatial import cKDTree
-
-        tree = cKDTree(points)
-        distances, _ = tree.query(points, k=2)
-        return float(distances[:, 1].mean())
-
-    def _get_boundary_ring(self, points: np.ndarray, resolution: float) -> np.ndarray:
-        """Add a ring of boundary points around the input points.
-
-        Parameters
-        ----------
-        points : np.ndarray
-            Original point coordinates
-        resolution : float
-            Approximate spacing between points
+        v : scipy.spatial.Voronoi
+            Voronoi tessellation of the nodes.
+        point_indices : np.ndarray
+            Indices of the points whose cell area is returned.
 
         Returns
         -------
         np.ndarray
-            Array including original and boundary points
+            Area of the Voronoi cell of each of ``point_indices``.
         """
-        # Get convex hull vertices
-        hull = ConvexHull(points)
-        hull_points = points[hull.vertices]
+        n_points = len(point_indices)
+        lengths, flat = PlanarAreaWeights._flatten_regions(v, point_indices)
 
-        # Expand hull outward
-        centroid = np.mean(hull_points, axis=0)
-        vectors = hull_points - centroid
-        expanded_hull = hull_points + vectors * (2**0.5 * resolution / np.linalg.norm(vectors, axis=1)[:, np.newaxis])
+        # Regions must be bounded polygons (>= 3 vertices); trusted cells all are.
+        assert (
+            n_points == 0 or lengths.min() >= 3
+        ), "Voronoi regions must be bounded polygons with >= 3 vertices (were untrusted cells passed?)."
 
-        # Create points along each hull edge
-        boundary_points = []
-        p1 = expanded_hull
-        p2 = np.roll(expanded_hull, 1, axis=0)
+        # Per-region offsets and a wrap-around "next vertex" index.
+        starts = np.zeros(n_points, dtype=np.intp)
+        np.cumsum(lengths[:-1], out=starts[1:])
+        ends = starts + lengths
+        nxt = np.arange(1, flat.shape[0] + 1, dtype=np.intp)
+        nxt[ends - 1] = starts  # wrap each region's last vertex back to its first
 
-        # Calculate number of points needed along this edge
-        edge_length = np.linalg.norm(p2 - p1, axis=1)
-        num_points = np.ceil(edge_length / resolution).astype(int)
+        # Shoelace formula: area = 1/2 |sum_i (x_i * y_{i+1} - x_{i+1} * y_i)|, per region.
+        pts = v.vertices[flat]
+        x, y = pts[:, 0], pts[:, 1]
+        cross = x * y[nxt] - x[nxt] * y
+        areas = 0.5 * np.abs(np.add.reduceat(cross, starts))
 
-        for i in np.where(num_points > 2)[0]:
-            # Create evenly spaced points along the edge
-            t = np.linspace(0, 1, num_points[i])[1:-1][:, None]  # Exclude last point to avoid duplicates
-            edge_points = p1[i] + t * (p2[i] - p1[i])
-            boundary_points.append(edge_points)
+        # Flag non-convex regions: a convex polygon's consecutive edge-turn cross products
+        # all share one sign, so a region with both signs has an interior/degenerate vertex.
+        edge_x, edge_y = x[nxt] - x, y[nxt] - y
+        turn = edge_x * edge_y[nxt] - edge_y * edge_x[nxt]
+        has_pos = np.add.reduceat((turn > 0).astype(np.intp), starts) > 0
+        has_neg = np.add.reduceat((turn < 0).astype(np.intp), starts) > 0
+        flagged = np.flatnonzero(has_pos & has_neg)
 
-        return np.concatenate([expanded_hull, np.vstack(boundary_points)])
+        # Exact ConvexHull fallback for the rare degenerate regions (matches the old code).
+        for pos in flagged:
+            region = v.regions[v.point_region[point_indices[pos]]]
+            areas[pos] = ConvexHull(v.vertices[region]).volume
+
+        return areas
 
     def compute_area_weights(self, latlons: np.ndarray) -> np.ndarray:
         """Compute area weights.
+
+        Untrusted (edge or unbounded) cells take the area of the nearest trusted cell;
+        a node set with no trusted cell at all gets uniform weights.
 
         Parameters
         ----------
@@ -172,23 +223,43 @@ class PlanarAreaWeights(BaseAreaWeights):
         np.ndarray
             Planar area weights.
         """
-        resolution = self._compute_mean_nearest_distance(latlons)
-        boundary_points = self._get_boundary_ring(latlons, resolution)
+        # Longitude is stored in [0, 2pi), not centred on the node set. A region
+        # straddling that branch cut (e.g. around the prime meridian) would otherwise
+        # place physically adjacent nodes ~2pi apart in this planar embedding, corrupting
+        # the tessellation and the nearest-trusted-cell fallback along the cut. Recentring
+        # is a rigid shift of the embedding, so cell areas are unaffected elsewhere.
+        lat, lon = latlons[:, 0], latlons[:, 1]
+        lon_center = np.arctan2(np.sin(lon).mean(), np.cos(lon).mean())
+        lon = (lon - lon_center + np.pi) % (2 * np.pi) - np.pi + lon_center
+        latlons = np.column_stack([lat, lon])
 
-        # Compute convex hull over all points (boundary ring included)
-        extended_points = np.vstack([latlons, boundary_points])
-        v = Voronoi(extended_points, qhull_options="QJ Pp")
+        try:
+            # Merged facets, not the joggle: joggle scales with the bounding box rather
+            # than the node spacing, so it fails on stretched grids (#690).
+            v = Voronoi(latlons, qhull_options="Qbb Qc Qz Pp")
+        except (QhullError, ValueError) as error:
+            LOGGER.warning(
+                "%s: the nodes cannot be tessellated (%s). Using uniform weights.",
+                type(self).__name__,
+                str(error).strip().splitlines()[0],
+            )
+            return np.ones(len(latlons))
 
-        # Compute the area of each node's region, excluding those in the boundary ring
-        areas = []
-        for idx in range(len(latlons)):
-            p_idx = v.point_region[idx]
-            r = v.regions[p_idx]
-            poly_coords = v.vertices[r]
-            area = ConvexHull(poly_coords).volume
-            areas.append(area)
+        trusted = self._trusted_cells(v, latlons)
+        if not trusted.any():
+            LOGGER.warning(
+                "%s: none of the %d Voronoi cells is bounded and local. Using uniform weights.",
+                type(self).__name__,
+                len(latlons),
+            )
+            return np.ones(len(latlons))
 
-        return np.array(areas)
+        areas = np.empty(len(latlons))
+        areas[trusted] = self._voronoi_region_areas(v, np.flatnonzero(trusted))
+        if not trusted.all():
+            _, nearest = cKDTree(latlons[trusted]).query(latlons[~trusted])
+            areas[~trusted] = areas[trusted][nearest]
+        return areas
 
 
 class MaskedPlanarAreaWeights(PlanarAreaWeights):
@@ -223,10 +294,17 @@ class MaskedPlanarAreaWeights(PlanarAreaWeights):
         self.mask_node_attr_name = mask_node_attr_name
 
     def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        """Compute the weights over the masked nodes tessellated on their own, and zero elsewhere."""
         assert self.mask_node_attr_name in nodes, f"Node attribute '{self.mask_node_attr_name}' not found in nodes."
-        attr_values = super().get_raw_values(nodes, **kwargs).to(self.device)
         mask = nodes[self.mask_node_attr_name].squeeze()
-        return attr_values * mask
+        selected = mask.cpu().numpy() != 0
+        latlons = self.get_latlon_coordinates(nodes).cpu().numpy()
+
+        area_weights = np.zeros(len(latlons))
+        area_weights[selected] = self.compute_area_weights(latlons[selected])
+
+        # multiplying rather than indexing keeps a fractional mask scaling the weights
+        return torch.from_numpy(area_weights).to(mask.device) * mask
 
 
 class SphericalAreaWeights(BaseAreaWeights):

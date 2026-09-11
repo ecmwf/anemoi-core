@@ -278,10 +278,12 @@ class AnemoiProfiler(AnemoiTrainer):
 
     @cached_property
     def callbacks(self) -> list[pl.callbacks.Callback]:
-        self.config.diagnostics.progress_bar["_target_"] = (
-            ProfilerProgressBar.__module__ + "." + ProfilerProgressBar.__name__
-        )
         callbacks = super().callbacks
+
+        # Force the profiler's own progress bar.
+        callbacks = [c for c in callbacks if not isinstance(c, pl.callbacks.ProgressBar)]
+        callbacks.append(ProfilerProgressBar())
+
         if self.config.diagnostics.benchmark_profiler.snapshot.enabled:
             from anemoi.training.diagnostics.callbacks.profiler import MemorySnapshotRecorder
             from anemoi.training.diagnostics.profilers import check_torch_version
@@ -303,14 +305,8 @@ class AnemoiProfiler(AnemoiTrainer):
         if type(batch) in [list, tuple]:
             batch = batch[0]
 
-        example_input_array = {}
-        for dataset_name in batch:
-            example_input_array[dataset_name] = batch[dataset_name][
-                :,
-                0 : self.task.num_input_timesteps,
-                ...,
-                self.data_indices[dataset_name].data.input.full,
-            ]
+        example_input_array = self.task.get_inputs(batch, data_indices=self.data_indices)
+        for dataset_name in example_input_array:
             # If the input batch is sharded, replicate it to its full size
             if self.config.dataloader.read_group_size > 1:
                 example_input_array[dataset_name] = example_input_array[dataset_name].repeat(

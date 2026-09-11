@@ -77,6 +77,7 @@ class AnemoiEvaluator(AnemoiTrainer):
             limit_val_batches=self.config.dataloader.limit_batches.validation,
             use_distributed_sampler=False,
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
+            enable_checkpointing=False,
         )
 
         LOGGER.debug("Starting evaluation..")

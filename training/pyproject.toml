@@ -117,6 +117,9 @@ scripts.".anemoi-training-train" = "anemoi.training.commands.train:main"
 # Add subcommand in the `commands` directory
 scripts.anemoi-training = "anemoi.training.__main__:main"
 
+[tool.setuptools]
+package-data."anemoi.training" = [ "py.typed" ]
+
 [tool.setuptools_scm]
 version_file = "src/anemoi/training/_version.py"
 version_scheme = "post-release"

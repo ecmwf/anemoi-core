@@ -254,7 +254,7 @@ class LossVariableMapper(BaseLossWrapper):
         if isinstance(original_indexer, int):
             return mapped_indices[0] if len(mapped_indices) == 1 else mapped_indices
         if isinstance(original_indexer, torch.Tensor):
-            return torch.as_tensor(mapped_indices, device=original_indexer.device, dtype=torch.long)
+            return original_indexer.new_tensor(mapped_indices, dtype=torch.long)
         return mapped_indices
 
     def _remap_scaler_indices_for_filtered_pred(
@@ -305,7 +305,7 @@ class LossVariableMapper(BaseLossWrapper):
         without_scalers: list[str] | list[int] | None = None,
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
-        squash_mode: Squash_mode = "avg",
+        squash_mode: Squash_mode | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **kwargs,
@@ -341,6 +341,11 @@ class LossVariableMapper(BaseLossWrapper):
         pred_filtered = pred[..., pred_indices]
         target_filtered = target[..., target_indices]
 
+        # torch.compile performance change
+        # Make contiguous to prevent a changing stride forcing specialisation
+        pred_filtered = pred_filtered.contiguous()
+        target_filtered = target_filtered.contiguous()
+
         loss_kwargs = dict(kwargs)
         loss_kwargs.update(
             {
@@ -348,9 +353,12 @@ class LossVariableMapper(BaseLossWrapper):
                 "without_scalers": without_scalers,
                 "grid_shard_slice": grid_shard_slice,
                 "group": group,
-                "squash_mode": squash_mode,
             },
         )
+        # Preserve the wrapped loss's reduction default unless the caller
+        # explicitly selects a mode.
+        if squash_mode is not None:
+            loss_kwargs["squash_mode"] = squash_mode
 
         empty_metric_selection = False
         if isinstance(scaler_indices, tuple):

@@ -7,8 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
 from functools import cached_property
+from typing import Any
 
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader
@@ -74,19 +76,17 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
-
-        # If the task defines a fixed tendency_delta (e.g. TemporalDownscaler uses 1h
-        # per-step differences rather than cumulative offsets from t=0), use that
-        # delta for every lead time so all steps share the same tendency statistics.
-        tendency_delta = getattr(self.task, "tendency_delta", None)
-        tendency_delta_str = frequency_to_string(tendency_delta) if tendency_delta is not None else None
-
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {
-                lead_time: dataset.statistics_tendencies(tendency_delta_str or lead_time) for lead_time in lead_times
-            }
+            targets_by_step = self.task.dataset_target_relative_times_by_dataset_by_step.get(dataset_name)
+            if targets_by_step is not None and self.task.model_timestep is not None:
+                lead_times = [
+                    frequency_to_string(relative_time * self.task.model_timestep)
+                    for relative_time in targets_by_step[0]
+                ]
+            else:
+                lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
+            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -150,11 +150,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                     self.config,
                     task=self.task,
                     mode=label,
-                    logger=LOGGER,
                 ),
                 frequency=shared_frequency,
                 shuffle=shuffle,
                 label=label,
+                epoch=self.epoch,
+                rollout=len(tuple(self.task.steps(label))),
             )
 
         return MultiDataset(
@@ -167,9 +168,13 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         )
 
     def set_epoch(self, epoch: int) -> None:
-        """Update the epoch for each dataset. This will take effect once the DataLoader workers are re-started."""
+        """Set the datamodule epoch and synchronize datasets settings."""
         self.epoch = epoch
+        self.sync_dataset_state()
 
+    def sync_dataset_state(self) -> None:
+        """Synchronize datasets with the current epoch and task state."""
+        refresh_task_timing = False
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
@@ -178,25 +183,55 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # Store the current rollout length, and refresh the time steps that must
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
-            dataset.set_epoch(
-                epoch,
-                rollout=len(tuple(self.task.steps(label))),
-                relative_date_indices=compute_relative_date_indices(
+            if dataset.relative_date_indices_are_native:
+                relative_date_indices = compute_relative_date_indices(
                     self.task,
                     dataset.data_readers,
                     mode=label,
-                ),
+                )
+            else:
+                refresh_task_timing = True
+                relative_date_indices = resolve_relative_date_indices(
+                    self.config,
+                    task=self.task,
+                    mode=label,
+                )
+            dataset.set_epoch(
+                self.epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                relative_date_indices=relative_date_indices,
             )
 
-    def _persistent_workers(self) -> bool:
-        """Return whether DataLoader workers can persist across epochs."""
+        if refresh_task_timing:
+            timesteps = self._timing_metadata()
+            metadata = {
+                "metadata_inference": {
+                    "dataset_names": self.dataset_names,
+                    **{dataset_name: {"timesteps": timesteps} for dataset_name in self.dataset_names},
+                },
+            }
+            self.task.fill_metadata(metadata)
+            self.task.configure_from_metadata(metadata)
+
+    def state_dict(self) -> dict[str, Any]:
+        """Save the epoch used to seed newly started dataloader workers."""
+        return {"epoch": self.epoch}
+
+    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
+        """Restore the dataloader epoch before Lightning starts worker processes."""
+        self.set_epoch(state_dict["epoch"])
+
+    @cached_property
+    def _use_persistent_workers(self) -> bool:
+        """Return the effective worker persistence setting."""
+        persistent_workers = self.config.dataloader.get("persistent_workers", True)
         rollout = getattr(self.task, "rollout", None)
-        if rollout is None:
-            return True
-        # Workers could also be persisted once rollout.step >= rollout.maximum,
-        # but that would make resumed runs behave differently from uninterrupted
-        # runs.
-        return rollout.epoch_increment == 0
+        if persistent_workers and rollout is not None and rollout.epoch_increment > 0:
+            LOGGER.info(
+                "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
+            )
+            return False
+        return persistent_workers
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""
@@ -219,7 +254,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._persistent_workers(),
+            persistent_workers=self._use_persistent_workers,
             **extra,
         )
 
@@ -244,31 +279,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
-        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, dict[str, list[int]]]:
-            if dataset.relative_date_indices_are_native:
-                return {}
-
-            input_relative_indices_by_dataset, target_relative_indices_by_dataset = (
-                resolve_task_relative_indices_by_dataset(
-                    self.task,
-                    dataset.model_relative_date_indices_by_dataset,
-                    mode=label,
-                )
-            )
-
-            return {
-                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
-                f"relative_date_input_indices_{label}_by_dataset": input_relative_indices_by_dataset,
-                f"relative_date_indices_{label}_by_dataset": {
-                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
-                    for name in self.dataset_names
-                },
-                f"relative_date_target_indices_{label}_by_dataset": target_relative_indices_by_dataset,
-            }
-
-        timesteps = _dataset_timing_metadata(self.ds_train, "training")
-        if len(self.valid_dataloader_config) > 0:
-            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
+        timesteps = self._timing_metadata()
 
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
@@ -290,3 +301,41 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
             }
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
+
+    def _timing_metadata(self) -> dict[str, object]:
+        """Return the current dataset-specific time windows for task configuration and inference metadata."""
+
+        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, object]:
+            if dataset.relative_date_indices_are_native:
+                return {}
+            assert dataset.frequency_seconds is not None
+
+            (
+                input_relative_indices_by_dataset,
+                target_relative_indices_by_dataset,
+                target_relative_indices_by_dataset_by_step,
+            ) = resolve_task_relative_indices_by_dataset(
+                self.task,
+                dataset.model_relative_date_indices_by_dataset,
+                datetime.timedelta(seconds=dataset.frequency_seconds),
+                mode=label,
+            )
+
+            return {
+                "model_timestep": frequency_to_string(datetime.timedelta(seconds=dataset.frequency_seconds)),
+                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
+                f"relative_date_input_indices_{label}_by_dataset": input_relative_indices_by_dataset,
+                f"relative_date_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_target_indices_{label}_by_dataset": target_relative_indices_by_dataset,
+                f"relative_date_target_indices_{label}_by_dataset_by_step": (
+                    target_relative_indices_by_dataset_by_step
+                ),
+            }
+
+        timesteps = _dataset_timing_metadata(self.ds_train, "training")
+        if len(self.valid_dataloader_config) > 0:
+            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
+        return timesteps

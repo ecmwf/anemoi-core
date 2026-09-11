@@ -1,5 +1,7 @@
 prefetch_factor: 2
 pin_memory: True
+# Automatically set to False when the rollout changes between epochs.
+persistent_workers: True
 
 # ============
 # read_group_size:

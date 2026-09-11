@@ -32,11 +32,14 @@ def reference_state_sampling_source(
     x: dict[str, torch.Tensor],
     *,
     data_indices: dict[str, Any],
-    n_step_output: int,
+    n_step_output: int | dict[str, int],
 ) -> dict[str, torch.Tensor]:
     """Use the latest input state as the source field, selecting model-output variables."""
     sources = {}
     for dataset_name, x_data in x.items():
+        dataset_n_step_output = (
+            n_step_output[dataset_name] if isinstance(n_step_output, dict) else n_step_output
+        )
         output_names = data_indices[dataset_name].model.output.ordered_names
         try:
             input_positions = data_indices[dataset_name].model.input.positions_for_names(output_names)
@@ -49,8 +52,8 @@ def reference_state_sampling_source(
             raise ValueError(msg) from exc
         input_idx = torch.as_tensor(input_positions, device=x_data.device, dtype=torch.long)
         source = x_data[:, -1:, :, :, :].index_select(-1, input_idx)
-        if n_step_output > 1:
-            source = source.expand(-1, n_step_output, -1, -1, -1)
+        if dataset_n_step_output != 1:
+            source = source.expand(-1, dataset_n_step_output, -1, -1, -1)
         sources[dataset_name] = source
     return sources
 
@@ -77,7 +80,7 @@ class TransportSourceSpec:
 def sampling_source_specs(
     x: dict[str, torch.Tensor],
     *,
-    n_step_output: int,
+    n_step_output: int | dict[str, int],
     num_output_channels: dict[str, int],
     grid_shard_sizes: DatasetShardSizes | None = None,
 ) -> dict[str, TransportSourceSpec]:
@@ -86,7 +89,7 @@ def sampling_source_specs(
         dataset_name: TransportSourceSpec(
             shape=(
                 x_data.shape[0],
-                n_step_output,
+                n_step_output[dataset_name] if isinstance(n_step_output, dict) else n_step_output,
                 x_data.shape[2],
                 x_data.shape[-2],
                 num_output_channels[dataset_name],

@@ -314,6 +314,11 @@ modules will be marked for compilation when the model is built. During
 their first forward pass, these modules will be compiled. No code
 modifications are required.
 
+Selected modules can define a training-specific compilation boundary. Graph
+score losses use this to compile their local score calculation while keeping
+model-parallel communication in eager mode. See :ref:`compiling-graph-scores`
+for a configuration example.
+
 You can optionally pass options to torch compile via the 'options'
 keyword. A full list of the possible options and their meanings can be
 found in the `torch.compile documentation

@@ -62,17 +62,37 @@ class RolloutEval(Callback):
         pl_module: pl.LightningModule,
         batch: dict[str, torch.Tensor],
     ) -> None:
-        batch_tensor = batch
-        if isinstance(batch, dict):
-            batch_tensor = next(iter(batch.values()))
-
         if self.follow_task_validation_rollout:
             self.max_rollout = len(tuple(pl_module.task.steps("validation")))
 
-        assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
-            "Batch length not sufficient for requested validation rollout length! "
-            f"Set `task.validation_rollout` to at least {self.max_rollout}"
-        )
+        if isinstance(batch, dict):
+            n_step_input_by_dataset = getattr(pl_module, "n_step_input_by_dataset", None)
+            n_step_output_by_dataset = getattr(pl_module, "n_step_output_by_dataset", None)
+            for dataset_name, batch_tensor in batch.items():
+                n_step_input = (
+                    n_step_input_by_dataset[dataset_name]
+                    if isinstance(n_step_input_by_dataset, dict)
+                    else pl_module.n_step_input
+                )
+                n_step_output = (
+                    n_step_output_by_dataset[dataset_name]
+                    if isinstance(n_step_output_by_dataset, dict)
+                    else pl_module.n_step_output
+                )
+                required = (
+                    self.max_rollout * n_step_output
+                    + n_step_input
+                )
+                assert batch_tensor.shape[1] >= required, (
+                    f"Batch length for dataset '{dataset_name}' is not sufficient for requested validation "
+                    f"rollout length! Set `task.validation_rollout` to at least {self.max_rollout}"
+                )
+        else:
+            batch_tensor = batch
+            assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
+                "Batch length not sufficient for requested validation rollout length! "
+                f"Set `task.validation_rollout` to at least {self.max_rollout}"
+            )
 
         # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
         # because `_step(..., validation_mode=True)` uses the task setting to determine step count.
@@ -81,9 +101,6 @@ class RolloutEval(Callback):
             self._log(pl_module, step_output.loss, step_output.metrics, batch_tensor.shape[0])
 
     def _log(self, pl_module: pl.LightningModule, loss: torch.Tensor, metrics: dict, bs: int) -> None:
-
-        loss_scales = loss
-        loss = loss_scales.sum()
         loss_name = getattr(pl_module.loss, "name", pl_module.loss.__class__.__name__.lower())
         pl_module.log(
             f"val_r{self.max_rollout}_{loss_name}",
@@ -95,34 +112,18 @@ class RolloutEval(Callback):
             batch_size=bs,
             sync_dist=True,
         )
-        if loss_scales.numel() > 1:
-            for scale in range(loss_scales.numel()):
-                pl_module.log(
-                    f"val_r{self.max_rollout}_{loss_name}_{scale}",
-                    loss_scales[scale],
-                    on_epoch=True,
-                    on_step=True,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
 
         for mname, mvalue in metrics.items():
-            for scale in range(mvalue.numel()):
-
-                log_val = mvalue[scale] if mvalue.numel() > 1 else mvalue
-
-                pl_module.log(
-                    f"val_r{self.max_rollout}_" + mname + "_scale_" + str(scale),
-                    log_val,
-                    on_epoch=True,
-                    on_step=False,
-                    prog_bar=False,
-                    logger=pl_module.logger_enabled,
-                    batch_size=bs,
-                    sync_dist=True,
-                )
+            pl_module.log(
+                f"val_r{self.max_rollout}_" + mname,
+                mvalue,
+                on_epoch=True,
+                on_step=False,
+                prog_bar=False,
+                logger=pl_module.logger_enabled,
+                batch_size=bs,
+                sync_dist=True,
+            )
 
     def on_validation_batch_end(
         self,
@@ -146,6 +147,10 @@ class RolloutEval(Callback):
                 if dtype is not None
                 else nullcontext()
             )
-
-            with context:
+            # 'torch.compile.set_stance' tells the compiler to try use compiled code if it exists
+            # but fall back to eager if it doesn't.
+            # This is used because the evaluationRollout callback seems to introduce many different input shapes
+            # These all force recompilation which slows down evaluation and eventually leads to a an error
+            # once the config.model.recompile_limit is reached.
+            with context and torch.compiler.set_stance("eager_on_recompile"):
                 self._eval(pl_module, batch)
