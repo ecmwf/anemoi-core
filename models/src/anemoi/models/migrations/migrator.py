@@ -166,13 +166,13 @@ def _import_file(location: Path, package: str | None = None) -> ModuleType:
     ModuleType
         The imported module
     """
-    spec = importlib.util.spec_from_file_location(location.stem, location)
+    module_name = f"{package}.{location.stem}" if package else location.stem
+    spec = importlib.util.spec_from_file_location(module_name, location)
     if spec is None or spec.loader is None:
         raise ValueError(f"{location} does not point to a valid Python file.")
 
     module = importlib.util.module_from_spec(spec)
 
-    module_name = f"{package}.{location.stem}" if package else location.stem
     sys.modules[module_name] = module
 
     spec.loader.exec_module(module)
