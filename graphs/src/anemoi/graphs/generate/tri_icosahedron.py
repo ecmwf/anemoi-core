@@ -199,7 +199,6 @@ def add_1_hop_edges(
     return multiscale_edges
 
 
-
 def add_edges_to_nx_graph(
     graph: nx.DiGraph,
     resolutions: list[int],
