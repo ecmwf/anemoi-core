@@ -15,11 +15,13 @@ from typing import Optional
 import einops
 import numpy as np
 import torch
+import torch.distributed as dist
 from torch import nn
 from torch.nn import Parameter
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -358,6 +360,15 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Whether theta is a trainable parameter.
     regressors : list[str] | None
         Variable names to use as regressors.
+    graph : HeteroData | None
+        Graph holding the node sets. Not read here; this residual has no spatial structure.
+    statistics : dict | None
+        Per-variable statistics of the training data, used to pick a starting theta
+        when ``theta_init`` is 0.
+    data_indices : IndexCollection | None
+        Says which variables are prognostic and where each one sits in the input. Required.
+    dataset_name : str | None
+        Name of the dataset this residual belongs to. Not read here.
     """
 
     def __init__(
@@ -448,6 +459,15 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    graph : HeteroData | None
+        Graph whose node coordinates give the number of latitudes and longitudes. Required.
+    statistics : dict | None
+        Per-variable statistics of the training data, used to pick a starting theta
+        when ``theta_init`` is 0.
+    data_indices : IndexCollection | None
+        Says which variables are prognostic and where each one sits in the input. Required.
+    dataset_name : str | None
+        Name of the node set in ``graph`` to read the grid coordinates from. Required.
     """
 
     def __init__(
@@ -526,48 +546,77 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         filt = torch.ones(len(self._truncation_input_idx), blur_lmax)
         filt = filt * max(theta_init, 0.01) / (0.5 - max(theta_init, 0.01))
         filt = torch.sqrt(filt / blur_lmax)
-
-        walias = torch.zeros(len(self._truncation_input_idx), lmax, lmax, 2)
-
         self.filter = Parameter(filt)
-        self.walias = Parameter(walias)
 
-        self.lpass_filter = self._truncate_with_anti_aliasing if anti_aliasing else self._truncate_without_anti_aliasing
+        if anti_aliasing:
+            self.walias = Parameter(torch.zeros(len(self._truncation_input_idx), lmax, lmax, 2))
+            self.lpass_filter = self._truncate_with_anti_aliasing
+        else:
+            self.lpass_filter = self._truncate_without_anti_aliasing
 
-    def _x_filter(self) -> torch.Tensor:
-        f = torch.square(self.filter)
+    def _x_filter(self, local_vars: slice = slice(None)) -> torch.Tensor:
+        f = torch.square(self.filter[local_vars])
         f = torch.cumsum(f, -1)
         return f / (1 + f)
 
-    def _w_filter(self) -> torch.Tensor:
-        walias = self.isht(torch.view_as_complex(self.walias))
+    def _w_filter(self, local_vars: slice = slice(None)) -> torch.Tensor:
+        walias = self.isht(torch.view_as_complex(self.walias[local_vars]))
         return torch.sigmoid(walias)
 
-    def _truncate_without_anti_aliasing(self, x: torch.Tensor) -> torch.Tensor:
+    def _truncate_without_anti_aliasing(self, x: torch.Tensor, local_vars: slice = slice(None)) -> torch.Tensor:
         x = self.x_fsht(x)
-        f = self._x_filter()
+        f = self._x_filter(local_vars)
         x = x * (1 - f.unsqueeze(-1))
         return self.x_isht(x)
 
-    def _truncate_with_anti_aliasing(self, x: torch.Tensor) -> torch.Tensor:
+    def _truncate_with_anti_aliasing(self, x: torch.Tensor, local_vars: slice = slice(None)) -> torch.Tensor:
         x_skip = self.x_fsht(x)
-        f = self._x_filter()
-        walias = self._w_filter()
+        f = self._x_filter(local_vars)
+        walias = self._w_filter(local_vars)
 
         x_skip = x_skip * (1 - f.unsqueeze(-1))
         return walias * x + (1 - walias) * self.x_isht(x_skip)
 
-    def _apply_truncation(self, x_last: torch.Tensor) -> torch.Tensor:
-        x_last = einops.rearrange(x_last, "... values var -> ... var values")
-        x_last[..., self._truncation_input_idx, :] = self.lpass_filter(x_last[..., self._truncation_input_idx, :])
-        return einops.rearrange(x_last, "... var values -> ... values var")
+    def _apply_truncation(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
+        channel_shard_sizes = get_shard_sizes(x_last, -1, model_comm_group)
+        local_vars = slice(None)  # every rank filters every variable unless the grid is split up
+        if grid_shard_sizes is not None:
+            # The forward transform needs every latitude ring, so hand each rank a few whole
+            # variables on the full grid instead of every variable on a piece of the grid.
+            assert min(channel_shard_sizes) > 0, (
+                f"Cannot spread {x_last.shape[-1]} truncated variables over "
+                f"{len(channel_shard_sizes)} model-parallel ranks; each rank needs at least one. "
+                "Lower num_gpus_per_model or shorten skip_truncate_variables."
+            )
+            x_last = all_to_all_transpose(x_last, -1, channel_shard_sizes, -2, grid_shard_sizes, model_comm_group)
+            local_vars = slice(*get_partition_range(channel_shard_sizes, dist.get_rank(group=model_comm_group)))
 
-    def _learnable(self, x_last: torch.Tensor) -> torch.Tensor:
+        x_last = einops.rearrange(x_last, "... values var -> ... var values")
+        x_last = self.lpass_filter(x_last, local_vars)
+        x_last = einops.rearrange(x_last, "... var values -> ... values var")
+
+        if grid_shard_sizes is not None:
+            x_last = all_to_all_transpose(x_last, -2, grid_shard_sizes, -1, channel_shard_sizes, model_comm_group)
+
+        return x_last
+
+    def _learnable(self, x_last: torch.Tensor, grid_shard_sizes=None, model_comm_group=None) -> torch.Tensor:
         if self.truncate:
-            x_last = self._apply_truncation(x_last)
+            truncated = self._apply_truncation(
+                x_last[..., self._truncation_input_idx],
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+            )
+            x_last = x_last.clone()  # here x_last is a view
+            x_last[..., self._truncation_input_idx] = truncated
 
         weight = self.isht(torch.view_as_complex(self.weight * self.muzero))
         weight = einops.rearrange(weight, "... var values -> ... values var")
+
+        if grid_shard_sizes is not None:
+            # The fields cover the whole globe, so we keep the points belonging to thisrank.
+            start, end = get_partition_range(grid_shard_sizes, dist.get_rank(group=model_comm_group))
+            weight = weight[..., start:end, :]
 
         gain = 1 - torch.sigmoid(weight[0, ...]) * (1 - self.theta_buff) - self.theta_buff
         out = gain * x_last[..., self._internal_input_idx] + weight[1, ...]
@@ -584,5 +633,7 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         x_last = x[:, -1, ...]
         out = torch.zeros_like(x_last)
-        out[..., self._internal_input_idx] = self._learnable(x_last)
+        out[..., self._internal_input_idx] = self._learnable(
+            x_last, grid_shard_sizes=grid_shard_sizes, model_comm_group=model_comm_group
+        )
         return self._expand_time(out, n_step_output)
