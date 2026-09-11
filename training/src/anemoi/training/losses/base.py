@@ -37,6 +37,7 @@ class LossFactoryContextKey(StrEnum):
 
     AVAILABLE_SCALERS = "available_scalers"
     DATA_INDICES = "data_indices"
+    NORMALIZER = "normalizer"
 
 
 class BaseLoss(nn.Module, ABC):

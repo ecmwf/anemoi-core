@@ -54,6 +54,9 @@ class LossFactoryContext:
 
     available_scalers: dict[str, TENSOR_SPEC] | None = None
     data_indices: IndexCollection | None = None
+    normalizer: object | None = None
+    """Dataset input normaliser (exposes ``_norm_mul``/``_norm_add`` over the DATA_FULL
+    variable axis) for losses that evaluate physical-space operators on predictions."""
 
     def for_loss_class(self, loss_class: type[BaseLoss]) -> tuple[dict, bool, bool]:
         """Return the context kwargs explicitly declared by a loss class."""
@@ -65,12 +68,19 @@ class LossFactoryContext:
             context_keys,
             LossFactoryContextKey.DATA_INDICES,
         )
+        takes_normalizer = self.normalizer is not None and _has_factory_context_key(
+            context_keys,
+            LossFactoryContextKey.NORMALIZER,
+        )
 
         if takes_scalers:
             constructor_kwargs["available_scalers"] = self.available_scalers
 
         if takes_data_indices:
             constructor_kwargs["data_indices"] = self.data_indices
+
+        if takes_normalizer:
+            constructor_kwargs["normalizer"] = self.normalizer
 
         return constructor_kwargs, takes_scalers, takes_data_indices
 
@@ -126,10 +136,11 @@ def _build_wrapped_loss(
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
     data_indices: "IndexCollection | None",
+    normalizer: object | None = None,
 ) -> BaseLoss:
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
     inner_loss_config = loss_config.pop("loss_fn")
-    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices, normalizer=normalizer)
     wrapper = instantiate(loss_config, loss_fn=inner_loss)
     # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
     if scalers_to_include and scalers:
@@ -149,6 +160,7 @@ def get_loss_function(
     data_indices: IndexCollection | None = None,
     graph_data: object | None = None,
     data_node_name: str | None = None,
+    normalizer: object | None = None,
     **kwargs,
 ) -> BaseLoss:
     """Get loss functions from config.
@@ -170,6 +182,9 @@ def get_loss_function(
         Graph data passed to loss classes that declare ``needs_graph_data = True``.
     data_node_name : str, optional
         Dataset node name passed to loss classes that declare ``needs_graph_data = True``.
+    normalizer : object, optional
+        Dataset input normaliser passed to loss classes that declare
+        ``LossFactoryContextKey.NORMALIZER`` in ``factory_context_keys``.
     kwargs : Any
         Additional arguments to pass to the loss function
 
@@ -207,6 +222,7 @@ def get_loss_function(
             data_indices,
             graph_data=graph_data,
             data_node_name=data_node_name,
+            normalizer=normalizer,
             **kwargs,
         )
         return instantiate(
@@ -217,7 +233,7 @@ def get_loss_function(
         )
 
     if target in WRAPPED_LOSSES:
-        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
+        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices, normalizer=normalizer)
 
     scalers = scalers or {}
 
@@ -235,6 +251,7 @@ def get_loss_function(
     factory_context = LossFactoryContext(
         available_scalers=available_scalers,
         data_indices=data_indices,
+        normalizer=normalizer,
     )
     constructor_kwargs, takes_scalers, takes_data_indices = _extract_constructor_context(
         loss_config,

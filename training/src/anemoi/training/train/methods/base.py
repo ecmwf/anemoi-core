@@ -284,6 +284,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                normalizer=self._dataset_normalizer(dataset_name),
             )
 
             # Check unit compatibility between predicted and target variables
@@ -296,6 +297,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices=data_indices[dataset_name],
                 graph_data=graph_data,
                 data_node_name=data_node_name,
+                normalizer=self._dataset_normalizer(dataset_name),
             )
             self._initialise_updating_scalers(
                 scalers=dataset_scalers,
@@ -422,6 +424,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: IndexCollection,
         graph_data: object | None = None,
         data_node_name: str = DEFAULT_DATASET_NAME,
+        normalizer: torch.nn.Module | None = None,
     ) -> torch.nn.ModuleDict:
         return torch.nn.ModuleDict(
             {
@@ -431,10 +434,27 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                     data_indices=data_indices,
                     graph_data=graph_data,
                     data_node_name=data_node_name,
+                    normalizer=normalizer,
                 )
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    def _dataset_normalizer(self, dataset_name: str) -> torch.nn.Module | None:
+        """Return the input normaliser of a dataset's pre-processors, if any.
+
+        Losses declaring ``LossFactoryContextKey.NORMALIZER`` use its affine
+        ``_norm_mul``/``_norm_add`` buffers (DATA_FULL variable axis) to evaluate
+        physical-space operators on normalised predictions.
+        """
+        pre_processors = getattr(getattr(self, "model", None), "pre_processors", None)
+        if pre_processors is None or dataset_name not in pre_processors:
+            return None
+        processors = getattr(pre_processors[dataset_name], "processors", {})
+        for processor in processors.values():
+            if hasattr(processor, "_norm_mul") and hasattr(processor, "_norm_add"):
+                return processor
+        return None
 
     def forward(self, x: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
         """Forward method.

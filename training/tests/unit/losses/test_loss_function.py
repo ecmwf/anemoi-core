@@ -33,6 +33,8 @@ from anemoi.training.losses import WeightedMSELoss
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
+from anemoi.training.losses.base import LossFactoryContextKey
+from anemoi.training.losses.loss import LossFactoryContext
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 
@@ -1134,3 +1136,54 @@ def test_mse_nans() -> None:
 
     out = loss(pred, target)
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
+
+
+class _NormalizerAwareLoss(BaseLoss):
+    """Loss stub that requests the dataset normaliser from the factory."""
+
+    factory_context_keys = frozenset({LossFactoryContextKey.NORMALIZER})
+
+    def __init__(self, normalizer: object | None = None, ignore_nans: bool = False) -> None:
+        super().__init__(ignore_nans=ignore_nans)
+        self.received_normalizer = normalizer
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, **_kwargs) -> torch.Tensor:
+        return (pred - target).abs().mean()
+
+
+def test_factory_context_passes_normalizer_only_to_declaring_losses() -> None:
+    normalizer = SimpleNamespace(_norm_mul=torch.ones(3), _norm_add=torch.zeros(3))
+    context = LossFactoryContext(normalizer=normalizer)
+
+    kwargs, _, _ = context.for_loss_class(_NormalizerAwareLoss)
+    assert kwargs == {"normalizer": normalizer}
+
+    kwargs, _, _ = context.for_loss_class(MSELoss)
+    assert "normalizer" not in kwargs
+
+    # A declaring loss built without a normaliser available gets nothing injected.
+    kwargs, _, _ = LossFactoryContext().for_loss_class(_NormalizerAwareLoss)
+    assert kwargs == {}
+
+
+def test_get_loss_function_forwards_normalizer_through_combined_loss() -> None:
+    normalizer = SimpleNamespace(_norm_mul=torch.ones(3), _norm_add=torch.zeros(3))
+    cfg = DictConfig(
+        {
+            "_target_": "anemoi.training.losses.CombinedLoss",
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss", "scalers": []},
+                {"_target_": f"{__name__}._NormalizerAwareLoss", "scalers": []},
+            ],
+            "loss_weights": [1.0, 1.0],
+        },
+    )
+    loss = get_loss_function(cfg, scalers={}, normalizer=normalizer)
+
+    mse, aware = loss.losses
+    assert not hasattr(mse, "received_normalizer")
+    assert aware.received_normalizer is normalizer
+
+    # Existing losses are untouched when no normaliser is supplied.
+    plain = get_loss_function(DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": []}), scalers={})
+    assert isinstance(plain, MSELoss)
