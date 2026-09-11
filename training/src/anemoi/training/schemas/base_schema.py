@@ -250,14 +250,14 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
         from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
 
         all_splits = [
-            self.dataloader.training.datasets,
-            self.dataloader.validation.datasets,
-            self.dataloader.test.datasets,
+            self.dataloader.training,
+            self.dataloader.validation,
+            self.dataloader.test,
         ]
         uses_trajectory = any(
             isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
             for split in all_splits
-            for dataset in split.values()
+            for dataset in split.iter_readers()
         )
         if uses_trajectory and self.data.frequency is not None:
             msg = (

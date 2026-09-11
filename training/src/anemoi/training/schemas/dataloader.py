@@ -9,9 +9,11 @@
 
 
 import datetime
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 from typing import Literal
+from typing import Self
 
 from pydantic import BaseModel as PydanticBaseModel
 from pydantic import ConfigDict
@@ -20,6 +22,8 @@ from pydantic import NonNegativeInt
 from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
+from pydantic import model_validator
+from pydantic_core import PydanticCustomError
 
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
@@ -122,18 +126,85 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
-class MultiDatasetSchema(BaseModel):
+ReaderSchema = NativeDatasetSchema | TrajectoryDatasetSchema
+"""A single reader definition (one anemoi-datasets dataset with its time range)."""
+
+
+class ParticipantsSchema(BaseModel):
+    """A dataset realised by several participants (multi-domain training).
+
+    All participants of a dataset provide the SAME variables and frequency and are consumed under
+    the same dataset name by the model; one participant is drawn per batch. Grids may differ.
+    """
+
+    participants: dict[str, ReaderSchema]
+    "Participant name -> reader definition. Names are the keys and hence unique."
+    statistics_from: str | None = Field(default=None)
+    "Participant whose statistics are used for the whole dataset. Defaults to the first participant."
+
+    @model_validator(mode="after")
+    def check_participants(self) -> Self:
+        if not self.participants:
+            msg = "'participants' must define at least one participant."
+            error = "empty_participants"
+            raise PydanticCustomError(error, msg)
+        if self.statistics_from is not None and self.statistics_from not in self.participants:
+            msg = (
+                f"'statistics_from' must name one of the participants {sorted(self.participants)}, "
+                f"got {self.statistics_from!r}."
+            )
+            error = "unknown_statistics_participant"
+            raise PydanticCustomError(error, msg)
+        return self
+
+
+class _DatasetsSchema(BaseModel):
+    """Common part of the per-stage dataset configuration.
+
+    Each entry of ``datasets`` is either a single reader (the dataset has exactly one participant, named
+    after the dataset) or a ``participants:`` block.
+    """
+
+    datasets: dict[str, ReaderSchema | ParticipantsSchema]
+    "Dataset name -> reader definition or participants block."
+
+    def participants(self, dataset_name: str) -> dict[str, ReaderSchema]:
+        """Return ``{participant_name: reader}`` for a dataset; the single form maps the dataset onto itself."""
+        entry = self.datasets[dataset_name]
+        if isinstance(entry, ParticipantsSchema):
+            return dict(entry.participants)
+        return {dataset_name: entry}
+
+    def iter_readers(self) -> Iterator[ReaderSchema]:
+        """Iterate over every reader definition of every dataset, participants flattened."""
+        for dataset_name in self.datasets:
+            yield from self.participants(dataset_name).values()
+
+
+class MultiDatasetSchema(_DatasetsSchema):
     """Configuration for a MultiDataset."""
 
     target_: Literal["anemoi.training.data.datasets.MultiDataset"] = Field(..., alias="_target_")
-    datasets: dict[str, NativeDatasetSchema | TrajectoryDatasetSchema]
+
+    @model_validator(mode="after")
+    def check_single_participant_per_dataset(self) -> Self:
+        counts = {name: len(self.participants(name)) for name in self.datasets}
+        offending = {name: count for name, count in counts.items() if count > 1}
+        if offending:
+            msg = (
+                "MultiDataset supports at most one participant per dataset; use "
+                "'_target_: anemoi.training.data.datasets.MultiDomainDataset' for datasets with several "
+                f"participants. Offending datasets (name: count): {offending}."
+            )
+            error = "multidataset_multiple_participants"
+            raise PydanticCustomError(error, msg)
+        return self
 
 
-class MultiDomainDatasetSchema(BaseModel):
+class MultiDomainDatasetSchema(_DatasetsSchema):
     """Configuration for a MultiDomainDataset."""
 
     target_: Literal["anemoi.training.data.datasets.MultiDomainDataset"] = Field(..., alias="_target_")
-    datasets: dict[str, NativeDatasetSchema | TrajectoryDatasetSchema]
 
 
 class DataLoaderSchema(PydanticBaseModel):
