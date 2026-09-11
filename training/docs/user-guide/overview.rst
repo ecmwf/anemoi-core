@@ -21,16 +21,12 @@ As you progress through this guide, you'll learn how to:
    up and customize your training pipeline using YAML-based
    configuration files.
 
-#. :doc:`Configure Your Data Handling <training>`: Learn about data
-   routing, normalization strategies, and how to set up your dataset for
-   training.
-
 #. :doc:`Choose and Configure Models <models>`: Explore the different
    model architectures available and how to select the best one for your
    needs.
 
-#. :doc:`Execute and Monitor Experiments <tracking>`: Get hands-on with
-   running your training jobs and tracking your experiments using tools
+#. :doc:`Monitor Experiments <tracking>`: Get hands-on with 
+   tracking your experiments using tools
    like MLflow.
 
 #. :doc:`Optimize Performance <performance-optimisation>`: Discover
