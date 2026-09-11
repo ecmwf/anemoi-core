@@ -25,18 +25,64 @@ from anemoi.utils.config import DotDict
 LOGGER = logging.getLogger(__name__)
 
 
-class GraphBuilder:
-    """Create a graph using without a config."""
+class GraphCreator:
+    """Provides a method to create graphs
+
+    Parameters
+    ----------
+    node_builders : list[BaseNodeBuilder], optional
+        Builders used to create graph nodes. If omitted, an empty list is used.
+    edge_builders : list[BaseEdgeBuilder], optional
+        Builders used to create graph edges. If omitted, an empty list is used.
+    post_processors : list[PostProcessor], optional
+        Processors applied after nodes and edges have been created. If omitted,
+        an empty list is used.
+    """
 
     def __init__(
         self,
         node_builders: list[BaseNodeBuilder] | None = None,
         edge_builders: list[BaseEdgeBuilder] | None = None,
         post_processors: list[PostProcessor] | None = None,
-    ):
+    ) -> None:
         self.node_builders = node_builders or []
         self.edge_builders = edge_builders or []
         self.post_processors = post_processors or []
+
+    @classmethod
+    def initialize_from_config(
+        cls,
+        config: str | Path | DotDict | DictConfig,
+    ) -> "GraphCreator":
+        """Initialise a graph creator from a configuration.
+
+        Parameters
+        ----------
+        config : str | pathlib.Path | DotDict | omegaconf.DictConfig
+            Configuration source. A string or path is interpreted as a path to
+            a configuration file. A ``DictConfig`` is converted to a
+            ``DotDict``. A ``DotDict`` is used directly.
+
+        Returns
+        -------
+        GraphCreator
+            A graph builder populated with node builders, edge builders, and
+            post-processors parsed from the configuration.
+        """
+        if isinstance(config, (Path, str)):
+            config = DotDict.from_file(str(config))
+        elif isinstance(config, DictConfig):
+            config = DotDict(config)
+
+        node_builders = _parse_nodes(config)
+        edge_builders = _parse_edges(config)
+        post_processors = _parse_post_processors(config)
+
+        return cls(
+            node_builders=node_builders,
+            edge_builders=edge_builders,
+            post_processors=post_processors,
+        )
 
     def update_graph(self, graph: HeteroData) -> None:
         """Update the graph.
@@ -111,7 +157,7 @@ class GraphBuilder:
                 f"Graph not saved because {save_path} already exists. If this occurred during a multi-process or multi-GPU run, another process likely saved it first. If you intended to recreate it, rerun with overwrite=True."
             )
 
-    def create(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
+    def create_graph(self, save_path: Path | None = None, overwrite: bool = False) -> HeteroData:
         """Create the graph and optionally save it to the output path.
 
         Parameters
@@ -137,28 +183,6 @@ class GraphBuilder:
             self.save(graph, save_path, overwrite)
 
         return graph
-
-
-class GraphCreator(GraphBuilder):
-    """Create a graph from a configuration file."""
-
-    def __init__(self, config: str | Path | DotDict | DictConfig):
-        if isinstance(config, Path) or isinstance(config, str):
-            config = DotDict.from_file(str(config))
-        elif isinstance(config, DictConfig):
-            config = DotDict(config)
-
-        self.config = config
-
-        node_builders = _parse_nodes(config)
-        edge_builders = _parse_edges(config)
-        post_processors = _parse_post_processors(config)
-
-        super().__init__(
-            node_builders=node_builders,
-            edge_builders=edge_builders,
-            post_processors=post_processors,
-        )
 
 
 def _parse_nodes(cfg: DotDict) -> list[BaseNodeBuilder]:

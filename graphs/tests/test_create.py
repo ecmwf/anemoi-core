@@ -14,7 +14,6 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.create import GraphBuilder
 from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.edges import CutOffEdges
 from anemoi.graphs.edges.attributes import EdgeDirection
@@ -40,16 +39,16 @@ class AddProcessedFlag:
         graph["data"].processed = torch.ones((graph["data"].num_nodes, 1), dtype=torch.float32)
 
 
-class TestGraphCreator:
+class TestGraphCreatorFromFile:
 
     @pytest.mark.parametrize("name", ["graph.pt", None])
     def test_generate_graph(self, config_file: tuple[Path, str], mock_grids_path: tuple[str, int], name: str):
-        """Test GraphCreator workflow."""
+        """Test GraphCreator.initialize_from_config workflow."""
         tmp_path, config_name = config_file
         graph_path = tmp_path / name if isinstance(name, str) else None
         config_path = tmp_path / config_name
 
-        graph = GraphCreator(config=config_path).create(save_path=graph_path)
+        graph = GraphCreator.initialize_from_config(config=config_path).create_graph(save_path=graph_path)
 
         assert isinstance(graph, HeteroData)
         assert "test_nodes" in graph.node_types
@@ -88,7 +87,7 @@ class TestGraphCreator:
             attributes=[UniformWeights(name="uniform_weights")],
         )
 
-        graph = GraphBuilder(
+        graph = GraphCreator(
             node_builders=[data_nodes, hidden_nodes],
             edge_builders=[
                 CutOffEdges(
@@ -98,7 +97,7 @@ class TestGraphCreator:
                     attributes=[EdgeLength(norm="unit-std"), EdgeDirection(norm="unit-std")],
                 ),
             ],
-        ).create(save_path=graph_path)
+        ).create_graph(save_path=graph_path)
 
         assert isinstance(graph, HeteroData)
         assert {"data", "hidden"}.issubset(set(graph.node_types))
@@ -128,7 +127,7 @@ class TestGraphCreator:
 
     def test_post_processors_are_applied(self):
         """Test that Python API post-processors are applied during graph creation."""
-        graph = GraphBuilder(
+        graph = GraphCreator(
             node_builders=[
                 LatLonNodes(
                     latitudes=[45.0, 45.0],
@@ -137,7 +136,7 @@ class TestGraphCreator:
                 )
             ],
             post_processors=[AddProcessedFlag()],
-        ).create()
+        ).create_graph()
 
         assert "processed" in graph["data"]
         assert torch.equal(graph["data"].processed, torch.ones((2, 1), dtype=torch.float32))

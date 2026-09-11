@@ -240,5 +240,5 @@ def test_mutual_knn_graph_creation(tmp_path, mock_grids_path):
     with config_path.open("w") as file:
         yaml.dump(cfg, file)
 
-    graph = GraphCreator(config=config_path).create()
+    graph = GraphCreator.initialize_from_config(config=config_path).create_graph()
     assert ("test_nodes", "to", "test_nodes") in graph.edge_types

@@ -38,13 +38,15 @@ class GraphExporter:
             if graph_path.suffix == ".pt":
                 self.graph = torch.load(graph_path, weights_only=False, map_location="cpu")
             elif graph_path.suffix in (".yaml", ".yml"):
-                self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
+                graph_creator = GraphCreator.initialize_from_config(graph_path)
+                self.graph = graph_creator.create_graph(save_path=None).to("cpu")
             else:
                 raise ValueError(
                     "The argument graph must be an actual graph (.pt) or a recipe to build one (.yaml / .yml)."
                 )
         else:
-            self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
+            graph_creator = GraphCreator.initialize_from_config(graph)
+            self.graph = graph_creator.create_graph(save_path=None).to("cpu")
 
         self.edges_name = self.graph.edge_types if edges_name is None else edges_name
         self.edge_attribute_name = edge_attribute_name

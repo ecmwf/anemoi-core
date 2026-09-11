@@ -142,7 +142,8 @@ def build_node_to_node_projection_subgraph(
             node_builder_cfg = {"_target_": "anemoi.graphs.nodes.ReducedGaussianGridNodes", "grid": grid}
         graph_config["nodes"][target_node_name] = {"node_builder": node_builder_cfg}
 
-    GraphCreator(OmegaConf.create(graph_config)).update_graph(subgraph)
+    config = OmegaConf.create(graph_config)
+    GraphCreator.initialize_from_config(config).update_graph(subgraph)
     return subgraph
 
 
@@ -205,7 +206,7 @@ def build_truncation_subgraph(
             ],
         }
     )
-    GraphCreator(config).update_graph(subgraph)
+    GraphCreator.initialize_from_config(config).update_graph(subgraph)
     return subgraph
 
 
@@ -258,5 +259,5 @@ def build_smoother_subgraph(
         }
     )
 
-    GraphCreator(config).update_graph(subgraph)
+    GraphCreator.initialize_from_config(config).update_graph(subgraph)
     return subgraph
