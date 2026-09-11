@@ -1,7 +1,10 @@
 # @package _global_
 #
-# O96 ERA5, GraphTransformerProcessor + GraphTransformer encoder/decoder.
-# Run with: anemoi-training train --config-name=o96_era5_transformer
+# O96 ERA5, GraphTransformerProcessor + GraphTransformer encoder/decoder - BASELINE (no embedder).
+# Identical to o96_era5_transformer.yaml except: default InputNormalizer (per-column, not pooled
+# by physical variable) and no model.input_transform (plain Linear input to the encoder, as usual).
+# Run alongside o96_era5_transformer.yaml to compare with/without the embedder.
+# Run with: anemoi-training train --config-name=o96_era5_transformer_baseline
 # (after `anemoi-training config generate` has copied this config tree locally)
 
 defaults:
@@ -35,7 +38,7 @@ system:
     dataset: /leonardo_work/DestE_340_26/ai-ml/datasets/aifs-ea-an-oper-0001-mars-o96-1979-2023-6h-v8.zarr
     graph: ${system.output.root}/graph.pt  # built once here on first run (own dataset), then reused
   output:
-    root: /leonardo_work/DestE_340_26/users/jschrei1/anemoi-core/runs/o96-embedder  # separate from o96-baseline, for comparison
+    root: /leonardo_work/DestE_340_26/users/jschrei1/anemoi-core/runs/o96-baseline  # separate from o96-embedder, for comparison
 
 diagnostics:
   log:
@@ -43,30 +46,10 @@ diagnostics:
       enabled: True
       tracking_uri: ${system.output.root}/mlflow  # local file store, no server needed
       offline: True  # no server to sync to - stays local
-      run_name: o96-graphtransformer-embedder  # distinguishes it from o96-baseline in the mlflow UI
+      run_name: o96-graphtransformer-baseline  # distinguishes it from o96-embedder in the mlflow UI
 
-data:
-  # JointVariableNormalizer instead of the default InputNormalizer: pools mean/stdev across all
-  # pressure levels of the same physical variable, instead of normalizing each level on its own -
-  # see JointVariableNormalizer's docstring. Keeps the rest of zarr.yaml's normalizer.config as-is
-  # (default method, per-variable overrides), only the _target_ changes.
-  datasets:
-    data:
-      processors:
-        normalizer:
-          _target_: anemoi.models.preprocessing.joint_variable_normalizer.JointVariableNormalizer
-
-model:
-  # Replaces the raw per-variable input the encoder would otherwise see with a learned
-  # embedding (per physical variable + pressure level) before the encoder mapper runs -
-  # see model.input_transform hook in AnemoiModelEncProcDec._assemble_input.
-  # mean/std intentionally omitted: JointVariableNormalizer above already normalizes upstream,
-  # so FeatureTokenizer's own defaults (mean=0, std=1 - i.e. a no-op) are what we want here.
-  input_transform:
-    _target_: anemoi.models.layers.embedder.Embedder
-    dim: 16
-    d_model: 64
-    nhead: 4
+# no data.datasets.data.processors.normalizer override -> default InputNormalizer (per-column)
+# no model.input_transform override -> default nn.Identity (plain Linear input to the encoder)
 
 # multi_scale.yaml's hidden mesh (TriNodes, resolution: 5, ~10k nodes) is the standard
 # pairing for O96 data (~40k grid points) - left as default, no override needed here.
