@@ -11,7 +11,7 @@
 
 These functions handle the setup and launching of torch multiprocess tests, including
 verification of spawned ranks, backends, and devices. Tests of parallel kernels,
-communication primitives should live in separate test modules that call ``run_distributed_test``,
+communication primitives should live in separate test modules that call ``_run_distributed_test``,
 see models/tests/distributed/test_communication_primitives.py for an example.
 
 Set ``ANEMOI_DISTRIBUTED_TEST_DEBUG=1`` and run pytest with ``-s`` to print
