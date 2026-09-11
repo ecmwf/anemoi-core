@@ -95,6 +95,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
+        # feature_names must reflect the real column order of the raw `vars` axis, not dict
+        # insertion order - name_to_index is the authoritative name->column mapping per dataset.
+        # TODO: single-dataset only for now; multi-dataset would need this as a ModuleDict, like
+        # self.encoder/self.decoder above, since each dataset can have a different variable set.
+        (dataset_name,) = self.dataset_names
+        feature_names = [
+            name
+            for name, _idx in sorted(
+                self.data_indices[dataset_name].name_to_index.items(),
+                key=lambda item: item[1],
+            )
+        ]
+        self.input_transform = instantiate(
+            model_config.model.get("input_transform", {"_target_": "torch.nn.Identity"}),
+            feature_names=feature_names,
+            _recursive_=False,
+        )
+
     def _assemble_input(
         self,
         x: torch.Tensor,
@@ -117,16 +135,20 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # normalize and add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
+        _batch, n_time, _ensemble, _grid, _n_vars = x.shape
+        x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
+        x_vars = self.input_transform(x_vars)
+        x_vars = einops.rearrange(
+            x_vars,
+            "(batch time ensemble grid) d -> (batch ensemble grid) (time d)",
+            batch=_batch,
+            time=n_time,
+            ensemble=_ensemble,
+            grid=_grid,
         )
+        x_vars = torch.cat((x_vars, node_attributes_data), dim=-1)
 
-        return x_data_latent, x_skip, grid_shard_sizes
+        return x_vars, x_skip, grid_shard_sizes
 
     def _assemble_output(
         self,
