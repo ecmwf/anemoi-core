@@ -8,12 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
+import datetime
 import re
 
 import numpy as np
 import pytest
+import torch
 from pytest_mock import MockFixture
 
+from anemoi.training.data.data_reader import RelativeTimeReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -139,3 +142,77 @@ class TestMultiDataset:
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+
+    def test_mixed_frequency_rejects_trajectory_datasets(self, mocker: MockFixture) -> None:
+        reader = mocker.MagicMock()
+        reader.num_sequences = 2
+
+        with pytest.raises(ValueError, match="Trajectory datasets are unsupported"):
+            MultiDataset(
+                data_readers={"trajectory": reader},
+                relative_date_indices=[0, 1],
+                frequency="1h",
+            )
+
+
+class RecordingReader:
+    def __init__(self, *, missing: set[int] | None = None) -> None:
+        self.data = "coarse"
+        self.frequency = datetime.timedelta(hours=6)
+        self.dates = np.arange(
+            np.datetime64("2020-01-01T00:00"),
+            np.datetime64("2020-01-02T00:00"),
+            np.timedelta64(6, "h"),
+        )
+        self.missing = missing or set()
+        self.raw_requested_indices = None
+        self.requested_indices = None
+
+    def get_sample(
+        self,
+        _sequence: int,
+        time_indices: slice | int | list[int],
+        _grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        self.raw_requested_indices = time_indices
+        if isinstance(time_indices, slice):
+            indices = list(range(time_indices.start, time_indices.stop, time_indices.step))
+        elif isinstance(time_indices, int):
+            indices = [time_indices]
+        else:
+            indices = list(time_indices)
+        self.requested_indices = indices
+        return torch.as_tensor(indices, dtype=torch.float32).reshape(len(indices), 1, 1, 1)
+
+
+def test_relative_time_reader_uses_previous_native_time_without_dropping_time_axis() -> None:
+    reader = RecordingReader()
+    wrapped = RelativeTimeReader(
+        reader,
+        native_relative_indices=np.array([0]),
+        model_relative_indices=np.array([0]),
+        frequency_seconds=3600,
+        anchor_dates_ns=np.array([np.datetime64("2020-01-01T04:00", "ns").astype(np.int64)]),
+    )
+
+    sample = wrapped.get_sample(sequence=0, position=0)
+
+    assert not isinstance(reader.raw_requested_indices, int)
+    assert reader.requested_indices == [0]
+    assert sample.shape == (1, 1, 1, 1)
+
+
+def test_relative_time_reader_skips_missing_exact_native_time() -> None:
+    reader = RecordingReader(missing={1})
+    wrapped = RelativeTimeReader(
+        reader,
+        native_relative_indices=np.array([0]),
+        model_relative_indices=np.array([0]),
+        frequency_seconds=3600,
+        anchor_dates_ns=np.array([np.datetime64("2020-01-01T06:00", "ns").astype(np.int64)]),
+    )
+
+    sample = wrapped.get_sample(sequence=0, position=0)
+
+    assert reader.requested_indices == [0]
+    assert sample.shape == (1, 1, 1, 1)

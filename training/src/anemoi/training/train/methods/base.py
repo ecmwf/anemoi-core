@@ -203,14 +203,28 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.n_step_input = self.task.num_input_timesteps
         self.n_step_output = self.task.num_output_timesteps
+        self.n_step_input_by_dataset = self.task.num_input_timesteps_by_dataset or {
+            dataset_name: len(self.task._requested_input_relative_times(dataset_name))
+            for dataset_name in self.dataset_names
+        }
+        self.n_step_output_by_dataset = self.task.num_output_timesteps_by_dataset or {
+            dataset_name: len(self.task._requested_output_relative_times(dataset_name))
+            for dataset_name in self.dataset_names
+        }
+        model_n_step_input: int | dict[str, int] = self.n_step_input
+        model_n_step_output: int | dict[str, int] = self.n_step_output
+        if any(value != self.task.num_input_timesteps for value in self.n_step_input_by_dataset.values()):
+            model_n_step_input = self.n_step_input_by_dataset
+        if any(value != self.task.num_output_timesteps for value in self.n_step_output_by_dataset.values()):
+            model_n_step_output = self.n_step_output_by_dataset
 
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
             metadata=metadata,
-            n_step_input=self.n_step_input,
-            n_step_output=self.n_step_output,
+            n_step_input=model_n_step_input,
+            n_step_output=model_n_step_output,
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
@@ -234,6 +248,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
+        self._validate_loss_datasets(loss_configs)
         self._resolve_subgrid(loss_configs)
 
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
@@ -257,6 +272,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
+                dataset_name=dataset_name,
                 data_indices=data_indices[dataset_name],
                 task=self.task,
                 graph_data=graph_data,
@@ -314,7 +330,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.is_first_step = True
 
-        LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
+        LOGGER.info(
+            "GraphModule with n_step_input=%s n_step_output=%s per_dataset_input=%s per_dataset_output=%s",
+            self.n_step_input,
+            self.n_step_output,
+            self.n_step_input_by_dataset,
+            self.n_step_output_by_dataset,
+        )
         self.effective_lr = (
             config.system.hardware.num_nodes
             * config.system.hardware.num_gpus_per_node
@@ -352,7 +374,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
 
-        LOGGER.debug("n_step_input: %d", self.n_step_input)
+        LOGGER.debug("n_step_input_by_dataset: %s", self.n_step_input_by_dataset)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -366,6 +388,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
+
+    def _validate_loss_datasets(self, loss_configs: dict) -> None:
+        """Validate that configured losses correspond to datasets with model targets."""
+        loss_datasets = [
+            dataset_name
+            for dataset_name in self.dataset_names
+            if dataset_name in loss_configs and loss_configs[dataset_name] is not None
+        ]
+        zero_target_datasets = [
+            dataset_name for dataset_name in loss_datasets if self.n_step_output_by_dataset[dataset_name] == 0
+        ]
+        if zero_target_datasets:
+            msg = (
+                f"Datasets {zero_target_datasets} have no targets at the configured model frequency but have a "
+                "training loss. Remove their loss configuration or choose compatible output offsets."
+            )
+            raise ValueError(msg)
+        if not loss_datasets:
+            msg = "At least one dataset with model targets must have a training loss configured."
+            raise ValueError(msg)
 
     @property
     def plot_adapter(self) -> Any:

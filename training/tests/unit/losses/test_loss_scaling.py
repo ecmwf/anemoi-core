@@ -22,6 +22,8 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
+from anemoi.training.losses.scalers.time_step import UniformTimeStepScaler
+from anemoi.training.tasks import Forecaster
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -614,3 +616,12 @@ def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> N
     assert values[0].item() == pytest.approx(
         1.0 / n_spectral_modes,
     ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
+
+
+def test_uniform_time_step_scaler_uses_dataset_output_count() -> None:
+    task = Forecaster(multistep_input=1, multistep_output=12, timestep="5m")
+    task.num_output_timesteps_by_dataset = {"coarse": 1}
+
+    scaler = UniformTimeStepScaler(task=task, dataset_name="coarse")
+
+    assert scaler.get_scaling_values().tolist() == [1.0]

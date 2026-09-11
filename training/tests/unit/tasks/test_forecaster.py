@@ -45,6 +45,13 @@ def _data_indices_single() -> dict[str, IndexCollection]:
     return {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
 
 
+def _data_indices_multi() -> dict[str, IndexCollection]:
+    return {
+        "meps": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "radar": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
+
+
 # ── Forecaster: offsets and steps ─────────────────────────────────────────────
 
 
@@ -335,6 +342,80 @@ def test_forecaster_get_inputs_and_targets_are_disjoint_in_time() -> None:
 
 
 # ── Forecaster: _advance_dataset_input ────────────────────────────────────────
+
+
+def test_forecaster_mixed_frequency_inputs_use_dataset_specific_requested_times() -> None:
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 1, "maximum": 1},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["meps", "radar"],
+            "meps": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_input_indices_validation_by_dataset": {"meps": [0]},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                    "relative_date_indices_validation_by_dataset": {"meps": [0]},
+                },
+            },
+            "radar": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"radar": [0, 1]},
+                    "relative_date_input_indices_validation_by_dataset": {"radar": [0, 1]},
+                    "relative_date_indices_training_by_dataset": {"radar": [0, 1, 2]},
+                    "relative_date_indices_validation_by_dataset": {"radar": [0, 1, 2]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+
+    batch = {
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
+        "radar": torch.tensor(
+            [[[[[3.0, 30.0]]], [[[4.0, 40.0]]], [[[5.0, 50.0]]]]],
+            dtype=torch.float32,
+        ),
+    }
+
+    x = task.get_inputs(batch, _data_indices_multi())
+
+    assert x["meps"].shape == (1, 1, 1, 1, 2)
+    assert x["radar"].shape == (1, 2, 1, 1, 2)
+
+
+def test_forecaster_preserves_explicit_empty_input_window_from_metadata() -> None:
+    task = Forecaster(
+        multistep_input=2,
+        multistep_output=1,
+        timestep="5m",
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["meps"],
+            "meps": {
+                "timesteps": {
+                    "relative_date_input_indices_training_by_dataset": {"meps": []},
+                    "relative_date_indices_training_by_dataset": {"meps": [0]},
+                },
+            },
+        },
+    }
+
+    task.configure_from_metadata(metadata)
+    batch = {
+        "meps": torch.tensor([[[[[1.0, 10.0]]]]], dtype=torch.float32),
+    }
+    x = task.get_inputs(batch, {"meps": _make_minimal_index_collection(_NAME_TO_INDEX)})
+
+    assert task.dataset_input_relative_times_by_dataset["meps"] == []
+    assert task._requested_input_relative_times("meps") == []
+    assert x["meps"].shape == (1, 0, 1, 1, 2)
 
 
 @pytest.mark.parametrize(
@@ -679,3 +760,127 @@ def test_offset_convert_and_validate_returns_sorted_timedeltas(
     assert converted_inputs == expected_inputs
     assert converted_outputs == expected_outputs
     assert all(isinstance(offset, datetime.timedelta) for offset in converted_inputs + converted_outputs)
+
+
+def test_mixed_frequency_rollout_keeps_input_only_dataset_context() -> None:
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 2, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["context"],
+            "context": {
+                "timesteps": {
+                    "model_timestep": "5m",
+                    "relative_date_input_indices_training_by_dataset": {"context": [0]},
+                    "relative_date_target_indices_training_by_dataset": {"context": []},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"context": [[], []]},
+                    "relative_date_indices_training_by_dataset": {"context": [0]},
+                },
+            },
+        },
+    }
+    task.fill_metadata(metadata)
+    task.configure_from_metadata(metadata)
+    data_indices = {
+        "context": _make_minimal_index_collection({"prog": 0, "force": 1}, forcing=["force"]),
+    }
+    batch = {"context": torch.tensor([[[[[1.0, 10.0]]]]])}
+    x = task.get_inputs(batch, data_indices)
+
+    updated = task.advance_input(
+        x,
+        {},
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask={"context": NoOutputMask()},
+        grid_shard_slice={"context": None},
+    )
+
+    assert updated["context"].shape == (1, 1, 1, 1, 2)
+    torch.testing.assert_close(updated["context"], batch["context"])
+
+
+def test_mixed_frequency_rollout_preserves_previous_predictions() -> None:
+    task = Forecaster(
+        multistep_input=3,
+        multistep_output=1,
+        timestep="5m",
+        rollout={"start": 2, "maximum": 2},
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["data"],
+            "data": {
+                "timesteps": {
+                    "model_timestep": "5m",
+                    "relative_date_input_indices_training_by_dataset": {"data": [-2, -1, 0]},
+                    "relative_date_target_indices_training_by_dataset": {"data": [1, 2]},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"data": [[1], [2]]},
+                    "relative_date_indices_training_by_dataset": {"data": [-2, -1, 0, 1, 2]},
+                },
+            },
+        },
+    }
+    task.configure_from_metadata(metadata)
+    data_indices = {"data": _make_minimal_index_collection(_NAME_TO_INDEX)}
+    batch = {
+        "data": torch.tensor([10.0, 11.0, 12.0, 13.0, 14.0]).reshape(1, 5, 1, 1, 1).expand(-1, -1, -1, -1, 2),
+    }
+    x = task.get_inputs(batch, data_indices)
+
+    x = task.advance_input(
+        x,
+        {"data": torch.full((1, 1, 1, 1, 2), 100.0)},
+        batch,
+        rollout_step=0,
+        data_indices=data_indices,
+        output_mask={"data": NoOutputMask()},
+        grid_shard_slice={"data": None},
+    )
+    x = task.advance_input(
+        x,
+        {"data": torch.full((1, 1, 1, 1, 2), 200.0)},
+        batch,
+        rollout_step=1,
+        data_indices=data_indices,
+        output_mask={"data": NoOutputMask()},
+        grid_shard_slice={"data": None},
+    )
+
+    assert x["data"][0, :, 0, 0, 0].tolist() == [12.0, 100.0, 200.0]
+
+
+def test_mixed_frequency_plotting_uses_dataset_time_positions() -> None:
+    task = OffsetForecaster(
+        input_offsets=["-12h", "0h"],
+        output_offsets=["6h", "12h"],
+        rollout_shift="12h",
+    )
+    metadata = {
+        "metadata_inference": {
+            "dataset_names": ["coarse"],
+            "coarse": {
+                "timesteps": {
+                    "model_timestep": "6h",
+                    "relative_date_input_indices_training_by_dataset": {"coarse": [-2, 0]},
+                    "relative_date_target_indices_training_by_dataset": {"coarse": [2]},
+                    "relative_date_target_indices_training_by_dataset_by_step": {"coarse": [[2]]},
+                    "relative_date_indices_training_by_dataset": {"coarse": [-2, 0, 2]},
+                },
+            },
+        },
+    }
+    task.configure_from_metadata(metadata)
+    data = torch.tensor([[10.0], [20.0], [30.0]])
+    output = torch.tensor([[[40.0]]])
+
+    samples = list(task._plot_adapter.iter_plot_samples(data, output, dataset_name="coarse"))
+
+    assert len(samples) == 1
+    x, y_true, y_pred, tag = samples[0]
+    assert (x.item(), y_true.item(), y_pred.item(), tag) == (20.0, 30.0, 40.0, "rstep00_out00")

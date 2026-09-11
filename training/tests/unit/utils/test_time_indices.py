@@ -19,7 +19,7 @@ def test_normalize_time_indices_collapses_contiguous_ranges() -> None:
     assert (normalized.start, normalized.stop, normalized.step) == (2, 5, 1)
 
 
-def test_normalize_time_indices_preserves_sparse_ranges() -> None:
+def test_normalize_time_indices_preserves_non_contiguous_ranges() -> None:
     """Test that normalize_time_indices preserves non-contiguous integer sequences as lists."""
     normalized = normalize_time_indices([2, 4, 7])
 

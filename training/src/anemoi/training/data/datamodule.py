@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-
+import datetime
 import logging
 from functools import cached_property
 from typing import Any
@@ -20,9 +20,13 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.relative_time_indices import resolve_config_frequency
+from anemoi.training.data.relative_time_indices import resolve_relative_date_indices
+from anemoi.training.data.relative_time_indices import resolve_task_relative_indices_by_dataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
+from anemoi.utils.dates import frequency_to_seconds
 from anemoi.utils.dates import frequency_to_string
 
 LOGGER = logging.getLogger(__name__)
@@ -72,10 +76,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     @cached_property
     def statistics_tendencies(self) -> dict[str, dict | None] | None:
         """Return tendency statistics from all training datasets."""
-        lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
-
         stats_by_dataset: dict[str, dict | None] = {}
         for dataset_name, dataset in self.ds_train.data_readers.items():
+            targets_by_step = self.task.dataset_target_relative_times_by_dataset_by_step.get(dataset_name)
+            if targets_by_step is not None and self.task.model_timestep is not None:
+                lead_times = [
+                    frequency_to_string(relative_time * self.task.model_timestep)
+                    for relative_time in targets_by_step[0]
+                ]
+            else:
+                lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
             stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
@@ -130,11 +140,27 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
-        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
+        frequency_seconds = {name: frequency_to_seconds(reader.frequency) for name, reader in data_readers.items()}
+        use_mixed_frequency_alignment = len(set(frequency_seconds.values())) != 1
+        if use_mixed_frequency_alignment:
+            shared_frequency = resolve_config_frequency(self.config, task=self.task)
+            return MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=resolve_relative_date_indices(
+                    self.config,
+                    task=self.task,
+                    mode=label,
+                ),
+                frequency=shared_frequency,
+                shuffle=shuffle,
+                label=label,
+                epoch=self.epoch,
+                rollout=len(tuple(self.task.steps(label))),
+            )
 
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=relative_date_indices,
+            relative_date_indices=compute_relative_date_indices(self.task, data_readers, mode=label),
             shuffle=shuffle,
             label=label,
             epoch=self.epoch,
@@ -148,6 +174,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
     def sync_dataset_state(self) -> None:
         """Synchronize datasets with the current epoch and task state."""
+        refresh_task_timing = False
         for dataset_name, label in (("ds_train", "training"), ("ds_valid", "validation"), ("ds_test", "test")):
             if dataset_name not in self.__dict__:
                 continue
@@ -156,15 +183,35 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             # Store the current rollout length, and refresh the time steps that must
             # be loaded for it. The task provides both values: steps() gives the rollout
             # length, and get_offsets() gives the time steps via compute_relative_date_indices().
-            dataset.set_epoch(
-                self.epoch,
-                rollout=len(tuple(self.task.steps(label))),
-                relative_date_indices=compute_relative_date_indices(
+            if dataset.relative_date_indices_are_native:
+                relative_date_indices = compute_relative_date_indices(
                     self.task,
                     dataset.data_readers,
                     mode=label,
-                ),
+                )
+            else:
+                refresh_task_timing = True
+                relative_date_indices = resolve_relative_date_indices(
+                    self.config,
+                    task=self.task,
+                    mode=label,
+                )
+            dataset.set_epoch(
+                self.epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                relative_date_indices=relative_date_indices,
             )
+
+        if refresh_task_timing:
+            timesteps = self._timing_metadata()
+            metadata = {
+                "metadata_inference": {
+                    "dataset_names": self.dataset_names,
+                    **{dataset_name: {"timesteps": timesteps} for dataset_name in self.dataset_names},
+                },
+            }
+            self.task.fill_metadata(metadata)
+            self.task.configure_from_metadata(metadata)
 
     def state_dict(self) -> dict[str, Any]:
         """Save the epoch used to seed newly started dataloader workers."""
@@ -232,8 +279,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         metadata["metadata_inference"]["dataset_names"] = self.dataset_names
 
+        timesteps = self._timing_metadata()
+
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
+            if len(timesteps) > 0:
+                metadata["metadata_inference"][dataset_name]["timesteps"] = timesteps
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
@@ -250,3 +301,41 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 "diagnostic": [input_index_to_name[int(index)] for index in input_data_indices["diagnostic"]],
             }
             metadata["metadata_inference"][dataset_name]["variable_types"] = variable_types
+
+    def _timing_metadata(self) -> dict[str, object]:
+        """Return the current dataset-specific time windows for task configuration and inference metadata."""
+
+        def _dataset_timing_metadata(dataset: MultiDataset, label: str) -> dict[str, object]:
+            if dataset.relative_date_indices_are_native:
+                return {}
+            assert dataset.frequency_seconds is not None
+
+            (
+                input_relative_indices_by_dataset,
+                target_relative_indices_by_dataset,
+                target_relative_indices_by_dataset_by_step,
+            ) = resolve_task_relative_indices_by_dataset(
+                self.task,
+                dataset.model_relative_date_indices_by_dataset,
+                datetime.timedelta(seconds=dataset.frequency_seconds),
+                mode=label,
+            )
+
+            return {
+                "model_timestep": frequency_to_string(datetime.timedelta(seconds=dataset.frequency_seconds)),
+                f"relative_date_indices_{label}": [int(v) for v in dataset.model_relative_date_indices.tolist()],
+                f"relative_date_input_indices_{label}_by_dataset": input_relative_indices_by_dataset,
+                f"relative_date_indices_{label}_by_dataset": {
+                    name: [int(v) for v in dataset.model_relative_date_indices_by_dataset[name].tolist()]
+                    for name in self.dataset_names
+                },
+                f"relative_date_target_indices_{label}_by_dataset": target_relative_indices_by_dataset,
+                f"relative_date_target_indices_{label}_by_dataset_by_step": (
+                    target_relative_indices_by_dataset_by_step
+                ),
+            }
+
+        timesteps = _dataset_timing_metadata(self.ds_train, "training")
+        if len(self.valid_dataloader_config) > 0:
+            timesteps.update(_dataset_timing_metadata(self.ds_valid, "validation"))
+        return timesteps
