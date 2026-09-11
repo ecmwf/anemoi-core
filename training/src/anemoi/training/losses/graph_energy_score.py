@@ -55,11 +55,17 @@ class GraphEnergyScoreLoss(BaseGraphEnergyScoreLoss):
         self,
         differences: torch.Tensor,
         matrix: torch.Tensor | None,
-        row_weight_sum: torch.Tensor | None,
+        source_index: torch.Tensor | None,
+        destination_index: torch.Tensor | None,
+        edge_weights: torch.Tensor | None,
         node_valid: torch.Tensor | None,
+        edge_valid: torch.Tensor | None,
         valid_weight_sum: torch.Tensor | None,
     ) -> torch.Tensor:
-        assert row_weight_sum is None
+        assert source_index is None
+        assert destination_index is None
+        assert edge_weights is None
+        assert edge_valid is None
         if matrix is None:
             norm = torch.abs(differences)
             return norm if node_valid is None else norm.masked_fill(~node_valid, torch.nan)
