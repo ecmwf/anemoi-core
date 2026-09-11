@@ -25,7 +25,7 @@ As you progress through this guide, you'll learn how to:
    model architectures available and how to select the best one for your
    needs.
 
-#. :doc:`Monitor Experiments <tracking>`: Get hands-on with 
+#. :doc:`Monitor Experiments <tracking>`: Get hands-on with
    tracking your experiments using tools
    like MLflow.
 
