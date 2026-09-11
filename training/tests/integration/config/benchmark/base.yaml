@@ -31,6 +31,7 @@ model:
         num_chunks: 2
   processor:
     num_chunks: 2
+    num_layers: 2
   num_channels: 512
 
 training:
