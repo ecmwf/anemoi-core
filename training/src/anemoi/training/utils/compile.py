@@ -109,10 +109,15 @@ def _set_num_threads(num_threads: int) -> None:
 
 def _check_gradient_checkpointing(model_config: DictConfig) -> bool:
     """Checks if gradient checkpointing is enabled in the model configuration."""
-    return (
-        getattr(model_config.encoder, "activation_checkpointing", False)
-        or getattr(model_config.decoder, "activation_checkpointing", False)
-        or getattr(model_config.processor, "activation_checkpointing", False)
+    mapper_configs = (
+        component.get("mapper", {})
+        for components in (model_config.get("encoders", {}), model_config.get("decoders", {}))
+        for component in components.values()
+    )
+    return any(getattr(mapper, "activation_checkpointing", False) for mapper in mapper_configs) or getattr(
+        model_config.get("processor", {}),
+        "activation_checkpointing",
+        False,
     )
 
 
