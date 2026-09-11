@@ -46,6 +46,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.train.participant_metrics import ParticipantMetrics
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -316,6 +317,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.is_first_step = True
         self._current_meta = None  # metadata of the batch being processed (see batch_meta.split_meta)
+        # validation metrics per participant (multi-domain training); reduced at validation epoch end
+        self._participant_metrics = ParticipantMetrics()
 
         LOGGER.info("GraphModule with n_step_input=%s and n_step_output=%s", self.n_step_input, self.n_step_output)
         self.effective_lr = (
@@ -1198,7 +1201,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 sync_dist=True,
             )
 
+        # Per-participant copies of the same metrics (no-op when the batch carries no participant).
+        self._participant_metrics.update(
+            meta_participant(self._current_meta),
+            {self._get_loss_name() + "_loss": val_loss, **metrics},
+            batch_size,
+        )
+
         return step_output
+
+    def on_validation_epoch_start(self) -> None:
+        self._participant_metrics.reset()
+        super().on_validation_epoch_start()
+
+    def on_validation_epoch_end(self) -> None:
+        # Collective call on every rank (see ParticipantMetrics.compute); logs nothing without participants.
+        for participant, metrics in self._participant_metrics.compute(self.device).items():
+            for mname, mvalue in metrics.items():
+                self.log(f"val_{mname}/{participant}", mvalue, on_epoch=True, logger=self.logger_enabled)
+        self._participant_metrics.reset()
+        super().on_validation_epoch_end()
 
     def lr_scheduler_step(self, scheduler: LRSchedulerTypeUnion, metric: Any | None = None) -> None:
         """Step the learning rate scheduler by Pytorch Lightning.

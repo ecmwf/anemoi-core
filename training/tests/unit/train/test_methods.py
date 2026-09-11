@@ -47,6 +47,7 @@ from anemoi.training.train.methods.transport import TransportTraining
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
 from anemoi.training.train.methods.transport_base import PreparedTransportObjective
 from anemoi.training.train.methods.transport_base import TransportObjective
+from anemoi.training.train.participant_metrics import ParticipantMetrics
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -474,6 +475,8 @@ def test_validation_step_logs_loss_and_metrics() -> None:
     module = MagicMock(spec=BaseTrainingModule)
     module.logger_enabled = True
     module._get_loss_name.return_value = "mse"
+    module._current_meta = {"participant": ["h1", "h1"]}
+    module._participant_metrics = ParticipantMetrics()
     module._step.return_value = SimpleNamespace(
         loss=torch.tensor(3.0),
         metrics={"data_mse_loss": torch.tensor(2.0)},
@@ -489,6 +492,11 @@ def test_validation_step_logs_loss_and_metrics() -> None:
         "val_mse_loss",
         "val_data_mse_loss",
     ]
+    # the same values are accumulated for the batch's participant
+    accumulated = module._participant_metrics.compute()
+    assert {p: {m: float(v) for m, v in metrics.items()} for p, metrics in accumulated.items()} == {
+        "h1": {"mse_loss": 3.0, "data_mse_loss": 2.0},
+    }
 
 
 # ── EDMDiffusionTransportObjective: compute_loss ─────────────────────────────────
@@ -881,6 +889,33 @@ def test_on_after_batch_transfer_without_meta() -> None:
     out = module.on_after_batch_transfer({"data": torch.zeros(2, 1, 1, 4, 3)}, 0)
     assert set(out) == {"data"}
     assert module._current_meta is None
+
+
+def test_validation_epoch_end_logs_per_participant_metrics() -> None:
+    module = _make_batch_transfer_module()
+    module.logger_enabled = True
+    module.log = MagicMock()
+    module._participant_metrics = ParticipantMetrics()
+    module._participant_metrics.update("h1", {"mse_loss": torch.tensor(1.0), "mse/2t": torch.tensor(3.0)}, 2)
+    module._participant_metrics.update("h2", {"mse_loss": torch.tensor(5.0)}, 1)
+
+    module.on_validation_epoch_end()
+
+    logged = {call.args[0]: float(call.args[1]) for call in module.log.call_args_list}
+    assert logged == {"val_mse_loss/h1": 1.0, "val_mse/2t/h1": 3.0, "val_mse_loss/h2": 5.0}
+    assert all("sync_dist" not in call.kwargs for call in module.log.call_args_list)
+    assert module._participant_metrics.compute() == {}  # reset for the next epoch
+
+
+def test_validation_epoch_end_without_participants_logs_nothing() -> None:
+    module = _make_batch_transfer_module()
+    module.log = MagicMock()
+    module._participant_metrics = ParticipantMetrics()
+    module._participant_metrics.update(None, {"mse_loss": torch.tensor(1.0)}, 2)
+
+    module.on_validation_epoch_end()
+
+    module.log.assert_not_called()
 
 
 def test_on_after_batch_transfer_rejects_mixed_participants() -> None:
