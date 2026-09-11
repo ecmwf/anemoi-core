@@ -16,6 +16,7 @@ from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
+from anemoi.training.schemas.training import RefractivityOperatorLossSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
 _TIME_AGG_CFG = {
@@ -242,3 +243,49 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 ],
             },
         )
+
+
+_REFRAC_LOSS_CFG = {
+    "_target_": "anemoi.training.losses.RefractivityOperatorLoss",
+    "scalers": ["node_weights"],
+    "moist": False,
+    "levels": [
+        {"name": "refrac_10400", "height": 10400, "sigma": 0.0051},
+        {"name": "refrac_13000", "height": 13000, "sigma": 0.0058, "bias": 0.0004},
+        {"name": "refrac_20500", "height": 20500, "sigma": 0.0049, "active": False},
+    ],
+}
+
+
+def test_refractivity_loss_schema_valid() -> None:
+    schema = RefractivityOperatorLossSchema(**_REFRAC_LOSS_CFG)
+    assert schema.interp == "hydrostatic_shape"
+    assert schema.q_interp == "log"
+    assert schema.levels[2].active is False
+
+
+def test_refractivity_loss_schema_rejects_bad_levels() -> None:
+    with pytest.raises(ValidationError):
+        RefractivityOperatorLossSchema(**{**_REFRAC_LOSS_CFG, "levels": []})
+    with pytest.raises(ValidationError):
+        RefractivityOperatorLossSchema(
+            **{**_REFRAC_LOSS_CFG, "levels": [{"name": "refrac_10400", "height": 10400, "sigma": 0.0}]},
+        )
+    with pytest.raises(ValidationError):
+        RefractivityOperatorLossSchema(**{**_REFRAC_LOSS_CFG, "pressure_levels": [1000, 1000, 50]})
+    with pytest.raises(ValidationError):
+        RefractivityOperatorLossSchema(**{**_REFRAC_LOSS_CFG, "interp": "cubic"})
+
+
+def test_combined_loss_accepts_refractivity_loss() -> None:
+    schema = CombinedLossSchema(
+        **{
+            **_COMBINED_LOSS_BASE,
+            "losses": [
+                {"_target_": "anemoi.training.losses.MSELoss", "scalers": ["nan_mask_weights"]},
+                _REFRAC_LOSS_CFG,
+            ],
+            "loss_weights": [1.0, 0.1],
+        },
+    )
+    assert isinstance(schema.losses[1], RefractivityOperatorLossSchema)

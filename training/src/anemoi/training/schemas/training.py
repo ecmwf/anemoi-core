@@ -9,6 +9,7 @@
 
 from enum import StrEnum
 from functools import partial
+from itertools import pairwise
 from typing import Annotated
 from typing import Any
 from typing import Literal
@@ -625,6 +626,57 @@ class GraphSmoothnessLossSchema(BaseLossSchema):
     "Optional path to a file containing an edge_index tensor."
 
 
+class RefractivityLevelSchema(BaseModel):
+    """One GNSS-RO refractivity observation level for RefractivityOperatorLoss."""
+
+    name: str
+    "Target variable holding the observed refractivity at this level (e.g. ``refrac_13000``)."
+    height: NonNegativeFloat
+    "Geopotential height of the level in gpm."
+    sigma: float = Field(gt=0.0)
+    "Fractional error scale of ln N at this level (e.g. 0.005 for 0.5 %)."
+    active: bool = True
+    "Whether the level contributes to the loss."
+    bias: float = 0.0
+    "Fractional offset subtracted from the log residual (operator/representation bias correction)."
+
+
+class RefractivityOperatorLossSchema(BaseLossSchema):
+    """Schema for RefractivityOperatorLoss."""
+
+    target_: Literal["anemoi.training.losses.RefractivityOperatorLoss"] = Field(..., alias="_target_")
+    "Refractivity observation-operator loss target."
+    levels: list[RefractivityLevelSchema] = Field(min_length=1)
+    "Observation levels; the named variables must be declared as ``target`` variables."
+    pressure_levels: list[PositiveInt] | None = None
+    "Ladder pressures in hPa, surface first and strictly decreasing; default 1000 ... 50."
+    moist: bool = True
+    "Include the water-vapour term (requires q_<p> in the model output)."
+    interp: Literal["linear_lnp", "hydrostatic_shape"] = "hydrostatic_shape"
+    "Pressure interpolation within a layer."
+    q_interp: Literal["linear", "log"] = "log"
+    "Humidity interpolation within a layer."
+    penalty_weight: NonNegativeFloat = 1.0
+    "Multiplier on the final loss."
+    huber_delta_sigmas: float = 3.0
+    "Huber transition in units of sigma; <= 0 for a pure quadratic penalty."
+    dry_min_height: NonNegativeFloat = 10400.0
+    "With moist=False every active level must be at or above this height (gpm)."
+    geopotential_prefix: str = "z"
+    temperature_prefix: str = "t"
+    humidity_prefix: str = "q"
+    ignore_nans: bool = True
+    "NaN observations are always masked; kept for interface compatibility."
+
+    @model_validator(mode="after")
+    def check_pressure_levels_decreasing(self) -> Self:
+        levels = self.pressure_levels
+        if levels is not None and (len(levels) < 2 or any(a <= b for a, b in pairwise(levels))):
+            msg = f"pressure_levels must be strictly decreasing with at least two entries, got {levels}"
+            raise ValueError(msg)
+        return self
+
+
 _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.combined.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
@@ -632,6 +684,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
     "anemoi.training.losses.EnergyScoreLoss": "energy_score",
     "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
+    "anemoi.training.losses.RefractivityOperatorLoss": "refractivity_operator",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -676,6 +729,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+            | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -737,6 +791,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+    | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),
