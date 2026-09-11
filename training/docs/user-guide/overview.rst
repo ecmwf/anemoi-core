@@ -34,8 +34,8 @@ As you progress through this guide, you'll learn how to:
    like MLflow.
 
 #. :doc:`Optimize Performance <performance-optimisation>`: Discover
-   techniques for fine-tuning your model, including learning rate
-   scheduling and loss function scaling.
+   techniques for improving computational performance, including
+   throughput optimization and efficient resource usage during training.
 
 #. :doc:`Debug and Troubleshoot </troubleshooting>`: Learn strategies
    for identifying and resolving issues that may arise during the
