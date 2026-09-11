@@ -18,6 +18,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import torch
 
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot import BasePlotCallback
 from anemoi.training.diagnostics.evaluation.geospatial.maps import Borders
 from anemoi.training.diagnostics.evaluation.geospatial.maps import Coastlines
@@ -161,7 +162,6 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if (
             self.changing_training_case
             and self._due(trainer)
-            and trainer.is_global_zero
             and batch_idx == 0
             and self._captured_training_epoch != trainer.current_epoch
         ):
@@ -178,7 +178,6 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         index = int((batch.diagnostic_context or {}).get("sample_index", -1))
         if (
             self._due(trainer)
-            and trainer.is_global_zero
             and self._captured_cases < self.max_cases
             and index in self.fixed_validation_cases
         ):
@@ -198,9 +197,12 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         step = pl_module.pop_query_diagnostics_step()
         if step is None:
             return
-        self._record(batch, step)
-        if step["prediction"] is not None and trainer.is_global_zero:
-            self.plot(trainer, self._prepare_case(pl_module, batch, step, "train"))
+        if getattr(pl_module, "ens_comm_group_rank", 0) == 0:
+            self._record(batch, step)
+        if step["prediction"] is not None:
+            payload = self._prepare_case(pl_module, batch, step, "train")
+            if trainer.is_global_zero:
+                self.plot(trainer, payload)
             self._captured_training_epoch = trainer.current_epoch
 
     def on_validation_batch_end(
@@ -215,8 +217,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if not self.enabled:
             return
         step = pl_module.pop_query_diagnostics_step()
-        if step is not None and step["prediction"] is not None and trainer.is_global_zero:
-            self.plot(trainer, self._prepare_case(pl_module, batch, step, "val"))
+        if step is not None and step["prediction"] is not None:
+            payload = self._prepare_case(pl_module, batch, step, "val")
+            if trainer.is_global_zero:
+                self.plot(trainer, payload)
             self._captured_cases += 1
 
     def _record(self, batch: Any, step: dict[str, Any]) -> None:
@@ -247,10 +251,16 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             self._counts["field_selected"][source] += int(details.get("selected_field_count", 0))
             self._counts["history_available"][source] += int(details.get("available_time_count", 0))
             self._counts["history_selected"][source] += int(details.get("selected_time_count", 0))
-        key = (variable, provenance, lead, str(target.get("units") or "unit unknown"))
+        key = (
+            variable,
+            provenance,
+            lead,
+            str(target.get("units") or "unit unknown"),
+            str(step["score_name"]),
+        )
         values = self._metrics.setdefault(key, [0.0, 0.0, 0.0, 0.0])
-        values[0] += float(step["normalized_mse"].cpu())
-        values[1] += float(step["physical_rmse"].cpu())
+        values[0] += float(step["normalized_score"].cpu())
+        values[1] += float(step["physical_score"].cpu())
         values[2] += float(step["loss_weight"].cpu())
         values[3] += 1
 
@@ -322,14 +332,14 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "target": None if batch.target is None else _cpu(batch.target)[0] * stdev + mean,
             "target_mask": None if batch.target_mask is None else _cpu(batch.target_mask)[0].astype(bool),
             "coordinates": _degrees(batch.output_coordinates),
-            "input": self._representative_input(model, batch, context),
-            "input_details": self._input_payload(model, batch, context) if self.input_plots else None,
+            "input": self._representative_input(pl_module, batch, context),
+            "input_details": self._input_payload(pl_module, batch, context) if self.input_plots else None,
             "graph": None,
             "embeddings": None,
             "sensitivity": None,
         }
         if self.domain_plots or self.graph_plots:
-            payload["graph"] = self._graph_payload(model, batch, context)
+            payload["graph"] = self._graph_payload(pl_module, batch, context)
         if self.embedding_plots or (self.sensitivity_plots and stage == "val"):
             catalogue = QueryCatalogue.from_snapshot(model.query_catalogue)
             variants = self._variants(catalogue, batch.query, pl_module.task)
@@ -352,8 +362,25 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 )
         return payload
 
-    def _input_payload(self, model: Any, batch: Any, context: dict[str, Any]) -> dict[str, Any]:
+    @staticmethod
+    def _full_native_tensor(
+        pl_module: pl.LightningModule,
+        source: str,
+        value: torch.Tensor,
+    ) -> torch.Tensor:
+        """Gather one bounded diagnostic vector, never the full field tensor."""
+        if getattr(pl_module, "model_comm_group_size", 1) <= 1:
+            return value
+        return gather_tensor(
+            value,
+            0,
+            pl_module.shard_sizes[source],
+            pl_module.model_comm_group,
+        )
+
+    def _input_payload(self, pl_module: pl.LightningModule, batch: Any, context: dict[str, Any]) -> dict[str, Any]:
         """Collect exact adapter inputs and a bounded 2 m-temperature geometry view."""
+        model = pl_module.model
         graph, hidden_name = model._graph_data, model.hidden_name
         hidden_rad = _cpu(model.node_attributes.get_coordinates(hidden_name))
         hidden = _degrees(hidden_rad)
@@ -373,8 +400,8 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 continue
             column, field = max(candidates, key=lambda item: float(item[1].get("time_offset_hours", -math.inf)))
             coordinates_rad = _cpu(model.node_attributes.get_coordinates(source))
-            normalized = _cpu(tensor.values)[0, :, column]
-            valid = _cpu(tensor.mask)[0, :, column].astype(bool)
+            normalized = _cpu(self._full_native_tensor(pl_module, source, tensor.values[0, :, column]))
+            valid = _cpu(self._full_native_tensor(pl_module, source, tensor.mask[0, :, column])).astype(bool)
             physical = normalized * float(field["stdev"]) + float(field["mean"])
             edges = _indices(graph[(source, "to", hidden_name)].edge_index)
             relevant = valid[edges[0]] & (hidden_lookup[edges[1]] >= 0)
@@ -451,24 +478,33 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                     & (coordinates[:, 0] >= south)
                     & (coordinates[:, 0] <= north)
                 )
-            normalized = _cpu(tensor.values)[0]
-            validity = _cpu(tensor.mask)[0].astype(bool)
             if fields:
-                missing_counts = [
-                    int(np.sum(selected_geometry & ~validity[:, column])) for column in range(len(fields))
-                ]
-                column = int(np.argmax(missing_counts))
+                start, end = context.get("inputs", {}).get(ifs, {}).get(
+                    "shard_native_index_range",
+                    [0, len(coordinates)],
+                )
+                local_geometry = torch.as_tensor(
+                    selected_geometry[int(start) : int(end)],
+                    dtype=torch.bool,
+                    device=tensor.mask.device,
+                )
+                missing_counts = ((~tensor.mask[0]) & local_geometry[:, None]).sum(dim=0)
+                if getattr(pl_module, "model_comm_group_size", 1) > 1:
+                    torch.distributed.all_reduce(missing_counts, group=pl_module.model_comm_group)
+                column = int(missing_counts.argmax().item())
+                normalized = _cpu(self._full_native_tensor(pl_module, ifs, tensor.values[0, :, column]))
+                validity = _cpu(self._full_native_tensor(pl_module, ifs, tensor.mask[0, :, column])).astype(bool)
                 field = fields[column]
-                physical = normalized[:, column] * float(field["stdev"]) + float(field["mean"])
+                physical = normalized * float(field["stdev"]) + float(field["mean"])
                 ifs_field = {
                     "source": ifs,
                     "field": field,
                     "coordinates": coordinates,
-                    "normalized": normalized[:, column],
+                    "normalized": normalized,
                     "physical": physical,
-                    "valid": validity[:, column],
+                    "valid": validity,
                     "selected_geometry": selected_geometry,
-                    "missing_count": missing_counts[column],
+                    "missing_count": int(missing_counts[column].item()),
                     "selected_count": int(selected_geometry.sum()),
                     "selected_field_count": int(
                         context.get("inputs", {}).get(ifs, {}).get("selected_field_count", len(fields)),
@@ -488,7 +524,13 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "ifs_field": ifs_field,
         }
 
-    def _representative_input(self, model: Any, batch: Any, context: dict[str, Any]) -> dict[str, Any] | None:
+    def _representative_input(
+        self,
+        pl_module: pl.LightningModule,
+        batch: Any,
+        context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        model = pl_module.model
         target, candidates = context.get("target", {}), []
         for source in batch.inputs:
             fields = context.get("inputs", {}).get(source, {}).get("resolved_fields", [])
@@ -502,16 +544,19 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             return None
         exact, _offset, source, column, field = max(candidates)
         tensor = batch.inputs[source]
+        values = self._full_native_tensor(pl_module, source, tensor.values[0, :, column])
+        mask = self._full_native_tensor(pl_module, source, tensor.mask[0, :, column])
         return {
             "source": source,
             "field": field,
             "coordinates": _degrees(model.node_attributes.get_coordinates(source)),
-            "values": _cpu(tensor.values)[0, :, column] * float(field["stdev"]) + float(field["mean"]),
-            "mask": _cpu(tensor.mask)[0, :, column].astype(bool),
+            "values": _cpu(values) * float(field["stdev"]) + float(field["mean"]),
+            "mask": _cpu(mask).astype(bool),
             "matches_target": bool(exact and field.get("units") == target.get("units")),
         }
 
-    def _graph_payload(self, model: Any, batch: Any, context: dict[str, Any]) -> dict[str, Any]:
+    def _graph_payload(self, pl_module: pl.LightningModule, batch: Any, context: dict[str, Any]) -> dict[str, Any]:
+        model = pl_module.model
         graph, hidden_name = model._graph_data, model.hidden_name
         hidden_rad = _cpu(model.node_attributes.get_coordinates(hidden_name))
         hidden = np.rad2deg(hidden_rad)
@@ -521,13 +566,16 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             coordinates_rad = _cpu(model.node_attributes.get_coordinates(name))
             coordinates = np.rad2deg(coordinates_rad)
             coordinates[:, 1] = (coordinates[:, 1] + 180) % 360 - 180
-            active = None if name not in batch.inputs else _cpu(batch.inputs[name].mask)[0].any(axis=-1)
+            active = None
+            if name in batch.inputs:
+                local_active = batch.inputs[name].mask[0].any(dim=-1)
+                active = _cpu(self._full_native_tensor(pl_module, name, local_active)).astype(bool)
             sources[name] = {"coordinates": coordinates, "coordinates_rad": coordinates_rad, "active": active}
             if active is None:
                 continue
             edges = _indices(graph[(name, "to", hidden_name)].edge_index)
-            encoder_edges[name] = edges
             usable = active[edges[0]]
+            encoder_edges[name] = edges[:, usable]
             distance = np.full(len(hidden), np.nan, dtype=np.float32)
             if usable.any():
                 selected = edges[:, usable]
@@ -691,6 +739,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             batch.query_variable_id,
             batch.query_provenance_id,
             batch.query_unit_id,
+            batch.query_grid_id,
         )
         input_stages = {}
         for source, tensor in batch.inputs.items():
@@ -757,6 +806,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                     [catalogue.unit_to_id[field.units or "unknown"] for field in fields],
                     device=device,
                 ),
+                torch.tensor(
+                    [catalogue.grid_to_id[field.dataset] for field in fields],
+                    device=device,
+                ),
             ),
         )
         if self._pca_components is None and len(final) >= 2:
@@ -787,6 +840,16 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                         [catalogue.unit_to_id[item["query"].unit] for item in valid],
                         device=device,
                     ),
+                    torch.tensor(
+                        [
+                            catalogue.grid_to_id.get(
+                                item["query"].grid,
+                                catalogue.grid_to_id["__custom__"],
+                            )
+                            for item in valid
+                        ],
+                        device=device,
+                    ),
                 ),
             )
             sweeps[kind] = {
@@ -801,9 +864,11 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "variable_labels": variable_labels,
             "provenance_labels": provenance_labels,
             "unit_labels": unit_labels,
+            "grid_labels": catalogue.grids[: self.max_embedding_items],
             "variable": _cpu(model.value_adapter.variable_embedding.weight[: len(variable_labels)]),
             "provenance": _cpu(model.value_adapter.provenance_embedding.weight[: len(provenance_labels)]),
             "unit": _cpu(model.value_adapter.unit_embedding.weight[: len(unit_labels)]),
+            "grid": _cpu(model.query_adapter.grid_embedding.weight[: self.max_embedding_items]),
             "query_stages": {key: _cpu(value) for key, value in query_stages.items()},
             "input_stages": input_stages,
             "labels": labels,
@@ -1083,6 +1148,8 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         annotation = (
             f"consumed: variable={query.get('variable')} level={level} provenance={query.get('provenance')} "
             f"lead={query.get('lead_time')} grid={query.get('grid')} bbox={query.get('bbox')}\n"
+            f"embedded geometry: grid={query.get('embedded_grid', query.get('grid'))} "
+            f"bbox={query.get('embedded_bbox', query.get('bbox'))}\n"
             f"origin={context.get('forecast_origin')} valid={context.get('valid_time')} "
             f"output_frequency={query.get('output_frequency')} "
             f"aggregation_type={query.get('aggregation_type')} "
@@ -1280,14 +1347,23 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         )
 
     @staticmethod
-    def _bbox(ax: Any, bbox: list[float] | None, projection: MapProjection, data_crs: Any) -> None:
+    def _bbox(
+        ax: Any,
+        bbox: list[float] | None,
+        projection: MapProjection,
+        data_crs: Any,
+        *,
+        color: str = "tab:orange",
+        label: str | None = None,
+        linestyle: str = "-",
+    ) -> None:
         if bbox is None:
             return
         west, south, east, north = bbox
         lon, lat = np.asarray([west, east, east, west, west]), np.asarray([south, south, north, north, south])
         if projection.axes_crs() is None:
             lon, lat = projection(lon, lat)
-        kwargs = {"color": "tab:orange", "lw": 1.5}
+        kwargs = {"color": color, "lw": 1.5, "label": label, "linestyle": linestyle}
         if data_crs is not None:
             kwargs["transform"] = data_crs
         ax.plot(lon, lat, **kwargs)
@@ -1295,6 +1371,8 @@ class QueryDiagnosticsPlot(BasePlotCallback):
     def _plot_domain(self, trainer: pl.Trainer, payload: dict[str, Any]) -> None:  # noqa: C901
         graph, output = payload["graph"], payload["graph"]["output"]
         hidden, bbox = graph["hidden"], graph["bbox"]
+        identity = graph["identity"]
+        refinement_area = identity.get("area") if identity.get("stretched") else None
         fig, axes, projection, data_crs = self._map(hidden, (2, 2))
         region = None if bbox is None else [bbox[0] - 3, bbox[2] + 3, bbox[1] - 3, bbox[3] + 3]
         hi, oi = _bounded(len(hidden), self.max_points), _bounded(len(output), self.max_points)
@@ -1306,8 +1384,19 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             okw["transform"] = data_crs
         axes[0, 0].scatter(hx, hy, **hkw)
         axes[0, 0].scatter(ox, oy, **okw)
-        self._bbox(axes[0, 0], bbox, projection, data_crs)
+        self._bbox(axes[0, 0], bbox, projection, data_crs, label="requested bbox")
+        self._bbox(
+            axes[0, 0],
+            refinement_area,
+            projection,
+            data_crs,
+            color="tab:purple",
+            label="fixed mesh-refinement area",
+            linestyle="--",
+        )
         self._finish_map(axes[0, 0], projection, data_crs, hidden)
+        if bbox is not None or refinement_area is not None:
+            axes[0, 0].legend(fontsize=6)
         axes[0, 0].set_title(f"global hidden mesh ({len(hidden):,}) + output ({len(output):,})")
         colours = plt.get_cmap("tab10")
         for number, (name, source) in enumerate(graph["sources"].items()):
@@ -1375,7 +1464,6 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                     ha="center",
                 )
             axes[1, 1].set_title(f"nearest usable encoder source · {source_name}")
-        identity = graph["identity"]
         output_extent = (
             f"lat=[{output[:, 0].min():.3f},{output[:, 0].max():.3f}] "
             f"lon=[{output[:, 1].min():.3f},{output[:, 1].max():.3f}]"
@@ -1405,8 +1493,28 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if source_name is not None:
             edges = graph["encoder_edges"][source_name]
             candidates = np.arange(edges.shape[1])
-            if graph["bbox"] is not None:
-                west, south, east, north = graph["bbox"]
+            focus = graph["bbox"]
+            focus_label = "requested bbox"
+            if focus is None and len(output):
+                south, west = output.min(axis=0)
+                north, east = output.max(axis=0)
+                # Keep the encoder panel regional whenever the resolved output
+                # has a regional footprint. Globally sampled edges rendered on
+                # a regional Lambert projection produce misleading long wedges
+                # at the projection boundary even though the spherical KNN
+                # edges themselves are short.
+                if east - west < 180 and north - south < 150:
+                    lon_pad = max(2.0, 0.05 * (east - west))
+                    lat_pad = max(2.0, 0.05 * (north - south))
+                    focus = [
+                        max(-180.0, west - lon_pad),
+                        max(-90.0, south - lat_pad),
+                        min(180.0, east + lon_pad),
+                        min(90.0, north + lat_pad),
+                    ]
+                    focus_label = "resolved output footprint"
+            if focus is not None:
+                west, south, east, north = focus
                 hidden = graph["hidden"]
                 inside = (
                     (hidden[:, 1] >= west) & (hidden[:, 1] <= east) & (hidden[:, 0] >= south) & (hidden[:, 0] <= north)
@@ -1424,7 +1532,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 edges[:, chosen],
                 projection,
                 data_crs,
-                f"encoder {source_name}→hidden · {len(chosen):,}/{edges.shape[1]:,} edges",
+                f"encoder {source_name}→hidden · {len(chosen):,}/{edges.shape[1]:,} edges in {focus_label}",
             )
         decoder = graph["decoder"]
         if decoder is not None:
@@ -1438,7 +1546,8 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 f"dynamic decoder · {decoder['edges'].shape[1]:,} bounded edges",
             )
         fig.suptitle(
-            "Connectivity used by forward path · global indices; decoder recomputed for bounded sampled destinations",
+            "Connectivity used by forward path · global indices; encoder display is footprint-bounded and "
+            "decoder is recomputed for bounded sampled destinations",
         )
         fig.tight_layout(rect=(0, 0, 1, 0.92))
         self._output_figure(
@@ -1483,19 +1592,21 @@ class QueryDiagnosticsPlot(BasePlotCallback):
 
     def _plot_embeddings(self, trainer: pl.Trainer, payload: dict[str, Any]) -> None:
         data = payload["embeddings"]
-        fig, axes = plt.subplots(2, 4, figsize=(17, 7))
+        fig, axes = plt.subplots(2, 5, figsize=(20, 7))
         for ax, values, labels, title in (
             (axes[0, 0], data["variable"], data["variable_labels"], "variable table norms"),
             (axes[0, 1], data["provenance"], data["provenance_labels"], "provenance table norms"),
             (axes[0, 2], data["unit"], data["unit_labels"], "unit table norms"),
+            (axes[0, 3], data["grid"], data["grid_labels"], "output-grid table norms"),
         ):
             ax.bar(range(len(labels)), np.linalg.norm(values, axis=1))
             ax.set_xticks(range(len(labels)), labels, rotation=90, fontsize=6)
             ax.set_title(title)
         for ax, values, labels, title in (
-            (axes[0, 3], data["variable"], data["variable_labels"], "variable cosine similarity"),
+            (axes[0, 4], data["variable"], data["variable_labels"], "variable cosine similarity"),
             (axes[1, 0], data["provenance"], data["provenance_labels"], "provenance cosine similarity"),
             (axes[1, 1], data["unit"], data["unit_labels"], "unit cosine similarity"),
+            (axes[1, 2], data["grid"], data["grid_labels"], "output-grid cosine similarity"),
         ):
             image = ax.imshow(_cosine(values), vmin=-1, vmax=1, cmap="RdBu_r")
             ax.set_xticks(range(len(labels)), labels, rotation=90, fontsize=5)
@@ -1503,29 +1614,31 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             ax.set_title(title)
             fig.colorbar(image, ax=ax, shrink=0.65)
         points = data["pca"]
-        axes[1, 2].scatter(points[:, 0], points[:, 1], s=15)
+        axes[1, 3].scatter(points[:, 0], points[:, 1], s=15)
         for point, label in zip(points, data["labels"], strict=False):
-            axes[1, 2].annotate(label, point, fontsize=5)
+            axes[1, 3].annotate(label, point, fontsize=5)
         for kind, sweep in data["sweeps"].items():
-            axes[1, 2].plot(sweep["pca"][:, 0], sweep["pca"][:, 1], marker="o", label=kind)
-        axes[1, 2].legend(fontsize=6)
-        axes[1, 2].set_title(f"catalogue query PCA · fixed basis fit epoch {data['pca_fit_epoch']}")
+            axes[1, 3].plot(sweep["pca"][:, 0], sweep["pca"][:, 1], marker="o", label=kind)
+        axes[1, 3].legend(fontsize=6)
+        axes[1, 3].set_title(
+            f"catalogue query PCA (display only) · fixed basis fit epoch {data['pca_fit_epoch']}",
+        )
         query = data["query_stages"]
-        axes[1, 3].plot(np.linalg.norm(query["continuous"], axis=-1).reshape(-1), label="query continuous norm")
-        axes[1, 3].axhline(np.linalg.norm(query["final"]), color="black", label="query final norm")
+        axes[1, 4].plot(np.linalg.norm(query["continuous"], axis=-1).reshape(-1), label="query continuous norm")
+        axes[1, 4].axhline(np.linalg.norm(query["final"]), color="black", label="query final norm")
         norm_lines = []
         for source, stages in data["input_stages"].items():
             joint = stages["joint"].reshape(-1, stages["joint"].shape[-1])
             pooled = stages["pooled"].reshape(-1, stages["pooled"].shape[-1])
-            axes[1, 3].plot(np.std(joint, axis=0), linestyle=":", label=f"{source} joint dimension std")
-            axes[1, 3].plot(np.std(pooled, axis=0), label=f"{source} pooled dimension std")
+            axes[1, 4].plot(np.std(joint, axis=0), linestyle=":", label=f"{source} joint dimension std")
+            axes[1, 4].plot(np.std(pooled, axis=0), label=f"{source} pooled dimension std")
             norm_lines.append(
                 f"{source}: joint |.|={np.linalg.norm(joint, axis=1).mean():.2g}, "
                 f"pooled |.|={np.linalg.norm(pooled, axis=1).mean():.2g}",
             )
-        axes[1, 3].text(0.01, 0.98, "\n".join(norm_lines), transform=axes[1, 3].transAxes, va="top", fontsize=6)
-        axes[1, 3].legend(fontsize=6)
-        axes[1, 3].set_title("stage norms/variation (input and query branches separate)")
+        axes[1, 4].text(0.01, 0.98, "\n".join(norm_lines), transform=axes[1, 4].transAxes, va="top", fontsize=6)
+        axes[1, 4].legend(fontsize=6)
+        axes[1, 4].set_title("stage norms/variation (input and query branches separate)")
         fig.suptitle(
             "Actual metadata stages: categorical tables + continuous features to final query; "
             "values + metadata to pooled input",
@@ -1533,6 +1646,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         fig.text(
             0.01,
             0.01,
+            "PCA is fitted only for this diagnostic and never enters training. "
             "Missing physical pressure is not fabricated: catalogue fields without a physical level are excluded. "
             "Optional known/omitted states appear only when the resolved base metadata supports that intervention.",
             fontsize=7,
@@ -1686,12 +1800,16 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         rows = []
         for key, values in sorted(payload["metrics"].items(), key=lambda item: -item[1][3])[:12]:
             count = values[3]
+            normalized = values[0] / count
+            if key[4] == "mse":
+                normalized = math.sqrt(normalized)
             rows.append(
                 [
                     "/".join(key[:3]),
                     f"{count:.0f}",
-                    f"{math.sqrt(values[0] / count):.3g}",
+                    f"{normalized:.3g}",
                     f"{values[1] / count:.3g} {key[3]}",
+                    key[4],
                     f"{values[2] / count:.3g}",
                 ],
             )
@@ -1699,10 +1817,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             ax.axis("off")
         table = axes[2, 1].table(
             cellText=rows,
-            colLabels=["var/prov/lead", "n", "norm RMSE", "physical RMSE", "loss weight"],
+            colLabels=["var/prov/lead", "n", "normalised", "physical", "score", "loss weight"],
             loc="center",
             cellLoc="left",
-            colWidths=[0.35, 0.08, 0.15, 0.27, 0.15],
+            colWidths=[0.30, 0.07, 0.13, 0.22, 0.13, 0.15],
             bbox=[-1, 0, 3, 1],
         )
         table.auto_set_font_size(False)

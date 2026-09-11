@@ -16,6 +16,7 @@ from typing import Any
 import numpy as np
 
 from anemoi.models.layers.query_adapter import CONTINUOUS_METADATA
+from anemoi.models.layers.query_adapter import encode_bbox_metadata
 from anemoi.training.query.query import ForecastQuery
 from anemoi.utils.dates import frequency_to_timedelta
 
@@ -40,7 +41,11 @@ def _hours(value: Any) -> float:
 
 def _resolution_km(value: Any) -> float | None:
     if isinstance(value, (int, float)):
-        return float(value)
+        # The Dataset API does not attach a unit to bare numbers. Several
+        # regional archives use degrees here (for example TITAN reports
+        # 0.025), so treating a scalar as kilometres silently creates a large
+        # metadata error. Unitless values use the coordinate-derived fallback.
+        return None
     if not isinstance(value, str):
         return None
     text = value.strip().lower()
@@ -52,6 +57,34 @@ def _resolution_km(value: Any) -> float | None:
     except ValueError:
         return None
     return None
+
+
+def _coordinate_resolution_km(
+    latitudes: np.ndarray,
+    longitudes: np.ndarray,
+) -> float | None:
+    """Estimate native spacing from bounded adjacent-coordinate samples."""
+    size = len(latitudes)
+    if size < 2:
+        return None
+    indices = np.linspace(0, size - 2, min(size - 1, 20_000), dtype=np.int64)
+    latitudes_rad = np.deg2rad(np.asarray(latitudes))
+    longitudes_rad = np.deg2rad(np.asarray(longitudes))
+    first_lat = latitudes_rad[indices]
+    second_lat = latitudes_rad[indices + 1]
+    dlat = second_lat - first_lat
+    dlon = (
+        longitudes_rad[indices + 1] - longitudes_rad[indices] + np.pi
+    ) % (2 * np.pi) - np.pi
+    haversine = (
+        np.sin(dlat / 2) ** 2
+        + np.cos(first_lat) * np.cos(second_lat) * np.sin(dlon / 2) ** 2
+    )
+    distances = 2 * 6371.0 * np.arcsin(np.minimum(1, np.sqrt(haversine)))
+    distances = distances[
+        np.isfinite(distances) & (distances > 1e-3) & (distances < 500)
+    ]
+    return None if not len(distances) else float(np.median(distances))
 
 
 def _request_field_metadata(metadata: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -160,7 +193,7 @@ class CatalogueField:
 class QueryCatalogue:
     """Index physical fields without weighting them by archive length."""
 
-    version = 2
+    version = 3
 
     def __init__(  # noqa: C901
         self,
@@ -186,9 +219,13 @@ class QueryCatalogue:
             provenance = dataset_name
             statistics = reader.statistics
             resolution_km = _resolution_km(reader.resolution)
+            resolution_source = "reader metadata"
             dates = np.asarray(reader.dates).astype("datetime64[ns]")
             latitudes = np.asarray(reader.data.latitudes)
             longitudes = (np.asarray(reader.data.longitudes) + 180) % 360 - 180
+            if resolution_km is None:
+                resolution_km = _coordinate_resolution_km(latitudes, longitudes)
+                resolution_source = "median sampled adjacent-node distance"
             self.datasets[dataset_name] = {
                 "frequency_hours": _hours(reader.frequency),
                 "start": str(dates.min()),
@@ -207,6 +244,7 @@ class QueryCatalogue:
                 ).hexdigest(),
                 "native_resolution": str(reader.resolution),
                 "resolution_km": resolution_km,
+                "resolution_source": resolution_source,
                 "supporting_arrays": sorted(reader.supporting_arrays),
             }
 
@@ -365,6 +403,8 @@ class QueryCatalogue:
         self.variable_to_id = {name: index for index, name in enumerate(self.variables)}
         self.provenance_to_id = {name: index for index, name in enumerate(self.provenances)}
         self.unit_to_id = {name: index for index, name in enumerate(self.units)}
+        self.grids = ["__custom__", *self.datasets]
+        self.grid_to_id = {name: index for index, name in enumerate(self.grids)}
         if self.excluded_fields:
             LOGGER.warning(
                 "Excluded %d fields from query targets because their physical semantics are incomplete. First: %s",
@@ -492,6 +532,13 @@ class QueryCatalogue:
         aggregation_type = field.aggregation_type
         input_cadence = field.cadence_hours if isinstance(field, CatalogueField) else None
         output_frequency = None if isinstance(field, CatalogueField) else field.output_frequency
+        grid = field.dataset if isinstance(field, CatalogueField) else field.grid
+        bbox = None if isinstance(field, CatalogueField) else field.bbox
+        if bbox is None and grid in self.datasets:
+            dataset = self.datasets[grid]
+            south, north = dataset["latitude_bounds_degrees"]
+            west, east = dataset["longitude_bounds_degrees"]
+            bbox = (west, south, east, north)
         values = {
             "log_pressure": (0.0 if pressure_pa is None else math.log(pressure_pa / 100000)),
             "pressure_applies": float(level_type == "pressure"),
@@ -514,6 +561,7 @@ class QueryCatalogue:
             "grid_spacing_known": float(resolution is not None),
             "spatial_support_km": 0.0 if support is None else math.log1p(support) / 10,
             "spatial_support_known": float(support is not None),
+            **encode_bbox_metadata(bbox),
             "level_surface": float(level_type == "surface"),
             "level_pressure": float(level_type == "pressure"),
             "level_model": float(level_type == "model"),
@@ -541,6 +589,7 @@ class QueryCatalogue:
             "variables": self.variables,
             "provenances": self.provenances,
             "units": self.units,
+            "grids": self.grids,
             "aliases": self.aliases,
             "datasets": self.datasets,
             "fields": [asdict(field) for field in self.fields],
@@ -567,7 +616,9 @@ class QueryCatalogue:
         catalogue.variables = list(snapshot["variables"])
         catalogue.provenances = list(snapshot["provenances"])
         catalogue.units = list(snapshot.get("units", ["unknown"]))
+        catalogue.grids = list(snapshot.get("grids", ["__custom__", *catalogue.datasets]))
         catalogue.variable_to_id = {name: index for index, name in enumerate(catalogue.variables)}
         catalogue.provenance_to_id = {name: index for index, name in enumerate(catalogue.provenances)}
         catalogue.unit_to_id = {name: index for index, name in enumerate(catalogue.units)}
+        catalogue.grid_to_id = {name: index for index, name in enumerate(catalogue.grids)}
         return catalogue

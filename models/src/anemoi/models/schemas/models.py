@@ -105,8 +105,12 @@ class QueryModelConfig(BaseModel):
     adapter_node_chunk_size: PositiveInt = 4096
     processor_mesh_resolution: PositiveInt = 5
     encoder_neighbours: PositiveInt = 12
+    dynamic_encoder: bool = True
+    "Filter cached encoder candidates using the source nodes valid in each query."
     decoder_neighbours: PositiveInt = 4
     decoder_chunk_size: PositiveInt = 512
+    ensemble_noise_std: NonNegativeFloat = 0.0
+    "Standard deviation of independent latent noise for ensemble query forecasts."
     stretched_grid: QueryStretchedGridConfig = Field(default_factory=QueryStretchedGridConfig)
 
 

@@ -176,7 +176,11 @@ def _gather(
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
         return _gather_into_tensor(input_, dim_, sizes, group)
 
-    requires_pad = dist.get_backend(group) == "gloo" and not all_shards_equal_shape
+    # ``all_gather`` with differently sized output tensors is not portable.
+    # Current NCCL/PyTorch combinations reject it just like Gloo does (for
+    # example an odd native-grid node count split across two ranks), so use the
+    # established padded path for every backend when shard lengths differ.
+    requires_pad = not all_shards_equal_shape
     if requires_pad:
         return _gather_with_padding(input_, dim_, sizes, group)
 

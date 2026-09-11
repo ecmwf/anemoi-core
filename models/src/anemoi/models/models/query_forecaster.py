@@ -14,12 +14,19 @@ from hydra.utils import instantiate
 from torch import Tensor, nn
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
+from anemoi.models.distributed.graph import gather_tensor, shard_tensor
+from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.shapes import (
+    BipartiteGraphShardInfo,
+    GraphShardInfo,
+    get_shard_sizes,
+)
 from anemoi.models.layers.graph import NamedNodesAttributes
 from anemoi.models.layers.graph_provider import (
     DynamicGraphProvider,
     create_graph_provider,
 )
+from anemoi.models.layers.query_adapter import CONTINUOUS_METADATA
 from anemoi.models.layers.query_adapter import QueryMetadataAdapter, QueryValueAdapter
 
 
@@ -103,9 +110,18 @@ class QueryForecaster(nn.Module):
         self.dataset_names = list(metadata["metadata_inference"]["dataset_names"])
         catalogue = metadata["metadata_inference"]["query_catalogue"]
         self.query_catalogue = catalogue
+        if catalogue["continuous_metadata"] != list(CONTINUOUS_METADATA):
+            raise ValueError(
+                "Checkpoint query metadata features do not match this model version. "
+                "Rebuild the query model/checkpoint after metadata schema changes."
+            )
 
         model_config = config.model
-        hidden = model_config.num_channels
+        # ``num_channels`` is a YAML convenience used to interpolate the
+        # processor and mapper widths. ModelSchema intentionally retains those
+        # resolved component values, but drops that convenience key during
+        # validation. Read the retained processor width at runtime.
+        hidden = model_config.processor.num_channels
         adapter_hidden = model_config.query.metadata_hidden_dim
         self.node_attributes = NamedNodesAttributes(
             {
@@ -130,8 +146,11 @@ class QueryForecaster(nn.Module):
             self.value_adapter.variable_embedding,
             self.value_adapter.provenance_embedding,
             self.value_adapter.unit_embedding,
+            len(catalogue.get("grids", ["__custom__", *self.dataset_names])),
         )
         self.query_to_latent = nn.Linear(adapter_hidden, hidden)
+        self.ensemble_noise_std = float(model_config.query.ensemble_noise_std)
+        self.dynamic_encoder = bool(model_config.query.dynamic_encoder)
 
         self.encoder_graph_provider = nn.ModuleDict()
         for name in self.dataset_names:
@@ -201,13 +220,17 @@ class QueryForecaster(nn.Module):
         query: dict[str, Any],
         output_coordinates: Tensor | None = None,
         model_comm_group: Any = None,
+        grid_shard_sizes: dict[str, list[int]] | None = None,
     ) -> Tensor:
-        if model_comm_group is not None and model_comm_group.size() != 1:
-            raise NotImplementedError(
-                "The initial query model supports one GPU per model group."
-            )
         batch_size = 1
         hidden_nodes = self.node_attributes(self.hidden_name, batch_size)
+        hidden_shard_sizes = get_shard_sizes(hidden_nodes, 0, model_comm_group)
+        hidden_nodes = shard_tensor(
+            hidden_nodes,
+            0,
+            hidden_shard_sizes,
+            model_comm_group,
+        )
         source_latents = []
         source_coverages = []
         for name, source in inputs.items():
@@ -225,24 +248,88 @@ class QueryForecaster(nn.Module):
             )
             pooled = pooled.reshape(-1, pooled.shape[-1])
             source_coverage = pooled[:, -1]
+            source_shard_sizes = (
+                None if grid_shard_sizes is None else grid_shard_sizes.get(name)
+            )
+            source_attributes = self.node_attributes(name, batch_size)
+            if source_shard_sizes is not None:
+                source_attributes = shard_tensor(
+                    source_attributes,
+                    0,
+                    source_shard_sizes,
+                    model_comm_group,
+                )
+            if source_attributes.shape[0] != source_coverage.shape[0]:
+                raise ValueError(
+                    f"Input shard for {name!r} has {source_coverage.shape[0]} nodes, "
+                    f"but its coordinate shard has {source_attributes.shape[0]}."
+                )
             source_nodes = torch.cat(
                 (
                     pooled,
-                    self.node_attributes(name, batch_size) * source_coverage[:, None],
+                    source_attributes * source_coverage[:, None],
                 ),
                 dim=-1,
             )
-            edge_attr, edge_index, edge_sizes = self.encoder_graph_provider[
-                name
-            ].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
+            full_source_coverage = source_coverage.detach()
+            if source_shard_sizes is not None:
+                full_source_coverage = gather_tensor(
+                    full_source_coverage,
+                    0,
+                    source_shard_sizes,
+                    model_comm_group,
+                )
+            provider = self.encoder_graph_provider[name]
+            if self.dynamic_encoder:
+                # Resolve encoder connectivity from the nodes that are
+                # genuinely present in this query. The cached spherical KNN
+                # graph supplies bounded candidates, while bbox selection,
+                # missing values and source dropout determine the edges
+                # consumed by this forward pass.
+                edge_attr, edge_index, _ = provider.get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                    shard_edges=False,
+                )
+                active_edges = full_source_coverage[edge_index[0]].bool()
+                edge_attr = edge_attr[active_edges]
+                edge_index = edge_index[:, active_edges]
+                if not edge_index.shape[1]:
+                    continue
+                edge_attr, edge_index, edge_sizes = shard_edges_1hop(
+                    edge_attr,
+                    edge_index,
+                    self.node_attributes.num_nodes[name],
+                    self.node_attributes.num_nodes[self.hidden_name],
+                    model_comm_group,
+                )
+            else:
+                edge_attr, edge_index, edge_sizes = provider.get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+            coverage = torch.zeros(
+                self.node_attributes.num_nodes[self.hidden_name],
+                dtype=pooled.dtype,
+                device=pooled.device,
             )
+            coverage.index_add_(
+                0,
+                edge_index[1],
+                full_source_coverage[edge_index[0]].to(coverage.dtype),
+            )
+            if model_comm_group is not None and model_comm_group.size() > 1:
+                torch.distributed.all_reduce(coverage, group=model_comm_group)
+                rank = model_comm_group.rank()
+                start = sum(hidden_shard_sizes[:rank])
+                coverage = coverage[start : start + hidden_shard_sizes[rank]]
             _, latent = self.encoder(
                 (source_nodes, hidden_nodes),
                 batch_size=batch_size,
                 shard_info=BipartiteGraphShardInfo(
-                    src_nodes=None, dst_nodes=None, edges=edge_sizes
+                    src_nodes=source_shard_sizes,
+                    dst_nodes=hidden_shard_sizes,
+                    edges=edge_sizes,
                 ),
                 edge_attr=edge_attr,
                 edge_index=edge_index,
@@ -250,12 +337,6 @@ class QueryForecaster(nn.Module):
                 keep_x_dst_sharded=True,
             )
             source_latents.append(latent)
-            coverage = torch.zeros(
-                self.node_attributes.num_nodes[self.hidden_name],
-                dtype=latent.dtype,
-                device=latent.device,
-            )
-            coverage.index_add_(0, edge_index[1], source_coverage[edge_index[0]])
             source_coverages.append((coverage > 0).to(latent.dtype)[:, None])
         if not source_latents:
             raise ValueError("At least one registered input source is required.")
@@ -269,10 +350,13 @@ class QueryForecaster(nn.Module):
             query["variable_id"],
             query["provenance_id"],
             query["unit_id"],
+            query["grid_id"],
         )
         latent = latent + self.query_to_latent(query_embedding).repeat_interleave(
-            self.node_attributes.num_nodes[self.hidden_name], dim=0
+            hidden_nodes.shape[0], dim=0
         )
+        if self.ensemble_noise_std:
+            latent = latent + torch.randn_like(latent) * self.ensemble_noise_std
         edge_attr, edge_index, edge_sizes = self.processor_graph_provider.get_edges(
             batch_size=batch_size,
             model_comm_group=model_comm_group,
@@ -280,7 +364,7 @@ class QueryForecaster(nn.Module):
         processed = self.processor(
             x=latent,
             batch_size=batch_size,
-            shard_info=GraphShardInfo(nodes=None, edges=edge_sizes),
+            shard_info=GraphShardInfo(nodes=hidden_shard_sizes, edges=edge_sizes),
             edge_attr=edge_attr,
             edge_index=edge_index,
             model_comm_group=model_comm_group,
@@ -318,11 +402,20 @@ class QueryForecaster(nn.Module):
             target_coordinates.shape[0], dim=0
         )
         destination = torch.cat((target_query, target_nodes), dim=-1)
+        target_shard_sizes = get_shard_sizes(destination, 0, model_comm_group)
+        destination = shard_tensor(
+            destination,
+            0,
+            target_shard_sizes,
+            model_comm_group,
+        )
         output = self.decoder(
             (processed, destination),
             batch_size=1,
             shard_info=BipartiteGraphShardInfo(
-                src_nodes=None, dst_nodes=None, edges=edge_sizes
+                src_nodes=hidden_shard_sizes,
+                dst_nodes=target_shard_sizes,
+                edges=edge_sizes,
             ),
             edge_attr=edge_attr,
             edge_index=edge_index,
@@ -336,11 +429,16 @@ class QueryForecaster(nn.Module):
         query: dict[str, Any],
         output_coordinates: Tensor | None = None,
         model_comm_group: Any = None,
+        grid_shard_sizes: dict[str, list[int]] | None = None,
     ) -> Tensor:
         """Return normalized values for tensor queries or physical values for user dictionaries."""
         if "metadata" in query:
             return self._forward_tensors(
-                inputs, query, output_coordinates, model_comm_group
+                inputs,
+                query,
+                output_coordinates,
+                model_comm_group,
+                grid_shard_sizes,
             )
         return self.predict(inputs, query, output_coordinates)
 
@@ -481,6 +579,10 @@ class QueryForecaster(nn.Module):
             ),
             "unit_id": torch.tensor(
                 [catalogue.unit_to_id[canonical.get("units") or "unknown"]],
+                device=device,
+            ),
+            "grid_id": torch.tensor(
+                [catalogue.grid_to_id.get(canonical["grid"], catalogue.grid_to_id["__custom__"])],
                 device=device,
             ),
             "grid": canonical["grid"],

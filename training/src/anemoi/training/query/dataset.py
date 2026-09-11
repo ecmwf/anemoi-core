@@ -13,6 +13,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 
+from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.query.batch import QueryBatch
 from anemoi.training.query.batch import QueryInput
 from anemoi.training.query.query import ForecastQuery
@@ -43,6 +44,9 @@ class QueryDataset(Dataset):
         self.seed = seed
         self.epoch = 0
         self.model_group_id = 0
+        self.model_group_rank = 0
+        self.sample_group_id = 0
+        self.shard_sizes: dict[str, list[int]] | None = None
 
         requested_fields = catalogue.restrict_targets(task.target_variables)
         if not requested_fields:
@@ -160,17 +164,50 @@ class QueryDataset(Dataset):
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
 
+    def per_worker_init(self, n_workers: int, worker_id: int) -> None:
+        """Satisfy the shared loader contract; worker indices need no partitioning.
+
+        PyTorch's sampler already assigns distinct example indices to workers,
+        and each query is deterministically generated from its index. Native
+        readers are opened lazily in the worker process.
+        """
+        del n_workers, worker_id
+
     def set_comm_group_info(
         self,
         _global_rank: int,
         model_group_id: int,
-        _model_group_rank: int,
-        _num_model_groups: int,
+        model_group_rank: int,
+        num_model_groups: int,
         _reader_group_rank: int,
         _reader_group_size: int,
-        _shard_sizes: dict,
+        shard_sizes: dict,
     ) -> None:
         self.model_group_id = model_group_id
+        self.model_group_rank = model_group_rank
+        self.sample_group_id = model_group_id
+        self.sample_group_count = num_model_groups
+        self.shard_sizes = shard_sizes
+
+    def set_ens_comm_group_info(
+        self,
+        ensemble_group_id: int,
+        _ensemble_group_rank: int,
+        ensemble_group_count: int,
+    ) -> None:
+        """Make all ensemble members draw exactly the same query and times."""
+        self.sample_group_id = ensemble_group_id
+        self.sample_group_count = ensemble_group_count
+
+    def _grid_shard(self, dataset: str, grid_size: int) -> tuple[int, int]:
+        """Return this model rank's contiguous native-grid interval."""
+        if self.shard_sizes is None or dataset not in self.shard_sizes:
+            return 0, grid_size
+        sizes = self.shard_sizes[dataset]
+        if sum(sizes) != grid_size:
+            msg = f"Grid shards for {dataset!r} sum to {sum(sizes)}, expected {grid_size}."
+            raise ValueError(msg)
+        return get_partition_range(sizes, self.model_group_rank)
 
     def _sample_option(
         self,
@@ -214,7 +251,7 @@ class QueryDataset(Dataset):
 
     def __getitem__(self, index: int) -> QueryBatch:  # noqa: C901
         rng = np.random.default_rng(
-            self.seed + self.epoch * self.length + index + self.model_group_id * 1_000_003,
+            self.seed + self.epoch * self.length + index + self.sample_group_id * 1_000_003,
         )
         field, lead_time, bbox = self._sample_option(rng)
         target_reader = self.readers[field.dataset]
@@ -326,13 +363,18 @@ class QueryDataset(Dataset):
                 )
             spatial_mask = self._bbox_mask(reader, context_bbox)
             grid_indices = np.flatnonzero(spatial_mask)
-            if not len(grid_indices):
-                continue
+            shard_start, shard_end = self._grid_shard(source_name, reader.grid_size)
+            grid_indices = grid_indices[(grid_indices >= shard_start) & (grid_indices < shard_end)]
+            # Native readers can push a contiguous slice into Zarr. Integer
+            # arrays are applied only after a full-grid read, which defeats
+            # model sharding. Read this rank's contiguous interval and apply
+            # any geographic context mask locally below.
             loaded = reader.get_sample(
                 0,
                 np.asarray(positions),
-                None if context_bbox is None else grid_indices,
+                slice(shard_start, shard_end),
             )[:, 0]
+            local_grid_indices = grid_indices - shard_start
             values = []
             metadata = []
             variable_ids = []
@@ -348,7 +390,7 @@ class QueryDataset(Dataset):
                         time_index,
                         :,
                         reader.name_to_index[source_field.field_name],
-                    ].float()
+                    ][local_grid_indices].float()
                     values.append((raw - source_field.mean) / source_field.stdev)
                     metadata.append(
                         self.catalogue.encode_metadata(source_field, offset_hours),
@@ -372,12 +414,12 @@ class QueryDataset(Dataset):
 
             selected_values = torch.stack(values, dim=-1)
             values_tensor = torch.zeros(
-                (reader.grid_size, selected_values.shape[-1]),
+                (shard_end - shard_start, selected_values.shape[-1]),
                 dtype=selected_values.dtype,
             )
             mask = torch.zeros_like(values_tensor, dtype=torch.bool)
-            values_tensor[grid_indices] = torch.nan_to_num(selected_values)
-            mask[grid_indices] = torch.isfinite(selected_values)
+            values_tensor[local_grid_indices] = torch.nan_to_num(selected_values)
+            mask[local_grid_indices] = torch.isfinite(selected_values)
             inputs[source_name] = QueryInput(
                 values=values_tensor[None],
                 metadata=torch.from_numpy(np.stack(metadata))[None],
@@ -394,6 +436,8 @@ class QueryDataset(Dataset):
                 "available_time_count": available_time_count,
                 "selected_time_count": len(positions),
                 "selected_node_count": len(grid_indices),
+                "shard_node_count": shard_end - shard_start,
+                "shard_native_index_range": [shard_start, shard_end],
                 "native_node_count": int(reader.grid_size),
                 "context_bbox_degrees": context_bbox,
             }
@@ -404,16 +448,20 @@ class QueryDataset(Dataset):
 
         target_nodes = self._bbox_mask(target_reader, bbox)
         target_indices = np.flatnonzero(target_nodes)
-        target = target_reader.get_sample(
-            0,
-            np.asarray([target_position]),
-            target_indices,
-        )[
-            0,
-            0,
-            :,
-            target_reader.name_to_index[field.field_name],
-        ].float()
+        # Select the single supervised variable before materialising the native
+        # grid. BaseAnemoiReader.get_sample intentionally loads all variables,
+        # which is appropriate for state training but needlessly expensive for
+        # a scalar query target (especially TITAN's hundreds of fields).
+        target_variable_index = target_reader.name_to_index[field.field_name]
+        target_native = np.asarray(
+            target_reader.data[
+                slice(target_position, target_position + 1),
+                slice(target_variable_index, target_variable_index + 1),
+                :,
+                :,
+            ],
+        )
+        target = torch.from_numpy(target_native)[0, 0, 0, target_indices].float()
         target = (target - field.mean) / field.stdev
         target_mask = torch.isfinite(target)
         target_latitudes = np.asarray(target_reader.data.latitudes)[target_indices]
@@ -427,6 +475,10 @@ class QueryDataset(Dataset):
             query,
             lead_time.total_seconds() / 3600,
         )
+        target_geometry = self.catalogue.datasets[field.dataset]
+        south, north = target_geometry["latitude_bounds_degrees"]
+        west, east = target_geometry["longitude_bounds_degrees"]
+        embedded_bbox = query.bbox or (west, south, east, north)
         loss_weight = (
             self.task.loss_weights.get(field.variable, 1.0)
             * self.task.loss_weights.get(field.provenance, 1.0)
@@ -444,6 +496,9 @@ class QueryDataset(Dataset):
             query_unit_id=torch.tensor(
                 [self.catalogue.unit_to_id[field.units or "unknown"]],
             ),
+            query_grid_id=torch.tensor(
+                [self.catalogue.grid_to_id[field.dataset]],
+            ),
             target_dataset=field.dataset,
             query=query.as_serialisable_dict(),
             output_coordinates=output_coordinates,
@@ -460,6 +515,8 @@ class QueryDataset(Dataset):
                     "target_dataset": field.dataset,
                     "target_field_name": field.field_name,
                     "target_units": field.units,
+                    "embedded_bbox": embedded_bbox,
+                    "embedded_grid": field.dataset,
                 },
                 "target": {
                     **asdict(field),

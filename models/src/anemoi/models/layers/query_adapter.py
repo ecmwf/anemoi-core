@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+import math
+
 import torch
 from torch import nn
 
@@ -29,6 +31,13 @@ CONTINUOUS_METADATA = (
     "grid_spacing_known",
     "spatial_support_km",
     "spatial_support_known",
+    "bbox_center_latitude_sin",
+    "bbox_center_latitude_cos",
+    "bbox_center_longitude_sin",
+    "bbox_center_longitude_cos",
+    "bbox_latitude_span",
+    "bbox_longitude_span",
+    "bbox_known",
     "level_surface",
     "level_pressure",
     "level_model",
@@ -40,6 +49,34 @@ CONTINUOUS_METADATA = (
     "aggregation_type_accumulation",
     "aggregation_type_other",
 )
+
+
+def encode_bbox_metadata(
+    bbox: tuple[float, float, float, float] | list[float] | None,
+) -> dict[str, float]:
+    """Encode a degree bbox without a longitude discontinuity at the dateline."""
+    if bbox is None:
+        return {
+            "bbox_center_latitude_sin": 0.0,
+            "bbox_center_latitude_cos": 0.0,
+            "bbox_center_longitude_sin": 0.0,
+            "bbox_center_longitude_cos": 0.0,
+            "bbox_latitude_span": 0.0,
+            "bbox_longitude_span": 0.0,
+            "bbox_known": 0.0,
+        }
+    west, south, east, north = (float(value) for value in bbox)
+    latitude = math.radians((south + north) / 2)
+    longitude = math.radians((west + east) / 2)
+    return {
+        "bbox_center_latitude_sin": math.sin(latitude),
+        "bbox_center_latitude_cos": math.cos(latitude),
+        "bbox_center_longitude_sin": math.sin(longitude),
+        "bbox_center_longitude_cos": math.cos(longitude),
+        "bbox_latitude_span": (north - south) / 180,
+        "bbox_longitude_span": (east - west) / 360,
+        "bbox_known": 1.0,
+    }
 
 
 class QueryValueAdapter(nn.Module):
@@ -179,13 +216,15 @@ class QueryMetadataAdapter(nn.Module):
         variable_embedding: nn.Embedding,
         provenance_embedding: nn.Embedding,
         unit_embedding: nn.Embedding,
+        num_grids: int,
     ) -> None:
         super().__init__()
         self.variable_embedding = variable_embedding
         self.provenance_embedding = provenance_embedding
         self.unit_embedding = unit_embedding
+        self.grid_embedding = nn.Embedding(num_grids, hidden_dim)
         self.net = nn.Sequential(
-            nn.Linear(metadata_dim + 3 * hidden_dim, hidden_dim),
+            nn.Linear(metadata_dim + 4 * hidden_dim, hidden_dim),
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
@@ -196,6 +235,7 @@ class QueryMetadataAdapter(nn.Module):
         variable_ids: torch.Tensor,
         provenance_ids: torch.Tensor,
         unit_ids: torch.Tensor,
+        grid_ids: torch.Tensor,
     ) -> torch.Tensor:
         return self.net(
             torch.cat(
@@ -204,6 +244,7 @@ class QueryMetadataAdapter(nn.Module):
                     self.variable_embedding(variable_ids),
                     self.provenance_embedding(provenance_ids),
                     self.unit_embedding(unit_ids),
+                    self.grid_embedding(grid_ids),
                 ),
                 dim=-1,
             )
@@ -216,17 +257,20 @@ class QueryMetadataAdapter(nn.Module):
         variable_ids: torch.Tensor,
         provenance_ids: torch.Tensor,
         unit_ids: torch.Tensor,
+        grid_ids: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         """Return the actual categorical, continuous, and projected query spaces."""
         variable = self.variable_embedding(variable_ids)
         provenance = self.provenance_embedding(provenance_ids)
         unit = self.unit_embedding(unit_ids)
-        joint_input = torch.cat((metadata, variable, provenance, unit), dim=-1)
+        grid = self.grid_embedding(grid_ids)
+        joint_input = torch.cat((metadata, variable, provenance, unit, grid), dim=-1)
         return {
             "continuous": metadata.detach(),
             "variable": variable.detach(),
             "provenance": provenance.detach(),
             "unit": unit.detach(),
+            "grid": grid.detach(),
             "joint_input": joint_input.detach(),
             "final": self.net(joint_input).detach(),
         }

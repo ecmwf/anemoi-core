@@ -13,6 +13,7 @@ query:
   adapter_node_chunk_size: 4096
   processor_mesh_resolution: 4
   encoder_neighbours: 12
+  dynamic_encoder: true
   decoder_neighbours: 4
   decoder_chunk_size: 512
   stretched_grid:

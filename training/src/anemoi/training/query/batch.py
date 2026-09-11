@@ -40,6 +40,7 @@ class QueryBatch:
     query_variable_id: torch.Tensor
     query_provenance_id: torch.Tensor
     query_unit_id: torch.Tensor
+    query_grid_id: torch.Tensor
     target_dataset: str
     query: dict[str, Any]
     output_coordinates: torch.Tensor | None = None

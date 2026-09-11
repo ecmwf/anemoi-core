@@ -12,6 +12,7 @@ import numpy as np
 from anemoi.utils.dates import frequency_to_timedelta
 
 from anemoi.models.layers.query_adapter import CONTINUOUS_METADATA
+from anemoi.models.layers.query_adapter import encode_bbox_metadata
 
 MODEL_TYPE_ALIASES = {
     "sfc": "surface",
@@ -60,6 +61,9 @@ class QueryMetadata:
         }
         self.units = list(snapshot.get("units", ["unknown"]))
         self.unit_to_id = {name: index for index, name in enumerate(self.units)}
+        self.datasets = snapshot.get("datasets", {})
+        self.grids = list(snapshot.get("grids", ["__custom__", *self.datasets]))
+        self.grid_to_id = {name: index for index, name in enumerate(self.grids)}
         self.aliases = snapshot.get("aliases", {})
 
     @staticmethod
@@ -381,13 +385,13 @@ class QueryMetadata:
         mean, stdev = self.normalization(canonical)
         return {
             **canonical,
+            "dataset": source,
             "mean": mean,
             "stdev": stdev,
             "time_offset_hours": self._hours(value.get("time_offset", "0h")),
         }
 
-    @staticmethod
-    def encode(value: dict[str, Any], time_offset_hours: float) -> np.ndarray:
+    def encode(self, value: dict[str, Any], time_offset_hours: float) -> np.ndarray:
         pressure = value.get("pressure_pa")
         model_level = value.get("model_level")
         height = value.get("height_m")
@@ -396,6 +400,13 @@ class QueryMetadata:
         resolution = value.get("resolution_km")
         support = value.get("spatial_support_km")
         aggregation_type = value["aggregation_type"]
+        grid = value.get("grid", value.get("dataset"))
+        bbox = value.get("bbox")
+        if bbox is None and grid in self.datasets:
+            dataset = self.datasets[grid]
+            south, north = dataset["latitude_bounds_degrees"]
+            west, east = dataset["longitude_bounds_degrees"]
+            bbox = (west, south, east, north)
         encoded = {
             "log_pressure": 0.0 if pressure is None else math.log(pressure / 100000),
             "pressure_applies": float(level_type == "pressure"),
@@ -432,6 +443,7 @@ class QueryMetadata:
             "grid_spacing_known": float(resolution is not None),
             "spatial_support_km": 0.0 if support is None else math.log1p(support) / 10,
             "spatial_support_known": float(support is not None),
+            **encode_bbox_metadata(bbox),
             "level_surface": float(level_type == "surface"),
             "level_pressure": float(level_type == "pressure"),
             "level_model": float(level_type == "model"),
