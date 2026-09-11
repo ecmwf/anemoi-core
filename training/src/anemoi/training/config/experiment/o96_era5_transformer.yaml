@@ -36,6 +36,8 @@ system:
     graph: ${system.output.root}/graph.pt  # built once here on first run (own dataset), then reused
   output:
     root: /leonardo_work/DestE_340_26/users/jschrei1/anemoi-core/runs/o96-embedder  # separate from o96-baseline, for comparison
+    logs:
+      mlflow: /leonardo_work/DestE_340_26/users/jschrei1/anemoi-core/runs/o96-comparison-mlflow
 
 diagnostics:
   log:
