@@ -519,7 +519,7 @@ minimum learning rate is not scaled by the number of GPUs. The user can
 also control the warmup period by setting
 ``config.training.optimization.lr_scheduler.warmup_t``. If the warmup
 period is set to 0, the learning rate will start at the maximum
-learning rate. The shipped default (see
+learning rate. The default (see
 ``config/training/optimization/lr_scheduler/cosine_scheduler.yaml``)
 uses a warmup period of 1000 steps.
 
