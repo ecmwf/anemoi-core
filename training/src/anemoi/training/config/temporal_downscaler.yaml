@@ -1,4 +1,5 @@
 defaults:
+- migration_state
 - data: zarr
 - dataloader: forecast_native_grid
 - diagnostics: evaluation
