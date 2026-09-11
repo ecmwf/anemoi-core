@@ -9,27 +9,24 @@
 
 import logging
 import os
-import random
 
 import numpy as np
 import torch
 
-from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.datasets import AnemoiDataset
 from anemoi.training.data.usable_indices import compute_valid_anchors
-from anemoi.training.utils.seeding import SeedContext
-from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
 
 class MultiDataset(AnemoiDataset):
-    """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
+    """Multi-dataset wrapper that returns synchronized samples from multiple data readers.
+
+    Selection policy: ONE set of anchors shared by all readers (intersection of
+    the readers' valid anchors); every sample reads ALL readers at that anchor.
+    """
 
     def __init__(
         self,
@@ -65,115 +62,30 @@ class MultiDataset(AnemoiDataset):
             epoch=epoch,
             rollout=rollout,
         )
+        self._check_no_mixed_sequence_types()
+        self._set_relative_date_indices(relative_date_indices)
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
-        # Compute valid (sequence, position) anchors and a flat index over them
-        # that the shuffle/shard logic operates on.
+    def _compute_anchors(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        # Valid (sequence, position) anchors shared by all readers, plus a flat index
+        # over them that the shuffle/shard logic operates on.
         self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
-
-    def set_epoch(
-        self,
-        epoch: int,
-        *,
-        rollout: int | None = None,
-        relative_date_indices: dict[str, TimeIndices] | None = None,
-    ) -> None:
-        """Set epoch-dependent sampling state before DataLoader workers are launched."""
-        self.epoch = epoch
-        if rollout is not None:
-            self.rollout = rollout
-        if relative_date_indices is None:
-            return
-
-        # Recompute valid (sequence, position) anchors for the updated rollout.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all data readers for this worker."""
         self.worker_id = worker_id
-
-        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # divide valid date indices into shards for sample communication groups (DDP ranks)
         # note that we need even splits here across DDP ranks, so we might throw away some samples
-        self.n_samples_per_worker, low, high = self._get_worker_index_range(
+        self.n_samples_per_worker, self.chunk_index_range = self._shard_indices(
             len(self.valid_date_indices),
             n_workers,
             worker_id,
         )
-
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
-
-        LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
-
-        base_seed = get_base_seed()
-        # The datamodule checkpoints this epoch and restores it before new workers
-        # start, so resuming from an epoch checkpoint derives the same seed.
-        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
-
-        torch.manual_seed(seed)
-        random.seed(seed)
-        self.seed = seed
-        self.rng = np.random.default_rng(seed=seed)
-        sanity_rnd = self.rng.random(1)[0]
-        LOGGER.info(
-            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
-            worker_id,
-            self.label,
-            os.getpid(),
-            self.epoch,
-            self.rollout,
-            seed,
-            sanity_rnd,
-        )
+        self._seed_worker()
 
     def get_sample(self, index: int) -> dict[str, torch.Tensor]:
         sequence, position = (int(v) for v in self.anchors[index])
-        x = {}
-        for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_comm_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
-
-        return x
+        return {name: self._read(name, sequence, position) for name in self.data_readers}
 
     def __iter__(self) -> dict[str, torch.Tensor]:
         """Return an iterator that yields dictionaries of synchronized samples.

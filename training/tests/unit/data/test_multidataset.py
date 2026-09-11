@@ -83,7 +83,7 @@ class TestMultiDataset:
 
     def test_worker_seed_includes_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """Test that worker RNG seed changes with epoch while staying shared across worker partitions."""
-        mocker.patch("anemoi.training.data.datasets.multidataset.get_base_seed", return_value=1000)
+        mocker.patch("anemoi.training.data.datasets.anemoidataset.get_base_seed", return_value=1000)
 
         multi_dataset.set_epoch(0)
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
@@ -102,7 +102,7 @@ class TestMultiDataset:
 
     def test_worker_shuffle_repeats_for_same_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """New workers reproduce the shuffle when the base seed and epoch match."""
-        mocker.patch("anemoi.training.data.datasets.multidataset.get_base_seed", return_value=1000)
+        mocker.patch("anemoi.training.data.datasets.anemoidataset.get_base_seed", return_value=1000)
         mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
 
         multi_dataset.set_epoch(5)

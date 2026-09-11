@@ -9,15 +9,14 @@
 
 import datetime
 import logging
+import os
+import random
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
-from typing import TYPE_CHECKING
 
-# Move third-party import inside this block
-if TYPE_CHECKING:
-    import numpy as np
-
+import numpy as np
+import torch
 from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
@@ -27,12 +26,25 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.utils.time_indices import normalize_time_indices
+from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiDataset(IterableDataset, ABC):
-    """Base Anemoi Datasets torch dataset class."""
+    """Base Anemoi Datasets torch dataset class.
+
+    Subclasses own the *selection policy* (which anchors exist, how they are
+    shuffled and interleaved across readers) by implementing
+    :meth:`_compute_anchors`, :meth:`per_worker_init` and :meth:`__iter__`.
+    Everything that does not depend on that policy (worker seeding, worker
+    sharding, sharded reads, relative-date-index normalisation) lives here.
+    """
 
     def __init__(
         self,
@@ -64,6 +76,7 @@ class AnemoiDataset(IterableDataset, ABC):
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
         self.rollout = rollout
+        self.relative_date_indices: dict[str, TimeIndices] = {}
         self._lazy_init_model_and_reader_group_info()
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
@@ -87,8 +100,61 @@ class AnemoiDataset(IterableDataset, ABC):
         self.shard_sizes = None
 
         # additional state vars (lazy init)
+        self.worker_id = 0
+        self.seed: int | None = None
+        self.rng: np.random.Generator | None = None
         self.n_samples_per_worker = 0
         self.chunk_index_range: np.ndarray | None = None
+
+    def _check_no_mixed_sequence_types(self) -> None:
+        """Reject mixing single-sequence readers with multi-sequence (trajectory) readers.
+
+        Anchors of a single-sequence reader (global time axis) and of a
+        trajectory reader (init x step axes) are not comparable; combining them
+        would silently keep only sequence-0 samples.
+        """
+        single_seq = [name for name, reader in self.data_readers.items() if reader.num_sequences == 1]
+        multi_seq = [name for name, reader in self.data_readers.items() if reader.num_sequences > 1]
+        if single_seq and multi_seq:
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                f"Trajectory datasets (init x step axes) in the same {self.__class__.__name__} is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
+            )
+            raise ValueError(msg)
+
+    def _set_relative_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Recompute anchors and store normalized relative date indices.
+
+        Normalizing to slices where possible improves downstream indexing performance.
+        """
+        self._compute_anchors(relative_date_indices)
+        self.relative_date_indices = {
+            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
+        }
+
+    @abstractmethod
+    def _compute_anchors(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Compute the valid ``(sequence, position)`` anchors and the flat index over them.
+
+        This is the selection policy of the subclass (e.g. intersection across
+        readers vs. independent anchors per reader).
+        """
+
+    def set_epoch(
+        self,
+        epoch: int,
+        *,
+        rollout: int | None = None,
+        relative_date_indices: dict[str, TimeIndices] | None = None,
+    ) -> None:
+        """Set epoch-dependent sampling state before DataLoader workers are launched."""
+        self.epoch = epoch
+        if rollout is not None:
+            self.rollout = rollout
+        if relative_date_indices is None:
+            return
+        self._set_relative_date_indices(relative_date_indices)
 
     def _collect(self, attr_name: str) -> dict:
         """Helper method to collect attributes from all data readers."""
@@ -235,7 +301,12 @@ class AnemoiDataset(IterableDataset, ABC):
 
     @abstractmethod
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
-        """Initialize all data readers for this worker. To be overwritten by subclasses."""
+        """Initialize worker state (shards, seed) for this worker. To be overwritten by subclasses.
+
+        Implementations typically set ``self.worker_id``, call
+        :meth:`_shard_indices` for each index set they iterate over and finish
+        with :meth:`_seed_worker`.
+        """
 
     def _get_worker_index_range(self, n_samples: int, n_workers: int, worker_id: int) -> tuple[int, int, int]:
         """Partition samples across communication groups and workers."""
@@ -243,6 +314,72 @@ class AnemoiDataset(IterableDataset, ABC):
         shard_start = self.sample_comm_group_id * shard_size
         low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
         return shard_size // n_workers, low, high
+
+    def _shard_indices(self, n_samples: int, n_workers: int, worker_id: int) -> tuple[int, np.ndarray]:
+        """Return this worker's share of ``n_samples`` flat indices.
+
+        Returns
+        -------
+        tuple[int, np.ndarray]
+            Number of samples per worker and the contiguous index range
+            ``[low, high)`` assigned to this worker (after sharding across
+            sample communication groups).
+        """
+        n_samples_per_worker, low, high = self._get_worker_index_range(n_samples, n_workers, worker_id)
+        LOGGER.info(
+            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+            worker_id,
+            os.getpid(),
+            self.global_rank,
+            self.model_comm_group_id,
+            low,
+            high,
+        )
+        return n_samples_per_worker, np.arange(low, high, dtype=np.uint32)
+
+    def _seed_worker(self) -> None:
+        """Seed torch, random and this dataset's numpy generator for the current epoch.
+
+        The seed depends on the base seed and the epoch only (no rank or worker
+        term), so all ranks and workers draw the same shuffle for the same
+        epoch. The datamodule checkpoints the epoch and restores it before new
+        workers start, so resuming from a checkpoint derives the same seed.
+        """
+        base_seed = get_base_seed()
+        seed = derive_seed(base_seed, SeedContext.DATALOADER, self.epoch)
+
+        torch.manual_seed(seed)
+        random.seed(seed)
+        self.seed = seed
+        self.rng = np.random.default_rng(seed=seed)
+        sanity_rnd = self.rng.random(1)[0]
+        LOGGER.info(
+            ("Worker %d (%s, pid %d, epoch %d, rollout %d, seed %d, sanity rnd %f)"),
+            self.worker_id,
+            self.label,
+            os.getpid(),
+            self.epoch,
+            self.rollout,
+            seed,
+            sanity_rnd,
+        )
+
+    def _read(self, dataset_name: str, sequence: int, position: int) -> torch.Tensor:
+        """Read one sample from a reader at a ``(sequence, position)`` anchor.
+
+        Applies the reader's relative date indices and, when shard sizes are
+        known (set by ``set_comm_group_info``), restricts the grid to this
+        reader group rank's shard.
+        """
+        time_steps = offset_time_indices(position, self.relative_date_indices[dataset_name])
+        # self.shard_sizes is lazily initialised to None; guard against the case where
+        # set_comm_group_info has not been called yet.
+        if self.shard_sizes is not None and self.shard_sizes[dataset_name] is not None:
+            start, end = get_partition_range(self.shard_sizes[dataset_name], self.reader_group_rank)
+            grid_indices = slice(start, end)
+        else:
+            grid_indices = slice(None)
+        return self.data_readers[dataset_name].get_sample(sequence, time_steps, grid_indices)
 
     @cached_property
     def shard_shapes(self) -> dict[str, list]:
@@ -261,12 +398,12 @@ class AnemoiDataset(IterableDataset, ABC):
         return slice(start, end)
 
     @abstractmethod
-    def get_sample(self, index: int) -> None:
-        """Get a sample from data readers at the specified index. To be overwritten by subclasses."""
-
-    @abstractmethod
     def __iter__(self) -> None:
-        """Return an iterator over the dataset(s). To be overwritten by subclasses."""
+        """Return an iterator over the dataset(s). To be overwritten by subclasses.
+
+        This is the only sampling contract of the base class: how samples are
+        addressed (``get_sample`` signature) is left to the subclass.
+        """
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
