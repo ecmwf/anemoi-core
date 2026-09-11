@@ -99,6 +99,8 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Parameters
         ----------
+        dataset_name : str
+            Name of the dataset.
         processors_configs : dict
             Configuration for the processors.
         statistics : dict

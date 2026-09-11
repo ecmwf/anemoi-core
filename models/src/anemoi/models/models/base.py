@@ -76,7 +76,6 @@ class BaseGraphModel(nn.Module):
         else:
             self.n_step_output = int(n_step_output)
 
-        model_config = DotDict(model_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.latent_skip = model_config.model.model.latent_skip

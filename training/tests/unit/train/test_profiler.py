@@ -19,8 +19,8 @@ def _make_minimal_index_collection(name_to_index: dict[str, int]) -> IndexCollec
     return IndexCollection(DictConfig({"forcing": [], "diagnostic": [], "target": []}), name_to_index)
 
 
-def test_profiler_example_input_uses_task_num_input_timesteps() -> None:
-    """Profiler example inputs slice with the instantiated task, not forecaster-only config keys."""
+def test_profiler_example_input_uses_task_input_offsets() -> None:
+    """Profiler example inputs use the task's requested time positions."""
     profiler = AnemoiProfiler.__new__(AnemoiProfiler)
     profiler.task = TemporalDownscaler(input_timestep="18h", output_timestep="6h")
     profiler.config = DictConfig({"task": {}, "dataloader": {"read_group_size": 1}})
@@ -38,5 +38,5 @@ def test_profiler_example_input_uses_task_num_input_timesteps() -> None:
 
     torch.testing.assert_close(
         example_input_array["data"],
-        batch["data"][:, : profiler.task.num_input_timesteps, ..., profiler.data_indices["data"].data.input.full],
+        batch["data"].index_select(1, torch.tensor([0, 3]))[..., profiler.data_indices["data"].data.input.full],
     )
