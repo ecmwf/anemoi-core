@@ -62,6 +62,7 @@ training:
   # Overwrites the tendency timestep used in the scaling to the output timestep so all lead times are normalised
   # by the same per-step statistics rather than their cumulative tendency statistics.
   # This does NOT activate the tendency scaler - to do this you must include the scaler in the loss configuration.
+  # Required with task.output_left_boundary: the 0h output step has no tendency statistics to fall back on.
   scalers:
     datasets:
       data:
