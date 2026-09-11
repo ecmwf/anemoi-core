@@ -66,6 +66,13 @@ class _Unset:
 _UNSET_MEMBERS: Any = _Unset()
 
 
+def _unwrap_plot_fn(plot_fn: Any) -> Any:
+    """Return the underlying function of a (possibly functools.partial) plot_fn."""
+    while hasattr(plot_fn, "func"):
+        plot_fn = plot_fn.func
+    return plot_fn
+
+
 def _allgather_view(
     pl_module: pl.LightningModule,
     prediction: SourceView,
@@ -962,9 +969,9 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             Forward the optional auxiliary tensor (e.g. corrupted targets) to
             ``plot_fn``, by default False.
         members : int | list[int] | None, optional
-            Ensemble members to select. None selects all of them. Left unset, the
-            plot adapter decides (all members for ensemble runs, the first member
-            otherwise).
+            Ensemble members to select. None selects all of them. Left unset,
+            ensemble-aware plot functions get the plot adapter's default (i.e., all members),
+            and every other plot function (sample, spectrum, histogram) gets the first member only.
         every_n_batches : int, optional
             Batch frequency to plot at, by default None.
         dataset_names : list[str] | None, optional
@@ -991,15 +998,19 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
     @property
     def artifact_subfolder(self) -> str:
         """Derive the artifact subfolder from the plot function name."""
-        fn = self.plot_fn
-        while hasattr(fn, "func"):
-            fn = fn.func
-        return getattr(fn, "__name__", type(self).__name__)
+        return getattr(_unwrap_plot_fn(self.plot_fn), "__name__", type(self).__name__)
+
+    @property
+    def _plot_fn_is_ensemble_aware(self) -> bool:
+        """Whether ``plot_fn`` can consume an ensemble axis in ``y_pred``."""
+        return getattr(_unwrap_plot_fn(self.plot_fn), "ensemble_aware", False)
 
     def _get_process_members(self, pl_module: pl.LightningModule) -> int | list[int] | None:
         """Return the `members` argument passed to process()."""
         if isinstance(self._members, _Unset):
-            return pl_module.plot_adapter.default_plot_members
+            if self._plot_fn_is_ensemble_aware:
+                return pl_module.plot_adapter.default_plot_members
+            return 0
         return self._members
 
     def _figure_tags(self, dataset_name: str, tag_suffix: str, batch_idx: int, local_rank: int) -> tuple[str, str]:
