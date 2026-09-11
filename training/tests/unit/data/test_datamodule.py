@@ -211,12 +211,14 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
     )
-    multi_dataset = mocker.patch("anemoi.training.data.datamodule.MultiDataset")
+    instantiate = mocker.patch("anemoi.training.data.datamodule.instantiate_with_runtime_kwargs")
 
-    datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
+    config = {"_target_": "anemoi.training.data.datasets.AnemoiDataset"}
+    datamodule._get_dataset(config, {"data": object()}, shuffle=False, label="validation")
 
     create_dataset.assert_called_once()
-    multi_dataset.assert_called_once_with(
+    instantiate.assert_called_once_with(
+        config,
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},
         shuffle=False,
