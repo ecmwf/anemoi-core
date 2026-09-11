@@ -86,6 +86,10 @@ repos:
     - --check-protected  # Check protected methods
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
+- repo: https://github.com/ecmwf/ci-infrastructure
+  rev: 743379b48062bc07774f5ad04151b2ca9acc5bfa
+  hooks:
+  - id: check-ci-approval # Workflows that can run fork code must hang off require-ci-approval
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
