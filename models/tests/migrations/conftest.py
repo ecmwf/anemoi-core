@@ -62,10 +62,7 @@ def recent_ckpt(ckpt_dir: Path) -> Path:
         migrations=[
             {
                 "name": "1751895180_final",
-                "metadata": {
-                    "versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"},
-                    "final": True,
-                },
+                "metadata": {"versions": {"migration": "1.0.0", "anemoi-models": "0.9.0"}, "final": True},
             }
         ],
         name="recent.ckpt",
