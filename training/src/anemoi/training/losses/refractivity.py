@@ -53,6 +53,10 @@ G0: float = 9.80665
 # for the minimum-thickness hinge: a layer cannot be thinner than R_d * T_MIN * ln(p_lo/p_hi).
 R_D: float = 287.06
 T_MIN_HINGE: float = 180.0
+# Physical temperature range the operator is evaluated on; predictions outside it are clamped so
+# the operator stays finite (and its gradient bounded) while the model is still far from realistic.
+T_PHYS_MIN: float = 100.0
+T_PHYS_MAX: float = 400.0
 
 InterpMethod = Literal["linear_lnp", "hydrostatic_shape"]
 HumidityInterp = Literal["linear", "log"]
@@ -153,7 +157,18 @@ def refractivity_at_heights(
     n_match : torch.Tensor
         Long ``(..., H)`` number of bracketing layers per target (see :func:`bracket_column`).
     """
+    # Non-finite columns (a diverged model) must not poison the loss or its gradient: sanitise the
+    # inputs and mask every target of such a column.
+    finite_col = torch.isfinite(phi).all(dim=-1) & torch.isfinite(t).all(dim=-1)
+    if q is not None:
+        finite_col = finite_col & torch.isfinite(q).all(dim=-1)
+        q = torch.nan_to_num(q, nan=0.0, posinf=1.0, neginf=0.0)
+    phi = torch.nan_to_num(phi, nan=0.0, posinf=0.0, neginf=0.0)
+    t = torch.nan_to_num(t, nan=T_PHYS_MIN, posinf=T_PHYS_MAX, neginf=T_PHYS_MIN).clamp(T_PHYS_MIN, T_PHYS_MAX)
+
     layer, w, valid, n_match = bracket_column(phi, phi_target)
+    valid = valid & finite_col.unsqueeze(-1)
+    n_match = torch.where(finite_col.unsqueeze(-1), n_match, torch.zeros_like(n_match))
     t_lo = torch.gather(t, -1, layer)
     t_hi = torch.gather(t, -1, layer + 1)
     t_h = (1.0 - w) * t_lo + w * t_hi
@@ -164,7 +179,7 @@ def refractivity_at_heights(
         if q is None:
             msg = "moist refractivity requires a specific-humidity column"
             raise ValueError(msg)
-        q = q.clamp_min(0.0)
+        q = q.clamp(0.0, 0.1)
         q_lo = torch.gather(q, -1, layer)
         q_hi = torch.gather(q, -1, layer + 1)
         if q_interp == "linear":
@@ -523,8 +538,11 @@ class RefractivityOperatorLoss(BaseLoss):
 
     def _thickness_hinge(self, phi: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """Node-weighted mean squared violation of the minimum layer thickness, and the disordered fraction."""
+        finite_col = torch.isfinite(phi).all(dim=-1, keepdim=True)
+        phi = torch.nan_to_num(phi, nan=0.0, posinf=0.0, neginf=0.0)
         deficit = torch.relu(phi[..., :-1] + self.dphi_min - phi[..., 1:]) / self.dphi_min  # (..., G, L-1)
-        disordered = (phi[..., 1:] <= phi[..., :-1]).to(deficit.dtype)
+        deficit = torch.where(finite_col, deficit, torch.zeros_like(deficit))
+        disordered = (phi[..., 1:] <= phi[..., :-1]).to(deficit.dtype) * finite_col.to(deficit.dtype)
         w = weights / weights.sum().clamp_min(torch.finfo(weights.dtype).tiny)  # unit-sum over all leading dims
         penalty = (w * (deficit * deficit).mean(dim=-1, keepdim=True)).sum()
         fraction = (w * disordered.mean(dim=-1, keepdim=True)).sum()
@@ -584,7 +602,9 @@ class RefractivityOperatorLoss(BaseLoss):
             mask = has_obs & valid
 
             safe_obs = torch.where(has_obs, n_obs, torch.ones_like(n_obs))
-            r = torch.log(n_model) - torch.log(safe_obs) - self.bias
+            r = torch.log(n_model.clamp_min(torch.finfo(n_model.dtype).tiny)) - torch.log(safe_obs) - self.bias
+            mask = mask & torch.isfinite(r)
+            r = torch.where(mask, r, torch.zeros_like(r))
             u = self._huber(r / self.sigma)
             u = torch.where(mask, u, torch.zeros_like(u))
 

@@ -385,3 +385,43 @@ def test_factory_builds_inside_combined_loss_and_unit_check_passes() -> None:
     target_out = target[..., di.data.output.full]
     value = loss(pred, target_out, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_OUTPUT)
     assert torch.isfinite(value)
+
+
+@pytest.mark.parametrize("corruption", ["negative_t", "zero_t", "nan_phi", "inf_t", "huge_q"])
+def test_loss_and_gradients_stay_finite_on_unphysical_columns(corruption: str) -> None:
+    di = _indices()
+    norm = _normalizer(di)
+    loss = _loss(di, norm, monotonicity_penalty_weight=1.0)
+    cols = _physical_column(grid=4)
+    n_obs = _true_refractivity(loss, cols) * 1.01
+    if corruption == "negative_t":
+        cols["t"][1] = -50.0
+    elif corruption == "zero_t":
+        cols["t"][1, 1:3] = 0.0
+    elif corruption == "nan_phi":
+        cols["phi"][2, 2] = float("nan")
+    elif corruption == "inf_t":
+        cols["t"][0, 2] = float("inf")
+    elif corruption == "huge_q":
+        cols["q"][3] = 5.0
+    pred, target = _make_pred_and_target(di, norm, cols, n_obs)
+    pred.requires_grad_(True)
+    value = loss(pred, target, target_layout="data_full")
+    assert torch.isfinite(value), corruption
+    value.backward()
+    assert torch.isfinite(pred.grad).all(), corruption
+    # Healthy nodes still contribute.
+    assert loss.last_level_counts[:2].min() >= 2
+
+
+def test_non_finite_column_is_masked_not_bracketed() -> None:
+    di = _indices()
+    norm = _normalizer(di)
+    loss = _loss(di, norm)
+    cols = _physical_column(grid=3)
+    n_obs = _true_refractivity(loss, cols)
+    cols["phi"][0] = float("nan")
+    pred, target = _make_pred_and_target(di, norm, cols, n_obs)
+    loss(pred, target, target_layout="data_full")
+    assert loss.last_level_counts.tolist() == [2, 2, 0]
+    assert loss.last_disordered_layer_fraction.item() == 0.0
