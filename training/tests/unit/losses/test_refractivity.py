@@ -191,6 +191,8 @@ def test_loss_recovers_physical_operator_through_normalisation() -> None:
     value = loss(pred, target, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_FULL)
     torch.testing.assert_close(value, torch.tensor(1.0), rtol=1e-3, atol=1e-4)
     torch.testing.assert_close(loss.last_level_losses[:2], torch.ones(2), rtol=1e-3, atol=1e-4)
+    # Observations are one sigma *above* the model, so the signed residual is -1 sigma.
+    torch.testing.assert_close(loss.last_level_bias[:2], -torch.ones(2), rtol=1e-3, atol=1e-4)
     assert loss.last_level_losses[2] == 0.0
     assert loss.last_level_counts.tolist() == [6, 6, 0]
 

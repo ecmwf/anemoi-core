@@ -382,6 +382,7 @@ class RefractivityOperatorLoss(BaseLoss):
         # Diagnostics refreshed on every forward (detached).
         self.last_level_losses: torch.Tensor | None = None
         self.last_level_counts: torch.Tensor | None = None
+        self.last_level_bias: torch.Tensor | None = None  # node-weighted mean of (r - bias)/sigma per level
         self.last_unbracketed_fraction: torch.Tensor | None = None  # finite obs with no bracketing layer
         self.last_ambiguous_fraction: torch.Tensor | None = None  # finite obs with several bracketing layers
         self.last_disordered_layer_fraction: torch.Tensor | None = None  # (node, layer) pairs with Phi_{l+1} <= Phi_l
@@ -628,6 +629,12 @@ class RefractivityOperatorLoss(BaseLoss):
 
             self.last_level_losses = level_loss.detach()
             self.last_level_counts = mask.sum(dim=reduce_dims).detach()
+            signed = (w_mask * (r / self.sigma)).sum(dim=reduce_dims)
+            self.last_level_bias = torch.where(
+                den > 0,
+                signed / den.clamp_min(torch.finfo(u.dtype).tiny),
+                torch.zeros_like(signed),
+            ).detach()
             n_has = has_obs.sum().clamp_min(1)
             self.last_unbracketed_fraction = ((has_obs & (n_match == 0)).sum() / n_has).detach()
             self.last_ambiguous_fraction = ((has_obs & (n_match > 1)).sum() / n_has).detach()

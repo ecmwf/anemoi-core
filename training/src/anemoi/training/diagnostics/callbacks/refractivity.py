@@ -26,7 +26,8 @@ class RefractivityLevelLogger(Callback):
     every forward; this callback reads them from every such leaf in the training loss
     tree and logs them as ``train_refrac/<dataset>/<level>`` (every ``every_n_batches``
     training batches) and ``val_refrac/<dataset>/<level>`` (epoch-averaged), together with
-    the observation counts and the column-health scalars (unbracketed, ambiguous and
+    the observation counts, the signed mean residual in sigma units (``*_bias``) and the
+    column-health scalars (unbracketed, ambiguous and
     disordered-layer fractions, minimum-thickness hinge).
 
     Parameters
@@ -51,12 +52,28 @@ class RefractivityLevelLogger(Callback):
         for dataset_name, loss in self._refractivity_losses(pl_module):
             if loss.last_level_losses is None:
                 continue
-            for name, value, count in zip(
+            biases = (
+                loss.last_level_bias.tolist()
+                if loss.last_level_bias is not None
+                else [None] * len(loss.observation_variables)
+            )
+            for name, value, count, bias in zip(
                 loss.observation_variables,
                 loss.last_level_losses.tolist(),
                 loss.last_level_counts.tolist(),
+                biases,
                 strict=False,
             ):
+                if bias is not None:
+                    pl_module.log(
+                        f"{prefix}_bias/{dataset_name}/{name}",
+                        bias,
+                        on_step=on_step,
+                        on_epoch=not on_step,
+                        logger=getattr(pl_module, "logger_enabled", True),
+                        sync_dist=not on_step,
+                        rank_zero_only=on_step,
+                    )
                 pl_module.log(
                     f"{prefix}/{dataset_name}/{name}",
                     value,

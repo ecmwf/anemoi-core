@@ -23,6 +23,7 @@ def _fake_refrac_loss() -> RefractivityOperatorLoss:
     loss.observation_variables = ["refrac_10400", "refrac_13000"]
     loss.last_level_losses = torch.tensor([1.5, 0.5])
     loss.last_level_counts = torch.tensor([120, 80])
+    loss.last_level_bias = torch.tensor([-0.4, 0.2])
     loss.last_unbracketed_fraction = torch.tensor(0.05)
     loss.last_ambiguous_fraction = torch.tensor(0.01)
     loss.last_disordered_layer_fraction = torch.tensor(0.2)
@@ -46,6 +47,7 @@ def test_logger_reads_every_refractivity_leaf() -> None:
     callback.on_train_batch_end(None, module, None, None, batch_idx=10)
     assert logged["train_refrac/data/refrac_10400"] == 1.5
     assert logged["train_refrac_count/data/refrac_13000"] == 80.0
+    assert abs(logged["train_refrac_bias/data/refrac_10400"] + 0.4) < 1e-6
     assert abs(logged["train_refrac_unbracketed_fraction/data"] - 0.05) < 1e-6
     assert abs(logged["train_refrac_disordered_layer_fraction/data"] - 0.2) < 1e-6
     assert abs(logged["train_refrac_monotonicity_penalty/data"] - 0.3) < 1e-6
