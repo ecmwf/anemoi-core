@@ -660,6 +660,8 @@ class RefractivityOperatorLossSchema(BaseLossSchema):
     "Multiplier on the final loss."
     huber_delta_sigmas: float = 3.0
     "Huber transition in units of sigma; <= 0 for a pure quadratic penalty."
+    monotonicity_penalty_weight: NonNegativeFloat = 0.0
+    "Weight of the dense minimum-thickness hinge on the geopotential ladder; 0 disables."
     dry_min_height: NonNegativeFloat = 10400.0
     "With moist=False every active level must be at or above this height (gpm)."
     geopotential_prefix: str = "z"

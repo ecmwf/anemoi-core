@@ -49,6 +49,10 @@ K2_WET: float = 3.73e5  # K^2 hPa^-1
 EPS_RD_RV: float = 0.622
 # Standard gravity, converts geopotential metres to geopotential (m^2 s^-2).
 G0: float = 9.80665
+# Dry-air gas constant (J kg^-1 K^-1) and the coldest plausible layer-mean temperature (K) used
+# for the minimum-thickness hinge: a layer cannot be thinner than R_d * T_MIN * ln(p_lo/p_hi).
+R_D: float = 287.06
+T_MIN_HINGE: float = 180.0
 
 InterpMethod = Literal["linear_lnp", "hydrostatic_shape"]
 HumidityInterp = Literal["linear", "log"]
@@ -65,9 +69,9 @@ def bracket_column(
     Parameters
     ----------
     phi : torch.Tensor
-        Geopotential ladder, shape ``(..., L)``. Expected strictly ascending along
-        the last axis (pressure descending) but not assumed: columns that are not
-        monotone, and targets matched by zero or several layers, are flagged invalid.
+        Geopotential ladder, shape ``(..., L)``. Expected ascending along the last
+        axis (pressure descending) but not assumed: targets matched by zero or several
+        layers are flagged invalid.
     phi_target : torch.Tensor
         Target geopotentials, shape ``(H,)``.
 
@@ -80,23 +84,30 @@ def bracket_column(
         Interpolation weight ``(..., H)`` in ``[0, 1]`` (0 where invalid).
     valid : torch.Tensor
         Bool tensor ``(..., H)``: exactly one layer brackets the target.
+    n_match : torch.Tensor
+        Long tensor ``(..., H)`` with the number of bracketing layers (0 = target outside
+        every layer, >1 = ambiguous because the column is disordered around the target).
+
+    Notes
+    -----
+    Validity is *local*: only the bracketing layer has to be ordered. A disordered layer
+    elsewhere in the column does not mask the target, so the operator keeps supplying a
+    gradient while early-training columns are still noisy; the disorder itself is left to
+    the minimum-thickness hinge of :class:`RefractivityOperatorLoss`.
     """
     lo = phi[..., :-1].unsqueeze(-2)  # (..., 1, L-1)
     hi = phi[..., 1:].unsqueeze(-2)
     target = phi_target.reshape((1,) * (phi.dim() - 1) + (-1, 1))  # (1..., H, 1)
     match = (lo <= target) & (target < hi)  # (..., H, L-1)
     n_match = match.sum(dim=-1)
-    # A physically meaningful column is strictly increasing in geopotential; reject the
-    # whole column otherwise, even where a unique bracketing layer happens to exist.
-    monotone = (phi[..., 1:] > phi[..., :-1]).all(dim=-1, keepdim=True)
-    valid = (n_match == 1) & monotone
+    valid = n_match == 1
     layer = torch.argmax(match.to(torch.int8), dim=-1)  # first match; 0 when none
     phi_lo = torch.gather(phi, -1, layer)
     phi_hi = torch.gather(phi, -1, layer + 1)
     denom = torch.where(valid, phi_hi - phi_lo, torch.ones_like(phi_lo))
     weight = torch.where(valid, (phi_target - phi_lo) / denom, torch.zeros_like(phi_lo))
     weight = weight.clamp(0.0, 1.0)
-    return layer, weight, valid
+    return layer, weight, valid, n_match
 
 
 def refractivity_at_heights(
@@ -109,7 +120,7 @@ def refractivity_at_heights(
     moist: bool = True,
     interp: InterpMethod = "hydrostatic_shape",
     q_interp: HumidityInterp = "log",
-) -> tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """Model-implied refractivity at fixed geopotentials.
 
     Parameters
@@ -139,8 +150,10 @@ def refractivity_at_heights(
         Refractivity ``(..., H)`` in N-units (1 where invalid, so ``log`` is finite).
     valid : torch.Tensor
         Bool ``(..., H)`` bracket validity mask.
+    n_match : torch.Tensor
+        Long ``(..., H)`` number of bracketing layers per target (see :func:`bracket_column`).
     """
-    layer, w, valid = bracket_column(phi, phi_target)
+    layer, w, valid, n_match = bracket_column(phi, phi_target)
     t_lo = torch.gather(t, -1, layer)
     t_hi = torch.gather(t, -1, layer + 1)
     t_h = (1.0 - w) * t_lo + w * t_hi
@@ -192,7 +205,7 @@ def refractivity_at_heights(
         e_h = q_h * p_h / (EPS_RD_RV + (1.0 - EPS_RD_RV) * q_h)
         n_model = n_model + K2_WET * e_h / (t_h * t_h)
     n_model = torch.where(valid, n_model, torch.ones_like(n_model))
-    return n_model, valid
+    return n_model, valid, n_match
 
 
 def _to_index_space(layout: IndexSpace | str | None) -> IndexSpace | None:
@@ -214,7 +227,11 @@ class RefractivityOperatorLoss(BaseLoss):
 
     Per level ``l`` with fractional error scale ``sigma_l`` the contribution is the
     node-weighted mean over valid observations of ``huber((r - bias_l) / sigma_l)``,
-    and the loss is ``penalty_weight`` times the mean over active levels.
+    and the loss is ``penalty_weight`` times the mean over active levels, plus
+    ``monotonicity_penalty_weight`` times a dense minimum-thickness hinge
+    ``mean_l relu(Phi_l + dPhi_min,l - Phi_{l+1})^2 / dPhi_min,l^2`` with
+    ``dPhi_min,l = R_d T_MIN ln(p_l/p_{l+1})`` — a physical lower bound on layer thickness
+    that supplies a gradient where the operator is undefined because the column is disordered.
 
     Example config (inside a ``CombinedLoss``):
 
@@ -223,6 +240,7 @@ class RefractivityOperatorLoss(BaseLoss):
         - _target_: anemoi.training.losses.RefractivityOperatorLoss
           scalers: [node_weights]
           moist: false
+          monotonicity_penalty_weight: 1.0
           levels:
             - {name: refrac_10400, height: 10400, sigma: 0.0051}
             - {name: refrac_13000, height: 13000, sigma: 0.0058}
@@ -243,6 +261,7 @@ class RefractivityOperatorLoss(BaseLoss):
         q_interp: HumidityInterp = "log",
         penalty_weight: float = 1.0,
         huber_delta_sigmas: float = 3.0,
+        monotonicity_penalty_weight: float = 0.0,
         dry_min_height: float = 10400.0,
         geopotential_prefix: str = "z",
         temperature_prefix: str = "t",
@@ -275,6 +294,8 @@ class RefractivityOperatorLoss(BaseLoss):
             Multiplier on the final loss.
         huber_delta_sigmas : float
             Huber transition point in units of ``sigma``; ``<= 0`` disables (pure quadratic).
+        monotonicity_penalty_weight : float
+            Weight of the dense minimum-thickness hinge on the geopotential ladder; 0 disables.
         dry_min_height : float
             With ``moist=False`` every active level must sit at or above this height (gpm).
         geopotential_prefix, temperature_prefix, humidity_prefix : str
@@ -300,6 +321,7 @@ class RefractivityOperatorLoss(BaseLoss):
         self.q_interp: HumidityInterp = q_interp
         self.penalty_weight = float(penalty_weight)
         self.huber_delta_sigmas = float(huber_delta_sigmas)
+        self.monotonicity_penalty_weight = float(monotonicity_penalty_weight)
         pressure_levels = list(pressure_levels or [1000, 925, 850, 700, 500, 400, 300, 250, 200, 150, 100, 70, 50])
         if len(pressure_levels) < 2 or any(a <= b for a, b in pairwise(pressure_levels)):
             msg = f"pressure_levels must be strictly decreasing with at least two entries, got {pressure_levels}"
@@ -318,6 +340,12 @@ class RefractivityOperatorLoss(BaseLoss):
         self.register_buffer(
             "ln_p",
             torch.log(torch.tensor(pressure_levels, dtype=torch.float64)).to(torch.float32),
+            persistent=False,
+        )
+        p64 = torch.tensor(pressure_levels, dtype=torch.float64)
+        self.register_buffer(
+            "dphi_min",
+            (R_D * T_MIN_HINGE * torch.log(p64[:-1] / p64[1:])).to(torch.float32),
             persistent=False,
         )
         self.register_buffer(
@@ -339,7 +367,10 @@ class RefractivityOperatorLoss(BaseLoss):
         # Diagnostics refreshed on every forward (detached).
         self.last_level_losses: torch.Tensor | None = None
         self.last_level_counts: torch.Tensor | None = None
-        self.last_unbracketed_fraction: torch.Tensor | None = None
+        self.last_unbracketed_fraction: torch.Tensor | None = None  # finite obs with no bracketing layer
+        self.last_ambiguous_fraction: torch.Tensor | None = None  # finite obs with several bracketing layers
+        self.last_disordered_layer_fraction: torch.Tensor | None = None  # (node, layer) pairs with Phi_{l+1} <= Phi_l
+        self.last_monotonicity_penalty: torch.Tensor | None = None
 
         LOGGER.info(
             "RefractivityOperatorLoss: %d active levels %s, moist=%s, interp=%s, q_interp=%s",
@@ -473,12 +504,12 @@ class RefractivityOperatorLoss(BaseLoss):
     def model_refractivity(
         self,
         pred: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return model refractivity ``(..., H)`` and bracket validity for a MODEL_OUTPUT prediction."""
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """Return model refractivity ``(..., H)``, validity, bracket counts and the physical Phi ladder."""
         phi = self._denormalise(pred, self.z_pos, self.z_full_idx)
         t = self._denormalise(pred, self.t_pos, self.t_full_idx)
         q = self._denormalise(pred, self.q_pos, self.q_full_idx) if self.moist else None
-        return refractivity_at_heights(
+        n_model, valid, n_match = refractivity_at_heights(
             phi,
             t,
             q,
@@ -488,6 +519,16 @@ class RefractivityOperatorLoss(BaseLoss):
             interp=self.interp,
             q_interp=self.q_interp,
         )
+        return n_model, valid, n_match, phi
+
+    def _thickness_hinge(self, phi: torch.Tensor, weights: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """Node-weighted mean squared violation of the minimum layer thickness, and the disordered fraction."""
+        deficit = torch.relu(phi[..., :-1] + self.dphi_min - phi[..., 1:]) / self.dphi_min  # (..., G, L-1)
+        disordered = (phi[..., 1:] <= phi[..., :-1]).to(deficit.dtype)
+        w = weights / weights.sum().clamp_min(torch.finfo(weights.dtype).tiny)  # unit-sum over all leading dims
+        penalty = (w * (deficit * deficit).mean(dim=-1, keepdim=True)).sum()
+        fraction = (w * disordered.mean(dim=-1, keepdim=True)).sum()
+        return penalty, fraction.detach()
 
     # ------------------------------------------------------------------ forward
     def forward(
@@ -539,7 +580,7 @@ class RefractivityOperatorLoss(BaseLoss):
         with torch.autocast(device_type=pred.device.type, enabled=False):
             n_obs = target.index_select(-1, obs_pos).to(torch.float32)  # (..., G, H)
             has_obs = torch.isfinite(n_obs) & (n_obs > 0)
-            n_model, valid = self.model_refractivity(pred)
+            n_model, valid, n_match, phi = self.model_refractivity(pred)
             mask = has_obs & valid
 
             safe_obs = torch.where(has_obs, n_obs, torch.ones_like(n_obs))
@@ -561,10 +602,17 @@ class RefractivityOperatorLoss(BaseLoss):
             n_active = (den > 0).sum().clamp_min(1)
             loss = self.penalty_weight * level_loss.sum() / n_active
 
+            hinge, disordered_fraction = self._thickness_hinge(phi, weights)
+            if self.monotonicity_penalty_weight > 0:
+                loss = loss + self.monotonicity_penalty_weight * hinge
+
             self.last_level_losses = level_loss.detach()
             self.last_level_counts = mask.sum(dim=reduce_dims).detach()
-            n_has = has_obs.sum()
-            self.last_unbracketed_fraction = ((has_obs & ~valid).sum() / n_has.clamp_min(1)).detach()
+            n_has = has_obs.sum().clamp_min(1)
+            self.last_unbracketed_fraction = ((has_obs & (n_match == 0)).sum() / n_has).detach()
+            self.last_ambiguous_fraction = ((has_obs & (n_match > 1)).sum() / n_has).detach()
+            self.last_disordered_layer_fraction = disordered_fraction
+            self.last_monotonicity_penalty = hinge.detach()
 
         if squash:
             return loss.to(pred.dtype)
@@ -575,11 +623,14 @@ class RefractivityOperatorLoss(BaseLoss):
         with torch.no_grad():
             phi_mean = self._denormalise(pred, self.z_pos, self.z_full_idx)
             phi_mean = phi_mean.reshape(-1, phi_mean.shape[-1]).mean(dim=0, keepdim=True)
-            layer, _, _ = bracket_column(phi_mean, self.phi_target)
+            layer, _, _, _ = bracket_column(phi_mean, self.phi_target)
             layer = layer.squeeze(0)
         per_level = (self.penalty_weight * level_loss / n_active).to(pred.dtype)
         groups = [self.z_pos, self.t_pos] + ([self.q_pos] if self.moist else [])
         for positions in groups:
             out = out.index_add(0, positions[layer], per_level / len(groups))
-            out = out.index_add(0, positions[layer + 1], torch.zeros_like(per_level))
+        if self.monotonicity_penalty_weight > 0:
+            # The hinge acts on every layer; spread it evenly over the z ladder.
+            share = (self.monotonicity_penalty_weight * hinge / self.z_pos.numel()).to(pred.dtype)
+            out = out.index_add(0, self.z_pos, share.expand(self.z_pos.numel()))
         return out

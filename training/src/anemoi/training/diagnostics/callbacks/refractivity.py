@@ -25,7 +25,9 @@ class RefractivityLevelLogger(Callback):
     ``RefractivityOperatorLoss`` keeps its last per-level values on the module after
     every forward; this callback reads them from every such leaf in the training loss
     tree and logs them as ``train_refrac/<dataset>/<level>`` (every ``every_n_batches``
-    training batches) and ``val_refrac/<dataset>/<level>`` (epoch-averaged).
+    training batches) and ``val_refrac/<dataset>/<level>`` (epoch-averaged), together with
+    the observation counts and the column-health scalars (unbracketed, ambiguous and
+    disordered-layer fractions, minimum-thickness hinge).
 
     Parameters
     ----------
@@ -73,15 +75,24 @@ class RefractivityLevelLogger(Callback):
                     sync_dist=not on_step,
                     rank_zero_only=on_step,
                 )
-            pl_module.log(
-                f"{prefix}_unbracketed_fraction/{dataset_name}",
-                float(loss.last_unbracketed_fraction),
-                on_step=on_step,
-                on_epoch=not on_step,
-                logger=getattr(pl_module, "logger_enabled", True),
-                sync_dist=not on_step,
-                rank_zero_only=on_step,
-            )
+            scalars = {
+                "unbracketed_fraction": loss.last_unbracketed_fraction,
+                "ambiguous_fraction": loss.last_ambiguous_fraction,
+                "disordered_layer_fraction": loss.last_disordered_layer_fraction,
+                "monotonicity_penalty": loss.last_monotonicity_penalty,
+            }
+            for key, value in scalars.items():
+                if value is None:
+                    continue
+                pl_module.log(
+                    f"{prefix}_{key}/{dataset_name}",
+                    float(value),
+                    on_step=on_step,
+                    on_epoch=not on_step,
+                    logger=getattr(pl_module, "logger_enabled", True),
+                    sync_dist=not on_step,
+                    rank_zero_only=on_step,
+                )
 
     def on_train_batch_end(
         self,

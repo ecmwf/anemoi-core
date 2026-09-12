@@ -110,7 +110,7 @@ def _loss(data_indices: IndexCollection, normalizer: SimpleNamespace, **kwargs) 
 
 
 def _true_refractivity(loss: RefractivityOperatorLoss, cols: dict[str, torch.Tensor]) -> torch.Tensor:
-    n, _ = refractivity_at_heights(
+    n, _, _ = refractivity_at_heights(
         cols["phi"].float(),
         cols["t"].float(),
         cols.get("q", torch.zeros_like(cols["t"])).float() if loss.moist else None,
@@ -132,7 +132,7 @@ def test_operator_isothermal_dry_column_matches_closed_form() -> None:
     phi = R_D * temp * torch.log(1000.0 / p)
     heights = torch.tensor([8000.0, 13000.0, 19500.0, 25000.0]) * G0
     for interp in ("linear_lnp", "hydrostatic_shape"):
-        n, valid = refractivity_at_heights(
+        n, valid, _ = refractivity_at_heights(
             phi[None],
             torch.full_like(p, temp)[None],
             None,
@@ -152,8 +152,8 @@ def test_operator_moist_term_increases_refractivity() -> None:
     cols = _physical_column(grid=5)
     ln_p = torch.log(torch.tensor(LEVELS, dtype=torch.float64))
     heights = torch.tensor([5000.0 * G0], dtype=torch.float64)
-    dry, _ = refractivity_at_heights(cols["phi"], cols["t"], None, ln_p, heights, moist=False)
-    wet, _ = refractivity_at_heights(cols["phi"], cols["t"], cols["q"], ln_p, heights, moist=True)
+    dry, _, _ = refractivity_at_heights(cols["phi"], cols["t"], None, ln_p, heights, moist=False)
+    wet, _, _ = refractivity_at_heights(cols["phi"], cols["t"], cols["q"], ln_p, heights, moist=True)
     assert torch.all(wet > dry)
 
 
@@ -168,7 +168,7 @@ def test_operator_gradcheck(interp: str, q_interp: str) -> None:
     q = cols["q"].clone().requires_grad_(True)
 
     def fn(phi_: torch.Tensor, t_: torch.Tensor, q_: torch.Tensor) -> torch.Tensor:
-        n, _ = refractivity_at_heights(phi_, t_, q_, ln_p, heights, moist=True, interp=interp, q_interp=q_interp)
+        n, _, _ = refractivity_at_heights(phi_, t_, q_, ln_p, heights, moist=True, interp=interp, q_interp=q_interp)
         return torch.log(n)
 
     assert torch.autograd.gradcheck(fn, (phi, t, q), eps=1e-6, atol=1e-6, rtol=1e-4)
@@ -227,21 +227,56 @@ def test_all_nan_observations_give_zero_loss_and_finite_gradients() -> None:
     assert torch.isfinite(pred.grad).all()
 
 
-def test_unbracketed_height_and_non_monotone_column_are_masked() -> None:
+def test_unbracketed_and_ambiguous_observations_are_masked_locally() -> None:
     di = _indices()
     norm = _normalizer(di)
     loss = _loss(di, norm)
     cols = _physical_column(grid=5)
     n_obs = _true_refractivity(loss, cols)
     n_obs[:, 2] = 10.0  # pretend an obs exists above the ladder
-    # Break monotonicity at node 0 (swap z_700 and z_300).
+    # Disorder node 0 (swap z_700 and z_300): 5000 gpm is then bracketed by two layers
+    # (ambiguous -> masked) while 12000 gpm still has exactly one bracketing layer (kept).
     cols["phi"][0, 1], cols["phi"][0, 2] = cols["phi"][0, 2].clone(), cols["phi"][0, 1].clone()
     pred, target = _make_pred_and_target(di, norm, cols, n_obs)
     value = loss(pred, target, target_layout="data_full")
     assert torch.isfinite(value)
-    assert loss.last_level_counts.tolist() == [4, 4, 0]
-    # 5 obs at the unbracketed level + 2 at the broken node out of 15 finite obs.
-    torch.testing.assert_close(loss.last_unbracketed_fraction, torch.tensor(7 / 15))
+    assert loss.last_level_counts.tolist() == [4, 5, 0]
+    # 15 finite obs: 5 above the ladder (no bracket), 1 ambiguous at the disordered node.
+    torch.testing.assert_close(loss.last_unbracketed_fraction, torch.tensor(5 / 15))
+    torch.testing.assert_close(loss.last_ambiguous_fraction, torch.tensor(1 / 15))
+    # 5 nodes x 3 layers; node 0 has two disordered layers (700->300 and 300->100 both inverted? no: only 700->300).
+    assert 0.0 < loss.last_disordered_layer_fraction < 0.5
+
+
+def test_minimum_thickness_hinge_is_zero_for_physical_columns_and_active_when_disordered() -> None:
+    di = _indices()
+    norm = _normalizer(di)
+    loss = _loss(di, norm, monotonicity_penalty_weight=2.0)
+    cols = _physical_column(grid=4)
+    n_obs = torch.full((4, len(OBS)), float("nan"))  # no obs: only the hinge can contribute
+    pred, target = _make_pred_and_target(di, norm, cols, n_obs)
+    assert loss(pred, target, target_layout="data_full").item() == 0.0
+    assert loss.last_monotonicity_penalty.item() == 0.0
+    assert loss.last_disordered_layer_fraction.item() == 0.0
+
+    # Collapse the 700->300 layer at node 1 to a quarter of its minimum thickness.
+    dphi_min = loss.dphi_min[1].double()
+    cols["phi"][1, 2] = cols["phi"][1, 1] + 0.25 * dphi_min
+    cols["phi"][1, 3] = cols["phi"][1, 2] + 2.0 * loss.dphi_min[2].double()
+    pred, target = _make_pred_and_target(di, norm, cols, n_obs)
+    pred.requires_grad_(True)
+    value = loss(pred, target, target_layout="data_full")
+    # deficit = 0.75 at one of 4*3 (node, layer) pairs with uniform node weights -> 2 * 0.75^2 / 12
+    torch.testing.assert_close(value, torch.tensor(2.0 * 0.75**2 / 12), rtol=1e-3, atol=1e-5)
+    value.backward()
+    pos = di.model.output.name_to_position
+    g_lo = pred.grad[0, 0, 0, 1, pos["z_700"]]
+    g_hi = pred.grad[0, 0, 0, 1, pos["z_300"]]
+    # Denormalised gradient pushes the lower level down and the upper level up.
+    assert g_lo * norm._norm_mul[di.name_to_index["z_700"]] > 0
+    assert g_hi * norm._norm_mul[di.name_to_index["z_300"]] < 0
+    # Not yet disordered (still increasing), so the disordered fraction stays zero while the hinge is active.
+    assert loss.last_disordered_layer_fraction.item() == 0.0
 
 
 def test_gradients_reach_bracketing_ladder_variables() -> None:
