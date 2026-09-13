@@ -9,6 +9,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.refractivity import RefractivityLevelLogger
@@ -31,7 +32,7 @@ def _fake_refrac_loss() -> RefractivityOperatorLoss:
     return loss
 
 
-def test_logger_reads_every_refractivity_leaf() -> None:
+def test_logger_aggregates_in_training_and_per_level_in_validation() -> None:
     refrac = _fake_refrac_loss()
     combined = CombinedLoss(MSELoss(), refrac, loss_weights=(1.0, 1.0))
     logged: dict[str, float] = {}
@@ -45,16 +46,30 @@ def test_logger_reads_every_refractivity_leaf() -> None:
     callback.on_train_batch_end(None, module, None, None, batch_idx=5)
     assert logged == {}
     callback.on_train_batch_end(None, module, None, None, batch_idx=10)
-    assert logged["train_refrac/data/refrac_10400"] == 1.5
-    assert logged["train_refrac_count/data/refrac_13000"] == 80.0
-    assert abs(logged["train_refrac_bias/data/refrac_10400"] + 0.4) < 1e-6
+    assert logged["train_refrac/data/mean"] == pytest.approx(1.0)  # mean of (1.5, 0.5)
+    assert logged["train_refrac_count/data/total"] == 200.0
+    assert logged["train_refrac_bias/data/mean_abs"] == pytest.approx(0.3)
     assert abs(logged["train_refrac_unbracketed_fraction/data"] - 0.05) < 1e-6
     assert abs(logged["train_refrac_disordered_layer_fraction/data"] - 0.2) < 1e-6
     assert abs(logged["train_refrac_monotonicity_penalty/data"] - 0.3) < 1e-6
+    assert "train_refrac/data/refrac_10400" not in logged  # per-level off in training by default
 
     logged.clear()
     callback.on_validation_batch_end(None, module, None, None, batch_idx=0)
     assert logged["val_refrac/data/refrac_13000"] == 0.5
+    assert logged["val_refrac_bias/data/refrac_10400"] == pytest.approx(-0.4)
+    assert logged["val_refrac/data/mean"] == pytest.approx(1.0)
+
+    logged.clear()
+    RefractivityLevelLogger(every_n_batches=1, per_level_training=True, health_scalars=False).on_train_batch_end(
+        None,
+        module,
+        None,
+        None,
+        batch_idx=0,
+    )
+    assert logged["train_refrac_count/data/refrac_13000"] == 80.0
+    assert "train_refrac_monotonicity_penalty/data" not in logged
 
 
 def test_logger_ignores_modules_without_refractivity_loss() -> None:
