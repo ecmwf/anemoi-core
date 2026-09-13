@@ -221,6 +221,34 @@ class NormalizedLeakyReluBoundingSchema(NormalizedReluBoundingSchema):
     "Leaky normalized Relu bounding object defined in anemoi.models.layers.bounding."
 
 
+class HydrostaticGeopotentialSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.bounding.HydrostaticGeopotential"] = Field(..., alias="_target_")
+    "Hydrostatic geopotential layer defined in anemoi.models.layers.bounding."
+    levels: list[PositiveInt]
+    "Pressure levels in hPa, anchor first and strictly decreasing (e.g. [1000, 925, ..., 50])."
+    normalizer: dict[str, Literal["none", "mean-std", "std", "min-max", "max"]]
+    "Normalisation method per variable prefix, e.g. {z: min-max, t: mean-std, q: mean-std}."
+    geopotential_prefix: str = "z"
+    temperature_prefix: str = "t"
+    humidity_prefix: str = "q"
+    geopotential_units: Literal["m2/s2", "m"] = "m2/s2"
+    check_finite: bool = False
+    "Raise if the integrated column is non-finite (adds a device sync; debug only)."
+    variables: Optional[list[str]] = None
+    "Unused; the ladder is derived from levels."
+
+    @model_validator(mode="after")
+    def check_levels_and_normalizer(self) -> HydrostaticGeopotentialSchema:
+        assert len(self.levels) >= 2, f"levels needs at least two entries, got {self.levels}"
+        assert all(
+            a > b for a, b in zip(self.levels[:-1], self.levels[1:])
+        ), f"levels must be strictly decreasing, got {self.levels}"
+        prefixes = (self.geopotential_prefix, self.temperature_prefix, self.humidity_prefix)
+        missing = [p for p in prefixes if p not in self.normalizer]
+        assert not missing, f"normalizer must give a method for each of {prefixes}; missing {missing}"
+        return self
+
+
 Bounding = Annotated[
     Union[
         ReluBoundingSchema,
@@ -231,6 +259,7 @@ Bounding = Annotated[
         LeakyHardtanhBoundingSchema,
         NormalizedReluBoundingSchema,
         NormalizedLeakyReluBoundingSchema,
+        HydrostaticGeopotentialSchema,
     ],
     Field(discriminator="target_"),
 ]
