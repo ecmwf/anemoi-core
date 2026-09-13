@@ -169,7 +169,7 @@ Trade-offs and tips
    activations for its local batch. If the model does not fit on a
    single GPU, switch to (or combine with) :ref:`Model Sharding
    <model-sharding>` by setting ``num_gpus_per_model > 1``.
--  **Communication.** DDP only synchronises once per step
+-  **Communication.** DDP only synchronises once per step and the syncronisation is overlapped with the existing computation of the backward pass
    (gradient all-reduce), so it scales very well across nodes as long as
    the interconnect is not saturated. Prefer data parallelism over model
    sharding whenever the model fits in a single GPU's memory.
