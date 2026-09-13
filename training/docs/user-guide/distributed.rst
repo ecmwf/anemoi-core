@@ -19,7 +19,7 @@ scale Anemoi Training across multiple GPUs. Each GPU holds a *full
 replica* of the model and processes a distinct subset of every batch
 in parallel. After the backward pass the gradients are averaged across
 all replicas with a collective ``all-reduce`` before the optimiser step,
-so every replica stays in sync.
+so every replica stays in sync. These all-reduce operations are completely independent from computing the backwards pass. Therefore, the additional communication is heavily overlapped with existing computation, which makes data parallelism very inexpensive.
 
 Data parallelism is enabled automatically whenever the number of
 data-parallel replicas
