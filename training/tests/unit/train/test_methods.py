@@ -2543,3 +2543,22 @@ def test_da_single_training_target_layout_is_data_output(
     # The forecast step (rollout_step=1, after one DA cycle) targets batch time index 2.
     expected = batch["data"][:, 2:3][..., [0, 2, 3]]
     torch.testing.assert_close(target, expected)
+
+
+def test_check_bounding_normalisers_detects_mismatch() -> None:
+    """A bounding restating a normaliser method must match the dataset normaliser."""
+    normalizer = SimpleNamespace(
+        methods={"z_500": "min-max", "t_500": "mean-std"},
+        default="mean-std",
+        _norm_mul=None,
+        _norm_add=None,
+    )
+    bounding_ok = SimpleNamespace(normalizer_methods={"z_500": "min-max", "t_500": "mean-std", "q_500": "mean-std"})
+    bounding_bad = SimpleNamespace(normalizer_methods={"z_500": "mean-std"})
+    module = SingleTraining.__new__(SingleTraining)
+    module._dataset_normalizer = lambda name: normalizer  # noqa: ARG005
+    module.model = SimpleNamespace(model=SimpleNamespace(boundings={"data": [bounding_ok]}))
+    module._check_bounding_normalisers()
+    module.model = SimpleNamespace(model=SimpleNamespace(boundings={"data": [bounding_ok, bounding_bad]}))
+    with pytest.raises(ValueError, match="z_500"):
+        module._check_bounding_normalisers()

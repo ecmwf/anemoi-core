@@ -219,6 +219,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.config = config
 
         self.data_indices = data_indices
+        self._check_bounding_normalisers()
 
         self.save_hyperparameters()
 
@@ -439,6 +440,38 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 for metric_name, val_metric_config in validation_metrics_configs.items()
             },
         )
+
+    def _check_bounding_normalisers(self) -> None:
+        """Fail loudly if a bounding restates a normalisation method the data normaliser does not use.
+
+        Boundings only receive dataset statistics, so layers that denormalise internally
+        (e.g. ``HydrostaticGeopotential``) restate the per-variable method in their config
+        and expose it as ``normalizer_methods``. A silent mismatch would produce a wrong but
+        plausible-looking physical column.
+        """
+        boundings = getattr(getattr(self.model, "model", None), "boundings", None)
+        if boundings is None:
+            return
+        for dataset_name, dataset_boundings in boundings.items():
+            normalizer = self._dataset_normalizer(dataset_name)
+            for bounding in dataset_boundings:
+                restated = getattr(bounding, "normalizer_methods", None)
+                if not restated:
+                    continue
+                if normalizer is None:
+                    msg = (
+                        f"{type(bounding).__name__} restates normaliser methods "
+                        f"but dataset {dataset_name!r} has no normaliser"
+                    )
+                    raise ValueError(msg)
+                actual = {name: normalizer.methods.get(name, normalizer.default) for name in restated}
+                mismatch = {name: (restated[name], actual[name]) for name in restated if restated[name] != actual[name]}
+                if mismatch:
+                    msg = (
+                        f"{type(bounding).__name__} for dataset {dataset_name!r} restates normaliser methods that "
+                        f"differ from the data normaliser (variable: (bounding, data)): {mismatch}"
+                    )
+                    raise ValueError(msg)
 
     def _dataset_normalizer(self, dataset_name: str) -> torch.nn.Module | None:
         """Return the input normaliser of a dataset's pre-processors, if any.

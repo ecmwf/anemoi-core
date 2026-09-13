@@ -29,6 +29,11 @@ from typing import Literal
 
 import torch
 
+from anemoi.models.physics.constants import EPS_RD_RV
+from anemoi.models.physics.constants import G0
+from anemoi.models.physics.constants import K1_DRY
+from anemoi.models.physics.constants import K2_WET
+from anemoi.models.physics.constants import R_D
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import LossFactoryContextKey
 from anemoi.training.losses.base import Squash_mode
@@ -41,17 +46,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# Smith-Weintraub refractivity constants (Smith & Weintraub 1953; Bevis et al. 1994 rounded).
-K1_DRY: float = 77.6  # K hPa^-1
-K2_WET: float = 3.73e5  # K^2 hPa^-1
-# Ratio of gas constants dry air / water vapour, used for the vapour-pressure conversion
-# e = q p / (EPS + (1 - EPS) q).
-EPS_RD_RV: float = 0.622
-# Standard gravity, converts geopotential metres to geopotential (m^2 s^-2).
-G0: float = 9.80665
-# Dry-air gas constant (J kg^-1 K^-1) and the coldest plausible layer-mean temperature (K) used
-# for the minimum-thickness hinge: a layer cannot be thinner than R_d * T_MIN * ln(p_lo/p_hi).
-R_D: float = 287.06
+# Physical constants are shared with the model-side hydrostatic bounding (anemoi.models.physics):
+# Smith-Weintraub N = K1 p/T + K2 e/T^2 (p, e in hPa), e = q p / (EPS + (1 - EPS) q), g0, R_d.
+# The coldest plausible layer-mean temperature (K) used for the minimum-thickness hinge: a layer
+# cannot be thinner than R_d * T_MIN * ln(p_lo/p_hi).
 T_MIN_HINGE: float = 180.0
 # Physical temperature range the operator is evaluated on; predictions outside it are clamped so
 # the operator stays finite (and its gradient bounded) while the model is still far from realistic.
