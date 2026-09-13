@@ -31,12 +31,28 @@ class CheckVariableOrder(pl.callbacks.Callback):
             return model_name_to_index
         return trainer.datamodule.data_indices.name_to_index
 
-    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
-        """Compare variables between model and data indices."""
+    def _compare_variables(  # type: ignore[misc]
+        self,
+        trainer: pl.Trainer,
+        model_name_to_index: dict,
+        data_name_to_index: dict,
+        ckpt_targets: dict | None = None,
+    ) -> None:
+        """Compare variables between model and data indices.
+
+        ``ckpt_targets`` holds the checkpoint's loss-only (target) variables per dataset;
+        they may differ from the data without affecting the model tensors.
+        """
+        ckpt_targets = ckpt_targets if isinstance(ckpt_targets, dict) else {}
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
             # Only compare if dataset exists in model (handles transfer learning scenarios)
             if dataset_name in model_name_to_index and dataset_name in data_name_to_index:
-                data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
+                extra = {"ignore_variables": ckpt_targets[dataset_name]} if ckpt_targets.get(dataset_name) else {}
+                data_indices.compare_variables(
+                    model_name_to_index[dataset_name],
+                    data_name_to_index[dataset_name],
+                    **extra,
+                )
             else:
                 LOGGER.debug(
                     "Skipping variable comparison for dataset '%s' (not found in checkpoint)",
@@ -49,13 +65,18 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module (used to read the checkpoint's target variables).
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(
+            trainer,
+            self._model_name_to_index,
+            data_name_to_index,
+            getattr(pl_module, "_ckpt_target_variables", None),
+        )
         self._check_variable_units(trainer, pl_module)
 
     @staticmethod
@@ -80,13 +101,18 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module (used to read the checkpoint's target variables).
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(
+            trainer,
+            self._model_name_to_index,
+            data_name_to_index,
+            getattr(pl_module, "_ckpt_target_variables", None),
+        )
 
     def on_test_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the test data.
@@ -94,10 +120,15 @@ class CheckVariableOrder(pl.callbacks.Callback):
         Parameters
         ----------
         trainer : pl.Trainer
-            Pytorch Lightning trainer
-        _ : pl.LightningModule
-            Not used
+            Pytorch Lightning trainer.
+        pl_module : pl.LightningModule
+            Training module (used to read the checkpoint's target variables).
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(
+            trainer,
+            self._model_name_to_index,
+            data_name_to_index,
+            getattr(pl_module, "_ckpt_target_variables", None),
+        )

@@ -10,6 +10,7 @@
 
 import logging
 import operator
+from collections.abc import Iterable
 
 import yaml
 from omegaconf import OmegaConf
@@ -183,7 +184,12 @@ class IndexCollection:
     def representer(dumper, data):
         return dumper.represent_scalar(f"!{data.__class__.__name__}", repr(data))
 
-    def compare_variables(self, ckpt_name_to_index: dict[str, int], data_name_to_index: dict[str, int]) -> None:
+    def compare_variables(
+        self,
+        ckpt_name_to_index: dict[str, int],
+        data_name_to_index: dict[str, int],
+        ignore_variables: Iterable[str] = (),
+    ) -> None:
         """Compare the order of the variables in the model from checkpoint and the data.
 
         Parameters
@@ -192,6 +198,12 @@ class IndexCollection:
             The dictionary mapping variable names to their indices in the checkpoint.
         data_name_to_index : dict[str, int]
             The dictionary mapping variable names to their indices in the data.
+        ignore_variables : Iterable[str], optional
+            Loss-only (``target``-category) variables that are neither model inputs nor
+            outputs. They may be added or removed between checkpoint and data without
+            affecting the model tensors; when the variable sets differ only by such names
+            and the *relative* order of all remaining variables is unchanged, the check
+            passes. The ``target`` variables of this collection are always included.
 
         Raises
         ------
@@ -206,6 +218,21 @@ class IndexCollection:
             LOGGER.info("The order of the variables in the model matches the order in the data.")
             LOGGER.debug("%s, %s", ckpt_name_to_index, data_name_to_index)
             return
+
+        ignore = set(ignore_variables) | set(getattr(self, "target", None) or [])
+        if ignore:
+            ckpt_kept = {k: v for k, v in ckpt_name_to_index.items() if k not in ignore}
+            data_kept = {k: v for k, v in data_name_to_index.items() if k not in ignore}
+            if set(ckpt_kept) == set(data_kept) and sorted(ckpt_kept, key=ckpt_kept.get) == sorted(
+                data_kept, key=data_kept.get
+            ):
+                changed = sorted((set(ckpt_name_to_index) ^ set(data_name_to_index)) & ignore)
+                LOGGER.info(
+                    "Variables differ from the checkpoint only by loss-only (target) variables %s; "
+                    "the relative order of the remaining variables matches. Continuing.",
+                    changed,
+                )
+                return
 
         keys1 = set(ckpt_name_to_index.keys())
         keys2 = set(data_name_to_index.keys())

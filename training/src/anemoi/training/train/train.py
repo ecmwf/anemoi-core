@@ -299,7 +299,10 @@ class AnemoiTrainer(ABC):
             if dataset_name in model._ckpt_model_name_to_index:
                 # Dataset found in checkpoint - validate variables match
                 ckpt_name_to_index = model._ckpt_model_name_to_index[dataset_name]
-                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index)
+                all_targets = getattr(model, "_ckpt_target_variables", None)
+                ckpt_targets = all_targets.get(dataset_name) if isinstance(all_targets, dict) else None
+                extra = {"ignore_variables": ckpt_targets} if ckpt_targets else {}
+                data_indices.compare_variables(ckpt_name_to_index, data_indices.name_to_index, **extra)
                 loaded_datasets.append(dataset_name)
             else:
                 # Dataset not found in checkpoint - will be randomly initialized

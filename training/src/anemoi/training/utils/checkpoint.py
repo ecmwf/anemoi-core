@@ -61,7 +61,7 @@ def load_and_prepare_model(lightning_checkpoint_path: str) -> tuple[torch.nn.Mod
     Parameters
     ----------
     lightning_checkpoint_path : str
-        path to lightning checkpoint
+        path to lightning checkpoint.
 
     Returns
     -------
@@ -87,11 +87,11 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
     Parameters
     ----------
     model : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     metadata : dict
-        Anemoi Metadata to inject into checkpoint
+        Anemoi Metadata to inject into checkpoint.
     save_path : Path | str
-        Directory to save anemoi checkpoint
+        Directory to save anemoi checkpoint.
 
     Returns
     -------
@@ -142,6 +142,11 @@ def transfer_learning_loading(model: torch.nn.Module, ckpt_path: Path | str) -> 
         model._ckpt_model_name_to_index = {
             dataset_name: indices.name_to_index for dataset_name, indices in data_indices.items()
         }
+        # Loss-only (target) variables of the checkpoint: they may be added/removed without
+        # touching the model tensors, so the variable-order check tolerates them.
+        model._ckpt_target_variables = {
+            dataset_name: list(getattr(indices, "target", None) or []) for dataset_name, indices in data_indices.items()
+        }
     else:
         # Old format: data_indices is a single IndexCollection object (not dict)
         msg = (
@@ -166,7 +171,7 @@ def freeze_submodule_by_name(module: nn.Module, target_name: str, base_target: s
     Parameters
     ----------
     module : torch.nn.Module
-        Pytorch model
+        Pytorch model.
     target_name : str
         The name of the submodule to freeze. Examples: "encoder", "encoder.lam".
     base_target : str
