@@ -140,6 +140,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         label: str = "generic",
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        dataset_options = {}
+        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
+        if dataloader_config.get("fake_dataloading", False):
+            dataset_options["fake_dataloading"] = True
+
         frequency_seconds = {name: frequency_to_seconds(reader.frequency) for name, reader in data_readers.items()}
         use_mixed_frequency_alignment = len(set(frequency_seconds.values())) != 1
         if use_mixed_frequency_alignment:
@@ -156,15 +161,18 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
                 label=label,
                 epoch=self.epoch,
                 rollout=len(tuple(self.task.steps(label))),
+                **dataset_options,
             )
 
+        relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
         return MultiDataset(
             data_readers=data_readers,
-            relative_date_indices=compute_relative_date_indices(self.task, data_readers, mode=label),
+            relative_date_indices=relative_date_indices,
             shuffle=shuffle,
             label=label,
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
+            **dataset_options,
         )
 
     def set_epoch(self, epoch: int) -> None:
