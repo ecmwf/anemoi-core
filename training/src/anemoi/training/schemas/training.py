@@ -679,6 +679,33 @@ class RefractivityOperatorLossSchema(BaseLossSchema):
         return self
 
 
+class TargetIdentityPairSchema(BaseModel):
+    """One (target variable -> model variable) pair for TargetIdentityLoss."""
+
+    target: str
+    "Target-category variable holding the observation (physical units, normaliser none)."
+    model: str
+    "Model-output variable it observes."
+    weight: NonNegativeFloat = 1.0
+    "Weight of the pair, comparable to general_variable weights when sigma is not used."
+    sigma: float | None = Field(default=None, gt=0.0)
+    "Optional physical observation error; the residual is then expressed in sigma units."
+
+
+class TargetIdentityLossSchema(BaseLossSchema):
+    """Schema for TargetIdentityLoss."""
+
+    target_: Literal["anemoi.training.losses.TargetIdentityLoss"] = Field(..., alias="_target_")
+    "Identity observation loss target."
+    pairs: list[TargetIdentityPairSchema] = Field(min_length=1)
+    reduction: Literal["sonde", "per_obs"] = "sonde"
+    "Grid reduction: zero-fill like the sonde MSE, or mean over valid observations."
+    huber_delta: float | None = Field(default=None, gt=0.0)
+    "Huber transition in residual units; null for a pure quadratic."
+    penalty_weight: NonNegativeFloat = 1.0
+    ignore_nans: bool = True
+
+
 _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.combined.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
@@ -687,6 +714,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.EnergyScoreLoss": "energy_score",
     "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
     "anemoi.training.losses.RefractivityOperatorLoss": "refractivity_operator",
+    "anemoi.training.losses.TargetIdentityLoss": "target_identity",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -732,6 +760,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
             | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
+            | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -794,6 +823,7 @@ LossSchemas = Annotated[
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
     | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
+    | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

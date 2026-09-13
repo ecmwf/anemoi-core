@@ -15,12 +15,13 @@ import pytorch_lightning as pl
 from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.losses.refractivity import RefractivityOperatorLoss
+from anemoi.training.losses.target_identity import TargetIdentityLoss
 
 LOGGER = logging.getLogger(__name__)
 
 
 class RefractivityLevelLogger(Callback):
-    """Log the diagnostics that ``RefractivityOperatorLoss`` keeps after each forward.
+    """Log the diagnostics that ``RefractivityOperatorLoss`` and ``TargetIdentityLoss`` keep after each forward.
 
     Training values are single-batch and noisy, so by default only aggregates are logged
     during training (``train_refrac/<dataset>/mean``, ``train_refrac_count/<dataset>/total``,
@@ -120,6 +121,31 @@ class RefractivityLevelLogger(Callback):
                     if value is not None:
                         self._emit(pl_module, f"{prefix}_{key}/{dataset_name}", value, on_step=on_step)
 
+    @staticmethod
+    def _identity_losses(pl_module: pl.LightningModule) -> list[tuple[str, TargetIdentityLoss]]:
+        found = []
+        for dataset_name, loss in getattr(pl_module, "loss", {}).items():
+            leaves = loss.iter_leaf_losses() if hasattr(loss, "iter_leaf_losses") else [loss]
+            found.extend((dataset_name, leaf) for leaf in leaves if isinstance(leaf, TargetIdentityLoss))
+        return found
+
+    def _log_identity(self, pl_module: pl.LightningModule, prefix: str, *, on_step: bool) -> None:
+        """Per-pair loss, bias and count of every TargetIdentityLoss leaf (few pairs, always per pair)."""
+        for dataset_name, loss in self._identity_losses(pl_module):
+            if loss.last_pair_losses is None:
+                continue
+            for name, value, bias, count in zip(
+                loss.observation_variables,
+                loss.last_pair_losses.tolist(),
+                loss.last_pair_bias.tolist(),
+                loss.last_pair_counts.tolist(),
+                strict=False,
+            ):
+                self._emit(pl_module, f"{prefix}/{dataset_name}/{name}", value, on_step=on_step)
+                self._emit(pl_module, f"{prefix}_bias/{dataset_name}/{name}", bias, on_step=on_step)
+                if not on_step:
+                    self._emit(pl_module, f"{prefix}_count/{dataset_name}/{name}", count, on_step=on_step)
+
     def on_train_batch_end(
         self,
         trainer: pl.Trainer,  # noqa: ARG002
@@ -130,6 +156,7 @@ class RefractivityLevelLogger(Callback):
     ) -> None:
         if batch_idx % self.every_n_batches == 0:
             self._log(pl_module, "train_refrac", on_step=True, per_level=self.per_level_training)
+            self._log_identity(pl_module, "train_identity", on_step=True)
 
     def on_validation_batch_end(
         self,
@@ -141,3 +168,4 @@ class RefractivityLevelLogger(Callback):
         dataloader_idx: int = 0,  # noqa: ARG002
     ) -> None:
         self._log(pl_module, "val_refrac", on_step=False, per_level=self.per_level_validation)
+        self._log_identity(pl_module, "val_identity", on_step=False)

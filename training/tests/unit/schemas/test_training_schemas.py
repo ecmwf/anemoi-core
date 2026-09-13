@@ -17,6 +17,7 @@ from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import RefractivityOperatorLossSchema
+from anemoi.training.schemas.training import TargetIdentityLossSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 
 _TIME_AGG_CFG = {
@@ -289,3 +290,22 @@ def test_combined_loss_accepts_refractivity_loss() -> None:
         },
     )
     assert isinstance(schema.losses[1], RefractivityOperatorLossSchema)
+
+
+def test_target_identity_loss_schema() -> None:
+    cfg = {
+        "_target_": "anemoi.training.losses.TargetIdentityLoss",
+        "scalers": ["node_weights"],
+        "pairs": [
+            {"target": "era_z_500", "model": "z_500", "weight": 800},
+            {"target": "gpt_100", "model": "t_100", "sigma": 1.0},
+        ],
+    }
+    schema = TargetIdentityLossSchema(**cfg)
+    assert schema.reduction == "sonde" and schema.pairs[1].sigma == 1.0
+    with pytest.raises(ValidationError):
+        TargetIdentityLossSchema(**{**cfg, "pairs": []})
+    with pytest.raises(ValidationError):
+        TargetIdentityLossSchema(**{**cfg, "reduction": "mean"})
+    combined = CombinedLossSchema(**{**_COMBINED_LOSS_BASE, "losses": [cfg], "loss_weights": [1.0]})
+    assert isinstance(combined.losses[0], TargetIdentityLossSchema)

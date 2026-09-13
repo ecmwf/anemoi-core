@@ -16,6 +16,7 @@ from anemoi.training.diagnostics.callbacks.refractivity import RefractivityLevel
 from anemoi.training.losses import CombinedLoss
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.refractivity import RefractivityOperatorLoss
+from anemoi.training.losses.target_identity import TargetIdentityLoss
 
 
 def _fake_refrac_loss() -> RefractivityOperatorLoss:
@@ -77,3 +78,24 @@ def test_logger_ignores_modules_without_refractivity_loss() -> None:
     module = SimpleNamespace(loss={"data": MSELoss()}, log=lambda name, value, **_kw: logged.__setitem__(name, value))
     RefractivityLevelLogger(every_n_batches=1).on_train_batch_end(None, module, None, None, batch_idx=0)
     assert logged == {}
+
+
+def test_logger_reports_identity_pairs() -> None:
+    ident = TargetIdentityLoss.__new__(TargetIdentityLoss)
+    torch.nn.Module.__init__(ident)
+    ident.observation_variables = ["era_z_500", "era_t_500"]
+    ident.last_pair_losses = torch.tensor([0.02, 0.01])
+    ident.last_pair_bias = torch.tensor([0.1, -0.05])
+    ident.last_pair_counts = torch.tensor([40320, 40320])
+    logged: dict[str, float] = {}
+    module = SimpleNamespace(
+        loss={"data": CombinedLoss(MSELoss(), ident, loss_weights=(1.0, 1.0))},
+        log=lambda n, v, **_k: logged.__setitem__(n, v),
+    )
+    RefractivityLevelLogger(every_n_batches=1).on_train_batch_end(None, module, None, None, batch_idx=0)
+    assert logged["train_identity/data/era_z_500"] == pytest.approx(0.02)
+    assert logged["train_identity_bias/data/era_t_500"] == pytest.approx(-0.05)
+    assert "train_identity_count/data/era_z_500" not in logged
+    logged.clear()
+    RefractivityLevelLogger().on_validation_batch_end(None, module, None, None, batch_idx=0)
+    assert logged["val_identity_count/data/era_z_500"] == 40320.0
