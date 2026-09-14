@@ -672,6 +672,7 @@ def test_validation_step_logs_loss_and_metrics() -> None:
     module = MagicMock(spec=BaseTrainingModule)
     module.logger_enabled = True
     module._get_loss_name.return_value = "mse"
+    module.task = SimpleNamespace(num_steps=1)
     module._step.return_value = SimpleNamespace(
         loss=torch.tensor(3.0),
         metrics={"data_mse_loss": torch.tensor(2.0)},
@@ -683,6 +684,8 @@ def test_validation_step_logs_loss_and_metrics() -> None:
         batch_idx=0,
     )
 
+    # The loss is restricted to the training rollout length.
+    assert module._step.call_args.kwargs == {"validation_mode": True, "loss_steps": 1}
     assert [call.args[0] for call in module.log.call_args_list] == [
         "val_mse_loss",
         "val_data_mse_loss",
@@ -1050,8 +1053,19 @@ def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
 
 def _make_single_training(task: Any, data_indices: dict[str, IndexCollection]) -> SingleTraining:
     """Build a SingleTraining module wired for unit tests."""
-    module = SingleTraining.__new__(SingleTraining)
+    return _make_training_module(SingleTraining, task, data_indices)
+
+
+def _make_training_module(
+    module_cls: type[BaseTrainingModule],
+    task: Any,
+    data_indices: dict[str, IndexCollection],
+) -> BaseTrainingModule:
+    """Build a SingleTraining or EnsembleTraining module wired for unit tests."""
+    module = module_cls.__new__(module_cls)
     pl.LightningModule.__init__(module)
+    if issubclass(module_cls, EnsembleTraining):
+        module.nens_per_device = 1
     _wire_training_module(
         module,
         data_indices=data_indices,
@@ -1185,12 +1199,17 @@ def test_single_training_loss_is_averaged_over_num_steps(
 
 def _run_validation_rollout_loss(
     monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
     *,
     training_rollout: int,
     validation_rollout: int | None,
     per_step_losses: list[float],
+    loss_steps: int | None,
 ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
-    """Run ``_step(validation_mode=True)`` with scripted per-step losses."""
+    """Run ``_step(validation_mode=True, loss_steps=...)`` with scripted per-step dataset losses.
+
+    Only ``compute_dataset_loss_metrics`` is stubbed, so the real ``compute_loss_metrics`` builds the metric keys.
+    """
     data_indices = _data_indices_single()
     task = Forecaster(
         multistep_input=1,
@@ -1199,7 +1218,7 @@ def _run_validation_rollout_loss(
         rollout={"start": training_rollout, "maximum": training_rollout},
         validation_rollout=validation_rollout,
     )
-    module = _make_single_training(task, data_indices)
+    module = _make_training_module(module_cls, task, data_indices)
 
     losses = iter([torch.tensor(value) for value in per_step_losses])
     dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
@@ -1207,47 +1226,73 @@ def _run_validation_rollout_loss(
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
     monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
     monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
-
-    def fake_compute_loss_metrics(*_args, **kwargs) -> tuple[torch.Tensor, dict, dict]:
-        loss = next(losses)
-        return loss, {f"data_dummy_loss/{kwargs['rollout_step'] + 1}": loss}, dummy_y
-
-    monkeypatch.setattr(module, "compute_loss_metrics", fake_compute_loss_metrics)
+    monkeypatch.setattr(
+        module,
+        "compute_dataset_loss_metrics",
+        lambda y_pred, *_a, **_kw: (next(losses), {}, y_pred),
+    )
 
     batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
-    output = module._step(batch, validation_mode=True)
+    output = module._step(batch, validation_mode=True, loss_steps=loss_steps)
     return output.loss, output.metrics
 
 
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
 def test_validation_loss_is_averaged_over_training_rollout(
     monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
 ) -> None:
     """With validation_rollout > training rollout the loss still averages the training rollout."""
     loss, metrics = _run_validation_rollout_loss(
         monkeypatch,
+        module_cls,
         training_rollout=2,
         validation_rollout=4,
         per_step_losses=[2.0, 4.0, 100.0, 200.0],
+        loss_steps=2,
     )
 
-    # Steps 3 and 4 are logged but excluded from the loss: (2.0 + 4.0) / 2 = 3.0
+    # Steps 3 and 4 are unrolled but excluded from the loss: (2.0 + 4.0) / 2 = 3.0
     assert torch.isclose(loss, torch.tensor(3.0)), f"Expected 3.0, got {loss.item()}"
-    assert sorted(metrics) == [f"data_dummy_loss/{step}" for step in (1, 2, 3, 4)]
+    # The per-dataset loss metric keeps its unsuffixed key and holds the last unrolled step.
+    assert list(metrics) == ["data_dummyloss_loss"]
+    assert torch.isclose(metrics["data_dummyloss_loss"], torch.tensor(200.0))
 
 
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
 def test_validation_loss_follows_training_rollout_when_unset(
     monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
 ) -> None:
     """With validation_rollout unset the validation rollout equals the training rollout."""
-    loss, metrics = _run_validation_rollout_loss(
+    loss, _ = _run_validation_rollout_loss(
         monkeypatch,
+        module_cls,
         training_rollout=2,
         validation_rollout=None,
         per_step_losses=[2.0, 4.0],
+        loss_steps=2,
     )
 
     assert torch.isclose(loss, torch.tensor(3.0)), f"Expected 3.0, got {loss.item()}"
-    assert sorted(metrics) == [f"data_dummy_loss/{step}" for step in (1, 2)]
+
+
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
+def test_rollout_eval_loss_is_averaged_over_full_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+) -> None:
+    """Without loss_steps (as called by RolloutEval) the loss averages every validation rollout step."""
+    loss, _ = _run_validation_rollout_loss(
+        monkeypatch,
+        module_cls,
+        training_rollout=1,
+        validation_rollout=4,
+        per_step_losses=[1.0, 2.0, 3.0, 4.0],
+        loss_steps=None,
+    )
+
+    assert torch.isclose(loss, torch.tensor(2.5)), f"Expected 2.5, got {loss.item()}"
 
 
 def test_single_training_advance_input_called_between_rollout_steps(

@@ -242,6 +242,7 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
+        loss_steps: int | None = None,
     ) -> TrainingStepOutput:
         """Training / validation step."""
         loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
@@ -252,7 +253,7 @@ class EnsembleTraining(BaseTrainingModule):
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        n_loss_steps = self.num_loss_steps(task_steps, validation_mode)
+        n_loss_steps = len(task_steps) if loss_steps is None else min(loss_steps, len(task_steps))
         for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
 

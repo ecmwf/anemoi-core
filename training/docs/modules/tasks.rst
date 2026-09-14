@@ -77,10 +77,11 @@ autoregressive rollout training. It is constructed with:
   :class:`~anemoi.training.tasks.forecaster.RolloutConfig`).
 - ``validation_rollout`` — number of rollout steps unrolled during
   validation (default ``null``, i.e. follow the training rollout).
-  Per-step metrics are logged for every step (``val_.../1`` …
-  ``val_.../N``); the reported validation loss is always averaged over
-  the training rollout so that it remains directly comparable to the
-  training loss.
+  The validation loss ``val_<loss>_loss`` is averaged over the current
+  training rollout (``rollout.step``) only, so that it is directly
+  comparable to ``train_<loss>_loss``. Per-step validation metrics are
+  logged for every unrolled step (``val_.../1`` … ``val_.../N``).
+
 
 RolloutConfig
 =============

@@ -42,8 +42,8 @@ class ForecasterSchema(BaseModel):
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollout steps unrolled in validation. The loss is always averaged over the training rollout."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Number of rollout steps unrolled in validation. The val loss is averaged over the training rollout only."
 
 
 class OffsetForecasterSchema(BaseModel):

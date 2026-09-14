@@ -183,6 +183,9 @@ def test_rollout_eval_handles_dict_batch(n_ensemble):
 
         callback.on_validation_batch_end(trainer, pl_module, outputs=[], batch=batch, batch_idx=0)
 
+        # RolloutEval must not restrict the loss to the training rollout.
+        assert pl_module._step.call_args.kwargs == {"validation_mode": True}
+
         #  Check for output
         mock_log.assert_called_once()
         args = mock_log.call_args[0]
