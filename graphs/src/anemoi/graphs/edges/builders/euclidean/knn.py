@@ -47,12 +47,16 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         """Prepare keyword arguments for computing edge index."""
         return {"num_nearest_neighbours": self.num_nearest_neighbours}
 
-    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int) -> torch.Tensor:
+    def _compute_edge_index_pyg(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
+    ) -> torch.Tensor:
         edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
         edge_index = torch.flip(edge_index, [0])
         return edge_index
 
-    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int) -> np.ndarray:
+    def _compute_adj_matrix_sklearn(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
+    ) -> np.ndarray:
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(

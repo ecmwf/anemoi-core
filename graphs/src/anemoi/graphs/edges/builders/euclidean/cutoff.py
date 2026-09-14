@@ -16,8 +16,8 @@ from torch_geometric.nn import radius as pyg_radius
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
-from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.graphs.utils import crop_to_max_num_neighbours
+from anemoi.graphs.utils import get_grid_reference_distance
 
 LOGGER = logging.getLogger(__name__)
 
@@ -99,7 +99,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
                 self.source_name,
                 self.target_name,
             )
-            
+
         return radius
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
@@ -168,6 +168,7 @@ class CutOffEdges(BaseCutOffEdges):
     update_graph(graph, attrs_config)
         Update the graph with the edges.
     """
+
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=target_coords)
@@ -208,7 +209,6 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         """Prepare keyword arguments for computing edge index."""
         radius = self.get_cutoff_radius(reference_coords=source_coords)
         return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
-
 
     def compute_edge_index_from_coords(
         self,

@@ -70,7 +70,7 @@ class NodeMaskingMixin:
         masked_indices = np.where(mask.squeeze().cpu())[0]
         mapper = dict(zip(range(len(masked_indices)), masked_indices))
         return np.vectorize(mapper.get)
-    
+
     @staticmethod
     def get_target_unmasking_mapping(nodes: NodeStorage) -> Callable:
         """Get the unmasking mapping for the target nodes."""

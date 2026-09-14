@@ -9,18 +9,17 @@
 
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 
 import numpy as np
 import torch
-
 from torch_geometric.data.storage import NodeStorage
+
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from abc import ABC
-from abc import abstractmethod
 from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import is_pyg_lib_available
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,9 +43,13 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor: ...
 
     @abstractmethod
-    def _compute_adj_matrix_sklearn(self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs) -> np.ndarray: ...
+    def _compute_adj_matrix_sklearn(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs
+    ) -> np.ndarray: ...
 
-    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs) -> torch.Tensor:
+    def compute_edge_index_from_coords(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs
+    ) -> torch.Tensor:
         """Compute edge index using pyg-lib (if available) or sklearn.
 
         Parameters
@@ -97,7 +100,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         torch.Tensor of shape (2, num_edges)
             Indices of source and target nodes connected by an edge.
         """
-        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes) # 3d coords
+        source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)  # 3d coords
         method_kwargs = self.prepare_method_kwargs(source_coords, target_coords)
         edge_index = self.compute_edge_index_from_coords(source_coords, target_coords, **method_kwargs)
         edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)

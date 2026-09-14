@@ -146,4 +146,3 @@ class BaseEdgeBuilder(ABC):
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
         return graph
-
