@@ -20,6 +20,8 @@ and rank count.
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 import torch
 import torch.distributed as dist
@@ -280,6 +282,15 @@ def test_reduce_fp32_accumulation_supports_low_precision_inputs(
     )
 
 
+def test_expand_sharded_tensor_assertions() -> None:
+    local = torch.empty((1, 4))
+
+    # Mock group queries to test the assertion without initializing distributed communication.
+    with patch.object(dist, "get_world_size", return_value=2), patch.object(dist, "get_rank", return_value=0):
+        with pytest.raises(AssertionError, match="expected local shard size 2"):
+            _expand_sharded_tensor(local, dim_=0, sizes=[2, 2], group=None)
+
+
 def _test_expand_sharded_tensor_rank(
     *,
     rank: int,
@@ -479,108 +490,6 @@ def test_alltoall_transpose_supports_explicit_shard_sizes(
         dim_concat=1,
         split_shard_sizes=split_shard_sizes,
         concat_shard_sizes=concat_shard_sizes,
-    )
-
-
-def _test_invalid_dim_rank(
-    *,
-    rank: int,
-    world_size: int,
-    device: torch.device,
-    group: dist.ProcessGroup,
-    primitive: str,
-    dim: int,
-) -> None:
-    full = torch.arange(torch.Size((16, 16)).numel(), dtype=torch.float32, device=device).reshape(16, 16)
-    sizes = get_balanced_partition_sizes(full.size(0), world_size)
-    local = torch.split(full, sizes, dim=0)[rank].contiguous()
-
-    with pytest.raises(AssertionError):
-        if primitive == "split":
-            _split(full, dim_=dim, sizes_=sizes, group=group)
-        elif primitive == "gather":
-            _gather(local, dim_=dim, sizes=sizes, group=group)
-        elif primitive == "expand":
-            _expand_sharded_tensor(local, dim_=dim, sizes=sizes, group=group)
-        else:
-            msg = f"Unknown primitive: {primitive}"
-            raise ValueError(msg)
-
-
-@pytest.mark.distributed
-@pytest.mark.parametrize(
-    ("primitive", "dim"),
-    [
-        pytest.param("split", 2, id="split_invalid_positive_dim"),
-        pytest.param("gather", 2, id="gather_invalid_positive_dim"),
-        pytest.param("expand", 2, id="expand_invalid_positive_dim"),
-    ],
-)
-def test_primitives_reject_invalid_dimensions(
-    primitive: str, dim: int, distributed_backend: str, distributed_world_size: int
-) -> None:
-    run_distributed_test(
-        _test_invalid_dim_rank,
-        backend=distributed_backend,
-        world_size=distributed_world_size,
-        primitive=primitive,
-        dim=dim,
-    )
-
-
-def _test_expand_rejects_wrong_local_size_rank(
-    *,
-    rank: int,
-    world_size: int,
-    device: torch.device,
-    group: dist.ProcessGroup,
-) -> None:
-    sizes = get_balanced_partition_sizes(16, world_size)
-    wrong_local_size = sizes[rank] + 1
-    local = torch.arange(wrong_local_size * 16, dtype=torch.float32, device=device).reshape(wrong_local_size, 16)
-
-    with pytest.raises(AssertionError):
-        _expand_sharded_tensor(local, dim_=0, sizes=sizes, group=group)
-
-
-@pytest.mark.distributed
-def test_expand_sharded_tensor_rejects_wrong_local_size(distributed_backend: str, distributed_world_size: int) -> None:
-    run_distributed_test(
-        _test_expand_rejects_wrong_local_size_rank,
-        backend=distributed_backend,
-        world_size=distributed_world_size,
-    )
-
-
-def _test_alltoall_transpose_rejects_same_dimension_rank(
-    *,
-    rank: int,
-    world_size: int,
-    device: torch.device,
-    group: dist.ProcessGroup,
-) -> None:
-    local = torch.arange(torch.Size((8, 16)).numel(), dtype=torch.float32, device=device).reshape(8, 16)
-    sizes = get_balanced_partition_sizes(local.size(1), world_size)
-
-    with pytest.raises(AssertionError):
-        _alltoall_transpose(
-            local,
-            dim_split=1,
-            split_sizes=sizes,
-            dim_concat=-1,
-            concat_sizes=sizes,
-            group=group,
-        )
-
-
-@pytest.mark.distributed
-def test_alltoall_transpose_rejects_same_split_and_concat_dimension(
-    distributed_backend: str, distributed_world_size: int
-) -> None:
-    run_distributed_test(
-        _test_alltoall_transpose_rejects_same_dimension_rank,
-        backend=distributed_backend,
-        world_size=distributed_world_size,
     )
 
 
@@ -858,6 +767,15 @@ def test_expand_sharded_tensor_preserves_channels_last_memory_format(
         shape=shape,
         dim=dim,
     )
+
+
+def test_alltoallwrapper_assertions() -> None:
+    # Mock the group query to test the assertions without initializing distributed communication.
+    with patch.object(dist, "get_world_size", return_value=2):
+        with pytest.raises(AssertionError, match="Expected 2 all-to-all input tensors"):
+            _alltoallwrapper([torch.empty(1), torch.empty(1)], [torch.empty(1)], group=None)
+        with pytest.raises(AssertionError, match="Expected 2 all-to-all output tensors"):
+            _alltoallwrapper([torch.empty(1)], [torch.empty(1), torch.empty(1)], group=None)
 
 
 def _test_alltoallwrapper_rank(

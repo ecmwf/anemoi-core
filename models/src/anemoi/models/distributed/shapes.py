@@ -20,8 +20,65 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 
 # Types for sharding metadata. These are per-rank partition sizes along one
 # tensor dimension, not full per-rank tensor shapes.
-ShardSizes = Union[list[int], None]
+ShardSizes = Union[list[int], tuple[int, ...], None]
 DatasetShardSizes = dict[str, ShardSizes]
+
+
+def validate_dim(tensor: Tensor, dim: int) -> None:
+    """Check that a dimension is within valid range for a tensor.
+
+    Parameters
+    ----------
+    tensor : Tensor
+        Tensor whose dimensions define the valid range.
+    dim : int
+        Dimension to validate. Negative dimensions are supported.
+
+    Raises
+    ------
+    TypeError
+        If ``dim`` is not a built-in integer.
+    IndexError
+        If ``dim`` is outside the valid range for ``tensor``.
+    """
+    if type(dim) is not int:
+        raise TypeError(f"Dimension must be an integer, but got {type(dim).__name__}")
+
+    ndim = tensor.dim()
+    if not -ndim <= dim < ndim:
+        raise IndexError(f"Dimension out of range (expected to be in range of [-{ndim}, {ndim - 1}], but got {dim})")
+
+
+def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup | None) -> None:
+    """Check that shard sizes are valid for the process group.
+
+    Parameters
+    ----------
+    sizes : ShardSizes
+        Shard sizes ordered by rank in the communication group.
+    mgroup : ProcessGroup or None
+        Communication group. If ``None``, validate metadata for one process.
+
+    Raises
+    ------
+    TypeError
+        If ``sizes`` is not a list or tuple of built-in integers.
+    ValueError
+        If there is not one non-negative size per process.
+    """
+    if not isinstance(sizes, (list, tuple)):
+        raise TypeError(f"Shard sizes must be a list or tuple of integers, but got {type(sizes).__name__}")
+    if any(type(size) is not int for size in sizes):
+        raise TypeError("Shard sizes must contain only integers")
+
+    comm_size = mgroup.size() if mgroup is not None else 1
+    if len(sizes) != comm_size:
+        raise ValueError(
+            f"Shard sizes must contain one entry per process, but got {len(sizes)} entries "
+            f"for a process group of size {comm_size}"
+        )
+    if any(size < 0 for size in sizes):
+        raise ValueError(f"Shard sizes must contain only non-negative entries, but got {sizes}")
 
 
 @dataclass(frozen=True)
@@ -60,7 +117,9 @@ def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: Optional[Process
     return get_balanced_partition_sizes(tensor.shape[dim], comm_size)
 
 
-def expand_shard_sizes_to_shapes(tensor: Tensor, dim: int, shard_sizes_dim: list[int]) -> list[list[int]]:
+def expand_shard_sizes_to_shapes(
+    tensor: Tensor, dim: int, shard_sizes_dim: list[int] | tuple[int, ...]
+) -> list[list[int]]:
     """Expand per-dimension shard sizes to full per-rank tensor shapes."""
     assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
 

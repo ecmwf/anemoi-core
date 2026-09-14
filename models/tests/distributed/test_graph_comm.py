@@ -49,6 +49,18 @@ GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
 
 
+class _TestProcessGroup:
+    def __init__(self, size: int = 2, rank: int = 0) -> None:
+        self._size = size
+        self._rank = rank
+
+    def size(self) -> int:
+        return self._size
+
+    def rank(self) -> int:
+        return self._rank
+
+
 def _make_range_tensor(
     shape: tuple[int, ...],
     device: torch.device | None = None,
@@ -70,6 +82,33 @@ def _make_grad_output(
     return (values * scale).reshape(shape)
 
 
+def test_ensure_sharded_errors() -> None:
+    x = _make_range_tensor((4, 3))
+
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        ensure_sharded(x, dim=2, shard_sizes=None, model_comm_group=None)
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got -3"):
+        ensure_sharded(x, dim=-3, shard_sizes=[4], model_comm_group=None)
+    with pytest.raises(TypeError, match="Dimension must be an integer"):
+        ensure_sharded(x, dim=0.0, shard_sizes=None, model_comm_group=None)
+    with pytest.raises(TypeError, match="Dimension must be an integer"):
+        ensure_sharded(x, dim=True, shard_sizes=None, model_comm_group=None)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        ensure_sharded(x, dim=0, shard_sizes=4, model_comm_group=None)
+    with pytest.raises(ValueError, match="one entry per process"):
+        ensure_sharded(x, dim=0, shard_sizes=[4, 0], model_comm_group=None)
+    with pytest.raises(TypeError, match="only integers"):
+        ensure_sharded(x, dim=0, shard_sizes=[4.0], model_comm_group=None)
+    with pytest.raises(TypeError, match="only integers"):
+        ensure_sharded(x, dim=0, shard_sizes=[True], model_comm_group=None)
+    with pytest.raises(ValueError, match="non-negative"):
+        ensure_sharded(x, dim=0, shard_sizes=[-1], model_comm_group=None)
+    with pytest.raises(ValueError, match=r"must match shard_sizes\[0\]"):
+        ensure_sharded(x, dim=0, shard_sizes=[5], model_comm_group=None)
+    with pytest.raises(ValueError, match=r"must match shard_sizes\[1\]"):
+        ensure_sharded(x, dim=0, shard_sizes=[4, 3], model_comm_group=_TestProcessGroup(rank=1))
+
+
 def test_ensure_sharded_computes_sizes_without_group() -> None:
     """Without a group, compute single-rank sizes and return the tensor unchanged."""
     x = _make_range_tensor((4, 3))
@@ -81,17 +120,14 @@ def test_ensure_sharded_computes_sizes_without_group() -> None:
     torch.testing.assert_close(sharded, expected)
 
 
-def test_ensure_sharded_validates_given_sizes() -> None:
-    """Consistent given sizes pass the tensor through; inconsistent sizes raise."""
+def test_ensure_sharded_accepts_given_sizes() -> None:
+    """Consistent given sizes pass the tensor through."""
     x = _make_range_tensor((4, 3))
 
     sharded, sizes = ensure_sharded(x, dim=0, shard_sizes=[4], model_comm_group=None)
 
     assert sharded is x
     assert sizes == [4]
-
-    with pytest.raises(AssertionError, match="expected shard size"):
-        ensure_sharded(x, dim=0, shard_sizes=[5], model_comm_group=None)
 
 
 def _test_ensure_sharded_rank(
@@ -198,6 +234,26 @@ def test_ensure_sharded_validates_explicit_shard_sizes(
     )
 
 
+def test_shard_tensor_errors() -> None:
+    x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
+
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        shard_tensor(x, dim=2, sizes=[2, 2], mgroup=group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        shard_tensor(x, dim=0, sizes=None, mgroup=group)
+    with pytest.raises(ValueError, match="one entry per process"):
+        shard_tensor(x, dim=0, sizes=[4], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        shard_tensor(x, dim=0, sizes=[4, 0.0], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        shard_tensor(x, dim=0, sizes=[4, True], mgroup=group)
+    with pytest.raises(ValueError, match="non-negative"):
+        shard_tensor(x, dim=0, sizes=[4, -1], mgroup=group)
+    with pytest.raises(ValueError, match="must sum exactly to 4"):
+        shard_tensor(x, dim=0, sizes=[2, 1], mgroup=group)
+
+
 @pytest.mark.parametrize(
     "gather_in_backward",
     [
@@ -206,19 +262,19 @@ def test_ensure_sharded_validates_explicit_shard_sizes(
     ],
 )
 def test_shard_tensor_identity_without_group(gather_in_backward: bool) -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
+    """Without a group, values and gradients pass through and unused communication metadata is ignored.
 
-    Covers the local fallback of ``_ShardParallelSection`` in both backward
-    modes: no forward split and no backward communication occur.
+    Covers the local fallback of ``_ShardParallelSection`` in both backward modes.
     """
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
+    unused_dim = x.ndim  # Out of range; ignored without a group.
 
     sharded = shard_tensor(
         x,
-        dim=0,
+        dim=unused_dim,
         sizes=None,
         mgroup=None,
         gather_in_backward=gather_in_backward,
@@ -424,6 +480,26 @@ def test_shard_tensor_no_backward_gather_with_explicit_shard_sizes(
     )
 
 
+def test_gather_tensor_errors() -> None:
+    x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
+
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        gather_tensor(x, dim=2, sizes=[4, 0], mgroup=group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        gather_tensor(x, dim=0, sizes=None, mgroup=group)
+    with pytest.raises(ValueError, match="one entry per process"):
+        gather_tensor(x, dim=0, sizes=[4], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        gather_tensor(x, dim=0, sizes=[4, True], mgroup=group)
+    with pytest.raises(ValueError, match="non-negative"):
+        gather_tensor(x, dim=0, sizes=[4, -1], mgroup=group)
+    with pytest.raises(ValueError, match=r"must match sizes\[0\].*but got 4"):
+        gather_tensor(x, dim=0, sizes=[3, 1], mgroup=group)
+    with pytest.raises(ValueError, match=r"must match sizes\[1\]"):
+        gather_tensor(x, dim=0, sizes=[4, 3], mgroup=_TestProcessGroup(rank=1))
+
+
 @pytest.mark.parametrize(
     "sizes",
     [
@@ -432,17 +508,14 @@ def test_shard_tensor_no_backward_gather_with_explicit_shard_sizes(
     ],
 )
 def test_gather_tensor_identity_without_group(sizes: list[int] | None) -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
-
-    Covers the local fallback of ``_GatherParallelSection``; the shard-size
-    metadata is ignored on this path.
-    """
+    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
+    unused_dim = x.ndim  # Out of range; ignored without a group.
 
-    gathered = gather_tensor(x, dim=0, sizes=sizes, mgroup=None)
+    gathered = gather_tensor(x, dim=unused_dim, sizes=sizes, mgroup=None)
 
     assert gathered.size() == expected.size()
     assert gathered.dtype == expected.dtype
@@ -611,6 +684,26 @@ def test_reduce_tensor(
     )
 
 
+def test_sync_tensor_errors() -> None:
+    x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
+
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        sync_tensor(x, dim=2, sizes=[4, 0], mgroup=group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        sync_tensor(x, dim=0, sizes=4, mgroup=group)
+    with pytest.raises(ValueError, match="one entry per process"):
+        sync_tensor(x, dim=0, sizes=[4], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        sync_tensor(x, dim=0, sizes=[4, 0.0], mgroup=group)
+    with pytest.raises(ValueError, match="non-negative"):
+        sync_tensor(x, dim=0, sizes=[4, -1], mgroup=group)
+    with pytest.raises(ValueError, match=r"must match sizes\[0\].*but got 4"):
+        sync_tensor(x, dim=0, sizes=[3, 1], mgroup=group)
+    with pytest.raises(ValueError, match=r"must match sizes\[1\]"):
+        sync_tensor(x, dim=0, sizes=[4, 3], mgroup=_TestProcessGroup(rank=1))
+
+
 @pytest.mark.parametrize(
     "gather_in_fwd",
     [
@@ -619,17 +712,17 @@ def test_reduce_tensor(
     ],
 )
 def test_sync_tensor_identity_without_group(gather_in_fwd: bool) -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
+    """Without a group, values and gradients pass through and unused communication metadata is ignored.
 
-    Covers the local fallback of ``_SyncParallelSection`` in both forward
-    modes: neither a gather nor a backward reduction occurs.
+    Covers the local fallback of ``_SyncParallelSection`` in both forward modes.
     """
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
+    unused_dim = x.ndim  # Out of range; ignored without a group.
 
-    synced = sync_tensor(x, dim=0, sizes=None, mgroup=None, gather_in_fwd=gather_in_fwd)
+    synced = sync_tensor(x, dim=unused_dim, sizes=[-1], mgroup=None, gather_in_fwd=gather_in_fwd)
 
     assert synced.size() == expected.size()
     assert synced.dtype == expected.dtype
@@ -798,17 +891,35 @@ def test_sync_tensor_no_forward_gather(
     )
 
 
-def test_reduce_shard_tensor_identity_without_group() -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
+def test_reduce_shard_tensor_errors() -> None:
+    x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
 
-    Covers the local fallback of ``_ReduceShardParallelSection``.
-    """
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        reduce_shard_tensor(x, dim=2, sizes=[2, 2], mgroup=group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        reduce_shard_tensor(x, dim=0, sizes=None, mgroup=group)
+    with pytest.raises(ValueError, match="one entry per process"):
+        reduce_shard_tensor(x, dim=0, sizes=[4], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        reduce_shard_tensor(x, dim=0, sizes=[4, True], mgroup=group)
+    with pytest.raises(TypeError, match="only integers"):
+        reduce_shard_tensor(x, dim=0, sizes=[4, 0.0], mgroup=group)
+    with pytest.raises(ValueError, match="non-negative"):
+        reduce_shard_tensor(x, dim=0, sizes=[4, -1], mgroup=group)
+    with pytest.raises(ValueError, match="must sum exactly to 4"):
+        reduce_shard_tensor(x, dim=0, sizes=[2, 1], mgroup=group)
+
+
+def test_reduce_shard_tensor_identity_without_group() -> None:
+    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
+    unused_dim = x.ndim  # Out of range; ignored without a group.
 
-    shard_sum = reduce_shard_tensor(x, dim=0, sizes=None, mgroup=None)
+    shard_sum = reduce_shard_tensor(x, dim=unused_dim, sizes=None, mgroup=None)
 
     assert shard_sum.size() == expected.size()
     assert shard_sum.dtype == expected.dtype
@@ -914,22 +1025,55 @@ def test_reduce_shard_tensor_gathers_gradients_with_explicit_shard_sizes(
     )
 
 
-def test_all_to_all_transpose_identity_without_group() -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
+def test_all_to_all_transpose_errors() -> None:
+    x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
 
-    Covers the local fallback of ``_AllToAllParallelSection``; the layout
-    metadata is ignored on this path.
-    """
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got -3"):
+        all_to_all_transpose(x, -3, [2, 2], 1, [3, 0], group)
+    with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
+        all_to_all_transpose(x, 0, [2, 2], 2, [3, 0], group)
+    with pytest.raises(ValueError, match="dim_split and dim_concat can not be the same, got 1 and 1"):
+        all_to_all_transpose(x, 1, [1, 2], 1, [3, 0], group)
+    with pytest.raises(ValueError, match="dim_split and dim_concat can not be the same, got 1 and -1"):
+        all_to_all_transpose(x, 1, [1, 2], -1, [2, 2], group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        all_to_all_transpose(x, 0, None, 1, [3, 0], group)
+    with pytest.raises(ValueError, match="Shard sizes must contain one entry per process"):
+        all_to_all_transpose(x, 0, [4], 1, [3, 0], group)
+    with pytest.raises(TypeError, match="Shard sizes must contain only integers"):
+        all_to_all_transpose(x, 0, [2, 2.0], 1, [3, 0], group)
+    with pytest.raises(ValueError, match="Shard sizes must contain only non-negative"):
+        all_to_all_transpose(x, 0, [5, -1], 1, [3, 0], group)
+    with pytest.raises(ValueError, match="split_sizes must sum exactly to 4"):
+        all_to_all_transpose(x, 0, [1, 2], 1, [3, 0], group)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        all_to_all_transpose(x, 0, [2, 2], 1, None, group)
+    with pytest.raises(ValueError, match="Shard sizes must contain one entry per process"):
+        all_to_all_transpose(x, 0, [2, 2], 1, [3], group)
+    with pytest.raises(TypeError, match="Shard sizes must contain only integers"):
+        all_to_all_transpose(x, 0, [2, 2], 1, [3, True], group)
+    with pytest.raises(ValueError, match="Shard sizes must contain only non-negative"):
+        all_to_all_transpose(x, 0, [2, 2], 1, [3, -1], group)
+    with pytest.raises(ValueError, match=r"must match concat_sizes\[0\].*but got 3"):
+        all_to_all_transpose(x, 0, [2, 2], 1, [2, 1], group)
+    with pytest.raises(ValueError, match=r"must match concat_sizes\[1\]"):
+        all_to_all_transpose(x, 0, [2, 2], 1, [3, 2], _TestProcessGroup(rank=1))
+
+
+def test_all_to_all_transpose_identity_without_group() -> None:
+    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
+    unused_dim = x.ndim  # Out of range; ignored without a group.
 
     transposed = all_to_all_transpose(
         x,
-        dim_split=0,
+        dim_split=unused_dim,
         split_sizes=None,
-        dim_concat=1,
+        dim_concat=unused_dim,
         concat_sizes=None,
         mgroup=None,
     )
