@@ -39,7 +39,7 @@ jobs:
         )
       }}
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             env | grep SLURM # helps with debugging
@@ -134,7 +134,7 @@ jobs:
     # built (e.g. an unlabeled PR that skipped build-env).
     if: ${{ always() && needs.build-env.result != 'skipped' }}
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             set -eux
