@@ -114,9 +114,9 @@ def _check_gradient_checkpointing(model_config: DictConfig) -> bool:
         for components in (model_config.get("encoders", {}), model_config.get("decoders", {}))
         for component in components.values()
     )
-    return any(getattr(mapper, "activation_checkpointing", False) for mapper in mapper_configs) or getattr(
+    return any(getattr(mapper, "gradient_checkpointing", False) for mapper in mapper_configs) or getattr(
         model_config.get("processor", {}),
-        "activation_checkpointing",
+        "gradient_checkpointing",
         False,
     )
 
