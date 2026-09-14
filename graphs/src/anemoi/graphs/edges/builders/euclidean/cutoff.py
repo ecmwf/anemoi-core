@@ -104,16 +104,16 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
-        return {"max_num_neighbors": self.max_num_neighbours}
+        return {"max_num_neighbours": self.max_num_neighbours}
 
     def _compute_edge_index_pyg(
         self,
         source_coords: torch.Tensor,
         target_coords: torch.Tensor,
         radius: float,
-        max_num_neighbors: int,
+        max_num_neighbours: int,
     ) -> torch.Tensor:
-        edge_index = pyg_radius(source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbors)
+        edge_index = pyg_radius(source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbours)
         edge_index = torch.flip(edge_index, [0])
 
         return edge_index
