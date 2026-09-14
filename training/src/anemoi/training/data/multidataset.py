@@ -20,7 +20,6 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import RelativeTimeReader
