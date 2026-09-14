@@ -71,13 +71,11 @@ class NodeMaskingMixin:
         mapper = dict(zip(range(len(masked_indices)), masked_indices))
         return np.vectorize(mapper.get)
 
-    @staticmethod
-    def get_target_unmasking_mapping(nodes: NodeStorage) -> Callable:
+    def get_target_unmasking_mapping(self, nodes: NodeStorage) -> Callable:
         """Get the unmasking mapping for the target nodes."""
         return NodeMaskingMixin._get_unmasking_mapping(mask=nodes[self.target_mask_attr_name])
 
-    @staticmethod
-    def get_source_unmasking_mapping(nodes: NodeStorage) -> Callable:
+    def get_source_unmasking_mapping(self, nodes: NodeStorage) -> Callable:
         """Get the unmasking mapping for the source nodes."""
         return NodeMaskingMixin._get_unmasking_mapping(mask=nodes[self.source_mask_attr_name])
 
@@ -99,11 +97,11 @@ class NodeMaskingMixin:
             Remapped adj_matrix with original node indices.
         """
         if self.target_mask_attr_name is not None:
-            target_node_mapping = NodeMaskingMixin.get_target_unmasking_mapping(target_nodes)
+            target_node_mapping = self.get_target_unmasking_mapping(target_nodes)
             adj_matrix.row = target_node_mapping(adj_matrix.row)
 
         if self.source_mask_attr_name is not None:
-            source_node_mapping = NodeMaskingMixin.get_source_unmasking_mapping(source_nodes)
+            source_node_mapping = self.get_source_unmasking_mapping(source_nodes)
             adj_matrix.col = source_node_mapping(adj_matrix.col)
 
         if self.source_mask_attr_name is not None or self.target_mask_attr_name is not None:
@@ -133,12 +131,12 @@ class NodeMaskingMixin:
         """
         # Remap source indices (row 0)
         if self.source_mask_attr_name is not None:
-            source_node_mapping = NodeMaskingMixin.get_source_unmasking_mapping(source_nodes)
+            source_node_mapping = self.get_source_unmasking_mapping(source_nodes)
             edge_index[0] = torch.from_numpy(source_node_mapping(edge_index[0].cpu().numpy())).to(edge_index.device)
 
         # Remap target indices (row 1)
         if self.target_mask_attr_name is not None:
-            target_node_mapping = NodeMaskingMixin.get_target_unmasking_mapping(target_nodes)
+            target_node_mapping = self.get_target_unmasking_mapping(target_nodes)
             edge_index[1] = torch.from_numpy(target_node_mapping(edge_index[1].cpu().numpy())).to(edge_index.device)
 
         return edge_index
