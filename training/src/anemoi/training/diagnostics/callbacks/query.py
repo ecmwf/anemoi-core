@@ -288,7 +288,11 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             gathered = [None] * torch.distributed.get_world_size()
             torch.distributed.all_gather_object(gathered, local)
         if trainer.is_global_zero:
-            self.plot(trainer, self._sampler_payload(gathered, trainer))
+            payload = self._sampler_payload(gathered, trainer)
+            if payload["counts"].get("entered", {}).get("samples", 0):
+                self.plot(trainer, payload)
+            else:
+                LOGGER.info("Skipping sampler plot for a resumed epoch with no newly entered examples.")
         self._counts.clear()
         self._metrics.clear()
 
@@ -1893,16 +1897,19 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             )
         for ax in axes[2]:
             ax.axis("off")
-        table = axes[2, 1].table(
-            cellText=rows,
-            colLabels=["var/prov/lead", "n", "normalised", "physical", "score", "loss weight"],
-            loc="center",
-            cellLoc="left",
-            colWidths=[0.30, 0.07, 0.13, 0.22, 0.13, 0.15],
-            bbox=[-1, 0, 3, 1],
-        )
-        table.auto_set_font_size(False)
-        table.set_fontsize(6)
+        if rows:
+            table = axes[2, 1].table(
+                cellText=rows,
+                colLabels=["var/prov/lead", "n", "normalised", "physical", "score", "loss weight"],
+                loc="center",
+                cellLoc="left",
+                colWidths=[0.30, 0.07, 0.13, 0.22, 0.13, 0.15],
+                bbox=[-1, 0, 3, 1],
+            )
+            table.auto_set_font_size(False)
+            table.set_fontsize(6)
+        else:
+            axes[2, 1].text(0.5, 0.5, "No subgroup metrics collected", ha="center", va="center")
         axes[2, 1].set_title("subgroup error; physical units are never pooled")
         entered = counts.get("entered", {}).get("samples", 0)
         valid = counts.get("valid_target", {}).get("samples", 0)
