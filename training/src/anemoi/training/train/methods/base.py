@@ -47,6 +47,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
@@ -200,7 +201,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = build_output_masks(get_multiple_datasets_config(config.model.output_mask), graph_data)
+        self.output_mask = self._build_output_masks(
+            get_multiple_datasets_config(config.model.output_mask),
+            graph_data,
+        )
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -428,6 +432,23 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     @cached_property
     def logger_enabled(self) -> bool:
         return self.trainer.logger is not None
+
+    def _build_output_masks(self, output_mask_configs: dict, graph_data: HeteroData | Path) -> dict:
+        """Build output masks from fused or per-dataset file graphs."""
+        if isinstance(graph_data, Path):
+            output_masks = {}
+            for dataset_name in self.dataset_names:
+                output_mask_config = output_mask_configs.get(dataset_name)
+                output_masks[dataset_name] = (
+                    build_output_masks(
+                        {DEFAULT_DATASET_NAME: output_mask_config},
+                        self._graph_data_dict[dataset_name],
+                    )[DEFAULT_DATASET_NAME]
+                    if output_mask_config is not None
+                    else NoOutputMask()
+                )
+            return output_masks
+        return build_output_masks(output_mask_configs, graph_data)
 
     def _build_metrics_for_dataset(
         self,

@@ -56,12 +56,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 graph=(
                     self._graph_data if file_graph else self._graph_data[(dataset_name, "to", self._graph_name_hidden)]
                 ),
-                edge_attributes=model_config.model.encoder.get("sub_graph_edge_attributes"),
+                edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=DEFAULT_DATASET_NAME if file_graph else self.node_attributes.num_nodes[dataset_name],
                 dst_size=(
                     self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden]
                 ),
-                trainable_size=model_config.model.encoder.get("trainable_size", 0),
+                trainable_size=encoder_config.mapper.get("trainable_size", 0),
                 dataset_name=dataset_name if file_graph else None,
             )
 
@@ -91,10 +91,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 if file_graph
                 else self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]
             ),
-            edge_attributes=model_config.model.processor.get("sub_graph_edge_attributes"),
+            edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
             src_size=self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden],
             dst_size=self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden],
-            trainable_size=model_config.model.processor.get("trainable_size", 0),
+            trainable_size=model_config.processor.get("trainable_size", 0),
             dataset_name=self.dataset_names[0] if file_graph else None,
         )
 
@@ -126,12 +126,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 graph=(
                     self._graph_data if file_graph else self._graph_data[(self._graph_name_hidden, "to", dataset_name)]
                 ),
-                edge_attributes=model_config.model.decoder.get("sub_graph_edge_attributes"),
+                edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
                 src_size=(
                     self._graph_name_hidden if file_graph else self.node_attributes.num_nodes[self._graph_name_hidden]
                 ),
                 dst_size=DEFAULT_DATASET_NAME if file_graph else self.node_attributes.num_nodes[dataset_name],
-                trainable_size=model_config.model.decoder.get("trainable_size", 0),
+                trainable_size=decoder_config.mapper.get("trainable_size", 0),
                 dataset_name=dataset_name if file_graph else None,
             )
 
@@ -169,6 +169,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
         the per-node attributes on the feature dimension, and computes the residual skip tensor.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor for the dataset.
+        batch_size : int
+            Batch size.
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset grid shard sizes.
+        model_comm_group : ProcessGroup | None
+            Model communication group.
+        dataset_name : str | None
+            Dataset to assemble.
 
         Returns
         -------
@@ -214,6 +227,21 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Concatenates the feature blocks listed in ``decoders_target_input`` for this dataset's
         decoder into the per-node vector fed to the decoder as ``x_dst``.
+
+        Parameters
+        ----------
+        x_input_data : Tensor
+            Raw input tensor for the dataset.
+        x_encoded_data : Tensor | None
+            Encoded input tensor, when required by the decoder target input.
+        batch_size : int
+            Batch size.
+        grid_shard_sizes : DatasetShardSizes | None
+            Per-dataset grid shard sizes.
+        model_comm_group : ProcessGroup | None
+            Model communication group.
+        dataset_name : str | None
+            Dataset to assemble.
 
         Returns
         -------
