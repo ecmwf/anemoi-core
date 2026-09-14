@@ -15,10 +15,12 @@ import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
+from packaging import version
 
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.train.train import PL_VERSION
 
 LOGGER = logging.getLogger(__name__)
 
@@ -87,10 +89,15 @@ class AnemoiEvaluator(AnemoiTrainer):
         # Otherwise let PL restore the full training state from the checkpoint.
         ckpt_path = None if self.load_weights_only else self.last_checkpoint
 
+        validate_parameters = {}
+        if version.parse("2.6.0") <= PL_VERSION:
+            validate_parameters["weights_only"] = False
+
         trainer.validate(
             model=self.model,
             datamodule=self.datamodule,
             ckpt_path=ckpt_path,
+            **validate_parameters,
         )
 
         if self.config.diagnostics.print_memory_summary:
