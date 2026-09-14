@@ -17,8 +17,8 @@ from enum import Enum
 from importlib.util import find_spec
 
 import numpy as np
-from scipy.sparse import coo_matrix
 import torch
+from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
