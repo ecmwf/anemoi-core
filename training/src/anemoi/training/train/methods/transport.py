@@ -301,11 +301,9 @@ class ResidualPredictionMode(PredictionMode):
     ``prepare_target`` denormalizes the projected lres source and the target so the
     residual can be computed in physical space, then renormalizes it with residual
     (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
-    The lres dataset is identified via ``transport.encoder_decoder_roles`` in the training
-    config.  Each entry names the ``reference``, ``target``, and optionally ``conditioning``
-    datasets for one encoder/decoder triple.  ``_encoder_decoder_roles_by_target`` inverts this into a
-    ``{target_dataset_name: role}`` dict so that ``prepare_target`` can look up the correct
-    reference dataset for each target independently — for multiple enc/dec pairs.
+    The reference dataset for each target is read from ``transport.residual_reference`` in
+    the training config, a ``{target: reference}`` mapping, so that ``prepare_target`` can
+    look up the correct baseline for each target independently — for multiple targets.
     Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
     normalization; those processors are built from the zero lead-time entry of
     ``statistics_tendencies`` because the residual is defined against the current
@@ -317,41 +315,20 @@ class ResidualPredictionMode(PredictionMode):
         super().__init__(module)
         self._validate_objective()
         self._validate_source_kind()
-        self._encoder_decoder_roles_by_target = self._build_encoder_decoder_roles_by_target()
+        self._reference_by_target = self._build_reference_by_target()
 
-    def _build_encoder_decoder_roles_by_target(self) -> dict:
-        """Build a ``{target_dataset_name: role}`` index from ``transport.encoder_decoder_roles``.
-
-        Raises ``ValueError`` if ``encoder_decoder_roles`` is not configured or if any
-        two triples map to the same target dataset (which would be ambiguous).
-        """
+    def _build_reference_by_target(self) -> dict[str, str]:
+        """Read the ``{target: reference}`` mapping from ``transport.residual_reference``."""
         transport = getattr(self.module.config.training, "transport", {}) or {}
-        enc_dec_roles = transport.get("encoder_decoder_roles", None)
-        if not enc_dec_roles:
+        residual_reference = transport.get("residual_reference", None)
+        if not residual_reference:
             msg = (
-                "transport.encoder_decoder_roles is not configured. "
-                "Set transport.encoder_decoder_roles in your training config with at least one "
-                "entry containing 'reference' and 'target' keys."
+                "transport.residual_reference is not configured. "
+                "Set transport.residual_reference in your training config to pair each target "
+                "dataset with its residual baseline, e.g. {out_hres: in_lres}."
             )
             raise ValueError(msg)
-        roles_by_target: dict = {}
-        for enc_name, role in enc_dec_roles.items():
-            target = role.get("target") if hasattr(role, "get") else getattr(role, "target", None)
-            reference = role.get("reference") if hasattr(role, "get") else getattr(role, "reference", None)
-            if not target or not reference:
-                msg = (
-                    f"encoder_decoder_roles['{enc_name}'] must specify both 'reference' and 'target'. "
-                    f"Got: {role!r}."
-                )
-                raise ValueError(msg)
-            if target in roles_by_target:
-                msg = (
-                    f"encoder_decoder_roles: target dataset '{target}' appears in more than one "
-                    f"encoder/decoder triple, which is ambiguous."
-                )
-                raise ValueError(msg)
-            roles_by_target[target] = role
-        return roles_by_target
+        return dict(residual_reference)
 
     def _validate_objective(self) -> None:
         objective_kind = getattr(self.module.config.training, "transport", {}).get("objective", "")
@@ -404,11 +381,11 @@ class ResidualPredictionMode(PredictionMode):
 
     def _reference_dataset_name_for_target(self, target_dataset_name: str) -> str:
         """Return the reference dataset name for a given target dataset."""
-        role = self._encoder_decoder_roles_by_target.get(target_dataset_name)
-        if role is None:
-            msg = f"No encoder_decoder_roles entry found for target dataset '{target_dataset_name}'."
+        reference = self._reference_by_target.get(target_dataset_name)
+        if reference is None:
+            msg = f"No transport.residual_reference entry found for target dataset '{target_dataset_name}'."
             raise ValueError(msg)
-        return role.get("reference") if hasattr(role, "get") else role.reference
+        return reference
 
     def prepare_target(
         self,
@@ -418,7 +395,7 @@ class ResidualPredictionMode(PredictionMode):
         """Compute the normalized residual target from an already-normalized batch.
 
         For each target dataset, looks up its paired reference dataset from
-        ``_encoder_decoder_roles_by_target``, denormalizes the reference projection, and delegates
+        ``_reference_by_target``, denormalizes the reference projection, and delegates
         the per-channel residual/state split to
         :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`.
         Prognostic channels become normalized residuals; diagnostic channels are kept

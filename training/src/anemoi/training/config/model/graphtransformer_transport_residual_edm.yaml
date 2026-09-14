@@ -6,12 +6,13 @@
 # out_hres contributes the noised target. Only the fusion_anchor (out_hres) owns
 # encoder/decoder edges.
 #
-# training.transport.encoder_decoder_roles only pairs the residual baseline with its
-# target (reference = in_lres, target = out_hres); which datasets are encoded is
-# decided by encoders.*.source_datasets.
+# training.transport.residual_reference only pairs the residual baseline with its
+# target ({out_hres: in_lres}); which datasets are encoded is decided by
+# encoders.*.source_datasets.
 
 num_channels: 1024
 cpu_offload: False
+recompile_limit: 32
 
 keep_batch_sharded: True
 

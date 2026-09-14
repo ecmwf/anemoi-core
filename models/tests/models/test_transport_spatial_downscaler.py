@@ -169,9 +169,7 @@ def _make_bare_model(
     # Encoder/decoder config names deliberately differ from the dataset name,
     # as in the graphtransformer_multi_* configs.
     _wire_fused_encoder_routing(model, anchor="out_hres", fused=["in_lres", "in_hres"])
-    model._roles_by_target = {
-        "out_hres": {"reference": "in_lres", "target": "out_hres"},
-    }
+    model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
 
@@ -316,50 +314,22 @@ def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the
 # ── role inference ────────────────────────────────────────────────────────────
 
 
-def test_resolve_roles_identifies_target_and_input_datasets_from_encoder_decoder_roles() -> None:
-    """The dataset listed as ``target`` in each triple is a target; reference/conditioning are inputs."""
+def test_resolve_roles_reads_the_residual_reference_mapping() -> None:
+    """``residual_reference`` is a ``{target: reference}`` map; its keys are the targets."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
     model.data_indices = _make_downscaler_indices()
     model.dataset_names = list(model.data_indices.keys())
-    config = {
-        "training": {
-            "transport": {
-                "encoder_decoder_roles": {
-                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres", "conditioning": "in_hres"},
-                },
-            },
-        },
-    }
-    model._resolve_roles(config)
+
+    model._resolve_roles({"training": {"transport": {"residual_reference": {"out_hres": "in_lres"}}}})
+
     assert model.target_dataset_names == ["out_hres"]
-    assert model._roles_by_target["out_hres"]["reference"] == "in_lres"
+    assert model._reference_by_target == {"out_hres": "in_lres"}
 
 
-def test_resolve_roles_rejects_duplicate_target() -> None:
-    """Two entries with the same ``target`` value must be rejected."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
-    )
-    model.data_indices = _make_downscaler_indices()
-    model.dataset_names = list(model.data_indices.keys())
-    config = {
-        "training": {
-            "transport": {
-                "encoder_decoder_roles": {
-                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
-                    "enc_dec_1": {"reference": "in_lres", "target": "out_hres"},  # duplicate!
-                },
-            },
-        },
-    }
-    with pytest.raises(ValueError, match="more than one entry"):
-        model._resolve_roles(config)
-
-
-def test_resolve_roles_allows_multiple_unique_targets() -> None:
-    """Two triples with different targets are both valid — each builds its own enc/dec pair."""
+def test_resolve_roles_allows_multiple_targets() -> None:
+    """Several targets may share one reference; each gets its own decoder."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
@@ -372,14 +342,13 @@ def test_resolve_roles_allows_multiple_unique_targets() -> None:
     config = {
         "training": {
             "transport": {
-                "encoder_decoder_roles": {
-                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
-                    "enc_dec_1": {"reference": "in_lres", "target": "out_hres_2"},
-                },
+                "residual_reference": {"out_hres": "in_lres", "out_hres_2": "in_lres"},
             },
         },
     }
+
     model._resolve_roles(config)
+
     assert model.target_dataset_names == ["out_hres", "out_hres_2"]
 
 
@@ -628,9 +597,7 @@ def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
     )
     model.target_dataset_names = ["out_hres"]
     _wire_fused_encoder_routing(model, anchor="out_hres", fused=["in_lres", "in_hres"])
-    model._roles_by_target = {
-        "out_hres": {"reference": "in_lres", "target": "out_hres"},
-    }
+    model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
 
@@ -906,7 +873,7 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
 
 
 def test_resolve_roles_records_the_reference_for_each_target() -> None:
-    """``_roles_by_target`` is authoritative for the residual baseline.
+    """``_reference_by_target`` is authoritative for the residual baseline.
 
     Which datasets are *encoded* with the target is decided by the encoder
     routing, not here.
@@ -919,18 +886,11 @@ def test_resolve_roles_records_the_reference_for_each_target() -> None:
         "out_hres": _make_index_collection({"t2m": 0, "precip": 1}, diagnostic=["precip"]),
     }
     model.dataset_names = list(model.data_indices.keys())
-    config = {
-        "training": {
-            "transport": {
-                "encoder_decoder_roles": {
-                    "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
-                },
-            },
-        },
-    }
-    model._resolve_roles(config)
+
+    model._resolve_roles({"training": {"transport": {"residual_reference": {"out_hres": "in_lres"}}}})
+
     assert model.target_dataset_names == ["out_hres"]
-    assert model._roles_by_target["out_hres"]["reference"] == "in_lres"
+    assert model._reference_by_target == {"out_hres": "in_lres"}
 
 
 def test_validate_roles_match_encoder_routing_accepts_a_consistent_setup() -> None:
@@ -956,42 +916,22 @@ def test_validate_roles_match_encoder_routing_rejects_targets_the_decoders_do_no
         model._validate_roles_match_encoder_routing()
 
 
-def test_validate_roles_match_encoder_routing_rejects_conditioning_that_is_not_encoded() -> None:
-    """``conditioning`` is now only a hint; the encoder's source_datasets decide.
-
-    Accepting a conditioning input the encoder never sees would silently train a
-    different model than the config describes.
-    """
-    model = _make_bare_model()
-    model._roles_by_target["out_hres"]["conditioning"] = "in_static"
-
-    with pytest.raises(ValueError, match="conditioning dataset 'in_static'"):
-        model._validate_roles_match_encoder_routing()
-
-
-def test_resolve_roles_raises_without_encoder_decoder_roles() -> None:
-    """Raises ``ValueError`` when called with a config that has no ``encoder_decoder_roles``."""
+def test_resolve_roles_raises_without_residual_reference() -> None:
+    """Raises ``ValueError`` when called with a config that has no ``residual_reference``."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
     model.data_indices = _make_downscaler_indices()
     model.dataset_names = list(model.data_indices.keys())
-    with pytest.raises(ValueError, match="encoder_decoder_roles"):
+    with pytest.raises(ValueError, match="residual_reference"):
         model._resolve_roles({"training": {"transport": {}}})
 
 
 # ── _resolve_roles: reference/target prognostic role consistency ───────────
 
 
-def _resolve_roles_config(
-    target: str = "out_hres",
-    reference: str = "in_lres",
-    conditioning: str | None = None,
-) -> dict:
-    role: dict[str, str] = {"reference": reference, "target": target}
-    if conditioning is not None:
-        role["conditioning"] = conditioning
-    return {"training": {"transport": {"encoder_decoder_roles": {"enc_dec_0": role}}}}
+def _resolve_roles_config(target: str = "out_hres", reference: str = "in_lres") -> dict:
+    return {"training": {"transport": {"residual_reference": {target: reference}}}}
 
 
 def test_resolve_roles_rejects_target_prognostic_absent_from_reference() -> None:
@@ -1128,9 +1068,7 @@ def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
             },
             "training": {
                 "transport": {
-                    "encoder_decoder_roles": {
-                        "enc_dec_0": {"reference": "in_lres", "target": "out_hres"},
-                    },
+                    "residual_reference": {"out_hres": "in_lres"},
                 },
             },
         },

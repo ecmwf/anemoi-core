@@ -9,7 +9,6 @@
 
 
 import logging
-from typing import Any
 from typing import Callable
 from typing import Optional
 
@@ -1127,63 +1126,40 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         self._validate_roles_match_encoder_routing()
 
     def _resolve_roles(self, model_config: DotDict) -> None:
-        """Build per-target role index from ``training.transport.encoder_decoder_roles``."""
+        """Build the ``{target: reference}`` index from ``training.transport.residual_reference``."""
 
-        enc_dec_roles = model_config.get("training", {}).get("transport", {}).get("encoder_decoder_roles", None) or {}
-        if not enc_dec_roles:
+        residual_reference = model_config.get("training", {}).get("transport", {}).get("residual_reference", None) or {}
+        if not residual_reference:
             msg = (
                 "AnemoiTransportSpatialDownscalerModelEncProcDec requires "
-                "training.transport.encoder_decoder_roles to be configured with at least one entry."
+                "training.transport.residual_reference to pair each target dataset with its "
+                "residual baseline, e.g. {out_hres: in_lres}."
             )
             raise ValueError(msg)
 
-        # Invert to {target: role}; each target must appear exactly once.
-        self._roles_by_target: dict[str, Any] = {}
-        for enc_name, role in enc_dec_roles.items():
-            target = role["target"]
-            if target in self._roles_by_target:
-                msg = (
-                    f"encoder_decoder_roles: target dataset '{target}' appears in more than one "
-                    f"entry.  Each target must be owned by exactly one enc/dec triple."
-                )
-                raise ValueError(msg)
-            self._roles_by_target[target] = role
-
-        # Ordered list of target datasets (one per triple).
-        self.target_dataset_names: list[str] = list(self._roles_by_target.keys())
+        self._reference_by_target: dict[str, str] = dict(residual_reference)
+        self.target_dataset_names: list[str] = list(self._reference_by_target.keys())
 
         # Fail fast on residual-baseline misconfiguration: every target prognostic
         # variable must also be prognostic in its reference dataset.
         self._validate_prognostics_match()
 
     def _validate_roles_match_encoder_routing(self) -> None:
-        """Require the role assignment and the encoder/decoder routing to describe the same model."""
+        """Require the residual pairing and the encoder/decoder routing to describe the same model."""
         role_targets = set(self.target_dataset_names)
         routed_targets = set(self.target_datasets)
         if role_targets != routed_targets:
             msg = (
-                f"encoder_decoder_roles declares targets {sorted(role_targets)} but the decoders "
+                f"residual_reference declares targets {sorted(role_targets)} but the decoders "
                 f"declare {sorted(routed_targets)}. Every target must appear in both."
             )
             raise ValueError(msg)
 
-        for target_name, role in self._roles_by_target.items():
-            reference_name = role["reference"]
+        for target_name, reference_name in self._reference_by_target.items():
             fused_inputs = self._fused_input_dataset_names(target_name)
             if reference_name not in fused_inputs:
                 msg = (
-                    f"encoder_decoder_roles: reference dataset '{reference_name}' of target "
-                    f"'{target_name}' is not encoded with it. Add it to the source_datasets of "
-                    f"encoder '{self.dataset2encoder[target_name]}' (currently fusing {fused_inputs})."
-                )
-                raise ValueError(msg)
-
-            # ``conditioning`` is redundant now that the encoder's source_datasets
-            # list every fused input, but silently ignoring it would hide a typo.
-            conditioning_name = role.get("conditioning")
-            if conditioning_name is not None and conditioning_name not in fused_inputs:
-                msg = (
-                    f"encoder_decoder_roles: conditioning dataset '{conditioning_name}' of target "
+                    f"residual_reference: reference dataset '{reference_name}' of target "
                     f"'{target_name}' is not encoded with it. Add it to the source_datasets of "
                     f"encoder '{self.dataset2encoder[target_name]}' (currently fusing {fused_inputs})."
                 )
@@ -1192,8 +1168,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     def _validate_prognostics_match(self) -> None:
         """Require the set of prognostic variables in the target and its reference to match exactly."""
         errors: list[str] = []
-        for target_name, role in self._roles_by_target.items():
-            reference_name = role["reference"]
+        for target_name, reference_name in self._reference_by_target.items():
             target_prognostic_names = set(self.data_indices[target_name].prognostic)
             reference_prognostic_names = set(self.data_indices[reference_name].prognostic)
             if target_prognostic_names == reference_prognostic_names:
@@ -1209,7 +1184,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         if errors:
             bullets = "\n  - ".join(errors)
             msg = (
-                "encoder_decoder_roles: residual prediction requires the set of prognostic "
+                "residual_reference: residual prediction requires the set of prognostic "
                 "variables in each target dataset to match its reference dataset exactly:\n  - " + bullets
             )
             raise ValueError(msg)
@@ -1513,7 +1488,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         x_ref_on_target_grid_by_target: dict[str, torch.Tensor] = {}
         reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]] = {}
         for target_name in self.target_dataset_names:
-            reference_name = self._roles_by_target[target_name]["reference"]
+            reference_name = self._reference_by_target[target_name]
             x_ref_on_target_grid_by_target[target_name] = post_processors[reference_name](
                 xs[reference_name],
                 in_place=False,

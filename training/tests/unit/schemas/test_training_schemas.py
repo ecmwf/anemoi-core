@@ -17,6 +17,7 @@ from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
+from anemoi.training.schemas.training import TransportTrainingConfigSchema
 
 _TIME_AGG_CFG = {
     "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
@@ -241,4 +242,48 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                     },
                 ],
             },
+        )
+
+
+def test_transport_defaults_to_state_prediction_without_a_residual_reference() -> None:
+    config = TransportTrainingConfigSchema()
+
+    assert config.prediction_mode == "state"
+    assert config.residual_reference == {}
+
+
+def test_transport_accepts_residual_prediction_with_a_reference() -> None:
+    config = TransportTrainingConfigSchema(
+        prediction_mode="residual",
+        residual_reference={"out_hres": "in_lres"},
+    )
+
+    assert config.residual_reference == {"out_hres": "in_lres"}
+
+
+def test_transport_rejects_residual_prediction_without_a_reference() -> None:
+    with pytest.raises(ValidationError, match="requires residual_reference"):
+        TransportTrainingConfigSchema(prediction_mode="residual")
+
+
+def test_transport_rejects_a_residual_reference_outside_residual_mode() -> None:
+    """Silently ignoring it would hide a half-finished switch to residual mode."""
+    with pytest.raises(ValidationError, match="would be ignored"):
+        TransportTrainingConfigSchema(prediction_mode="tendency", residual_reference={"out_hres": "in_lres"})
+
+
+def test_transport_rejects_residual_prediction_with_stochastic_interpolant() -> None:
+    with pytest.raises(ValidationError, match="only supports objective='edm_diffusion'"):
+        TransportTrainingConfigSchema(
+            prediction_mode="residual",
+            objective="stochastic_interpolant",
+            residual_reference={"out_hres": "in_lres"},
+        )
+
+
+def test_transport_rejects_a_target_that_is_its_own_residual_baseline() -> None:
+    with pytest.raises(ValidationError, match="their own residual baseline"):
+        TransportTrainingConfigSchema(
+            prediction_mode="residual",
+            residual_reference={"out_hres": "out_hres"},
         )

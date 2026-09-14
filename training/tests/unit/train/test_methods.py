@@ -2655,12 +2655,7 @@ def _make_residual_module(
             training=SimpleNamespace(
                 transport={
                     "objective": "edm_diffusion",
-                    "encoder_decoder_roles": {
-                        "enc_dec_0": {
-                            "reference": lres_name,
-                            "target": target_name,
-                        },
-                    },
+                    "residual_reference": {target_name: lres_name},
                 },
             ),
         ),
@@ -2685,7 +2680,7 @@ def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes(
     )
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
-    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
+    mode._reference_by_target = {"out": "in_lres"}
 
     # Normalized batch — a fully normalized tensor for lres and target on the same grid.
     b, t, e, g = 2, 1, 1, 4
@@ -2727,7 +2722,7 @@ def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target(
     )
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
-    mode._encoder_decoder_roles_by_target = {"out": {"reference": "in_lres", "target": "out"}}
+    mode._reference_by_target = {"out": "in_lres"}
 
     b, t, e, g = 2, 1, 1, 4
     lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
@@ -2778,7 +2773,7 @@ def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> 
         training=SimpleNamespace(
             transport={
                 "objective": "stochastic_interpolant",
-                "encoder_decoder_roles": {"enc_dec_0": {"reference": "in_lres", "target": "out"}},
+                "residual_reference": {"out": "in_lres"},
             },
         ),
     )
@@ -2787,18 +2782,18 @@ def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> 
 
 
 def test_residual_prediction_mode_reference_dataset_raises_when_roles_absent() -> None:
-    """_build_encoder_decoder_roles_by_target raises ValueError when transport.encoder_decoder_roles is not set."""
+    """_build_reference_by_target raises ValueError when transport.residual_reference is not set."""
     module, _ = _make_residual_module(
         pre_offset=0.0,
         post_offset=0.0,
         tend_pre_offset=0.0,
         tend_post_offset=0.0,
     )
-    module.config.training.transport = {"objective": "edm_diffusion"}  # no encoder_decoder_roles
+    module.config.training.transport = {"objective": "edm_diffusion"}  # no residual_reference
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
     with pytest.raises(ValueError, match="is not configured"):
-        mode._build_encoder_decoder_roles_by_target()
+        mode._build_reference_by_target()
 
 
 def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:

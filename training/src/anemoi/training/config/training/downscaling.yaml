@@ -70,20 +70,10 @@ method:
 transport:
   prediction_mode: residual
   objective: edm_diffusion
-  # Encoder/decoder role assignments for ResidualPredictionMode, keyed by encoder/decoder name.
-  # Which datasets are encoded is decided by model.encoders.*.source_datasets; these roles
-  # only pair the residual baseline with its target.
-  encoder_decoder_roles:
-    enc_dec_0:
-      reference: in_lres      # low-res input projected onto hres grid; residual baseline
-      target: out_hres        # high-res output the model predicts
-      conditioning: in_hres  # must also appear in the encoder's source_datasets
-  # Log-normal noise schedule — corresponds to probabilistic_low_noise in the old config.
-  # Switch to distribution: karras for high-noise training.
-  training_condition:
-    kind: log_normal
-    mean: 0.0
-    std: 3.5
+  # Residual baseline for each target dataset, as {target: reference}. Which datasets are
+  # *encoded* is a separate concern, decided by model.encoders.*.source_datasets.
+  residual_reference:
+    out_hres: in_lres   # predict out_hres as a residual against in_lres projected onto its grid
 
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
@@ -114,4 +104,3 @@ metrics:
       - 2t
 
 submodules_to_freeze: []
-recompile_limit: 32
