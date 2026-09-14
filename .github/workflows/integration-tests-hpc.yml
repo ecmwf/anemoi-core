@@ -39,7 +39,7 @@ jobs:
         )
       }}
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             env | grep SLURM # helps with debugging
@@ -79,7 +79,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_benchmark' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: srun python -m pytest -v training/tests/integration/test_benchmark.py --slow --multigpu
+      pytest_cmd: srun python -m pytest -o tmp_path_retention_policy=all -v training/tests/integration/test_benchmark.py --slow --multigpu
       timeout_minutes: 360
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_benchmark_pytest
@@ -134,7 +134,7 @@ jobs:
     # built (e.g. an unlabeled PR that skipped build-env).
     if: ${{ always() && needs.build-env.result != 'skipped' }}
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             set -eux
