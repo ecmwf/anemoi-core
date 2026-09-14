@@ -1,10 +1,10 @@
-name: distributed-primitive-tests-hpc-gpu
+name: distributed-tests-hpc
 
 on:
   workflow_dispatch:
 
 jobs:
-  distributed-primitive-tests:
+  distributed-tests:
     runs-on: hpc
     timeout-minutes: 60
     steps:
@@ -32,7 +32,7 @@ jobs:
             deactivate
             rm -rf $REPO_NAME
           sbatch_options: |
-            #SBATCH --job-name=anemoi_core_dist_primitives
+            #SBATCH --job-name=anemoi_core_distributed_pytest
             #SBATCH --nodes=1
             #SBATCH --ntasks=1
             #SBATCH --cpus-per-task=4

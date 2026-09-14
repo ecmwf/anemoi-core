@@ -28,6 +28,8 @@ from anemoi.models.distributed.primitives import _alltoall_transpose
 from anemoi.models.distributed.primitives import _resolve_group_name
 from tests.distributed._distributed_runner import _run_distributed_test
 
+from .distributed_runner import run_distributed_test
+
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
 

@@ -18,6 +18,8 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
 from tests.distributed._distributed_runner import _run_distributed_test
 
+from .distributed_runner import run_distributed_test
+
 
 def _test_cross_grid_projector_returns_target_shards_rank(
     *,
