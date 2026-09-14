@@ -9,31 +9,87 @@
 
 
 import contextlib
+import logging
+import os
+from collections.abc import Iterator
+from contextlib import contextmanager
 from enum import Enum
+from importlib.util import find_spec
 
+import numpy as np
+from scipy.sparse import coo_matrix
 import torch
 from sklearn.neighbors import NearestNeighbors
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
+LOGGER = logging.getLogger(__name__)
+
+FORCE_CPU_ENV_VAR = "ANEMOI_GRAPHS_FORCE_CPU"
+DISABLE_PYG_LIB_ENV_VAR = "ANEMOI_GRAPHS_DISABLE_PYG_LIB"
+
 
 def get_distributed_device() -> torch.device:
-    """Get the distributed device.
+    """Get the device that graph building should use on this rank.
+    Also makes the current CUDA device match the returned device.
+
+    Set ``ANEMOI_GRAPHS_FORCE_CPU=1`` to build graphs on the CPU instead.
 
     Returns
     -------
     torch.device
-        The distributed device.
+        The device to build the graph on.
     """
-    if torch.cuda.is_available():
-        import os
+    if os.environ.get(FORCE_CPU_ENV_VAR):
+        return torch.device("cpu")
 
-        local_rank = int(os.environ.get("SLURM_LOCALID", 0))
-        device = torch.device(f"cuda:{local_rank}")
-    else:
-        device = torch.device("cpu")
+    if not torch.cuda.is_available():
+        return torch.device("cpu")
 
-    return device
+    local_rank = int(os.environ.get("SLURM_LOCALID", "0"))
+
+    device_count = torch.cuda.device_count()
+    if local_rank >= device_count:
+        LOGGER.warning(
+            "SLURM_LOCALID=%d but only %d CUDA device(s) are visible; building the graph on "
+            "cuda:%d. Check that the number of tasks per node matches the number of GPUs.",
+            local_rank,
+            device_count,
+            local_rank % device_count,
+        )
+        local_rank = local_rank % device_count
+
+    # Keep the current device in sync with where the data will live - see docstring.
+    torch.cuda.set_device(local_rank)
+
+    return torch.device(f"cuda:{local_rank}")
+
+
+@contextmanager
+def cuda_device_of(device: torch.device | str | None) -> Iterator[None]:
+    """Temporarily make the current CUDA device the one ``device`` refers to.
+
+    Defence in depth for kernels that lack their own device guard (see get_distributed_device).
+    A no-op for CPU tensors and when no device is given, so it is safe to wrap call sites unconditionally.
+    """
+    device = torch.device(device) if device is not None else None
+    if device is None or device.type != "cuda":
+        yield
+        return
+
+    with torch.cuda.device(device):
+        yield
+
+
+def is_pyg_lib_available() -> bool:
+    """Whether the pyg-lib accelerated neighbour-search kernels should be used.
+
+    Set ANEMOI_GRAPHS_DISABLE_PYG_LIB=1 to fall back to the scikit-learn implementation.
+    """
+    if os.environ.get(DISABLE_PYG_LIB_ENV_VAR):
+        return False
+
+    return find_spec("pyg_lib") is not None
 
 
 def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
@@ -64,6 +120,9 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
         1,
     ), "Mask must have the same shape as the number of nodes."
 
+    if isinstance(coords_rad, torch.Tensor):
+        coords_rad = coords_rad.detach().cpu()
+
     nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
     nearest_neighbour.fit(coords_rad.cpu())
@@ -71,7 +130,9 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
     return nearest_neighbour
 
 
-def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> float:
+def get_grid_reference_distance(
+    coords_rad: torch.Tensor, mask: torch.Tensor | None = None, use_cartesian: bool = True
+) -> float:
     """Get the reference distance of the grid.
 
     It is the maximum distance of a node in the mesh with respect to its nearest neighbour.
@@ -82,16 +143,57 @@ def get_grid_reference_distance(coords_rad: torch.Tensor, mask: torch.Tensor | N
         Coordinates in radians.
     mask : torch.Tensor, optional
         Mask to remove nodes, by default None.
+    use_cartesian : bool, optional
+        Whether to convert coordinates to Cartesian before computing distances. Defaults to True.
 
     Returns
     -------
     float
         The reference distance of the grid.
     """
-    xyz = latlon_rad_to_cartesian(coords_rad).cpu()
-    nearest_neighbours = get_nearest_neighbour(xyz, mask)
-    dists, _ = nearest_neighbours.kneighbors(xyz, n_neighbors=2, return_distance=True)
+    points = latlon_rad_to_cartesian(coords_rad) if use_cartesian else coords_rad
+    if isinstance(points, torch.Tensor):
+        points = points.detach().cpu()
+    nearest_neighbours = get_nearest_neighbour(points, mask)
+    dists, _ = nearest_neighbours.kneighbors(points, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
+
+
+def crop_to_max_num_neighbours(adjmat, max_num_neighbours: int) -> coo_matrix:
+    """Remove neighbors exceeding the maximum allowed limit."""
+    nodes_to_drop = np.maximum(np.bincount(adjmat.row) - max_num_neighbours, 0)
+    if (num_nodes_to_drop := nodes_to_drop.sum()) == 0:
+        return adjmat
+
+    LOGGER.info(
+        "Removing %d neighbours because they exceed the maximum allowed number of neighbours (%d) for each target node.",
+        num_nodes_to_drop,
+        max_num_neighbours,
+    )
+
+    # Vectorized approach: sort edges by (row, distance) to group by node
+    # no repeated O(nnz) scans in a loop
+    sort_idx = np.lexsort((adjmat.data, adjmat.row))
+    sorted_rows = adjmat.row[sort_idx]
+
+    # Find where each row starts and ends
+    row_changes = np.concatenate(([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)]))
+
+    # Compute rank of each edge within its row
+    edge_rank_in_row = np.zeros(len(sorted_rows), dtype=int)
+    for i in range(len(row_changes) - 1):
+        start, end = row_changes[i], row_changes[i + 1]
+        edge_rank_in_row[start:end] = np.arange(end - start)
+
+    # Keep edges where rank < max_num_neighbours (smallest distances are first due to sorting)
+    mask_sorted = edge_rank_in_row < max_num_neighbours
+
+    # Map back to original order
+    mask = np.zeros(adjmat.nnz, dtype=bool)
+    mask[sort_idx] = mask_sorted
+
+    # Define the new sparse matrix
+    return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
 
 def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
