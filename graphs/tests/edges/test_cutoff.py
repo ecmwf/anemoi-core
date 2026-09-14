@@ -46,16 +46,18 @@ def test_fail_init_both_params(edge_builder):
 def test_cutoff(edge_builder, graph_with_nodes: HeteroData):
     """Test CutOffEdges with cutoff_factor."""
     builder = edge_builder("test_nodes", "test_nodes", cutoff_factor=0.5)
-    graph = builder.update_graph(graph_with_nodes)
-    assert ("test_nodes", "to", "test_nodes") in graph.edge_types
+    assert ("test_nodes", "to", "test_nodes") not in graph_with_nodes.edge_types
+    builder.update_graph(graph_with_nodes)
+    assert ("test_nodes", "to", "test_nodes") in graph_with_nodes.edge_types
 
 
 @pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])
 def test_cutoff_with_distance_km(edge_builder, graph_with_nodes: HeteroData):
     """Test CutOffEdges with cutoff_distance_km."""
     builder = edge_builder("test_nodes", "test_nodes", cutoff_distance_km=500.0)
-    graph = builder.update_graph(graph_with_nodes)
-    assert ("test_nodes", "to", "test_nodes") in graph.edge_types
+    assert ("test_nodes", "to", "test_nodes") not in graph_with_nodes.edge_types
+    builder.update_graph(graph_with_nodes)
+    assert ("test_nodes", "to", "test_nodes") in graph_with_nodes.edge_types
 
 
 @pytest.mark.parametrize("edge_builder", [CutOffEdges, ReversedCutOffEdges])

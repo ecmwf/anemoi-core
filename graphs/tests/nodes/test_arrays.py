@@ -43,7 +43,7 @@ def test_register_nodes():
     """Test LatLonNodes register correctly the nodes."""
     graph = HeteroData()
     node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
-    graph = node_builder.register_nodes(graph)
+    node_builder.register_nodes(graph)
 
     assert graph["test_nodes"].x is not None
     assert isinstance(graph["test_nodes"].x, torch.Tensor)
@@ -55,10 +55,10 @@ def test_register_nodes():
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class):
     """Test LatLonNodes register correctly the weights."""
     node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
-    config = {"test_attr": {"_target_": f"anemoi.graphs.nodes.attributes.{attr_class.__name__}"}}
 
-    graph = node_builder.register_attributes(graph_with_nodes, config)
+    attr = attr_class(name="test_attr")
+    node_builder.register_attributes(graph_with_nodes, [attr])
 
-    assert graph["test_nodes"]["test_attr"] is not None
-    assert isinstance(graph["test_nodes"]["test_attr"], torch.Tensor)
-    assert graph["test_nodes"]["test_attr"].shape[0] == graph["test_nodes"].x.shape[0]
+    assert graph_with_nodes["test_nodes"]["test_attr"] is not None
+    assert isinstance(graph_with_nodes["test_nodes"]["test_attr"], torch.Tensor)
+    assert graph_with_nodes["test_nodes"]["test_attr"].shape[0] == graph_with_nodes["test_nodes"].x.shape[0]

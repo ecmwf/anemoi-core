@@ -57,8 +57,9 @@ def test_fail_init_reversed(reversed_num_nearest_neighbours):
 def test_mutual_knn(graph_with_nodes):
     """MutualKNNEdges registers the expected edge type."""
     builder = MutualKNNEdges("test_nodes", "test_nodes", 3)
-    graph = builder.update_graph(graph_with_nodes)
-    assert ("test_nodes", "to", "test_nodes") in graph.edge_types
+    assert ("test_nodes", "to", "test_nodes") not in graph_with_nodes.edge_types
+    builder.update_graph(graph_with_nodes)
+    assert ("test_nodes", "to", "test_nodes") in graph_with_nodes.edge_types
 
 
 def test_mutual_equals_intersection(graph_with_nodes):
@@ -239,5 +240,5 @@ def test_mutual_knn_graph_creation(tmp_path, mock_grids_path):
     with config_path.open("w") as file:
         yaml.dump(cfg, file)
 
-    graph = GraphCreator(config=config_path).create()
+    graph = GraphCreator.initialize_from_config(config=config_path).create_graph()
     assert ("test_nodes", "to", "test_nodes") in graph.edge_types

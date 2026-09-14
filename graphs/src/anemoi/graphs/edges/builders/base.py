@@ -16,15 +16,14 @@ from importlib.util import find_spec
 
 import numpy as np
 import torch
-from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.graphs.edges.attributes import BaseEdgeAttributeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -47,11 +46,13 @@ class BaseEdgeBuilder(ABC):
         target_name: str,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        attributes: list[BaseEdgeAttributeBuilder] | None = None,
     ):
         self.source_name = source_name
         self.target_name = target_name
         self.source_mask_attr_name = source_mask_attr_name
         self.target_mask_attr_name = target_mask_attr_name
+        self.attributes = attributes or []
         self.device = get_distributed_device()
 
     @property
@@ -72,18 +73,13 @@ class BaseEdgeBuilder(ABC):
         edge_index = self.compute_edge_index(source_nodes, target_nodes)
         return edge_index.to(dtype=torch.int32, device=self.device)
 
-    def register_edges(self, graph: HeteroData) -> HeteroData:
-        """Register edges in the graph.
+    def register_edges(self, graph: HeteroData) -> None:
+        """Register edges in the graph in-place.
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the edges.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered edges.
         """
         edge_index = self.get_edge_index(graph)
         edge_type = type(self).__name__
@@ -93,45 +89,41 @@ class BaseEdgeBuilder(ABC):
             graph[self.name].edge_index = concat_edges(graph[self.name].edge_index, edge_index)
             if edge_type not in graph[self.name].edge_type:
                 graph[self.name].edge_type = graph[self.name].edge_type + "," + edge_type
-            return graph
+            return
 
         # Register new edge indices
         graph[self.name].edge_index = edge_index
         graph[self.name].edge_type = edge_type
-        return graph
 
-    def register_attributes(self, graph: HeteroData, config: DotDict) -> HeteroData:
-        """Register attributes in the edges of the graph specified.
+    def register_attributes(self, graph: HeteroData, attributes: list[BaseEdgeAttributeBuilder]) -> None:
+        """Register attributes in the edges of the graph specified (in-place).
 
         Parameters
         ----------
         graph : HeteroData
             The graph to register the attributes.
-        config : DotDict
-            The configuration of the attributes.
-
-        Returns
-        -------
-        HeteroData
-            The graph with the registered attributes.
+        attributes : list
+            List of instantiated attribute objects.
         """
-        for attr_name, attr_config in config.items():
+        for attr_obj in attributes:
             edge_index = graph[self.name].edge_index
-            edge_attribute_builder = instantiate(attr_config)
-            graph[self.name][attr_name] = edge_attribute_builder(
+            graph[self.name][attr_obj.name] = attr_obj(
                 x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
             )
-        return graph
 
-    def update_graph(self, graph: HeteroData, attrs_config: DotDict | None = None) -> HeteroData:
-        """Update the graph with the edges.
+    def update_graph(
+        self,
+        graph: HeteroData,
+        attributes: list[BaseEdgeAttributeBuilder] | None = None,
+    ) -> None:
+        """Update the graph with the edges in-place.
 
         Parameters
         ----------
         graph : HeteroData
             The graph.
-        attrs_config : DotDict
-            The configuration of the edge attributes.
+        attributes : list[BaseEdgeAttributeBuilder], optional
+            Attributes to register instead of the attributes stored on the builder.
 
         Returns
         -------
@@ -139,17 +131,17 @@ class BaseEdgeBuilder(ABC):
             The graph with the edges.
         """
         t0 = time.time()
-        graph = self.register_edges(graph)
+        self.register_edges(graph)
         t1 = time.time()
         LOGGER.debug("Time to register edge indices (%s): %.2f s", self.__class__.__name__, t1 - t0)
 
-        if attrs_config is not None:
+        attributes = self.attributes if attributes is None else attributes
+
+        if attributes:
             t0 = time.time()
-            graph = self.register_attributes(graph, attrs_config)
+            self.register_attributes(graph, attributes)
             t1 = time.time()
             LOGGER.debug("Time to register edge attribute (%s): %.2f s", self.__class__.__name__, t1 - t0)
-
-        return graph
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):

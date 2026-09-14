@@ -30,8 +30,8 @@ class TestEdgeBuilderDependencies:
         hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
 
         graph = HeteroData()
-        graph = data_node_builder.update_graph(graph, {})
-        graph = hidden_node_builder.update_graph(graph, {})
+        data_node_builder.update_graph(graph, [])
+        hidden_node_builder.update_graph(graph, [])
 
         return graph
 
@@ -40,7 +40,7 @@ class TestEdgeBuilderDependencies:
         edge_builder = ICONTopologicalEncoderEdges(source_name="data", target_name="hidden")
         assert ("data", "to", "hidden") not in icon_graph.edge_types
 
-        icon_graph = edge_builder.update_graph(icon_graph)
+        edge_builder.update_graph(icon_graph)
 
         assert ("data", "to", "hidden") in icon_graph.edge_types
         assert hasattr(icon_graph["data", "to", "hidden"], "edge_index")
@@ -57,7 +57,7 @@ class TestEdgeBuilderDependencies:
         edge_builder = ICONTopologicalDecoderEdges(source_name="hidden", target_name="data")
         assert ("hidden", "to", "data") not in icon_graph.edge_types
 
-        icon_graph = edge_builder.update_graph(icon_graph)
+        edge_builder.update_graph(icon_graph)
 
         assert ("hidden", "to", "data") in icon_graph.edge_types
         assert hasattr(icon_graph["hidden", "to", "data"], "edge_index")
@@ -74,7 +74,7 @@ class TestEdgeBuilderDependencies:
         edge_builder = ICONTopologicalProcessorEdges(source_name="hidden", target_name="hidden")
         assert ("hidden", "to", "hidden") not in icon_graph.edge_types
 
-        icon_graph = edge_builder.update_graph(icon_graph)
+        edge_builder.update_graph(icon_graph)
 
         assert ("hidden", "to", "hidden") in icon_graph.edge_types
         assert hasattr(icon_graph["hidden", "to", "hidden"], "edge_index")

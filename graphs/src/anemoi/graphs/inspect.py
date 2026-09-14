@@ -44,7 +44,7 @@ class GraphInspector:
         self,
         path: str | Path,
         output_path: Path,
-        area: tuple[float, float, float, float] = None,
+        area: tuple[float, float, float, float] | None = None,
         show_attribute_distributions: bool | None = True,
         show_nodes: bool | None = False,
         **kwargs,
@@ -57,7 +57,7 @@ class GraphInspector:
         self.show_nodes = show_nodes
 
         if self.area is not None:
-            self.graph = SubsetNodesInArea(nodes_name=list(self.graph.node_types), area=area).update_graph(self.graph)
+            SubsetNodesInArea(nodes_name=list(self.graph.node_types), area=area).update_graph(self.graph)
 
         if isinstance(self.output_path, str):
             self.output_path = Path(self.output_path)
@@ -82,7 +82,7 @@ class GraphInspector:
             plot_interactive_subgraph_2d(self.graph, edges_subgraph, out_file=ofile)
 
         if self.show_attribute_distributions:
-            LOGGER.info("Saving distribution plots of node ande edge attributes ...")
+            LOGGER.info("Saving distribution plots of node and edge attributes ...")
             plot_distribution_node_derived_attributes(self.graph, self.output_path / "distribution_node_adjancency.png")
             plot_distribution_edge_attributes(self.graph, self.output_path / "distribution_edge_attributes.png")
             plot_distribution_node_attributes(self.graph, self.output_path / "distribution_node_attributes.png")

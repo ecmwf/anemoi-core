@@ -167,7 +167,7 @@ part of :doc:`Anemoi Graphs <anemoi-graphs:index>`.
    from anemoi.models.graphs.create import GraphCreator
 
    graph_config = OmegaConf.load("graph.yaml")
-   graph_data = GraphCreator(config=graph_config).create()
+   graph_data = GraphCreator.initialize_from_config(config=graph_config).create_graph()
 
 ************************
  Initializing the Model
