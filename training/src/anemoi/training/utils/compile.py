@@ -145,7 +145,7 @@ def prepare_compilation(
     # The runtime impact of this should be marginal
     if version.parse(torch.__version__) >= version.parse("2.10.0"):
         torch._C._dynamo.eval_frame._set_lru_cache(False)
-        LOGGER.info("disabling LRU cache")
+        LOGGER.info("disabling torch compile LRU cache")
     else:
         LOGGER.warning(
             "Could not disable torch compile LRU cache because torch version is < 2.10.0. This may"

@@ -200,6 +200,7 @@ compile:
       #dynamic: false
       #mode: max-autotune
   - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+recompile_limit: 32
 
 # Bounding configuration
 bounding:

@@ -38,7 +38,6 @@ graph:
 
 model:
   num_channels: 16
-  recompile_limit: 32
   processor:
     num_layers: 2
     num_chunks: 2

@@ -187,6 +187,7 @@ compile:
       dynamic: false
       fullgraph: true
       mode: max-autotune
+recompile_limit: 32
 
 # if using torch compile, how many times a certain block of code will be recompiled in response to different inputs.
 # A higher limit can result in better performance but will increase compilation time and disk space
