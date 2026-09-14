@@ -268,7 +268,7 @@ class ReducedSHT(SHT):
         self,
         grid: str,
         truncation: int | None = None,
-        use_graphed_rfft: bool = False,
+        fft_backend: str = "eager",
         **kwargs,
     ) -> None:
         """SHT on a reduced Gaussian grid.
@@ -279,9 +279,11 @@ class ReducedSHT(SHT):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        fft_backend : str
+            Which backend to use for the FFT on reduced grids. Options are:
+            - "eager": eager implementation using rfft_rings_reduced_banded with a single band.
+            - "graphed": graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            - "native": native compiled backend for the rfft on reduced grids. Currently only CUDA is supported.
         """
         super().__init__()
 
@@ -312,7 +314,7 @@ class ReducedSHT(SHT):
         self._sht = SphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_rfft=use_graphed_rfft,
+            fft_backend=fft_backend,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -332,7 +334,7 @@ class OctahedralSHT(SHT):
         self,
         nlat: int,
         truncation: int | None = None,
-        use_graphed_rfft: bool = False,
+        fft_backend: str = "eager",
         **kwargs,
     ) -> None:
         """SHT on an octahedral reduced grid.
@@ -344,17 +346,20 @@ class OctahedralSHT(SHT):
             on the octahedral grid structure.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        fft_backend : str
+            Which backend to use for the FFT on reduced grids. Options are:
+            - "eager": eager implementation using rfft_rings_reduced_banded with a single band.
+            - "graphed": graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            - "native": native compiled backend for the rfft on reduced grids. Currently only CUDA is supported.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
         """
         super().__init__()
         self.nlat = nlat
         self.lons_per_lat = [20 + 4 * i for i in range(self.nlat // 2)]
         self.lons_per_lat += list(reversed(self.lons_per_lat))
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat,
-            truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_rfft=use_graphed_rfft,
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1, fft_backend=fft_backend
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -383,7 +388,13 @@ class InverseSpectralTransform(torch.nn.Module):
 class InverseRegularSHT(InverseSpectralTransform):
     """Inverse SHT on a regular lon-lat grid."""
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        fft_backend: str = "eager",
+        **kwargs,
+    ) -> None:
         """Initialize InverseRegularSHT.
 
         Parameters
@@ -392,6 +403,11 @@ class InverseRegularSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        fft_backend : str
+            Which backend to use for the FFT on reduced grids. Options are:
+            - "eager": eager implementation using rfft_rings_reduced_banded with a single band.
+            - "graphed": graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            - "native": native compiled backend for the rfft on reduced grids. Currently only CUDA is supported.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -400,7 +416,7 @@ class InverseRegularSHT(InverseSpectralTransform):
         self.nlon = 2 * nlat
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1, fft_backend=fft_backend
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -414,7 +430,7 @@ class InverseReducedSHT(InverseSpectralTransform):
         self,
         grid: str,
         truncation: int | None = None,
-        use_graphed_irfft: bool = False,
+        fft_backend: str = "eager",
         **kwargs,
     ) -> None:
         """Inverse SHT on a reduced Gaussian grid.
@@ -425,9 +441,13 @@ class InverseReducedSHT(InverseSpectralTransform):
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
-        use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        fft_backend : str
+            Which backend to use for the FFT on reduced grids. Options are:
+            - "eager": eager implementation using rfft_rings_reduced_banded with a single band.
+            - "graphed": graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            - "native": native compiled backend for the rfft on reduced grids. Currently only CUDA is supported.
+        **kwargs : dict
+            Additional keyword arguments (ignored).
         """
         super().__init__()
 
@@ -458,7 +478,7 @@ class InverseReducedSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_irfft=use_graphed_irfft,
+            fft_backend=fft_backend,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -472,7 +492,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self,
         nlat: int,
         truncation: int | None = None,
-        use_graphed_irfft: bool = False,
+        fft_backend: str = "eager",
         **kwargs,
     ) -> None:
         """Inverse SHT on an octahedral reduced grid.
@@ -483,9 +503,11 @@ class InverseOctahedralSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to nlat // 2 - 1.
-        use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+        fft_backend : str
+            Which backend to use for the FFT on reduced grids. Options are:
+            - "eager": eager implementation using rfft_rings_reduced_banded with a single band.
+            - "graphed": graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            - "native": native compiled backend for the rfft on reduced grids. Currently only CUDA is supported.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -496,7 +518,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         self._isht = InverseSphericalHarmonicTransform(
             lons_per_lat=self.lons_per_lat,
             truncation=truncation or self.nlat // 2 - 1,
-            use_graphed_irfft=use_graphed_irfft,
+            fft_backend=fft_backend,
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
