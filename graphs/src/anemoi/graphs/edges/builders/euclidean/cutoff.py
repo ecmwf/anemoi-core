@@ -10,55 +10,20 @@
 
 import logging
 
-import numpy as np
 import torch
-from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
-from torch_geometric.data import HeteroData
-from torch_geometric.data.storage import NodeStorage
-from torch_geometric.nn import pyg_radius
+from torch_geometric.nn import radius as pyg_radius
 
 from anemoi.graphs import EARTH_RADIUS
-from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
+from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
 from anemoi.graphs.utils import crop_to_max_num_neighbours
 
 LOGGER = logging.getLogger(__name__)
 
 
-
-class CutOffEdges(BaseDistanceEdgeBuilders):
-    """Computes cut-off based edges and adds them to the graph.
-
-    It uses as reference the target nodes.
-
-    Attributes
-    ----------
-    source_name : str
-        The name of the source nodes.
-    target_name : str
-        The name of the target nodes.
-    cutoff_factor : float | None
-        Factor to multiply the grid reference distance to get the cut-off radius.
-        Mutually exclusive with cutoff_distance_km.
-    cutoff_distance_km : float | None
-        Cutoff radius in kilometers. Mutually exclusive with cutoff_factor.
-    source_mask_attr_name : str | None
-        The name of the source mask attribute to filter edge connections.
-    target_mask_attr_name : str | None
-        The name of the target mask attribute to filter edge connections.
-    max_num_neighbours : int
-        The maximum number of nearest neighbours to consider when building edges.
-
-    Methods
-    -------
-    register_edges(graph)
-        Register the edges in the graph.
-    register_attributes(graph, config)
-        Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
-        Update the graph with the edges.
-    """
+class BaseCutOffEdges(BaseDistanceEdgeBuilders):
+    """Base class for cut-off based edges."""
 
     def __init__(
         self,
@@ -139,10 +104,7 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
-        return {
-            "radius": self.get_cutoff_radius(reference_coords=target_coords),
-            "max_num_neighbors": self.max_num_neighbours,
-        }
+        return {"max_num_neighbors": self.max_num_neighbours}
 
     def _compute_edge_index_pyg(
         self,
@@ -174,7 +136,45 @@ class CutOffEdges(BaseDistanceEdgeBuilders):
         return adj_matrix
 
 
-class ReversedCutOffEdges(CutOffEdges):
+class CutOffEdges(BaseCutOffEdges):
+    """Computes cut-off based edges and adds them to the graph.
+
+    It uses as reference the target nodes.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    cutoff_factor : float | None
+        Factor to multiply the grid reference distance to get the cut-off radius.
+        Mutually exclusive with cutoff_distance_km.
+    cutoff_distance_km : float | None
+        Cutoff radius in kilometers. Mutually exclusive with cutoff_factor.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+    max_num_neighbours : int
+        The maximum number of nearest neighbours to consider when building edges.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
+    def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
+        """Prepare keyword arguments for computing edge index."""
+        radius = self.get_cutoff_radius(reference_coords=target_coords)
+        return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
+
+
+class ReversedCutOffEdges(BaseCutOffEdges):
     """Computes cut-off based edges and adds them to the graph.
 
     It uses as reference the source nodes.
@@ -206,10 +206,9 @@ class ReversedCutOffEdges(CutOffEdges):
 
     def prepare_method_kwargs(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> dict:
         """Prepare keyword arguments for computing edge index."""
-        return {
-            "radius": self.get_cutoff_radius(reference_coords=source_coords),
-            "max_num_neighbors": self.max_num_neighbours,
-        }
+        radius = self.get_cutoff_radius(reference_coords=source_coords)
+        return {"radius": radius} | super().prepare_method_kwargs(source_coords, target_coords)
+
 
     def compute_edge_index_from_coords(
         self,

@@ -14,39 +14,14 @@ import torch
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric.nn import knn
 
-from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
+from anemoi.graphs.edges.builders.euclidean.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import intersect_edges
 
 LOGGER = logging.getLogger(__name__)
 
 
-class KNNEdges(BaseDistanceEdgeBuilders):
-    """Computes KNN based edges and adds them to the graph.
-
-    It uses as reference the target nodes.
-
-    Attributes
-    ----------
-    source_name : str
-        The name of the source nodes.
-    target_name : str
-        The name of the target nodes.
-    num_nearest_neighbours : int
-        Number of nearest neighbours to connect for each target node.
-    source_mask_attr_name : str | None
-        The name of the source mask attribute to filter edge connections.
-    target_mask_attr_name : str | None
-        The name of the target mask attribute to filter edge connections.
-
-    Methods
-    -------
-    register_edges(graph)
-        Register the edges in the graph.
-    register_attributes(graph, config)
-        Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
-        Update the graph with the edges.
-    """
+class BaseKNNEdges(BaseDistanceEdgeBuilders):
+    """Base class for KNN-based edges."""
 
     def __init__(
         self,
@@ -88,6 +63,35 @@ class KNNEdges(BaseDistanceEdgeBuilders):
         return adj_matrix
 
 
+class KNNEdges(BaseKNNEdges):
+    """Computes KNN based edges and adds them to the graph.
+
+    It uses as reference the target nodes.
+
+    Attributes
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    num_nearest_neighbours : int
+        Number of nearest neighbours to connect for each target node.
+    source_mask_attr_name : str | None
+        The name of the source mask attribute to filter edge connections.
+    target_mask_attr_name : str | None
+        The name of the target mask attribute to filter edge connections.
+
+    Methods
+    -------
+    register_edges(graph)
+        Register the edges in the graph.
+    register_attributes(graph, config)
+        Register attributes in the edges of the graph.
+    update_graph(graph, attrs_config)
+        Update the graph with the edges.
+    """
+
+
 class ReversedKNNEdges(KNNEdges):
     """Computes KNN based edges and adds them to the graph.
 
@@ -120,10 +124,12 @@ class ReversedKNNEdges(KNNEdges):
         self,
         source_coords: torch.Tensor,
         target_coords: torch.Tensor,
+        **kwargs,
     ) -> torch.Tensor:
-        edge_index = super().compute_edge_index_from_coords(target_coords, source_coords)
+        edge_index = super().compute_edge_index_from_coords(target_coords, source_coords, **kwargs)
         edge_index = torch.flip(edge_index, dims=[0])
         return edge_index
+
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
     """Computes mutual KNN based edges and adds them to the graph.
