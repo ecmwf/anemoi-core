@@ -32,9 +32,6 @@ from unittest.mock import patch
 import pytest
 import torch
 import torch.distributed as dist
-from distributed_runner import run_distributed_test
-from distributed_test_utils import shard_sizes_from_pattern
-from distributed_test_utils import torch_version_less_than
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.graph import all_to_all_transpose
@@ -44,6 +41,10 @@ from anemoi.models.distributed.graph import reduce_shard_tensor
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+
+from .distributed_runner import run_distributed_test
+from .distributed_test_utils import shard_sizes_from_pattern
+from .distributed_test_utils import torch_version_less_than
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
