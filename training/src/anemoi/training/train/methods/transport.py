@@ -499,10 +499,8 @@ class TransportTraining(BaseTransportTraining):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-        loss_steps: int | None = None,
     ) -> TrainingStepOutput:
         """Run one training or validation step for the selected transport objective."""
-        del loss_steps  # single-step objective, the loss always covers the only step
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         prepared_target = self.prediction_mode.prepare_target(batch, x)
         prepared_objective = self.transport_objective.prepare(prepared_target)

@@ -18,7 +18,6 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -242,18 +242,14 @@ class EnsembleTraining(BaseTrainingModule):
         self,
         batch: dict[str, torch.Tensor],
         validation_mode: bool = False,
-        loss_steps: int | None = None,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
+        step_losses, step_metrics, y_preds = [], [], []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        n_loss_steps = len(task_steps) if loss_steps is None else min(loss_steps, len(task_steps))
         for i, task_step_kwargs in enumerate(task_steps):
             y_pred = self(x, **task_step_kwargs)
 
@@ -282,10 +278,8 @@ class EnsembleTraining(BaseTrainingModule):
                     grid_shard_slice=self.grid_shard_slice,
                 )
 
-            if i < n_loss_steps:
-                loss = loss + loss_next
-            metrics.update(metrics_next)
+            step_losses.append(loss_next)
+            step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / n_loss_steps
-        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+        return self._aggregate_steps(step_losses, step_metrics, y_preds)

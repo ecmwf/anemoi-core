@@ -59,8 +59,8 @@ class OffsetForecasterSchema(BaseModel):
     "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Number of rollout steps unrolled in validation. The val loss is averaged over the training rollout only."
 
 
 class AutoencoderTaskSchema(BaseModel):

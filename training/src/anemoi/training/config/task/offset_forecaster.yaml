@@ -10,5 +10,5 @@ rollout:
   # maximum rollout to use
   maximum: 1
 
-# number of rollout steps to use for validation, or null to use the training rollout
+# minimum number of rollout steps unrolled in validation, or null to follow the training rollout.
 validation_rollout: null
