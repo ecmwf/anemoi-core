@@ -1,7 +1,7 @@
 name: run-integration-test-hpc
 
 # Reusable workflow: run a single expensive integration test on HPC, reusing the
-# shared clone + virtualenv that the caller's build-env job created under
+# shared source tree + virtualenv that the caller's build-env job created under
 # $PERM/TESTING/integration-venvs/${{ github.run_id }}.
 on:
   workflow_call:
@@ -27,7 +27,7 @@ jobs:
             env | grep SLURM # helps with debugging
             set -eux
             module load python3/3.12.9-01
-            # Reuse the shared clone + virtualenv built by the build-env job.
+            # Reuse the shared source tree + virtualenv built by the build-env job.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             cd "$WORKDIR/anemoi-core"
             source "$WORKDIR/venv/bin/activate"

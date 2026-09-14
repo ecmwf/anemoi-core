@@ -1,0 +1,13 @@
+# actionlint validates runs-on against GitHub's hosted labels and flags anything
+# else as unknown. `hpc` is ECMWF's self-hosted HPC runner; add new self-hosted
+# labels here.
+self-hosted-runner:
+  labels:
+    - hpc
+
+paths:
+  # A real scope (the Copilot CLI job needs it), but newer than actionlint's
+  # permission list as of v1.7.12. Drop this once actionlint knows it.
+  .github/workflows/weekly-pr-bulletin.yml:
+    ignore:
+      - 'unknown permission scope "copilot-requests"'

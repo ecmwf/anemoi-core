@@ -30,7 +30,7 @@ jobs:
             sed -i "s/%NEXT_ANEMOI_MODELS_VERSION%/$NEXT_MODELS_VERSION/g" "$file"
           done
 
-          echo "$(git diff)"
+          git diff
 
           if [ -n "$(git status --porcelain)" ]; then
             git config user.name "DeployDuck"

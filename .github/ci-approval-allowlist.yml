@@ -1,0 +1,23 @@
+# Exemptions from ecmwf/ci-infrastructure's check-ci-approval pre-commit hook,
+# which fails any workflow that can run fork code -- pull_request_target, or
+# pull_request onto a runner that is not GitHub-hosted -- unless every job hangs
+# off the require-ci-approval gate via `needs:`.
+#
+# An entry here is a claim that the workflow never executes pull request code.
+# Re-check that claim whenever one of these files gains a checkout step.
+
+exempt:
+  - workflow: pr-conventional-commit.yml
+    reason: "reads the pull request title from the event payload; no checkout"
+  - workflow: pr-label-expensive-tests.yml
+    reason: "reads labels from the event payload and posts a commit status; no checkout"
+  - workflow: pr-label-file-based.yml
+    reason: "actions/labeler reads the changed-file list through the API; no checkout"
+  - workflow: pr-label-public.yml
+    reason: "labels fork pull requests from the event payload; no checkout"
+  - workflow: readthedocs-pr-update.yml
+    reason: "checks out the base branch only, and runs nothing from the pull request"
+  # Whole-workflow, not `jobs: [pytest]`: a workflow with no gate job at all is
+  # reported before per-job exemptions are consulted.
+  - workflow: python-pull-request.yml
+    reason: "pytest's runs-on is ${{ matrix.platform }}, which the hook cannot resolve; the matrix is ubuntu-latest only. Drop this if a self-hosted platform is ever added."

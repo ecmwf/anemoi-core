@@ -86,6 +86,14 @@ repos:
     - --check-protected  # Check protected methods
     - --check-class      # Check class docstrings
     - --disable=SIG101,SIG102,SIG305     # Disable empty docstrings
+- repo: https://github.com/ecmwf/ci-infrastructure
+  rev: dac4b18ffe60c317fbab05246e851b6971f7eabf
+  hooks:
+  - id: check-ci-approval # Workflows that can run fork code must hang off require-ci-approval
+- repo: https://github.com/rhysd/actionlint
+  rev: v1.7.12
+  hooks:
+  - id: actionlint # Workflow syntax, expressions and runner labels; config in .github/actionlint.yaml
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"
