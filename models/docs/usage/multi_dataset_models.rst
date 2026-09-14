@@ -97,8 +97,8 @@ choose stable, descriptive names.
  Encoding multiple datasets with the same encoder
 ***************************************************
 
-The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder. 
-Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder 
+The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
+Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
 by setting the ``dataset_fusing_strategy`` field, which supports the following values:
 
 ``not_supported``

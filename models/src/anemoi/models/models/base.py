@@ -151,7 +151,9 @@ class BaseGraphModel(nn.Module):
 
         # Only one dataset is currently supported per encoder. Work in progress.
         for encoder_name, datasets in self.encoder2datasets.items():
-            assert len(datasets) == 1, f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
+            assert (
+                len(datasets) == 1
+            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
