@@ -48,15 +48,11 @@ class BaseEdgeBuilder(ABC):
 
     @abstractmethod
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement compute_edge_index(source_nodes, target_nodes)"
-        )
+        ...
 
     @abstractmethod
     def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        raise NotImplementedError(
-            f"{type(self).__name__} must implement compute_edge_index_from_coords(source_coords, target_coords) to support dynamic graph creation."
-        )
+        ...
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
