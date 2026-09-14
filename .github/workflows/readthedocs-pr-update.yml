@@ -20,7 +20,7 @@ jobs:
   documentation:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -31,7 +31,7 @@ jobs:
           if [ "${{ github.event_name }}" == "pull_request" ]; then
             # For pull requests, compare with the PR base
             MERGE_BASE=$(git merge-base origin/${{ github.event.pull_request.base.ref }} ${{ github.event.pull_request.head.sha }})
-            CHANGED_FILES=$(git diff --name-only $MERGE_BASE...${{ github.event.pull_request.head.sha }})
+            CHANGED_FILES=$(git diff --name-only "$MERGE_BASE"...${{ github.event.pull_request.head.sha }})
           elif [ "${{ github.event_name }}" == "push" ]; then
             # For pushes, compare with the previous commit
             CHANGED_FILES=$(git diff --name-only HEAD^ HEAD)
@@ -43,9 +43,11 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED_FILES"
 
-          echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-          echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
-          echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')" >> $GITHUB_OUTPUT
+          {
+            echo "training_changed=$(echo "$CHANGED_FILES" | grep -q '^training/' && echo 'true' || echo 'false')"
+            echo "graphs_changed=$(echo "$CHANGED_FILES" | grep -q '^graphs/' && echo 'true' || echo 'false')"
+            echo "models_changed=$(echo "$CHANGED_FILES" | grep -q '^models/' && echo 'true' || echo 'false')"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Documentation for training package
         if: steps.changed-packages.outputs.training_changed == 'true'

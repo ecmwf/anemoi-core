@@ -17,7 +17,7 @@ jobs:
     name: Assign labels in pull request
     if: github.event.pull_request.merged == false
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v5
       - name: Assign labels from Conventional Commits
         id: action-assign-labels
         uses: mauroalderete/action-assign-labels@v1

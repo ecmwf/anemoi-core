@@ -90,6 +90,10 @@ repos:
   rev: 68dc4e5c55ddf18db3caab916e66b96f2dab5284
   hooks:
   - id: check-ci-approval # Workflows that can run fork code must hang off require-ci-approval
+- repo: https://github.com/rhysd/actionlint
+  rev: v1.7.12
+  hooks:
+  - id: actionlint # Workflow syntax, expressions and runner labels; config in .github/actionlint.yaml
 ci:
   autoupdate_schedule: monthly
   autoupdate_commit_msg: "chore(deps): pre-commit.ci autoupdate"

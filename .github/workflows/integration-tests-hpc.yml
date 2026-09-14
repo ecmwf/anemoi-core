@@ -29,10 +29,15 @@ permissions:
 jobs:
   ci-approval:
     name: ci-approval
+    # Comments must stay out here: inside the block below they would be part of
+    # the expression, which has no comment syntax.
+    #  - no pull request (schedule, dispatch, merge_group): always run
+    #  - a label event: only when the label just added is 'run-expensive-tests'
+    #  - a push: when the pull request carries 'run-expensive-tests'
     if: >-
       ${{
-        !github.event.pull_request ||     # always run if no PR
-        github.event.label.name == 'run-expensive-tests' ||        # ignore labelling events, that don't hav
+        !github.event.pull_request ||
+        github.event.label.name == 'run-expensive-tests' ||
         (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'run-expensive-tests'))
       }}
     runs-on: ubuntu-slim
@@ -187,7 +192,7 @@ jobs:
       issues: write   # comments on #294; no longer inherited from the repo default
     steps:
       - name: Add failure comment
-        uses: peter-evans/create-or-update-comment@v3
+        uses: peter-evans/create-or-update-comment@v5
         with:
           issue-number: 294
           body: |
