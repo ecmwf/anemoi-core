@@ -169,10 +169,32 @@ class QueryDataModule(pl.LightningDataModule):
         return {name: reader.supporting_arrays for name, reader in self.train_readers.items()}
 
     @cached_property
+    def stretched_refinement_area(self) -> list[float] | None:
+        """Resolve the cached mesh footprint from config or regional grids."""
+        stretched = self.config.model.query.stretched_grid
+        if not stretched.enabled:
+            return None
+        if stretched.area is not None:
+            return [float(value) for value in stretched.area]
+
+        regional_sources = [name for name in self.dataset_names if name not in self.task.global_context_sources]
+        if not regional_sources:
+            msg = "Cannot derive a stretched refinement area without an enabled regional source."
+            raise ValueError(msg)
+        bounds = [self.catalogue.datasets[name] for name in regional_sources]
+        return [
+            min(value["longitude_bounds_degrees"][0] for value in bounds),
+            min(value["latitude_bounds_degrees"][0] for value in bounds),
+            max(value["longitude_bounds_degrees"][1] for value in bounds),
+            max(value["latitude_bounds_degrees"][1] for value in bounds),
+        ]
+
+    @cached_property
     def graph_data(self) -> Any:
         graph_path = self.config.system.input.graph
         save_path = Path(graph_path) if graph_path else None
         stretched = self.config.model.query.stretched_grid
+        refinement_area = self.stretched_refinement_area
         expected_geometry = {
             "datasets": self.dataset_names,
             "source_geometries": {
@@ -186,7 +208,7 @@ class QueryDataModule(pl.LightningDataModule):
             },
             "stretched": bool(stretched.enabled),
             "context_source": stretched.context_source,
-            "area": list(stretched.area),
+            "area": refinement_area,
             "global_resolution": stretched.global_resolution,
             "local_resolution": stretched.local_resolution,
             "margin_radius_km": stretched.margin_radius_km,
@@ -245,7 +267,7 @@ class QueryDataModule(pl.LightningDataModule):
             if stretched.enabled and name == stretched.context_source:
                 node_attributes["query_area_mask"] = {
                     "_target_": "anemoi.graphs.nodes.attributes.GeographicAreaMask",
-                    "area": list(stretched.area),
+                    "area": refinement_area,
                 }
             nodes[name] = {
                 "node_builder": {

@@ -227,10 +227,14 @@ class QueryDiagnosticsPlotSchema(PydanticBaseModel):
     changing_training_case: bool = False
     domain_plots: bool = True
     graph_plots: bool = True
+    static_geometry_once: bool = False
     input_plots: bool = True
+    regional_input_plots: bool = True
+    global_input_plots: bool = True
     embedding_plots: bool = True
     sensitivity_plots: bool = True
     sampler_plots: bool = True
+    sampler_every_n_epochs: PositiveInt | None = None
     lead_time_hours: list[float] = Field(default_factory=list)
     pressure_levels_hpa: list[float] | None = None
     target_provenances: list[str] | None = None

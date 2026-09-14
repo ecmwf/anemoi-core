@@ -22,7 +22,10 @@ ERA5 is the default global context and stretched-mesh reference. To use IFS,
 enable IFS and set ``model.query.stretched_grid.context_source=IFS`` and
 ``task.reference_provenance=IFS``. The
 processor mesh remains global but is refined over
-``model.query.stretched_grid.area``. Query targets are decoded only on their
+``model.query.stretched_grid.area``. Leave ``area: null`` to derive the cached
+refinement footprint from the union of enabled non-global dataset bounds. This
+cached-mesh setting is distinct from the per-query bbox, which is embedded and
+controls the requested output geometry. Query targets are decoded only on their
 sampled AOI. Set ``task.target_regions_by_provenance`` when products have
 different native domains; regions outside the refined AOI use the coarser part
 of the processor mesh. The graph cache records source bounds and all stretched
@@ -73,6 +76,12 @@ one-at-a-time interventions. Use ``null`` for automatic compatible
 level/provenance discovery and ``[]`` to disable one of those sweeps. An
 unsupported request is logged and shown as skipped; no nearest level, product
 or grid is substituted.
+
+Set ``static_geometry_once: true`` to render domain and connectivity figures
+only for the first selected case. ``regional_input_plots`` and
+``global_input_plots`` independently control the native regional-temperature
+and global-context input panels. ``sampler_every_n_epochs`` can emit accumulated
+sampler statistics less frequently than the selected field examples.
 
 Figures are written below ``${system.output.plots}/plots`` (therefore below the
 chosen ``system.output.root``) and logged as MLflow artifacts under

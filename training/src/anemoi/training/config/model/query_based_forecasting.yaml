@@ -23,7 +23,10 @@ query:
   stretched_grid:
     enabled: true
     context_source: ERA5  # Set to IFS after enabling IFS and disabling ERA5 if desired.
-    area: [-15.0, 55.0, 35.0, 72.0]
+    # Null derives the fixed graph refinement footprint from the union of the
+    # enabled regional datasets. This is distinct from the per-query bbox,
+    # which is embedded and may select a smaller output footprint.
+    area: null
     global_resolution: 3
     local_resolution: 6
     margin_radius_km: 100.0

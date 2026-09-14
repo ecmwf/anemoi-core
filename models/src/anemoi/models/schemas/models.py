@@ -92,7 +92,8 @@ class QueryStretchedGridConfig(BaseModel):
 
     enabled: bool = False
     context_source: Literal["ERA5", "IFS"] = "ERA5"
-    area: list[float] = Field(default_factory=lambda: [-15.0, 55.0, 35.0, 72.0], min_length=4, max_length=4)
+    area: list[float] | None = Field(default=None, min_length=4, max_length=4)
+    """Refinement bbox, or ``None`` to derive the union of regional source footprints."""
     global_resolution: PositiveInt = 3
     local_resolution: PositiveInt = 6
     margin_radius_km: PositiveFloat = 100.0

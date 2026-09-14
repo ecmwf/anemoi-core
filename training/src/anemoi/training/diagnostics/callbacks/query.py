@@ -87,10 +87,14 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         changing_training_case: bool = False,
         domain_plots: bool = True,
         graph_plots: bool = True,
+        static_geometry_once: bool = False,
         input_plots: bool = True,
+        regional_input_plots: bool = True,
+        global_input_plots: bool = True,
         embedding_plots: bool = True,
         sensitivity_plots: bool = True,
         sampler_plots: bool = True,
+        sampler_every_n_epochs: int | None = None,
         lead_time_hours: list[float] | None = None,
         pressure_levels_hpa: list[float] | None = None,
         target_provenances: list[str] | None = None,
@@ -110,10 +114,14 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         self.changing_training_case = changing_training_case
         self.domain_plots = domain_plots
         self.graph_plots = graph_plots
+        self.static_geometry_once = static_geometry_once
         self.input_plots = input_plots
+        self.regional_input_plots = regional_input_plots
+        self.global_input_plots = global_input_plots
         self.embedding_plots = embedding_plots
         self.sensitivity_plots = sensitivity_plots
         self.sampler_plots = sampler_plots
+        self.sampler_every_n_epochs = sampler_every_n_epochs or every_n_epochs
         self.lead_time_hours = lead_time_hours or []
         self.pressure_levels_hpa = pressure_levels_hpa
         self.target_provenances = target_provenances
@@ -131,6 +139,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         self._pca_mean: np.ndarray | None = None
         self._pca_components: np.ndarray | None = None
         self._pca_fit_epoch: int | None = None
+        self._static_geometry_captured = False
 
     @property
     def artifact_subfolder(self) -> str:
@@ -146,6 +155,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
 
     def _due(self, trainer: pl.Trainer) -> bool:
         return self.enabled and not trainer.sanity_checking and trainer.current_epoch % self.every_n_epochs == 0
+
+    def _sampler_due(self, trainer: pl.Trainer) -> bool:
+        return self.enabled and (trainer.current_epoch + 1) % self.sampler_every_n_epochs == 0
 
     def on_train_epoch_start(self, trainer: pl.Trainer, _pl_module: pl.LightningModule) -> None:
         if self._due(trainer):
@@ -268,7 +280,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         values[3] += 1
 
     def on_train_epoch_end(self, trainer: pl.Trainer, _pl_module: pl.LightningModule) -> None:
-        if not self._due(trainer) or not self.sampler_plots:
+        if not self._sampler_due(trainer) or not self.sampler_plots:
             return
         local = {"counts": {key: dict(value) for key, value in self._counts.items()}, "metrics": self._metrics}
         gathered: list[Any] = [local]
@@ -341,8 +353,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "embeddings": None,
             "sensitivity": None,
         }
-        if self.domain_plots or self.graph_plots:
+        include_geometry = not self.static_geometry_once or not self._static_geometry_captured
+        if (self.domain_plots or self.graph_plots) and include_geometry:
             payload["graph"] = self._graph_payload(pl_module, batch, context)
+            self._static_geometry_captured = True
         if self.embedding_plots or (self.sensitivity_plots and stage == "val"):
             catalogue = QueryCatalogue.from_snapshot(model.query_catalogue)
             variants = self._variants(catalogue, batch.query, pl_module.task)
@@ -393,6 +407,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
 
         temperature_sources = []
         for source, tensor in batch.inputs.items():
+            regional_only = self.regional_input_plots and not self.global_input_plots
+            if regional_only and source in pl_module.task.global_context_sources:
+                continue
             fields = context.get("inputs", {}).get(source, {}).get("resolved_fields", [])
             candidates = [
                 (column, field)
@@ -464,7 +481,11 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             mapped_source[locations] = source_index
         mapped_distance[~np.isfinite(mapped)] = np.nan
 
-        ifs = next((name for name in batch.inputs if name.upper() == "IFS" or "IFS" in name.upper()), None)
+        ifs = (
+            next((name for name in batch.inputs if name.upper() == "IFS" or "IFS" in name.upper()), None)
+            if self.global_input_plots
+            else None
+        )
         ifs_field = None
         if ifs is not None:
             tensor = batch.inputs[ifs]
@@ -516,9 +537,22 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                         context.get("inputs", {}).get(ifs, {}).get("available_field_count", len(fields)),
                     ),
                 }
+        output = _degrees(batch.output_coordinates)
+        requested_bbox = (context.get("requested_query") or {}).get("bbox")
+        resolved_query = context.get("resolved_query") or batch.query
+        bbox = requested_bbox or resolved_query.get("embedded_bbox") or resolved_query.get("bbox")
+        if bbox is None:
+            south, west = output.min(axis=0)
+            north, east = output.max(axis=0)
+            extent = [float(west), float(east), float(south), float(north)]
+        else:
+            west, south, east, north = bbox
+            extent = [float(west), float(east), float(south), float(north)]
         return {
             "hidden": hidden[selected_hidden],
-            "bbox": (context.get("requested_query") or {}).get("bbox"),
+            "output": output,
+            "bbox": bbox,
+            "extent": extent,
             "temperature_sources": temperature_sources,
             "skipped_temperature_sources": skipped_temperature_sources,
             "mapped_temperature": mapped,
@@ -536,6 +570,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         model = pl_module.model
         target, candidates = context.get("target", {}), []
         for source in batch.inputs:
+            regional_only = self.regional_input_plots and not self.global_input_plots
+            if regional_only and source in pl_module.task.global_context_sources:
+                continue
             fields = context.get("inputs", {}).get(source, {}).get("resolved_fields", [])
             for column, field in enumerate(fields):
                 exact = all(
@@ -607,6 +644,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             if str(key).startswith("query_source_coverage_")
         }
         identity = getattr(graph, "query_geometry", {})
+        requested_bbox = (context.get("requested_query") or {}).get("bbox")
+        resolved_query = context.get("resolved_query") or batch.query
+        bbox = requested_bbox or resolved_query.get("embedded_bbox") or resolved_query.get("bbox")
         return {
             "hidden": hidden,
             "sources": sources,
@@ -616,7 +656,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "hidden_masks": hidden_masks,
             "output": _degrees(batch.output_coordinates),
             "output_mask": _cpu(batch.target_mask)[0].astype(bool),
-            "bbox": (context.get("requested_query") or {}).get("bbox"),
+            "bbox": bbox,
             "identity": identity,
             "identity_hash": hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()[:12],
             "cache": str(model.config.system.input.graph),
@@ -950,8 +990,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             return
         self._plot_example(trainer, payload)
         if self.input_plots and payload["input_details"] is not None:
-            self._plot_stretched_temperature(trainer, payload)
-            self._plot_ifs_input(trainer, payload)
+            if self.regional_input_plots:
+                self._plot_stretched_temperature(trainer, payload)
+            if self.global_input_plots:
+                self._plot_ifs_input(trainer, payload)
         if self.domain_plots and payload["graph"] is not None:
             self._plot_domain(trainer, payload)
         if self.graph_plots and payload["graph"] is not None:
@@ -1019,6 +1061,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         cmap: str = "viridis",
         vmin: float | None = None,
         vmax: float | None = None,
+        extent: list[float] | None = None,
     ) -> None:
         valid = np.isfinite(values) if mask is None else mask & np.isfinite(values)
         available = np.flatnonzero(valid)
@@ -1028,7 +1071,13 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if data_crs is not None:
             kwargs["transform"] = data_crs
         artist = ax.scatter(x, y, **kwargs)
-        self._finish_map(ax, projection, data_crs, coordinates[selected] if len(selected) else coordinates)
+        self._finish_map(
+            ax,
+            projection,
+            data_crs,
+            coordinates[selected] if len(selected) else coordinates,
+            extent,
+        )
         ax.set_title(title, fontsize=8)
         fig.colorbar(artist, ax=ax, shrink=0.7, pad=0.02)
 
@@ -1175,7 +1224,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         data = payload["input_details"]
         hidden = data["hidden"]
         sources = data["temperature_sources"]
-        fig, axes, projection, data_crs = self._map(hidden, (2, 2))
+        output = data["output"]
+        extent = data["extent"]
+        fig, axes, projection, data_crs = self._map(output, (2, 2))
         if not sources:
             for ax in axes.flat:
                 ax.text(0.5, 0.5, "No 2 m temperature input in this sampled case", ha="center", va="center")
@@ -1206,7 +1257,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 pad=0.02,
                 label=sources[0]["field"].get("units") or "unit unknown",
             )
-            self._finish_map(axes[0, 0], projection, data_crs, hidden)
+            self._finish_map(axes[0, 0], projection, data_crs, output, extent)
             axes[0, 0].legend(fontsize=5)
             axes[0, 0].set_title("actual native 2 m-temperature inputs")
 
@@ -1221,6 +1272,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 cmap="coolwarm",
                 vmin=low,
                 vmax=high,
+                extent=extent,
             )
             source_ids = data["mapped_source"]
             mapped = source_ids >= 0
@@ -1238,7 +1290,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             if data_crs is not None:
                 kwargs["transform"] = data_crs
             axes[1, 0].scatter(x, y, **kwargs)
-            self._finish_map(axes[1, 0], projection, data_crs, hidden)
+            self._finish_map(axes[1, 0], projection, data_crs, output, extent)
             labels = ", ".join(f"{index}={source['source']}" for index, source in enumerate(sources))
             axes[1, 0].set_title(f"nearest connected source · {labels}", fontsize=8)
             self._scatter(
@@ -1250,6 +1302,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 data_crs,
                 "source-to-hidden edge distance [km]",
                 cmap="magma",
+                extent=extent,
             )
             for ax in axes.flat:
                 self._bbox(ax, data["bbox"], projection, data_crs)
@@ -1394,7 +1447,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             projection,
             data_crs,
             color="tab:purple",
-            label="fixed mesh-refinement area",
+            label="cached mesh-refinement footprint",
             linestyle="--",
         )
         self._finish_map(axes[0, 0], projection, data_crs, hidden)
