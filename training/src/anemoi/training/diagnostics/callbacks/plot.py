@@ -462,7 +462,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 raise TypeError(preds)
             gathered_predictions = [
                 {
-                    dataset_name: _allgather_view(pl_module, dataset_pred, dataset_name)
+                    dataset_name: _allgather_view(pl_module, dataset_pred, pl_module.grid_shard_sizes[dataset_name])
                     for dataset_name, dataset_pred in pred.items()
                 }
                 for pred in preds

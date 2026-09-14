@@ -10,7 +10,6 @@
 
 import logging
 from abc import abstractmethod
-from collections import defaultdict
 
 import numpy as np
 import torch
@@ -192,7 +191,8 @@ def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict,
     for dataset_name, data_reader in data_readers.items():
         if dataset_name not in output_mask_config:
             LOGGER.warning(
-                f"Dataset '{dataset_name}' not found in 'config.model.output_mask'. Using `NoOutputMask` as default.",
+                "Dataset %s not found in 'config.model.output_mask'. Using `NoOutputMask` as default.",
+                dataset_name,
             )
             output_masks[dataset_name] = NoOutputMask()
             continue

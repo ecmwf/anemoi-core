@@ -61,9 +61,7 @@ def grad_scaler(
 
 
 def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
-    """Reshapes a scaler tensor to align with specific logical axes of a target layout
-    for broadcasting.
-    """
+    """Reshapes a scaler tensor to align with specific logical axes of a target layout for broadcasting."""
     target_ndim = layout.ndim
     new_shape = [1] * target_ndim
 

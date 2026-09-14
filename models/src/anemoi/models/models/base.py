@@ -26,6 +26,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
@@ -572,6 +573,40 @@ class BaseGraphModel(nn.Module):
             ),
         )
 
+    @staticmethod
+    def _apply_spatial_preprocessor(
+        tensors: tuple[Tensor, ...],
+        dataset_name: str,
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        model_comm_group: Optional[ProcessGroup],
+    ) -> tuple[Tensor, ...]:
+        """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
+        grid_shard_sizes = None  # TODO: grid_shard_size will be carried with the data
+
+        if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
+            return tensors
+
+        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        projected_tensors = []
+        output_grid_shard_sizes: ShardSizes = None
+        for index, tensor in enumerate(tensors):
+            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
+                tensor,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=source_grid_shard_sizes,
+            )
+            if index == 0:
+                output_grid_shard_sizes = tensor_grid_shard_sizes
+            elif tensor_grid_shard_sizes != output_grid_shard_sizes:
+                raise RuntimeError(
+                    f"Spatial preprocessor for {dataset_name!r} returned inconsistent target-grid shard sizes."
+                )
+            projected_tensors.append(projected_tensor)
+
+        if grid_shard_sizes is not None:
+            grid_shard_sizes[dataset_name] = output_grid_shard_sizes
+        return tuple(projected_tensors)
+
     def predict_step(
         self,
         x: Batch,
@@ -581,6 +616,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> Batch:
         """Prediction step for the model.
@@ -605,6 +641,9 @@ class BaseGraphModel(nn.Module):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional arguments.
 
@@ -629,6 +668,17 @@ class BaseGraphModel(nn.Module):
                     dataset_name,
                     pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
                 )
+
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            input_data = processed_batch
+            for dataset_name in dataset_names:
+                (projected_tensor,) = self._apply_spatial_preprocessor(
+                    (processed_batch[dataset_name],),
+                    dataset_name,
+                    spatial_pre_processors,
+                    model_comm_group,
+                )
+                input_data[dataset_name] = projected_tensor
 
             # The target forcings condition the decoder, and need to go through the input processors
             processed_target = target

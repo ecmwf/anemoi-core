@@ -331,6 +331,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.reader_group_size = self.config.dataloader.read_group_size
 
+        self._validate_spatial_processor_target_grid(data_readers)
+
         self.grid_dim = -2
 
         # check sharding support
@@ -999,6 +1001,15 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if not self.keep_batch_sharded:
             batch = self.allgather_batch(batch)
 
+        # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
+        # Owned by the model; applied before normalization so projectors see raw values.
+        for ds_name, projector in self.model.spatial_pre_processors.items():
+            if ds_name in batch:
+                batch[ds_name] = projector(
+                    batch[ds_name],
+                    model_comm_group=self.model_comm_group,
+                )
+
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
         LOGGER.debug("on_after_batch_transfer batch:\n%r", batch)
@@ -1023,17 +1034,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         pass
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
-        """Allgather the batch-shards across the reader group.
+        """Allgather the shards of a grid-sharded tensor across the reader group.
+
+        The shard sizes must be supplied by the caller because a tensor may live on the
+        reader grid (before spatial preprocessing) or on the projected grid (after it).
+
+        Gathering over the reader group is valid for both: post-projection shards are laid
+        out over the model comm group, and ``keep_batch_sharded`` asserts in ``__init__``
+        that the reader group and the model comm group coincide. When they do not,
+        ``grid_shard_sizes`` is ``None`` post-projection and this returns early.
 
         Parameters
         ----------
         batch : torch.Tensor
-            Batch-shard of current reader rank
+            Grid-shard of the current reader rank.
 
         Returns
         -------
         torch.Tensor
-            Allgathered (full) batch
+            Allgathered (full) tensor.
         """
         return batch.allgather(self.reader_groups[self.reader_group_id])
 
@@ -1293,8 +1312,58 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
+    def _validate_spatial_processor_target_grid(self, data_readers: dict) -> None:
+        """Check each spatial projector's target grid against its dataset's graph nodes."""
+        for dataset_name, projector in self.model.spatial_pre_processors.items():
+            dataset_grid_size = data_readers[dataset_name].grid_size
+            if dataset_grid_size is None:
+                # Skip validation for datasets with variable number of samples (i.e. observations)
+                continue
+
+            if projector.output_grid_size != dataset_grid_size:
+                msg = (
+                    f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
+                    f"{projector.output_grid_size} points, but its graph node set {dataset_name!r} has "
+                    f"{dataset_grid_size}. The encoder runs after projection, so this node set must be "
+                    f"built on the projector's output grid. Check that the graph node set is correctly "
+                    "constructed and that the projection matrix matches the graph."
+                )
+                raise ValueError(msg)
+
+    def _validate_spatial_processor_grid_sizes(self) -> None:
+        """Check each spatial projector's source grid against the data it will be fed.
+
+        ``shard_sizes`` is derived from ``input_grid_size`` and is what the reader slices
+        zarr with, so a disagreement truncates every rank's read instead of raising.
+        """
+        datamodule = getattr(self.trainer, "datamodule", None)
+        if datamodule is None or not self.model.spatial_pre_processors:
+            return
+
+        data_readers = datamodule.ds_train.data_readers
+        for dataset_name, projector in self.model.spatial_pre_processors.items():
+            reader = data_readers.get(dataset_name)
+            if reader is None:
+                msg = (
+                    f"Spatial processor configured for dataset {dataset_name!r}, "
+                    "but no corresponding training data reader exists. "
+                    "Check data.datasets and dataloader.training.datasets."
+                )
+                raise ValueError(msg)
+
+            if reader.grid_size != projector.input_grid_size:
+                msg = (
+                    f"Spatial processor for dataset {dataset_name!r} expects a source grid of "
+                    f"{projector.input_grid_size} points, but the dataset provides {reader.grid_size}. "
+                    f"Check that the projection matrix matches the dataset resolution."
+                )
+                raise ValueError(msg)
+
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
+        if stage == "fit":
+            self._validate_spatial_processor_grid_sizes()
+
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})

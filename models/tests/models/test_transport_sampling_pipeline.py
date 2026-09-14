@@ -13,6 +13,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data import Batch
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.data.views import create_source_view
@@ -569,6 +570,37 @@ def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
     assert grid_shard_sizes is None
     assert isinstance(xs, Batch)
     assert xs.data["data"].shape == (2, 3, 1, 3, 2)
+
+
+def test_before_sampling_replaces_source_grid_shard_sizes(monkeypatch) -> None:
+    model = _transport_model_stub()
+    comm_group = object()
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_grid_shard_sizes
+            return x[..., :2, :], target_grid_shard_sizes
+
+    monkeypatch.setattr(
+        transport_model_module,
+        "get_shard_sizes",
+        lambda *_args, **_kwargs: source_grid_shard_sizes,
+    )
+    monkeypatch.setattr(transport_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+
+    (xs,), grid_shard_sizes = model._before_sampling(
+        {"data": torch.randn(1, 2, 8, 1)},
+        {"data": IdentityProcessor()},
+        n_step_input=1,
+        model_comm_group=comm_group,
+        spatial_pre_processors=torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
+    )
+
+    assert grid_shard_sizes == {"data": target_grid_shard_sizes}
+    assert xs["data"].shape[-2] == 2
 
 
 def test_after_sampling_postprocesses_source_views_and_returns_data() -> None:

@@ -206,6 +206,11 @@ class BaseAnemoiReader(ABC):
         self.grid_shard_slice = None
 
     @property
+    def num_sequences(self) -> int:
+        """Number of independent sequences in the dataset."""
+        return 1
+
+    @property
     def dates(self) -> np.ndarray:
         """Return dataset dates."""
         return self.data.dates

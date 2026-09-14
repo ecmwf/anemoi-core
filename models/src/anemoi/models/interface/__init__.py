@@ -20,6 +20,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 
@@ -188,6 +189,22 @@ class AnemoiModelInterface(torch.nn.Module):
             if pre_tend is not None:
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
+
+        # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
+        # Keyed by dataset name; empty by default so existing models are unaffected.
+        # Built from optional config.data.datasets.<dataset_name>.spatial_processor entries.
+        self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
+        for dataset_name, dataset_config in data_config.items():
+            sp_config = getattr(dataset_config, "spatial_processor", None)
+            if sp_config is None:
+                continue
+            projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
+            if not isinstance(projector, SpatialPreprocessor):
+                raise TypeError(
+                    f"datasets.{dataset_name}.spatial_processor must instantiate a SpatialPreprocessor, "
+                    f"got {type(projector)}"
+                )
+            self.spatial_pre_processors[dataset_name] = projector
 
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
@@ -484,6 +501,8 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+        if self.spatial_pre_processors:
+            predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         return self.unwrap_batch(self.model.predict_step(**predict_kwargs, **kwargs))
 
