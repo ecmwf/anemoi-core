@@ -47,12 +47,12 @@ class BaseEdgeBuilder(ABC):
         return self.source_name, "to", self.target_name
 
     @abstractmethod
-    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        ...
+    def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor: ...
 
     @abstractmethod
-    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
-        ...
+    def compute_edge_index_from_coords(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor
+    ) -> torch.Tensor: ...
 
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
