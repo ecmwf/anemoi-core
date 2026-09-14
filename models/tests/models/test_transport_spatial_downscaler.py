@@ -1193,3 +1193,35 @@ def test_real_construction_rejects_a_reference_that_is_not_fused_into_the_encode
         _build_real_downscaler(
             model__encoders__enc0__source_datasets=["out_hres", "in_hres"],
         )
+
+
+def test_real_construction_predict_step_returns_only_the_target_state() -> None:
+    """Inference must survive ``x`` and the sampled target having disjoint keys.
+
+    The sampler seeds one field per *target*, but ``_before_sampling`` returns
+    every dataset in the batch, so anything that zips the two together breaks
+    here and nowhere else.
+    """
+    model = _build_real_downscaler()
+    batch_size, grid = 1, 4
+
+    # (batch, time, grid, vars) — predict_step adds the ensemble dimension.
+    batch = {
+        "in_lres": torch.zeros(batch_size, 1, grid, 2),
+        "in_hres": torch.zeros(batch_size, 1, grid, 1),
+        "out_hres": torch.zeros(batch_size, 1, grid, 2),
+    }
+    identity = {name: _AdditiveProcessor(offset=0.0) for name in batch}
+
+    out = model.predict_step(
+        batch,
+        pre_processors=identity,
+        post_processors=identity,
+        n_step_input=1,
+        post_processors_residual={"out_hres": _AdditiveProcessor(offset=0.0)},
+        schedule_params={"schedule_type": "karras", "num_steps": 2, "sigma_max": 1.0, "sigma_min": 0.1, "rho": 7.0},
+        sampler_params={"sampler": "heun"},
+    )
+
+    assert set(out) == {"out_hres"}
+    assert out["out_hres"].shape == (batch_size, 1, 1, grid, 2)

@@ -148,8 +148,11 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             schedule_params,
             x_device,
         )
+        # Seeded per *source* dataset, not per input: a downscaler reads several
+        # inputs but seeds only its targets.
         y_init = {
-            dataset_name: source[dataset_name].to(dtype=sigma_schedule.dtype) * sigma_schedule[0] for dataset_name in x
+            dataset_name: source_tensor.to(dtype=sigma_schedule.dtype) * sigma_schedule[0]
+            for dataset_name, source_tensor in source.items()
         }
 
         sampler_instance = _build_inference_sampler(
