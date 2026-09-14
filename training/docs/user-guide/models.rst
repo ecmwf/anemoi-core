@@ -227,7 +227,6 @@ geometric progression of KNN smoothers:
              scale_factor: 2
            per_scale_loss:
              _target_: anemoi.training.losses.CRPS
-             backend: stable
              alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
@@ -250,7 +249,6 @@ geometric progression of KNN smoothers:
                - null            # full resolution
            per_scale_loss:
              _target_: anemoi.training.losses.CRPS
-             backend: stable
              alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
