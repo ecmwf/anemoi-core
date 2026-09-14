@@ -8,7 +8,7 @@ jobs:
     runs-on: hpc
     timeout-minutes: 60
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             env | grep SLURM # helps with debugging
