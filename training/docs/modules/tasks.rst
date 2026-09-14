@@ -75,13 +75,14 @@ autoregressive rollout training. It is constructed with:
   ``"6H"``).
 - ``rollout`` — optional dict configuring the rollout schedule (see
   :class:`~anemoi.training.tasks.forecaster.RolloutConfig`).
-- ``validation_rollout`` — number of rollout steps unrolled during
-  validation (default ``null``, i.e. follow the training rollout).
-  The validation loss ``val_<loss>_loss`` is averaged over the current
-  training rollout (``rollout.step``) only, so that it is directly
-  comparable to ``train_<loss>_loss``. Per-step validation metrics are
-  logged for every unrolled step (``val_.../1`` … ``val_.../N``).
-
+- ``validation_rollout`` — minimum number of rollout steps unrolled
+  during validation (default ``null``, i.e. follow the training
+  rollout). Validation always unrolls at least the current training
+  rollout. The validation losses ``val_<loss>_loss`` and
+  ``val_<dataset>_<loss>_loss`` are averaged over the current training
+  rollout (``rollout.step``) only, so that they are directly comparable
+  to ``train_<loss>_loss``. The validation metrics are logged for every
+  unrolled step (``val_.../1`` … ``val_.../N``).
 
 RolloutConfig
 =============
