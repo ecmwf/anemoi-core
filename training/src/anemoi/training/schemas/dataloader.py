@@ -20,7 +20,7 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -132,6 +132,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
     persistent_workers: bool = Field(default=True)
     "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
+    fake_dataloading: bool = Field(default=False)
+    "Load one real sample per worker and reuse it for subsequent accesses."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet

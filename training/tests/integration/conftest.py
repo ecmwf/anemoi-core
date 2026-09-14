@@ -12,14 +12,12 @@ import logging
 import os
 import shutil
 from pathlib import Path
-from typing import Union
 
 import pytest
 import torch
 from hydra import compose
 from hydra import initialize
 from omegaconf import DictConfig
-from omegaconf import ListConfig
 from omegaconf import OmegaConf
 
 from anemoi.models.migrations import Migrator
@@ -67,17 +65,19 @@ def set_working_directory() -> None:
     os.chdir(repo_root)
 
 
-def _load_testing_modifications(tmp_path: Path) -> Union[DictConfig, ListConfig]:
-    modifications_file = "training/tests/integration/config/testing_modifications.yaml"
-    testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
-    assert isinstance(testing_modifications, DictConfig)
-    testing_modifications.system.output.root = str(tmp_path)
-    return testing_modifications
+@pytest.fixture
+def config_with_tempdir(tmp_path: Path) -> DictConfig:
+    return OmegaConf.create({"system": {"output": {"root": str(tmp_path)}}})
 
 
 @pytest.fixture
-def testing_modifications_with_temp_dir(tmp_path: Path) -> DictConfig:
-    return _load_testing_modifications(tmp_path)
+def testing_modifications_with_temp_dir(config_with_tempdir: DictConfig) -> DictConfig:
+    modifications_file = "training/tests/integration/config/testing_modifications.yaml"
+    testing_modifications = OmegaConf.load(Path.cwd() / modifications_file)
+    testing_modifications_with_tempdir = OmegaConf.merge(testing_modifications, config_with_tempdir)
+
+    assert isinstance(testing_modifications_with_tempdir, DictConfig)
+    return testing_modifications_with_tempdir
 
 
 class GetTmpPath:
@@ -526,7 +526,7 @@ def gnn_config(testing_modifications_with_temp_dir: DictConfig, get_tmp_path: Ge
 )
 def benchmark_config(
     request: pytest.FixtureRequest,
-    testing_modifications_with_temp_dir: OmegaConf,
+    config_with_tempdir: OmegaConf,
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
     test_case = request.param
@@ -566,7 +566,7 @@ def benchmark_config(
         Path.cwd() / f"training/tests/integration/config/benchmark/{test_case}.yaml",
     )
     OmegaConf.set_struct(template.data, False)
-    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications, base_benchmark_config)
+    cfg = OmegaConf.merge(template, config_with_tempdir, use_case_modifications, base_benchmark_config)
 
     cfg.system.output.profiler = Path(cfg.system.output.root + "/" + cfg.system.output.profiler)
     OmegaConf.resolve(cfg)
@@ -592,11 +592,11 @@ def global_config_with_checkpoint(
 
     if "gnn" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-gnn-global-2026-08-18.ckpt",
         )
     elif "graphtransformer" in model_architecture:
         existing_ckpt = get_test_data(
-            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-03-06.ckpt",
+            "anemoi-integration-tests/training/checkpoints/testing-checkpoint-graphtransformer-global-2026-08-18.ckpt",
         )
     else:
         msg = f"Unknown architecture in config {cfg.model.architecture}"
@@ -723,7 +723,7 @@ def stochastic_interpolant_config(
     params=[
         pytest.param(
             [
-                "model=graphtransformer_transport_edm",
+                "model=graphtransformer_multi_transport_edm",
                 "training=multi_transport",
                 "training.transport.prediction_mode=state",
                 "training.transport.objective=edm_diffusion",
@@ -732,7 +732,7 @@ def stochastic_interpolant_config(
         ),
         pytest.param(
             [
-                "model=graphtransformer_transport_tendency_edm",
+                "model=graphtransformer_multi_transport_tendency_edm",
                 "training=multi_transport",
                 "training.transport.prediction_mode=tendency",
                 "training.transport.objective=edm_diffusion",
@@ -818,4 +818,72 @@ def temporal_downscaler_ensemble_config(
     cfg = handle_truncation_matrices(cfg, get_test_data)
     assert isinstance(cfg, DictConfig)
 
+    return cfg, url_dataset
+
+
+@pytest.fixture
+def offset_forecaster_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    cfg, url, _ = build_global_config(
+        ["model=graphtransformer"],
+        testing_modifications_with_temp_dir,
+        get_tmp_path,
+    )
+
+    OmegaConf.set_struct(cfg.task, False)
+    cfg.task = {
+        "_target_": "anemoi.training.tasks.OffsetForecaster",
+        "input_offsets": ["-12H", "0H"],
+        "output_offsets": ["6H", "12H"],
+        "rollout": {
+            "start": 2,
+            "epoch_increment": 0,
+            "maximum": 2,
+        },
+    }
+
+    return cfg, url
+
+
+@pytest.fixture
+def offset_forecaster_tendency_transport_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    """Compose a multi-output tendency transport model using irregular input offsets."""
+    with initialize(
+        version_base=None,
+        config_path="../../src/anemoi/training/config",
+        job_name="test_offset_forecaster_tendency_transport",
+    ):
+        template = compose(config_name="transport_edm_diffusion_tendency")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_transport.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+
+    OmegaConf.set_struct(cfg.task, False)
+    cfg.task = {
+        "_target_": "anemoi.training.tasks.OffsetForecaster",
+        "input_offsets": ["-12H", "0H"],
+        "output_offsets": ["6H", "12H"],
+        "rollout": {
+            "start": 1,
+            "epoch_increment": 0,
+            "maximum": 1,
+        },
+        "validation_rollout": 1,
+    }
+    cfg.training.max_epochs = 1
+    cfg.dataloader.limit_batches.training = 1
+    cfg.dataloader.limit_batches.validation = 1
+    cfg.diagnostics.plot.callbacks = []
+
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
     return cfg, url_dataset

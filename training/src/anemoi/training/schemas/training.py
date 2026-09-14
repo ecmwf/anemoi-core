@@ -25,7 +25,7 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
 
@@ -725,6 +725,14 @@ class ImplementedStrategiesUsingBaseDDPStrategySchema(StrEnum):
     ddp = "anemoi.training.distributed.strategy.DDPGroupStrategy"
 
 
+class SingleDeviceStrategySchema(BaseModel):
+    target_: Literal["anemoi.training.distributed.single.SingleDeviceStrategy"] = Field(..., alias="_target_")
+    "Hydra target for the single device strategy."
+    device: str = "auto"
+    "Device to use for training."
+    model_config = ConfigDict(extra="ignore")
+
+
 class BaseDDPStrategySchema(BaseModel):
     """Strategy configuration."""
 
@@ -746,7 +754,7 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
     "Number of GPUs per ensemble."
 
 
-StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
+StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | SingleDeviceStrategySchema
 
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
