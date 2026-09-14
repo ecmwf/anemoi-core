@@ -99,8 +99,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -116,8 +116,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(x[dataset_name], "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    y_noised[dataset_name], "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+                ),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -203,22 +205,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _build_conditioning_kwargs(
         self,
-        x: dict[str, torch.Tensor],
+        dataset_names: list[str],
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
         self._assert_condition_shapes(condition)
-        dataset_names = list(x.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
-        # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
-        condition_base = condition[dataset_names[0]][:, 0, :, 0]
+        # the condition that way, so we can read it from any dataset, embed it
+        # once, and repeat it over each dataset's graph nodes below.
+        condition_base = next(iter(condition.values()))[:, 0, :, 0]
         noise_cond_base = self._embed_noise_conditioning(condition_base)
 
         fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in x:
+        for dataset_name in dataset_names:
             # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
@@ -263,24 +264,27 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        # Multi-dataset case
-        dataset_names = list(x.keys())
+        # Datasets the network touches. ``x`` and ``conditioned_target`` need not
+        # share keys: a downscaler reads its inputs from ``x`` only and writes its
+        # target from ``conditioned_target`` only.
+        routed_datasets = list(dict.fromkeys([*self.input_datasets, *self.target_datasets]))
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
+        shape_sources = {**x, **conditioned_target}
+        batch_size = self._get_consistent_dim(shape_sources, 0)
+        ensemble_size = self._get_consistent_dim(shape_sources, 2)
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
+            dataset_names=routed_datasets,
             grid_shard_sizes=grid_shard_sizes,
         )
-        for dataset_name in dataset_names:
+        for dataset_name in routed_datasets:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
         # Embed the current noise level or bridge time and pass it to the conditional layers.
         fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            x, condition, model_comm_group=model_comm_group
+            routed_datasets, condition, model_comm_group=model_comm_group
         )
 
         # Process each dataset through its corresponding encoder
@@ -292,13 +296,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
-            if dataset_name not in self.input_datasets:
-                continue
-
+        for dataset_name in self.input_datasets:
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                conditioned_target[dataset_name],
+                x,
+                conditioned_target,
                 bse,
                 grid_shard_sizes,
                 model_comm_group,
@@ -395,7 +396,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
+                x_out,
+                x_skip_dict[dataset_name],
+                batch_size,
+                ensemble_size,
+                conditioned_target[dataset_name].dtype,
             )
 
         return x_out_dict
@@ -718,20 +723,22 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        y_noised: torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor | None, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        x_dataset = x[dataset_name]
+        y_noised_dataset = y_noised[dataset_name]
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
+        x_skip = self.residual[dataset_name](
+            x_dataset, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output
+        )[..., self._internal_input_idx[dataset_name]]
         assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
@@ -742,8 +749,10 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         # Combine input history, corrupted target, and node position features
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(x_dataset, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    y_noised_dataset, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+                ),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -1091,6 +1100,10 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     #: :class:`anemoi.models.models.base.BaseGraphModel.uses_zero_offset_statistics`).
     uses_zero_offset_statistics: bool = True
 
+    #: Inputs are concatenated onto the target grid and encoded together, so one
+    #: encoder owns several source datasets.
+    supports_encoder_fusion: bool = True
+
     def __init__(
         self,
         *,
@@ -1101,12 +1114,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         n_step_output: int,
         graph_data: HeteroData,
     ) -> None:
-        # ``_resolve_roles`` must be called before ``super().__init__`` because
-        # ``_build_networks`` (invoked in the base ``__init__``) restricts the
-        # encoder/decoder loops to the target dataset only.
-        self.data_indices = data_indices
-        self._resolve_roles(model_config=DotDict(model_config))
-
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -1115,6 +1122,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             n_step_output=n_step_output,
             graph_data=graph_data,
         )
+
+        self._resolve_roles(model_config=DotDict(model_config))
+        self._validate_roles_match_encoder_routing()
 
     def _resolve_roles(self, model_config: DotDict) -> None:
         """Build per-target role index from ``training.transport.encoder_decoder_roles``."""
@@ -1142,19 +1152,42 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         # Ordered list of target datasets (one per triple).
         self.target_dataset_names: list[str] = list(self._roles_by_target.keys())
 
-        # Per-target input list: reference dataset first, then conditioning (if configured).
-        self._input_dataset_names_by_target: dict[str, list[str]] = {
-            target: ([role["reference"]] + ([role["conditioning"]] if role.get("conditioning") else []))
-            for target, role in self._roles_by_target.items()
-        }
-
-        # Convenience alias used by forward paths that are not yet generalized
-        # to multiple targets (e.g. ``_forward_transport_network``).
-        self.target_dataset_name: str = self.target_dataset_names[0]
-
         # Fail fast on residual-baseline misconfiguration: every target prognostic
         # variable must also be prognostic in its reference dataset.
         self._validate_prognostics_match()
+
+    def _validate_roles_match_encoder_routing(self) -> None:
+        """Require the role assignment and the encoder/decoder routing to describe the same model."""
+        role_targets = set(self.target_dataset_names)
+        routed_targets = set(self.target_datasets)
+        if role_targets != routed_targets:
+            msg = (
+                f"encoder_decoder_roles declares targets {sorted(role_targets)} but the decoders "
+                f"declare {sorted(routed_targets)}. Every target must appear in both."
+            )
+            raise ValueError(msg)
+
+        for target_name, role in self._roles_by_target.items():
+            reference_name = role["reference"]
+            fused_inputs = self._fused_input_dataset_names(target_name)
+            if reference_name not in fused_inputs:
+                msg = (
+                    f"encoder_decoder_roles: reference dataset '{reference_name}' of target "
+                    f"'{target_name}' is not encoded with it. Add it to the source_datasets of "
+                    f"encoder '{self.dataset2encoder[target_name]}' (currently fusing {fused_inputs})."
+                )
+                raise ValueError(msg)
+
+            # ``conditioning`` is redundant now that the encoder's source_datasets
+            # list every fused input, but silently ignoring it would hide a typo.
+            conditioning_name = role.get("conditioning")
+            if conditioning_name is not None and conditioning_name not in fused_inputs:
+                msg = (
+                    f"encoder_decoder_roles: conditioning dataset '{conditioning_name}' of target "
+                    f"'{target_name}' is not encoded with it. Add it to the source_datasets of "
+                    f"encoder '{self.dataset2encoder[target_name]}' (currently fusing {fused_inputs})."
+                )
+                raise ValueError(msg)
 
     def _validate_prognostics_match(self) -> None:
         """Require the set of prognostic variables in the target and its reference to match exactly."""
@@ -1183,81 +1216,27 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     # ── dimension arithmetic ─────────────────────────────────────────────────
 
-    def encoder_node_set(self, dataset_name: str) -> str:
-        """Graph node set whose grid this dataset's features must occupy at encode time."""
-        # Conditioning inputs have no encoder of their own; they are concatenated onto
-        # the target grid, so their projected tensors must match the target's node set.
-        for target_name, input_names in self._input_dataset_names_by_target.items():
-            if dataset_name in input_names:
-                return target_name
-        return dataset_name
+    def _fused_input_dataset_names(self, dataset_name: str) -> list[str]:
+        """Datasets concatenated onto ``dataset_name``'s grid, in encoder source order.
+
+        The anchor itself is excluded: it contributes the noised target rather
+        than an input history.
+        """
+        encoder_name = self.dataset2encoder[dataset_name]
+        return [name for name in self.encoder2datasets[encoder_name] if name != dataset_name]
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Return the encoder input dimension on the target grid for ``dataset_name``."""
-        if dataset_name not in self.target_dataset_names:
-            msg = (
-                "AnemoiTransportSpatialDownscalerModelEncProcDec._calculate_input_dim is "
-                f"only defined for target datasets {self.target_dataset_names}; got '{dataset_name}'."
-            )
-            raise ValueError(msg)
+        if dataset_name not in self.input_datasets:
+            # Fused inputs have no encoder of their own, so this width is unused.
+            return super()._calculate_input_dim(dataset_name)
 
         history_dim = self.n_step_input * sum(
-            self.num_input_channels[input_name] for input_name in self._input_dataset_names_by_target[dataset_name]
+            self.num_input_channels[input_name] for input_name in self._fused_input_dataset_names(dataset_name)
         )
         noised_dim = self.n_step_output * self.num_output_channels[dataset_name]
         node_attr_dim = self.node_attributes.attr_ndims[dataset_name]
         return history_dim + noised_dim + node_attr_dim
-
-    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
-        """Populate per-dataset channel counts for every dataset but per-dataset
-        input/target/output dims only for the target.
-        """
-        self.num_input_channels = {}
-        self.num_output_channels = {}
-        self.num_input_channels_prognostic = {}
-        self.num_input_channels_forcings = {}
-        self._internal_input_idx = {}
-        self._internal_output_idx = {}
-        self._forcing_input_idx = {}
-        self.input_dim = {}
-        self.input_dim_latent = self._calculate_input_dim_latent()
-        self.target_dim = {}
-        self.output_dim = {}
-
-        for dataset_name, dataset_indices in data_indices.items():
-            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
-            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
-            self._forcing_input_idx[dataset_name] = dataset_indices.model.input.forcing
-
-            self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
-            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
-            self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
-
-        # ``_calculate_input_dim`` for each target sums ``num_input_channels`` across
-        # the triple's input datasets, so it must run after the loop above has
-        # populated the channel counts for every dataset.
-        for target in self.target_dataset_names:
-            self.input_dim[target] = self._calculate_input_dim(target)
-            self.target_dim[target] = self._calculate_target_dim(target)
-            self.output_dim[target] = self._calculate_output_dim(target)
-
-    # ── network build restricted to the target dataset ───────────────────────
-
-    def _build_networks(self, model_config: DotDict) -> None:
-        """Build one encoder/decoder pair per target dataset.
-        Temporarily restricts ``dataset_names`` to the target datasets so the
-        base implementation loops only over the targets when creating
-        encoder/decoder modules.  Input datasets share the target grid and are
-        concatenated as extra per-node features before encoding; they do not
-        get their own encoder/decoder.
-        """
-        original_dataset_names = self.dataset_names
-        self.dataset_names = list(self.target_dataset_names)
-        try:
-            super()._build_networks(model_config)
-        finally:
-            self.dataset_names = original_dataset_names
 
     # ── residual math (mirror of tendency model's compute_tendency pair) ─────
 
@@ -1412,20 +1391,18 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     def _assemble_input(
         self,
-        x: dict[str, torch.Tensor] | torch.Tensor,
-        y_noised: dict[str, torch.Tensor] | torch.Tensor,
+        x: dict[str, torch.Tensor],
+        y_noised: dict[str, torch.Tensor],
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
     ) -> tuple[torch.Tensor, None, ShardSizes]:
-        """Concatenate all input-dataset features, the noised target, and node attrs."""
-        assert dataset_name in self.target_dataset_names, (
+        """Concatenate all fused input features, the noised target, and node attrs."""
+        assert dataset_name in self.input_datasets, (
             "AnemoiTransportSpatialDownscalerModelEncProcDec._assemble_input only supports "
-            f"target datasets {self.target_dataset_names}; got '{dataset_name}'."
+            f"encoder anchors {self.input_datasets}; got '{dataset_name}'."
         )
-        assert isinstance(x, dict), "Downscaler _assemble_input expects a per-dataset dict for x."
-        assert isinstance(y_noised, dict), "Downscaler _assemble_input expects a per-dataset dict for y_noised."
 
         node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
         target_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
@@ -1441,7 +1418,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         # vector on the target grid.  All inputs must already share the target
         # grid dimension (reference is projected upstream).
         feature_chunks: list[torch.Tensor] = []
-        for input_name in self._input_dataset_names_by_target[dataset_name]:
+        for input_name in self._fused_input_dataset_names(dataset_name):
             input_tensor = x[input_name]
             feature_chunks.append(
                 einops.rearrange(
@@ -1462,127 +1439,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         x_data_latent = torch.cat(feature_chunks, dim=-1)
         return x_data_latent, None, target_grid_shard_sizes
-
-    # ── forward pass restricted to the target dataset ────────────────────────
-
-    def _forward_transport_network(
-        self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
-        condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        del kwargs
-        target_name = self.target_dataset_name
-        # In this model the target dataset drives batch/ensemble dimensions;
-        # input datasets share the same batch and ensemble, but may be validated
-        # in future.  We do not iterate over all datasets here — only the target.
-        target_tensor = x[target_name] if target_name in x else conditioned_target[target_name]
-        batch_size = target_tensor.shape[0]
-        ensemble_size = target_tensor.shape[2]
-        bse = batch_size * ensemble_size
-
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=[target_name],
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[target_name], model_comm_group)
-
-        # Conditioning is shared across datasets — build it on the target only.
-        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            {target_name: target_tensor},
-            {target_name: condition[target_name]},
-            model_comm_group=model_comm_group,
-        )
-
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-
-        # Encode on the target grid, feeding features from all input datasets.
-        x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-            x=x,
-            y_noised=conditioned_target,
-            bse=bse,
-            grid_shard_sizes=grid_shard_sizes,
-            model_comm_group=model_comm_group,
-            dataset_name=target_name,
-        )
-
-        (
-            encoder_edge_attr,
-            encoder_edge_index,
-            enc_edge_shard_sizes,
-        ) = self.encoder_graph_provider[target_name].get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-        enc_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_data,
-            dst_nodes=shard_sizes_hidden,
-            edges=enc_edge_shard_sizes,
-        )
-        x_data_latent, x_latent = self.encoder[self.dataset2encoder[target_name]](
-            (x_data_latent, x_hidden_latent),
-            batch_size=bse,
-            shard_info=enc_shard_info,
-            edge_attr=encoder_edge_attr,
-            edge_index=encoder_edge_index,
-            model_comm_group=model_comm_group,
-            keep_x_dst_sharded=True,
-            **fwd_mapper_kwargs[target_name],
-        )
-
-        # Processor
-        (
-            processor_edge_attr,
-            processor_edge_index,
-            proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-        x_latent_proc = self.processor(
-            x=x_latent,
-            batch_size=bse,
-            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            **processor_kwargs,
-        )
-        if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
-
-        # Decode back onto the target grid.
-        (
-            decoder_edge_attr,
-            decoder_edge_index,
-            dec_edge_shard_sizes,
-        ) = self.decoder_graph_provider[target_name].get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-        dec_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_sizes_hidden,
-            dst_nodes=shard_sizes_data,
-            edges=dec_edge_shard_sizes,
-        )
-        x_out = self.decoder[self.dataset2decoder[target_name]](
-            (x_latent_proc, x_data_latent),
-            batch_size=bse,
-            shard_info=dec_shard_info,
-            edge_attr=decoder_edge_attr,
-            edge_index=decoder_edge_index,
-            model_comm_group=model_comm_group,
-            keep_x_dst_sharded=in_out_sharded[target_name],
-            **bwd_mapper_kwargs[target_name],
-        )
-        target_dtype = target_tensor.dtype
-        x_out = self._assemble_output(x_out, x_skip, batch_size, ensemble_size, target_dtype)
-        return {target_name: x_out}
 
     # ── sampling hooks ────────────────────────────────────────────────────────
 
@@ -1732,11 +1588,10 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
     ) -> dict[str, torch.Tensor]:
-        """Build the sampling source only for the target dataset."""
-        target_name = self.target_dataset_name
+        """Build the sampling source only for the target datasets."""
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                {target_name: x[target_name]},
+                {name: x[name] for name in self.target_dataset_names},
                 n_step_output=self.n_step_output,
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
@@ -1804,8 +1659,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 sampler_params=sampler_params,
                 **kwargs,
             )
-            target_name = self.target_dataset_name
-            out[target_name] = out[target_name].to(batch[target_name].dtype)
+            for target_name in self.target_dataset_names:
+                out[target_name] = out[target_name].to(batch[target_name].dtype)
 
             out = self._after_sampling(
                 out,

@@ -370,7 +370,7 @@ class BaseGraphModel(nn.Module):
             if grid_shard_sizes is None:
                 in_out_sharded[dataset_name] = False
             else:
-                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
+                in_out_sharded[dataset_name] = grid_shard_sizes.get(dataset_name) is not None
 
         return in_out_sharded
 

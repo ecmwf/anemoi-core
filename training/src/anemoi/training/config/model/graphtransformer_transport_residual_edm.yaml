@@ -1,12 +1,14 @@
 ---
 # Model config for spatial downscaling with AnemoiTransportSpatialDownscalerModelEncProcDec.
 #
-# Dataset roles come from training.transport.encoder_decoder_roles:
-#   reference = in_lres, conditioning = in_hres, target = out_hres.
-# Only *target* datasets get an encoder/decoder pair. in_lres (remapped onto the hres
-# grid by data.datasets.in_lres.spatial_processor) and in_hres are concatenated as
-# extra per-node features before encoding, so the triple shares one encoder anchored
-# at out_hres.
+# The encoder below fuses all three datasets onto the out_hres node set: in_lres is
+# remapped onto it by data.datasets.in_lres.spatial_processor, in_hres is native, and
+# out_hres contributes the noised target. Only the fusion_anchor (out_hres) owns
+# encoder/decoder edges.
+#
+# training.transport.encoder_decoder_roles only pairs the residual baseline with its
+# target (reference = in_lres, target = out_hres); which datasets are encoded is
+# decided by encoders.*.source_datasets.
 
 num_channels: 1024
 cpu_offload: False
@@ -82,10 +84,12 @@ processor:
 
 encoders:
   "0":
-    # Target only: the graph's encoder edges are (out_hres -> hidden), and the
-    # conditioning datasets are folded in as node features by _assemble_input.
-    source_datasets: [ "out_hres" ]
-    dataset_fusing_strategy:  "not_supported" # Options: "not_supported", "concatenate_inputs_along_variable_dim" (model-class dependent)
+    # All three datasets are encoded together on the out_hres node set: in_lres is
+    # remapped onto it by data.datasets.in_lres.spatial_processor, in_hres is native,
+    # and out_hres contributes the noised target. Only the anchor owns encoder edges.
+    source_datasets: [ "out_hres", "in_lres", "in_hres" ]
+    dataset_fusing_strategy:  "concatenate_inputs_along_variable_dim" # Options: "not_supported", "concatenate_inputs_along_variable_dim" (model-class dependent)
+    fusion_anchor: "out_hres"
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}
