@@ -123,10 +123,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # self.encoder/self.decoder, since each dataset can have a different variable set.
         (dataset_name,) = self.dataset_names
         feature_names = self.data_indices[dataset_name].model.input.ordered_names
+        # `or` (not `.get(key, default)` alone) because the Pydantic schema round-trip makes
+        # this key present-but-None for configs that never set it, not absent - `.get` only
+        # falls back to its default when the key is missing entirely.
+        input_transform_config = model_config.model.get("input_transform") or {
+            "_target_": "anemoi.models.layers.embedder.PlainInputTransform"
+        }
         self.input_transform = instantiate(
-            model_config.model.get(
-                "input_transform", {"_target_": "anemoi.models.layers.embedder.PlainInputTransform"}
-            ),
+            input_transform_config,
             feature_names=feature_names,
             _recursive_=False,
         )
