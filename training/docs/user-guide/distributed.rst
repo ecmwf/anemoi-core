@@ -57,7 +57,7 @@ The relevant knobs live under ``config.system.hardware`` and
        for pure data parallelism.
    * - ``dataloader.batch_size.training``
      - ``2``
-     - Per-GPU batch size (must be 1 when ``num_gpus_per_model`` > 1).```
+     - Per-GPU batch size (must be 1 when ``num_gpus_per_model`` > 1).
 
 The **effective (global) batch size** used per optimiser step is:
 
