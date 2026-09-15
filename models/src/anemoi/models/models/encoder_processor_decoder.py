@@ -133,6 +133,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             feature_names=feature_names,
             _recursive_=False,
         )
+        __import__("pdb").set_trace()  # TODO delme
 
     def _assemble_input(
         self,
