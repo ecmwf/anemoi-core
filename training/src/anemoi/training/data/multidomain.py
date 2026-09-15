@@ -7,18 +7,20 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import datetime
 import logging
 import os
 import random
 from collections.abc import Generator
 from collections.abc import Mapping
+from functools import cached_property
 
 import numpy as np
 import torch
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.training.data.anemoidataset import AnemoiDataset
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -67,7 +69,7 @@ class MultiDomainSampler:
         yield from samples
 
 
-class MultiDomainDataset(AnemoiDataset):
+class MultiDomainDataset(MultiDataset):
     """Sample independent domains through one iterable dataset.
 
     Unlike :class:`MultiDataset`, which returns synchronized samples from every
@@ -106,13 +108,13 @@ class MultiDomainDataset(AnemoiDataset):
             Options forwarded to ``Variable.check_compatibility``. The options
             follow ``CheckVariablesCompatibilitySchema``.
         """
-        super().__init__(
-            data_readers=data_readers,
-            shuffle=shuffle,
-            label=label,
-            epoch=epoch,
-            rollout=rollout,
-        )
+        self.data_readers = data_readers
+        self.label = label
+        self.shuffle = shuffle
+        self.dataset_names = list(data_readers.keys())
+        self.epoch = epoch
+        self.rollout = rollout
+        self._lazy_init_model_and_reader_group_info()
 
         single_seq = [name for name, reader in data_readers.items() if reader.num_sequences == 1]
         multi_seq = [name for name, reader in data_readers.items() if reader.num_sequences > 1]
@@ -128,6 +130,10 @@ class MultiDomainDataset(AnemoiDataset):
             name: data_reader.compute_anchors(relative_date_indices[name])
             for name, data_reader in self.data_readers.items()
         }
+        for name, anchors in self.anchors.items():
+            if len(anchors) == 0:
+                msg = f"No valid anchors found for data reader '{name}': {self.data_readers[name]}"
+                raise ValueError(msg)
         self.valid_date_indices = {
             name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }
@@ -139,6 +145,11 @@ class MultiDomainDataset(AnemoiDataset):
         LOGGER.info("valid date indices: %s", self.valid_date_indices)
         self.n_samples_per_worker = {}  # overwrite base to empty dict
         self.chunk_index_range = {}  # overwrite base to empty dict
+
+    @cached_property
+    def frequency(self) -> dict[str, datetime.timedelta]:
+        """Return the frequency of each domain."""
+        return self._collect("frequency")
 
     def set_epoch(
         self,
@@ -158,6 +169,10 @@ class MultiDomainDataset(AnemoiDataset):
             name: data_reader.compute_anchors(relative_date_indices[name])
             for name, data_reader in self.data_readers.items()
         }
+        for name, anchors in self.anchors.items():
+            if len(anchors) == 0:
+                msg = f"No valid anchors found for data reader '{name}': {self.data_readers[name]}"
+                raise ValueError(msg)
         self.valid_date_indices = {
             name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }

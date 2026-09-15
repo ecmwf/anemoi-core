@@ -73,6 +73,24 @@ class TestMultiDomain:
         assert np.array_equal(multi_domain.anchors["dataset_a"][:, 1], [0, *range(11, 24)])
         assert np.array_equal(multi_domain.anchors["dataset_b"], [[0, 0], [0, 1], [0, 2], [0, 3]])
 
+    def test_frequency_is_reported_per_domain(self, multi_domain: MultiDomainDataset) -> None:
+        assert multi_domain.frequency == {"dataset_a": "3h", "dataset_b": "1h"}
+
+    def test_empty_domain_raises(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
+
+        with pytest.raises(ValueError, match="No valid anchors found for data reader 'dataset_b'"):
+            MultiDomainDataset(
+                data_readers=multi_domain.data_readers,
+                relative_date_indices=multi_domain.relative_date_indices,
+            )
+
+    def test_set_epoch_empty_domain_raises(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
+
+        with pytest.raises(ValueError, match="No valid anchors found for data reader 'dataset_b'"):
+            multi_domain.set_epoch(1, relative_date_indices=multi_domain.relative_date_indices)
+
     def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         assert set(multi_domain.n_samples_per_worker) == {"dataset_a", "dataset_b"}
