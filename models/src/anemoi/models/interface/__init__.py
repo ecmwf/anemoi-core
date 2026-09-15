@@ -23,8 +23,6 @@ from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 #: Key used in ``statistics_tendencies`` to select the zero lead-time entry.
-#: Kept as a module-level constant so the interface, prediction modes, and
-#: tests all reference the same string.
 ZERO_LEAD_TIME_KEY: str = "0h"
 
 
@@ -212,30 +210,20 @@ class AnemoiModelInterface(torch.nn.Module):
     ) -> tuple[Processors | None, Processors | None]:
         """Build the residual pre/post-processor pair.
 
-        Always uses the zero lead-time entry (``statistics_tendencies["0h"]``)
-        because residual-mode normalization statistics are independent of the
-        forecast lead time — the same pair applies to every output step.
+        Uses the zero lead-time entry (``statistics_tendencies["0h"]``)
+        because output steps of the spatial downscaler do not have different
+        'lead times' — the same statistics apply to every output step.
 
-        Returns ``(None, None)`` when ``statistics_tendencies`` is absent, so
-        callers can decide whether to fall back to state processors or raise.
+        Returns ``(None, None)`` when ``statistics_tendencies`` is absent.
         """
         if statistics_tendencies is None:
             return None, None
-        # Support both the per-lead-time layout produced by the datamodule
-        # (``{"lead_times": [...], "0h": {...}, ...}``) and a flat statistics
-        # dict passed directly (already the zero-offset stats).
-        if "lead_times" in statistics_tendencies:
-            step_stats = statistics_tendencies.get(ZERO_LEAD_TIME_KEY)
-            if step_stats is None:
-                msg = (
-                    f"uses_zero_offset_statistics=True but statistics_tendencies has no "
-                    f"'{ZERO_LEAD_TIME_KEY}' entry (available: "
-                    f"{sorted(k for k in statistics_tendencies if k != 'lead_times')})."
-                )
-                raise ValueError(msg)
-            stats_for_residual = step_stats
-        else:
-            stats_for_residual = statistics_tendencies
+        # Follow the per-lead-time layout produced by the datamodule
+        # (``{"lead_times": [...], "0h": {...}, ...}``)
+        stats_for_residual = statistics_tendencies.get(ZERO_LEAD_TIME_KEY)
+        if stats_for_residual is None:
+            msg = f"uses_zero_offset_statistics=True but statistics_tendencies has no " f"'{ZERO_LEAD_TIME_KEY}' entry."
+            raise ValueError(msg)
         return self._build_processor_pair(processors_configs, data_indices, stats_for_residual)
 
     def _build_model(self) -> None:
@@ -279,22 +267,6 @@ class AnemoiModelInterface(torch.nn.Module):
             if pre_res is not None:
                 self.pre_processors_residual[dataset_name] = pre_res
                 self.post_processors_residual[dataset_name] = post_res
-
-        # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
-        # Keyed by dataset name; empty by default so existing models are unaffected.
-        # Built from optional config.data.datasets.<dataset_name>.spatial_processor entries.
-        self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
-        for dataset_name, dataset_config in data_config.items():
-            sp_config = getattr(dataset_config, "spatial_processor", None)
-            if sp_config is None:
-                continue
-            projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
-            if not isinstance(projector, SpatialPreprocessor):
-                raise TypeError(
-                    f"datasets.{dataset_name}.spatial_processor must instantiate a SpatialPreprocessor, "
-                    f"got {type(projector)}"
-                )
-            self.spatial_pre_processors[dataset_name] = projector
 
         # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
         # Keyed by dataset name; empty by default so existing models are unaffected.

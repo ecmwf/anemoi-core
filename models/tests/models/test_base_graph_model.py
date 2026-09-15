@@ -248,7 +248,6 @@ def test_without_fusion_every_source_dataset_is_its_own_anchor() -> None:
 
     assert model.encoder2anchors == {0: ["data", "extra"]}
     assert model.input_datasets == ["data", "extra"]
-    assert model.encoder_node_set("extra") == "extra"
 
 
 def test_fusion_anchor_without_a_fusion_strategy_is_rejected() -> None:
@@ -280,8 +279,6 @@ def test_fusion_routes_every_source_dataset_through_the_anchor_node_set() -> Non
     # Every fused dataset still resolves to the encoder, on the anchor's node set.
     assert model.encoder2datasets == {0: ["data", "extra"]}
     assert model.dataset2encoder == {"data": 0, "extra": 0}
-    assert model.encoder_node_set("extra") == "data"
-    assert model.encoder_node_set("data") == "data"
 
 
 def test_fusion_requires_an_anchor() -> None:

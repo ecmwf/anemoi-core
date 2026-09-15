@@ -173,20 +173,6 @@ def _make_bare_model(
     return model
 
 
-def test_encoder_node_set_maps_fused_inputs_to_the_anchor() -> None:
-    """Fused inputs are encoded on the anchor's grid, so they share its node set."""
-    model = _make_bare_model()
-
-    assert model.encoder_node_set("in_lres") == "out_hres"
-    assert model.encoder_node_set("in_hres") == "out_hres"
-
-
-def test_encoder_node_set_leaves_the_anchor_unchanged() -> None:
-    model = _make_bare_model()
-
-    assert model.encoder_node_set("out_hres") == "out_hres"
-
-
 def test_fused_input_dataset_names_excludes_the_anchor() -> None:
     """The anchor contributes the noised target, not an input history."""
     model = _make_bare_model()
@@ -1102,7 +1088,6 @@ def test_real_construction_builds_one_encoder_decoder_pair_anchored_at_the_targe
     assert set(model.decoder.keys()) == {"dec0"}
     assert set(model.encoder_graph_provider.keys()) == {"out_hres"}
     assert set(model.decoder_graph_provider.keys()) == {"out_hres"}
-    assert model.encoder_node_set("in_lres") == "out_hres"
 
     # in_lres (2 vars) + in_hres (1 var) history, noised target (2 vars), node attrs.
     assert model.input_dim["out_hres"] == 3 + 2 + model.node_attributes.attr_ndims["out_hres"]

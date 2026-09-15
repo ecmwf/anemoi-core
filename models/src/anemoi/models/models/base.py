@@ -188,10 +188,6 @@ class BaseGraphModel(nn.Module):
             )
         return [fusion_anchor]
 
-    def encoder_node_set(self, dataset_name: str) -> str:
-        """Graph node set whose grid this dataset's features must occupy at encode time."""
-        return self.dataset2anchor.get(dataset_name, dataset_name)
-
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
         self.dataset2decoder: dict[str, str] = {}
