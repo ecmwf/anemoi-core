@@ -357,6 +357,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     # were not built through `__init__` (e.g. `__new__`-built test doubles).
     _participants: tuple[str, ...] = ()
     _active_participant: str | None = None
+    # Participants activated so far, only used to log each one's first activation. Rebound
+    # rather than mutated in place, so the class-level default is never shared between instances.
+    _activated_participants: tuple[str, ...] = ()
 
     @property
     def participants(self) -> list[str]:
@@ -492,6 +495,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.shard_sizes = self._shard_sizes[participant]
         self.loss = self._loss[participant_key]
         self.metrics = self._metrics[participant_key]
+
+        if participant is not None and participant not in self._activated_participants:
+            # Once per participant per run: cheap evidence that every participant's graph is
+            # really trained on. Every subsequent switch is logged at DEBUG instead.
+            self._activated_participants = (*self._activated_participants, participant)
+            LOGGER.info("Participant '%s' activated for the first time, grid sizes %s.", participant, self.grid_sizes)
 
     def set_active_participant(self, participant: str | None) -> None:
         """Select the participant the model and the grid-sized training objects resolve to.

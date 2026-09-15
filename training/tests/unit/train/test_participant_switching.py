@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 from types import SimpleNamespace
 from unittest.mock import MagicMock
 
@@ -151,6 +152,22 @@ def test_all_participants_keep_their_losses_registered() -> None:
     registered = dict(module.named_modules())
     assert "_loss.west.data" in registered
     assert "_loss.north.data" in registered
+
+
+def test_first_activation_of_every_participant_is_logged_once(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.INFO, logger="anemoi.training.train.methods.base"):
+        module = _make_module()  # activates `west`
+        module.set_active_participant("north")
+        module.set_active_participant("west")
+        module.set_active_participant("north")
+
+    activated = [record.getMessage() for record in caplog.records if "activated for the first time" in record.message]
+    assert len(activated) == 2, "one line per participant, however often they are switched between"
+    assert "'west'" in activated[0]
+    assert "{'data': 4}" in activated[0], "the grid sizes identify which participant's graph is in use"
+    assert "'north'" in activated[1]
+    assert "{'data': 6}" in activated[1]
+    assert module._activated_participants == ("west", "north")
 
 
 # ── graph node resolution ─────────────────────────────────────────────────────
