@@ -858,7 +858,12 @@ class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
 
 StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema
 
-VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
+# Maps group names to group specifications. Additionally accepts the reserved key
+# `ignore_variables_metadata: bool`, which makes `ExtractVariableGroupAndLevel` ignore the
+# dataset's `variables_metadata` and derive the parameter/level by cracking the variable name
+# instead (see `anemoi.training.utils.variables_metadata`). When set, group specifications given
+# as dictionaries are restricted to the `param` key only.
+VariableGroupType = dict[str, bool | str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
 class UpdateDsStatsOnCkptLoadSchema(BaseModel):

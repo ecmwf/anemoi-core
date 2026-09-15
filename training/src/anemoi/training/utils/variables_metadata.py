@@ -204,12 +204,27 @@ class ExtractVariableGroupAndLevel:
         Dictionary with groups as keys and variable names as values
     metadata_variables : dict, optional
         Dictionary with variable names as keys and metadata as values, by default None
+    ignore_variables_metadata : bool, optional
+        Ignore ``metadata_variables`` entirely and always derive the parameter and level by
+        splitting the variable name on a trailing ``_<digits>`` suffix, by default False.
+        May also be set as the reserved ``ignore_variables_metadata`` key inside
+        ``variable_groups``.
+
+        Use this for datasets whose ``variables_metadata`` is internally self-consistent but
+        useless for grouping, e.g. observation datasets that set ``param`` to the full variable
+        name including the level or channel suffix (``param: z_500`` for variable ``z_500``) and
+        ``levtype: sfc`` for every variable. Without this, every level and every channel becomes
+        its own parameter.
+
+        Note that when set, group specifications given as dictionaries may only use the ``param``
+        key, since no other metadata attribute is available.
     """
 
     def __init__(
         self,
         variable_groups: dict[str, GROUP_SPEC | dict[str, GROUP_SPEC]],
         metadata_variables: dict[str, dict | Variable] | None = None,
+        ignore_variables_metadata: bool = False,
     ) -> None:
 
         if isinstance(variable_groups, DictConfig):
@@ -217,10 +232,26 @@ class ExtractVariableGroupAndLevel:
 
         variable_groups = variable_groups.copy()
 
+        # Reserved key: allow the flag to be set inline in the per-dataset `variable_groups` block.
+        # Must be popped before `self.variable_groups` is assigned, otherwise `get_group` would
+        # iterate it as if it were a group name. An explicit constructor argument wins.
+        self.ignore_variables_metadata = bool(
+            variable_groups.pop("ignore_variables_metadata", False) or ignore_variables_metadata,
+        )
+
         assert "default" in variable_groups, "Default group not defined in variable_groups"
         self.default_group = variable_groups.pop("default")
 
         self.variable_groups = variable_groups
+
+        if self.ignore_variables_metadata:
+            if metadata_variables:
+                LOG.info(
+                    "`ignore_variables_metadata` is set: discarding dataset `variables_metadata` for "
+                    "param/level derivation. Parameter and level will be derived by splitting the "
+                    "variable name on a trailing `_<digits>` suffix.",
+                )
+            metadata_variables = None
 
         self.metadata_variables: dict[str, Variable] = {
             name: Variable.from_dict(name, val) if not isinstance(val, Variable) else val

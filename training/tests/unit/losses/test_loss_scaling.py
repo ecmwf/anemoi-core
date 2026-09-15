@@ -442,6 +442,49 @@ def test_metric_range(fake_data: tuple[DictConfig, IndexCollection]) -> None:
     assert metric_range == expected_metric_range
 
 
+# Observation-style metadata: `param` is the full variable name and everything is declared
+# surface, so the metadata is self-consistent (hence trusted) but useless for grouping.
+OBS_STYLE_METADATA = {
+    name: {"mars": {"param": name, "levtype": "sfc"}}
+    for name in ("x", "y_50", "y_500", "y_850", "z", "q", "other", "d")
+}
+
+
+@pytest.mark.parametrize("fake_data", [linear_scaler], indirect=["fake_data"])
+def test_metric_range_collapses_with_ignore_variables_metadata(
+    fake_data: tuple[DictConfig, IndexCollection],
+) -> None:
+    """Obs-style metadata splits every level into its own block unless the flag is set."""
+    config, data_indices, _, _ = fake_data
+    metrics_to_log = config.training.get("metrics", [])
+    y_indices = [data_indices.model.output.name_to_index[n] for n in ("y_50", "y_500", "y_850")]
+
+    # Trusting the metadata, `param` is the un-cracked name: one block per level.
+    split = get_metric_ranges(
+        ExtractVariableGroupAndLevel(config.training.variable_groups, OBS_STYLE_METADATA),
+        data_indices.model.output,
+        metrics_to_log=metrics_to_log,
+    )
+    assert "pl_y" not in split
+    assert [split["sfc_y_50"], split["sfc_y_500"], split["sfc_y_850"]] == [[i] for i in y_indices]
+
+    # Ignoring it restores the single grouped block.
+    collapsed = get_metric_ranges(
+        ExtractVariableGroupAndLevel(
+            config.training.variable_groups,
+            OBS_STYLE_METADATA,
+            ignore_variables_metadata=True,
+        ),
+        data_indices.model.output,
+        metrics_to_log=metrics_to_log,
+    )
+    assert collapsed["pl_y"] == y_indices
+    assert not [key for key in collapsed if key.startswith("sfc_y_")]
+
+    # Explicit per-variable metrics are keyed by exact name and remain unaffected.
+    assert collapsed["y_850"] == [data_indices.model.output.name_to_index["y_850"]]
+
+
 @pytest.fixture
 def mock_updating_scalar() -> type[BaseUpdatingScaler]:
     class UpdatingScalar(BaseUpdatingScaler):

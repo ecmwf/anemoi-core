@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## Unreleased
+
+### Features
+
+* **training:** Add `ignore_variables_metadata` to `variable_groups`, to derive a variable's parameter and level from its name instead of the dataset's `variables_metadata`. For datasets whose metadata sets `param` to the full variable name (e.g. `param: z_500`) with `levtype: sfc` throughout, which otherwise puts every level and channel in its own group.
+
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-08-11)
 
 

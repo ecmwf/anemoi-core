@@ -899,6 +899,32 @@ from metadata, otherwise it is found by splitting the variable name by
 `_` and taking the first part, see class
 `anemoi.training.utils.ExtractVariableGroupAndLevel`.
 
+Some datasets -- in particular observation datasets -- write a
+``variables_metadata`` block in which ``param`` is the *full* variable
+name including the level or channel suffix (e.g. ``param: z_500`` for
+variable ``z_500``) and ``levtype: sfc`` for every variable. Such
+metadata is internally self-consistent, so it is trusted, but it defeats
+grouping: every level and every channel becomes its own parameter. To
+ignore the dataset metadata entirely and always derive the parameter and
+level from the variable name, set:
+
+.. code:: yaml
+
+   variable_groups:
+      datasets:
+         your_dataset_name:
+            ignore_variables_metadata: True
+            default: sfc
+            pl:
+               param: [q, t, u, v, w, z]
+
+This affects variable grouping, the variable and variable-level loss
+scalers, and validation-metric grouping consistently -- so all
+``cris_*`` channels share one validation curve, and all ``z_*`` levels
+share one, as they would without metadata. Note that when it is set,
+dictionary group specifications may only use the ``param`` key, since no
+other metadata attribute is available.
+
 If more complex variable groups are required, it is possible to define
 the group values as a dictionary, such that the variable's metadata must
 contain the key and value pair. See
