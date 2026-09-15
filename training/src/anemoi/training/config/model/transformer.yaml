@@ -137,7 +137,6 @@ compile:
     #options: # An example of setting torch.compile options
       #dynamic: false
       #mode: max-autotune
-recompile_limit: 32
 
 # Bounding configuration
 bounding: #These are applied in order

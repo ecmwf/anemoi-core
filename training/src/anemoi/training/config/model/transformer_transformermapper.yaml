@@ -110,8 +110,6 @@ edge_trainable_parameters:
   data2hidden: 8
   hidden2data: 8
 
-recompile_limit: 32
-
 attributes:
   edges:
     - edge_length
