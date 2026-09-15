@@ -114,18 +114,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
     def _build_input_transform(self, model_config: DotDict) -> None:
-        # feature_names must reflect the real column order of the raw `vars` axis, not dict
-        # insertion order - name_to_index is the authoritative name->column mapping per dataset.
+        # feature_names must match the columns of the raw input tensor `x` at _assemble_input
+        # time - that's the model's INPUT set (forcing + prognostic) in raw column order, not
+        # every variable in the dataset: diagnostic-only variables (e.g. tp, cp) are predicted,
+        # never part of `x`, so including them here would size input_transform wider than `x`
+        # actually is.
         # TODO: single-dataset only for now; multi-dataset would need this as a ModuleDict, like
         # self.encoder/self.decoder, since each dataset can have a different variable set.
         (dataset_name,) = self.dataset_names
-        feature_names = [
-            name
-            for name, _idx in sorted(
-                self.data_indices[dataset_name].name_to_index.items(),
-                key=lambda item: item[1],
-            )
-        ]
+        feature_names = self.data_indices[dataset_name].model.input.ordered_names
         self.input_transform = instantiate(
             model_config.model.get(
                 "input_transform", {"_target_": "anemoi.models.layers.embedder.PlainInputTransform"}
@@ -133,7 +130,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             feature_names=feature_names,
             _recursive_=False,
         )
-        __import__("pdb").set_trace()  # TODO delme
 
     def _assemble_input(
         self,
