@@ -9,9 +9,20 @@
 
 from .batch import Batch
 from .flat import FlatView
+from .spec import SourceSpec
 from .tensor_layout import TensorLayout
 from .views import GriddedSourceView
 from .views import SourceView
 from .views import TabularSourceView
+from .views import create_source_view
 
-__all__ = ["Batch", "SourceView", "FlatView", "TensorLayout", "GriddedSourceView", "TabularSourceView"]
+__all__ = [
+    "Batch",
+    "SourceSpec",
+    "SourceView",
+    "FlatView",
+    "TensorLayout",
+    "GriddedSourceView",
+    "TabularSourceView",
+    "create_source_view",
+]

@@ -223,10 +223,10 @@ def test_inference_forcing_only_target_preserves_output_metadata():
 
 @pytest.mark.parametrize("members", [1, 2])
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
-    from anemoi.models.data.views import TabularSourceView
+    from anemoi.models.data.views import create_source_view
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = TabularSourceView(
+    view = create_source_view(
         name="obs",
         data=samples,
         variables=["a"],

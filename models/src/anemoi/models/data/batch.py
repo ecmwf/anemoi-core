@@ -22,6 +22,7 @@ import torch
 from torch.distributed import ProcessGroup
 from torch.utils.data import default_collate
 
+from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import TensorLayout
 from anemoi.models.data.views import create_source_view
@@ -183,6 +184,12 @@ class Batch:
     variables: dict[str, list[str]] = field(default_factory=dict)
     statistics: dict[str, np.ndarray] = field(default_factory=dict)
 
+    # Per-dataset SourceSpec, built on first access and reused for the life of this
+    # batch. Deliberately *not* propagated to the batches returned by ``to``,
+    # ``with_data`` etc.: those may carry different variables, layouts or
+    # static-coord flags, and a stale spec would silently mis-describe them.
+    _spec_cache: dict[str, SourceSpec] = field(default_factory=dict, repr=False, compare=False)
+
     @property
     def size(self) -> int:
         """Number of samples (batch size) in this batch."""
@@ -249,8 +256,16 @@ class Batch:
         lines.append(")")
         return "\n".join(lines)
 
-    def __getitem__(self, dataset_name: str) -> "SourceView":
-        """Return a per-dataset view bundling data, coordinates, layout and metadata."""
+    def spec_for(self, dataset_name: str) -> SourceSpec:
+        """Return the :class:`SourceSpec` describing one dataset in this batch.
+
+        Built on first call and memoised, so repeated ``batch[name]`` access does
+        not rebuild the spec or re-run its validation.
+        """
+        cached = self._spec_cache.get(dataset_name)
+        if cached is not None:
+            return cached
+
         if dataset_name not in self.data:
             msg = f"Dataset {dataset_name!r} not found in batch (have {list(self.data)})."
             raise KeyError(msg)
@@ -266,19 +281,33 @@ class Batch:
         if dataset_name not in self.variables:
             raise ValueError(f"Dataset {dataset_name!r} requires variable names for view-based access.")
 
+        spec = SourceSpec(
+            name=dataset_name,
+            variables=self.variables[dataset_name],
+            layout=layout,
+            statistics=self.statistics.get(dataset_name, {}),
+            grid_size=self.grid_sizes.get(dataset_name),
+            coordinates_are_static=self.is_static_coords(dataset_name),
+        )
+        self._spec_cache[dataset_name] = spec
+        return spec
+
+    @property
+    def spec(self) -> dict[str, SourceSpec]:
+        """Per-dataset specs for this batch, without any of its data."""
+        return {dataset_name: self.spec_for(dataset_name) for dataset_name in self.dataset_names}
+
+    def __getitem__(self, dataset_name: str) -> "SourceView":
+        """Return a per-dataset view bundling data, coordinates, layout and metadata."""
         per_dataset_meta = (
             self.metadata.get(dataset_name) if isinstance(self.metadata.get(dataset_name), dict) else None
         )
         boundaries = per_dataset_meta.get(BOUNDARIES_META_KEY) if per_dataset_meta else None
         return create_source_view(
-            name=dataset_name,
+            spec=self.spec_for(dataset_name),
             data=self.data[dataset_name],
-            variables=self.variables[dataset_name],
-            statistics=self.statistics.get(dataset_name, {}),
             coordinates=self.coordinates.get(dataset_name),
-            coordinates_are_static=self.is_static_coords(dataset_name),
             timedeltas=self.timedeltas.get(dataset_name),
-            layout=layout,
             boundaries=boundaries,
             shard_sizes=self.shard_sizes.get(dataset_name),
         )

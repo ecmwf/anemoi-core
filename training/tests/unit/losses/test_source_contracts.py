@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data.views import TabularSourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
@@ -29,7 +30,7 @@ from anemoi.training.utils.index_space import IndexSpace
 
 
 def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSourceView:
-    return GriddedSourceView(
+    return create_source_view(
         name="grid",
         data=data,
         variables=["a", "b"],
@@ -102,7 +103,7 @@ def test_scores_accept_equivalent_negative_axes(loss_type: type[EnergyScoreLoss]
 
 
 def _observations() -> TabularSourceView:
-    return TabularSourceView(
+    return create_source_view(
         name="obs",
         data=[torch.ones(2, 2), torch.ones(3, 2)],
         variables=["a", "b"],
@@ -166,7 +167,7 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
 @pytest.mark.parametrize("backend", ["naive", "stable"])
 def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     data = torch.tensor([[[-1.0], [-1.0]], [[1.0], [1.0]]], requires_grad=True)
-    pred = TabularSourceView(
+    pred = create_source_view(
         name="obs",
         data=[data],
         variables=["a"],

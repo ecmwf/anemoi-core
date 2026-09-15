@@ -14,7 +14,6 @@ from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import replace
-from functools import cached_property
 from typing import Any
 
 import einops
@@ -23,6 +22,8 @@ import torch
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatView
+from anemoi.models.data.spec import SPEC_FIELD_NAMES
+from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import ShardSizes
@@ -32,27 +33,28 @@ from anemoi.models.distributed.utils import model_is_distributed
 LOGGER = logging.getLogger(__name__)
 
 
+def _split_spec_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    """Pop the :class:`SourceSpec` fields out of ``kwargs`` and return them.
+
+    Lets callers keep passing the spec's fields flat (``name=``, ``variables=``,
+    ``layout=``, ...) rather than building a :class:`SourceSpec` first.
+    """
+    return {key: kwargs.pop(key) for key in tuple(kwargs) if key in SPEC_FIELD_NAMES}
+
+
 def create_source_view(**kwargs) -> "SourceView":
-    """Factory function to create a SourceView for a source dataset."""
-    if kwargs["layout"].time_in_grid:
+    """Factory function to create a SourceView for a source dataset.
+
+    Accepts either a ready-made ``spec=SourceSpec(...)``, or the spec's fields
+    passed flat alongside the payload.
+    """
+    if "spec" not in kwargs:
+        kwargs["spec"] = SourceSpec(**_split_spec_kwargs(kwargs))
+
+    if kwargs["spec"].layout.time_in_grid:
         return TabularSourceView(**kwargs)
 
     return GriddedSourceView(**kwargs)
-
-
-def _fancy_variable_index(
-    indices: slice | Sequence[int] | torch.Tensor,
-) -> slice | list[int] | Sequence[int] | torch.Tensor:
-    """Return a variable index safe for dimension-preserving indexing.
-
-    Statistics are stored as numpy arrays, so a tensor index is converted
-    to a plain list of ints (preserving the variable axis).
-
-    Slices and other sequence indices are returned unchanged.
-    """
-    if isinstance(indices, torch.Tensor):
-        return indices.tolist()
-    return indices
 
 
 def _shape_without_ensemble_dim(tensor: torch.Tensor, layout: TensorLayout) -> tuple[int, ...]:
@@ -74,21 +76,20 @@ class SourceView(ABC):
     ``layout.time_in_grid`` dispatch.
     """
 
-    name: str
+    spec: SourceSpec
     data: torch.Tensor | list[torch.Tensor]
-    variables: list[str]
-    statistics: dict[str, torch.Tensor]
-    coordinates: torch.Tensor | list[torch.Tensor] | None
-    layout: TensorLayout
-    coordinates_are_static: bool = False
+    coordinates: torch.Tensor | list[torch.Tensor] | None = None
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     boundaries: list[tuple[slice, ...]] | None = None
     shard_sizes: ShardSizes | list[ShardSizes] = None
 
     def __post_init__(self) -> None:
-        """Validate the metadata needed to interpret every materialized tensor."""
-        if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"Source {self.name!r} requires unique variable names.")
+        """Validate the payload against the spec that describes it.
+
+        Metadata-only checks (unique variable names) live on
+        :class:`~anemoi.models.data.spec.SourceSpec`; what remains here is
+        everything that needs a materialized tensor.
+        """
         samples = self.data if isinstance(self.data, list) else [self.data]
         for sample in samples:
             layout = self.layout.normalized(sample.ndim)
@@ -100,13 +101,56 @@ class SourceView(ABC):
         if samples and any(sample.dtype != samples[0].dtype for sample in samples):
             raise ValueError(f"Source {self.name!r} requires the same dtype for every sample.")
 
-    @cached_property
+    @property
+    def name(self) -> str:
+        """Dataset name."""
+        return self.spec.name
+
+    @property
+    def variables(self) -> list[str]:
+        """Variable names along the variables axis, in order."""
+        return self.spec.variables
+
+    @property
+    def layout(self) -> TensorLayout:
+        """Mapping from logical axes to physical dimension positions."""
+        return self.spec.layout
+
+    @property
+    def statistics(self) -> dict[str, Any]:
+        """Per-statistic arrays over the variable axis."""
+        return self.spec.statistics
+
+    @property
+    def coordinates_are_static(self) -> bool:
+        """Whether the coordinate tensor is fixed for the whole run."""
+        return self.spec.coordinates_are_static
+
+    @property
+    def grid_size(self) -> int | None:
+        """Full grid size before sharding; ``None`` for observation datasets."""
+        return self.spec.grid_size
+
+    @property
     def name_to_index(self) -> dict[str, int]:
-        """Mapping from variable name to index along the variables axis."""
-        return {name: idx for idx, name in enumerate(self.variables)}
+        """Mapping from variable name to index along the variables axis.
+
+        Memoised on the spec, so it survives repeated ``batch[name]`` access.
+        """
+        return self.spec.name_to_index
 
     def clone(self, **kwargs) -> "SourceView":
-        """Return a new view with replacements, sharing fields that are not replaced."""
+        """Return a new view with replacements, sharing fields that are not replaced.
+
+        Spec fields may be passed flat (``variables=``, ``statistics=``, ...); they
+        are routed onto a replaced :class:`SourceSpec`.
+        """
+        spec_kwargs = _split_spec_kwargs(kwargs)
+        if spec_kwargs:
+            if "spec" in kwargs:
+                msg = f"clone() got both spec= and spec field(s) {sorted(spec_kwargs)}; pass one or the other."
+                raise ValueError(msg)
+            kwargs["spec"] = self.spec.clone(**spec_kwargs)
         return replace(self, **kwargs)
 
     def select(self, **kwargs) -> "SourceView":
@@ -419,9 +463,7 @@ class GriddedSourceView(SourceView):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
-        new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
-        new_statistics = {k: v[_fancy_variable_index(indices)] for k, v in self.statistics.items()}
-        return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
+        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
 
     def index_select(self, dim: int, index: torch.Tensor) -> "GriddedSourceView":
         """Return a new view with the data tensor indexed along a given dimension."""
@@ -775,9 +817,7 @@ class TabularSourceView(SourceView):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
-        new_variables = self.variables[indices] if isinstance(indices, slice) else [self.variables[i] for i in indices]
-        new_statistics = {k: v[_fancy_variable_index(indices)] for k, v in self.statistics.items()}
-        return self.clone(data=new_data, variables=new_variables, statistics=new_statistics)
+        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSourceView":
         """Return a new view restricted to the given time indices.

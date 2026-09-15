@@ -20,6 +20,7 @@ from torch import Tensor
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import GriddedSourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.models.models.target_features import TARGET_FEATURE_REGISTRY
 from anemoi.models.models.target_features import CompositeTargetFeature
 from anemoi.models.models.target_features import DecodingTargetFeature
@@ -107,7 +108,7 @@ class TargetFeatureTestCase:
             model_init.num_nodes,
             model_init.num_vars,
         )
-        return GriddedSourceView(
+        return create_source_view(
             name=self.DATASET,
             data=torch.rand(shape, dtype=torch.float32),
             coordinates=torch.zeros(model_init.num_nodes, 2),

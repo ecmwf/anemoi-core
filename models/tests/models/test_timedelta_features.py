@@ -13,7 +13,7 @@ import pytest
 import torch
 
 from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.data.views import TabularSourceView
+from anemoi.models.data.views import create_source_view
 from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.target_features import create_decoding_target_features
@@ -85,7 +85,7 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["coordinates"], ["obs"], model),
     }
-    view = TabularSourceView(
+    view = create_source_view(
         name="obs",
         data=[torch.ones(3, 1)],
         variables=["value"],
@@ -120,7 +120,7 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
     model = _model_with_timedelta_attributes(dtype="float64")
     model.residual = {}
     model.node_attributes = {}
-    view = TabularSourceView(
+    view = create_source_view(
         name="obs",
         data=[torch.ones(2, 1, dtype=torch.float32)],
         variables=["value"],
@@ -144,7 +144,7 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["encoded_data"], ["obs"], model),
     }
-    view = TabularSourceView(
+    view = create_source_view(
         name="obs",
         data=[torch.ones(2, 1)],
         variables=["value"],
