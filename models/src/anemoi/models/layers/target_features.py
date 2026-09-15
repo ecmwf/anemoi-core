@@ -183,7 +183,10 @@ class PrognosticsFeature(DecodingTargetFeature):
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        x_prog = torch.index_select(x_input_data, dim=-1, index=self.model._internal_input_idx[dataset_name])
+        # The prognostic indices are metadata and may remain on the CPU while
+        # the input data has been moved to the model device.
+        input_idx = torch.as_tensor(self.model._internal_input_idx[dataset_name], device=x_input_data.device)
+        x_prog = torch.index_select(x_input_data, dim=-1, index=input_idx)
         return einops.rearrange(x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
