@@ -27,6 +27,7 @@ from anemoi.training.losses.scalers.variable_tendency import BaseTendencyScaler
 from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
 from anemoi.training.losses.scalers.variable_tendency import VarTendencyScaler
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
@@ -346,6 +347,78 @@ expected_var_tendency_scaling = torch.Tensor(
         (2**2) / (1**2),  # d
     ],
 )
+
+
+@pytest.mark.parametrize("norm", [None, "unit-sum", "unit-mean"])
+@pytest.mark.parametrize(
+    ("scaler_config", "expected_weights"),
+    [
+        pytest.param(
+            {
+                "_target_": "anemoi.training.losses.scalers.GeneralVariableLossScaler",
+                "weights": {"default": 1, "y": 4},
+            },
+            [4.0, 4.0, 1.0],
+            id="general",
+        ),
+        pytest.param(std_dev_scaler, [2.0, 4.0, 1.0], id="tendency"),
+        pytest.param(linear_scaler, [0.5, 0.85, 1.0], id="level"),
+        pytest.param(
+            {
+                "_target_": "anemoi.training.losses.scalers.VariableMaskingLossScaler",
+                "variables": ["diag"],
+            },
+            [1.0, 1.0, 0.0],
+            id="masking",
+        ),
+    ],
+)
+def test_variable_scalers_with_interspersed_target(
+    scaler_config: dict,
+    expected_weights: list[float],
+    norm: str | None,
+) -> None:
+    """Build model-ordered weights and apply them to predictions paired with target variables."""
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["forcing"], "diagnostic": ["diag"], "target": ["truth"]}),
+        {"forcing": 0, "y_500": 1, "truth": 2, "y_850": 3, "diag": 4},
+    )
+    scalers, _ = create_scalers(
+        DictConfig({"variable": {**scaler_config, "norm": norm}}),
+        data_indices=data_indices,
+        metadata_extractor=ExtractVariableGroupAndLevel(DictConfig({"default": "sfc", "pl": ["y"]})),
+        statistics={"stdev": [1.0, 4.0, 1.0, 8.0, 1.0]},
+        statistics_tendencies={"lead_times": ["6h"], "6h": {"stdev": [1.0, 2.0, 1.0, 2.0, 1.0]}},
+    )
+    # Normalise over the three model outputs, including the diagnostic variable.
+    divisor = 1.0
+    if norm == "unit-sum":
+        divisor = sum(expected_weights)
+    elif norm == "unit-mean":
+        divisor = sum(expected_weights) / 3
+    expected_scaling = torch.tensor(expected_weights) / divisor
+    torch.testing.assert_close(scalers["variable"][1], expected_scaling)
+
+    scalers["grid"] = (TensorDim.GRID.value, torch.ones(1))
+    loss = get_loss_function(
+        DictConfig(
+            {
+                "_target_": "anemoi.training.losses.MSELoss",
+                "scalers": ["variable", "grid"],
+                "predicted_variables": ["y_500", "y_850"],
+                "target_variables": ["truth", "y_850"],
+            },
+        ),
+        scalers=scalers,
+        data_indices=data_indices,
+    )
+    pred = torch.tensor([3.0, 5.0, 0.0]).reshape(1, 1, 1, 1, 3)
+    target = torch.tensor([0.0, -10.0, 2.0, 3.0, 0.0]).reshape(1, 1, 1, 1, 5)
+    result = loss(pred, target, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_FULL)
+
+    # Squared errors are (3 - 2)^2 = 1 and (5 - 3)^2 = 4.
+    expected_loss = (expected_weights[0] + 4 * expected_weights[1]) / (2 * divisor)
+    torch.testing.assert_close(result, torch.tensor(expected_loss))
 
 
 @pytest.mark.parametrize(
