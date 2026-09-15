@@ -505,11 +505,6 @@ also possible for users to add callbacks using the same structure:
    :no-undoc-members:
    :show-inheritance:
 
-.. automodule:: anemoi.training.diagnostics.callbacks.evaluation
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
 .. automodule:: anemoi.training.diagnostics.callbacks.optimiser
    :members:
    :no-undoc-members:

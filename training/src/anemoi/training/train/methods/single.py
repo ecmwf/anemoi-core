@@ -11,14 +11,14 @@
 from __future__ import annotations
 
 import logging
-import typing
+from typing import TYPE_CHECKING
 
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.index_space import IndexSpace
 
-if typing.TYPE_CHECKING:
+if TYPE_CHECKING:
     import torch
 
     from anemoi.training.train.step_output import TrainingStepOutput
