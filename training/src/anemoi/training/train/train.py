@@ -33,6 +33,8 @@ from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.create import load_graph_from_file
 from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import fuse_participant_graphs
+from anemoi.graphs.projection_helpers import participant_node_name
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
@@ -57,6 +59,35 @@ from anemoi.training.utils.seeding import get_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _apply_dataset_to_graph_config(graph_config: DictConfig, dataset_cfg: Any, dataset_name: str) -> None:
+    """Point the ``data`` node builder of ``graph_config`` at the dataset of ``dataset_cfg``."""
+    reader_cfg = dataset_cfg.dataset_config
+    dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
+    if dataset_path is None:
+        msg = f"Dataset source is None for dataset '{dataset_name}'."
+        raise ValueError(msg)
+    data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
+    if (
+        data_node_cfg is not None
+        and hasattr(data_node_cfg, "node_builder")
+        and hasattr(data_node_cfg.node_builder, "dataset")
+    ):
+        # Build the dataset value for the graph node builder.
+        # Start with the bare dataset path, then merge any keys from
+        # dataset_config that are not part of DatasetConfigSchema
+        # (e.g. check_variables_compatibility).  Schema-managed keys
+        # are excluded to avoid forwarding complex validated objects
+        # or None defaults (e.g. select: None, frequency: Frequency(...)).
+        graph_dataset_value: str | dict = {"dataset": dataset_path}
+        if isinstance(reader_cfg, (DictConfig, dict)):
+            _schema_keys = set(DatasetConfigSchema.model_fields.keys())
+            graph_dataset_value.update(
+                {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
+            )
+        data_node_cfg.node_builder.dataset = graph_dataset_value
+
 
 PL_VERSION = version.parse(pl.__version__)
 
@@ -201,6 +232,7 @@ class AnemoiTrainer(ABC):
             and not graph_cfg.overwrite
             and not getattr(graph_cfg, "nodes", None)
             and not getattr(graph_cfg, "edges", None)
+            and not getattr(graph_cfg, "participants", None)
         )
         if is_existing:
             if not save_path.exists():
@@ -214,6 +246,10 @@ class AnemoiTrainer(ABC):
 
         # Build mode: expand config and create graph via GraphCreator.
         graph_config = OmegaConf.create(OmegaConf.to_container(graph_cfg, resolve=False))
+        participant_graph_cfgs = graph_config.pop("participants", None)
+
+        if participant_graph_cfgs:
+            return self._build_participant_graphs(graph_config, participant_graph_cfgs, dataset_names, save_path)
 
         if not uses_fused_dataset_graph(graph_cfg, dataset_names):
             if len(dataset_names) == 1:
@@ -231,30 +267,7 @@ class AnemoiTrainer(ABC):
                         participant,
                     )
                     dataset_cfg = dataset_cfg.participants[participant]
-                reader_cfg = dataset_cfg.dataset_config
-                dataset_path = reader_cfg["dataset"] if isinstance(reader_cfg, (DictConfig, dict)) else reader_cfg
-                if dataset_path is None:
-                    msg = f"Dataset source is None for dataset '{dataset_name}'."
-                    raise ValueError(msg)
-                data_node_cfg = graph_config.get("nodes", {}).get(DEFAULT_DATASET_NAME)
-                if (
-                    data_node_cfg is not None
-                    and hasattr(data_node_cfg, "node_builder")
-                    and hasattr(data_node_cfg.node_builder, "dataset")
-                ):
-                    # Build the dataset value for the graph node builder.
-                    # Start with the bare dataset path, then merge any keys from
-                    # dataset_config that are not part of DatasetConfigSchema
-                    # (e.g. check_variables_compatibility).  Schema-managed keys
-                    # are excluded to avoid forwarding complex validated objects
-                    # or None defaults (e.g. select: None, frequency: Frequency(...)).
-                    graph_dataset_value: str | dict = {"dataset": dataset_path}
-                    if isinstance(reader_cfg, (DictConfig, dict)):
-                        _schema_keys = set(DatasetConfigSchema.model_fields.keys())
-                        graph_dataset_value.update(
-                            {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
-                        )
-                    data_node_cfg.node_builder.dataset = graph_dataset_value
+                _apply_dataset_to_graph_config(graph_config, dataset_cfg, dataset_name)
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
@@ -273,6 +286,55 @@ class AnemoiTrainer(ABC):
             return graph
 
         return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
+
+    def _build_participant_graphs(
+        self,
+        graph_config: DictConfig,
+        participant_graph_cfgs: DictConfig,
+        dataset_names: list[str],
+        save_path: Path | None,
+    ) -> HeteroData:
+        """Build one graph per participant and fuse them into a single graph.
+
+        Every node group is suffixed with its participant name (``data_west``, ``hidden_west``, ...),
+        except for a single participant, which keeps the plain names and so is unchanged.
+        """
+        if len(dataset_names) != 1:
+            msg = f"graph.participants is only supported for a single dataset, but datasets are {dataset_names}."
+            raise ValueError(msg)
+
+        dataset_name = dataset_names[0]
+        dataset_cfg = get_multiple_datasets_config(self.config.dataloader.training)[dataset_name]
+        participants = list(participant_graph_cfgs)
+        suffix = len(participants) > 1
+        required = [participant_node_name(DEFAULT_DATASET_NAME, p if suffix else None) for p in participants]
+
+        overwrite = self.config.graph.get("overwrite", False)
+        if save_path and save_path.exists() and not overwrite:
+            graph = load_graph_from_file(save_path)
+            validate_loaded_graph(graph, required)
+            return graph
+
+        dataset_participants = dataset_cfg.get("participants", {})
+        missing = [p for p in participants if p not in dataset_participants]
+        if missing:
+            msg = (
+                f"graph.participants defines {missing}, which are not participants of dataset "
+                f"'{dataset_name}' ({list(dataset_participants)})."
+            )
+            raise ValueError(msg)
+
+        graphs = {}
+        for participant in participants:
+            LOGGER.info("Building graph for participant '%s' of dataset '%s'.", participant, dataset_name)
+            participant_config = participant_graph_cfgs[participant]
+            _apply_dataset_to_graph_config(participant_config, dataset_participants[participant], dataset_name)
+            graphs[participant] = GraphCreator(participant_config).create()
+
+        fused = fuse_participant_graphs(graphs)
+        if save_path:
+            GraphCreator(graph_config).save(fused, save_path, overwrite=True)
+        return fused
 
     def _validate_transfer_learning_datasets(
         self,
