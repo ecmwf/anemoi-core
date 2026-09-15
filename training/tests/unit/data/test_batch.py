@@ -19,7 +19,7 @@ from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import SourceView
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 def _gridded_layout() -> TensorLayout:

@@ -24,7 +24,7 @@ from anemoi.models.transport.schedules import ExponentialSigmaSchedule
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
 from anemoi.models.transport.schedules import LinearSigmaSchedule
 from anemoi.models.transport.schedules import SigmaSchedule
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 DATASET_NAME = "test_dataset"
 

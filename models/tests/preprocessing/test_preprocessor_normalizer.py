@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.data.views import create_source_view
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 VARIABLES = ["x", "y", "z", "q", "other"]
 

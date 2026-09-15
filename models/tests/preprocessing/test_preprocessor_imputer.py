@@ -18,7 +18,7 @@ from anemoi.models.data.views import create_source_view
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 VARIABLES = ["x", "y", "z", "q", "other", "prog"]
 

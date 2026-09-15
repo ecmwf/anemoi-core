@@ -26,7 +26,7 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 
 def test_instantiation_with_filtering() -> None:

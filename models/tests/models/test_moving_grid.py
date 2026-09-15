@@ -23,8 +23,8 @@ from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from anemoi.models.data.testing import make_source
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_source
+from batch_builders import make_batch
 
 
 class _NearestEdges:

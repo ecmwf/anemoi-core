@@ -26,7 +26,7 @@ from anemoi.models.models.target_features import CompositeTargetFeature
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import register_target_feature
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 
 @dataclass

@@ -28,8 +28,8 @@ from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
-from anemoi.models.data.testing import make_source
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_source
+from batch_builders import make_batch
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -524,7 +524,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
         statistics={"obs": {}},
     )
 
-    target_forcing = batch.update_source(
+    target_forcing = batch.replace(
         "obs", batch["obs"].clone(data=[torch.full((3, 2), 5.0)], variables=["forcing_a", "forcing_b"])
     )
     model._forward_transport_network(

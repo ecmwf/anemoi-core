@@ -326,6 +326,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             assert (
                 do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
             ), "Target and output coordinates must match."
-            output = output.update_source(dataset_name, x_out_dict[dataset_name])
+            output = output.replace(dataset_name, x_out_dict[dataset_name])
 
         return output

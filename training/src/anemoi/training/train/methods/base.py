@@ -939,7 +939,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         processed_batch = batch
         for dataset_name, processor in processors.items():
             if dataset_name in batch:
-                processed_batch = processed_batch.update_source(
+                processed_batch = processed_batch.replace(
                     dataset_name,
                     processor(batch[dataset_name], in_place=False, **kwargs),
                 )
@@ -964,7 +964,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if dataset_name not in batch:
                 continue
             layout = layouts.get(dataset_name) if isinstance(layouts, dict) else layouts
-            processed = processed.update_source(
+            processed = processed.replace(
                 dataset_name,
                 self._postprocess_dataset_view(batch[dataset_name], dataset_name, layout),
             )

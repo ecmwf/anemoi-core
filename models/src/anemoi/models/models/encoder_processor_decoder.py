@@ -464,7 +464,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         output_positions = [self.data_indices[dataset_name].name_to_index[name] for name in output_names]
         output_statistics = {name: values[output_positions] for name, values in self.statistics[dataset_name].items()}
         output_dtype = torch.promote_types(dtype, torch.float32)
-        pred = target.unflatten(x_out.to(output_dtype), variables=output_names, statistics=output_statistics)
+        pred = target.unflatten(
+            x_out.to(output_dtype),
+            spec=target.spec.clone(variables=output_names, statistics=output_statistics),
+        )
 
         if x_skip is not None:
             assert (
@@ -902,7 +905,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             assert (
                 do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
             ), "Target and output coordinates must match."
-            output = output.update_source(dataset_name, x_out_dict[dataset_name])
+            output = output.replace(dataset_name, x_out_dict[dataset_name])
 
         return output
 

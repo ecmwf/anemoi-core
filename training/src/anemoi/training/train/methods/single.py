@@ -35,8 +35,7 @@ class SingleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        first_payload = next(iter(batch.data.values()))
-        dtype = first_payload[0].dtype if isinstance(first_payload, list) else first_payload.dtype
+        dtype = batch[list(batch.keys())[0]].dtype
         loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
         metrics = {}
         y_preds = []

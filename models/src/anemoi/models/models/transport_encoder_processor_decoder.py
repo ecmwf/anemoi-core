@@ -553,7 +553,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 target_data.dtype,
                 dataset_name,
             )
-            out_batch = out_batch.update_source(dataset_name, out_view)
+            out_batch = out_batch.replace(dataset_name, out_view)
 
         return out_batch
 
@@ -709,8 +709,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup],
         grid_shard_sizes: DatasetShardSizes | None,
     ) -> torch.Tensor | list[torch.Tensor]:
-        if template is not None and dataset_name in template.coordinates:
-            coordinates = template.coordinates[dataset_name]
+        if template is not None and dataset_name in template and template[dataset_name].coordinates is not None:
+            coordinates = template[dataset_name].coordinates
             dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
             if dataset_grid_shard_sizes is None:
                 return coordinates
@@ -945,7 +945,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 # Normalize the output-time decoding forcings like the model inputs.
                 for dataset_name in list(target_forcing.keys()):
                     if dataset_name in pre_processors:
-                        target_forcing = target_forcing.update_source(
+                        target_forcing = target_forcing.replace(
                             dataset_name,
                             pre_processors[dataset_name](target_forcing[dataset_name], in_place=False),
                         )

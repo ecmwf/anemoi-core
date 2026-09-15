@@ -71,10 +71,6 @@ class Batch:
         """Per-dataset specs for this batch, without any of its data."""
         return {name: source.spec for name, source in self.sources.items()}
 
-    def spec_for(self, dataset_name: str) -> SourceSpec:
-        """Return the :class:`SourceSpec` describing one dataset in this batch."""
-        return self[dataset_name].spec
-
     @property
     def size(self) -> int:
         """Number of samples (batch size) in this batch."""

@@ -427,11 +427,11 @@ class BaseGraphModel(nn.Module):
     def _resolve_in_out_sharded(self, batch: Batch) -> dict[str, bool]:
         """Per-dataset flag indicating whether the dataset is grid-sharded.
 
-        Sharding metadata is carried by the batch itself (``batch.shard_sizes``),
-        which the per-dataset source views expose via ``flatten().shard_sizes``.
-        ``None`` means the corresponding dataset is replicated, not sharded.
+        Sharding metadata is carried by each source, which exposes it via
+        ``flatten().shard_sizes``. ``None`` means that dataset is replicated, not
+        sharded.
         """
-        return {dataset_name: batch.shard_sizes.get(dataset_name) is not None for dataset_name in batch.keys()}
+        return {dataset_name: source.shard_sizes is not None for dataset_name, source in batch.items()}
 
     # Canonical gridded axis order: the integer passed to _get_consistent_dim indexes this tuple
     # TODO: Should this be defined here?
@@ -570,7 +570,7 @@ class BaseGraphModel(nn.Module):
         coordinates = view.coordinates
         if coordinates is not None:
             coordinates = shard_tensor(coordinates, -2, sizes, model_comm_group)
-        return batch.update_source(
+        return batch.replace(
             dataset_name,
             view.clone(
                 data=shard_tensor(view.data, grid_dim, sizes, model_comm_group),
@@ -670,7 +670,7 @@ class BaseGraphModel(nn.Module):
 
             processed_batch = x
             for dataset_name in dataset_names:
-                processed_batch = processed_batch.update_source(
+                processed_batch = processed_batch.replace(
                     dataset_name,
                     pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
                 )
@@ -691,7 +691,7 @@ class BaseGraphModel(nn.Module):
             for dataset_name in target.dataset_names:
                 if dataset_name not in pre_processors:
                     continue
-                processed_target = processed_target.update_source(
+                processed_target = processed_target.replace(
                     dataset_name,
                     pre_processors[dataset_name](target[dataset_name], in_place=False, **kwargs),
                 )
@@ -703,7 +703,7 @@ class BaseGraphModel(nn.Module):
             for dataset_name in y_hat.dataset_names:
                 if dataset_name not in post_processors:
                     continue
-                y_hat = y_hat.update_source(
+                y_hat = y_hat.replace(
                     dataset_name,
                     post_processors[dataset_name](y_hat[dataset_name], in_place=False),
                 )
@@ -711,7 +711,7 @@ class BaseGraphModel(nn.Module):
             # Gather the output if needed
             if gather_out:
                 for dataset_name in y_hat.dataset_names:
-                    y_hat = y_hat.update_source(dataset_name, y_hat[dataset_name].allgather(model_comm_group))
+                    y_hat = y_hat.replace(dataset_name, y_hat[dataset_name].allgather(model_comm_group))
 
         return y_hat
 

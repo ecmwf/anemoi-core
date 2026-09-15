@@ -41,7 +41,7 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 
 def _view(data: torch.Tensor) -> GriddedSourceView:

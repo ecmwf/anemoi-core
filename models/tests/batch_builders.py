@@ -15,9 +15,11 @@ objects. Tests frequently need the *result* of collation directly - a batch whos
 tensors already carry a batch axis - which would otherwise mean spelling out a
 :class:`~anemoi.models.data.spec.SourceSpec` per dataset at every call site.
 
-These helpers take the spec's fields flat and assemble the sources. They are a
-test convenience only; they are not a compatibility layer and production code
-should not use them.
+These helpers take the spec's fields flat and assemble the sources.
+
+An identical copy lives under each package's ``tests/`` directory, since the two
+suites are collected in separate pytest processes and neither package's tests are
+importable from the other.
 """
 
 import logging

@@ -20,8 +20,8 @@ from anemoi.models.data.views import create_source_view
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 from anemoi.training.losses import MSELoss
 from anemoi.training.train.step_output import TrainingStepOutput
-from anemoi.models.data.testing import make_source
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_source
+from batch_builders import make_batch
 
 BS = 2
 TIME = 6

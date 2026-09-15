@@ -11,45 +11,55 @@ import pytest
 import torch
 
 from anemoi.models.data import Batch
+from anemoi.models.data import SourceSample
 from anemoi.models.data import SourceSpec
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data.views import TabularSourceView
 from anemoi.models.data.views import create_source_view
-from anemoi.models.data.testing import make_source
+from batch_builders import make_batch
+from batch_builders import make_source
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
 
 
-def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> dict:
+def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> SourceSample:
     n_vars = len(variables)
-    return {
-        "data": torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
-        "variables": variables,
-        "statistics": {"mean": torch.arange(n_vars, dtype=torch.float32)},
-        "layout": GRIDDED_LAYOUT,
-        "coordinates": torch.zeros(4, 2),
-        "metadata": {},
-        "grid_size": 4,
-    }
+    return SourceSample(
+        data=torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
+        variables=variables,
+        statistics={"mean": torch.arange(n_vars, dtype=torch.float32)},
+        layout=GRIDDED_LAYOUT,
+        coordinates=torch.zeros(4, 2),
+        grid_size=4,
+        coordinates_are_static=True,
+    )
 
 
-def tabular_payload(n_points: int = 4) -> dict:
-    return {
-        "data": torch.ones(1, n_points, 2),
-        "variables": ["t2m", "sp"],
-        "statistics": {"mean": torch.tensor([1.0, 2.0])},
-        "layout": TABULAR_LAYOUT,
-        "coordinates": torch.zeros(n_points, 2),
-        "timedeltas": torch.zeros(n_points),
-        "metadata": {"boundaries": (slice(0, n_points // 2), slice(n_points // 2, n_points))},
-        "grid_size": None,
-    }
+def tabular_payload(n_points: int = 4) -> SourceSample:
+    return SourceSample(
+        data=torch.ones(1, n_points, 2),
+        variables=["t2m", "sp"],
+        statistics={"mean": torch.tensor([1.0, 2.0])},
+        layout=TABULAR_LAYOUT,
+        coordinates=torch.zeros(n_points, 2),
+        timedeltas=torch.zeros(n_points),
+        boundaries=(slice(0, n_points // 2), slice(n_points // 2, n_points)),
+    )
 
 
-def gridded_batch(**kwargs) -> Batch:
-    return Batch.collate([{"grid": gridded_payload(**kwargs)}], static_coord_datasets=["grid"])
+def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
+    n_vars = len(variables)
+    return make_batch(
+        data={"grid": torch.arange(2 * 2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 2, 1, 4, n_vars)},
+        coordinates={"grid": torch.zeros(4, 2)},
+        layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
+        variables={"grid": variables},
+        statistics={"grid": {"mean": torch.arange(n_vars, dtype=torch.float32)}},
+        grid_sizes={"grid": 4},
+        static_coords=("grid",),
+    )
 
 
 class TestSourceSpec:
@@ -116,39 +126,25 @@ class TestSpecOnViews:
         assert batch["grid"].name_to_index is batch["grid"].name_to_index
 
     def test_batch_spec_covers_every_dataset(self) -> None:
-        batch = Batch.collate([{"grid": gridded_payload(), "obs": tabular_payload()}])
+        batch = Batch.collate([{"grid": gridded_payload(), "obs": tabular_payload()}])  # noqa: E501
         assert set(batch.spec) == {"grid", "obs"}
         assert batch.spec["obs"].layout.time_in_grid is True
         assert batch.spec["obs"].grid_size is None
 
-    def test_flat_spec_kwargs_still_construct_a_view(self) -> None:
-        """Call sites that predate the spec pass its fields flat."""
-        view = make_source(
-            name="grid",
-            data=torch.zeros(1, 1, 4, 2),
-            variables=["a", "b"],
-            statistics={},
-            layout=GRIDDED_LAYOUT,
-            coordinates=torch.zeros(4, 2),
-            coordinates_are_static=True,
-        )
+    def test_create_source_view_dispatches_on_the_spec_layout(self) -> None:
+        spec = SourceSpec(name="grid", variables=["a", "b"], layout=GRIDDED_LAYOUT, coordinates_are_static=True)
+        view = create_source_view(spec, data=torch.zeros(1, 1, 4, 2), coordinates=torch.zeros(4, 2))
         assert isinstance(view, GriddedSourceView)
-        assert view.variables == ["a", "b"]
+        assert view.spec is spec
         assert view.coordinates_are_static is True
 
-    def test_clone_routes_flat_spec_kwargs_onto_the_spec(self) -> None:
+    def test_clone_replaces_the_spec_wholesale(self) -> None:
         view = gridded_batch()["grid"]
-        cloned = view.clone(variables=["x", "y", "z"])
+        cloned = view.clone(spec=view.spec.clone(variables=["x", "y", "z"]))
         assert cloned.variables == ["x", "y", "z"]
-        assert cloned.spec is not view.spec
         assert view.variables == ["a", "b", "c"]
         # payload is shared by reference when it is not replaced
         assert cloned.data is view.data
-
-    def test_clone_rejects_spec_and_spec_fields_together(self) -> None:
-        view = gridded_batch()["grid"]
-        with pytest.raises(ValueError, match="pass one or the other"):
-            view.clone(spec=view.spec, variables=["x", "y", "z"])
 
     def test_select_variables_keeps_data_and_spec_consistent(self) -> None:
         view = gridded_batch()["grid"]
@@ -158,28 +154,30 @@ class TestSpecOnViews:
         assert selected.data.shape[selected.layout.variables] == 2
 
 
-class TestSpecCacheInvalidation:
-    """A cached spec must never outlive the batch it describes."""
+class TestBatchTransformations:
+    """Transformations must carry the spec through, and never mutate the receiver."""
 
-    def test_update_source_is_not_shadowed_by_a_stale_spec(self) -> None:
+    def test_replace_swaps_one_source(self) -> None:
         batch = gridded_batch()
-        assert batch["grid"].variables == ["a", "b", "c"]  # populate the cache
-
-        renamed = batch.update_source("grid", batch["grid"].clone(variables=["x", "y", "z"]))
+        renamed = batch.replace("grid", batch["grid"].clone(spec=batch["grid"].spec.clone(variables=["x", "y", "z"])))
         assert renamed["grid"].variables == ["x", "y", "z"]
         assert batch["grid"].variables == ["a", "b", "c"]
 
-    def test_select_is_not_shadowed_by_a_stale_spec(self) -> None:
+    def test_select_narrows_variables_and_their_lookup(self) -> None:
         batch = gridded_batch()
-        assert batch["grid"].name_to_index == {"a": 0, "b": 1, "c": 2}  # populate the cache
-
         selected = batch.select(variables=[1])
         assert selected["grid"].variables == ["b"]
         assert selected["grid"].name_to_index == {"b": 0}
+        assert batch["grid"].variables == ["a", "b", "c"]
 
-    def test_device_transfer_preserves_the_spec_contents(self) -> None:
+    def test_device_transfer_preserves_the_spec(self) -> None:
         batch = gridded_batch()
         moved = batch.to("cpu")
-        assert moved["grid"].variables == batch["grid"].variables
-        assert moved["grid"].layout == batch["grid"].layout
-        assert moved["grid"].grid_size == batch["grid"].grid_size
+        assert moved["grid"].spec is batch["grid"].spec
+
+    def test_apply_pairwise_runs_per_dataset(self) -> None:
+        batch = gridded_batch()
+        other = gridded_batch()
+        out = batch.apply_pairwise(other, lambda a, b, **_: (a - b).abs().sum())
+        assert set(out) == {"grid"}
+        assert out["grid"].item() == 0.0

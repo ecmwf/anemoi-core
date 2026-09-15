@@ -25,7 +25,7 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 
 def _view(data: torch.Tensor) -> GriddedSourceView:

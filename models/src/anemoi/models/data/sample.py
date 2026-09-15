@@ -15,6 +15,9 @@ from dataclasses import dataclass
 from dataclasses import field
 from typing import Any
 
+from rich.console import Console
+from rich.tree import Tree
+
 import torch
 
 from anemoi.models.data.tensor_layout import TensorLayout
@@ -101,3 +104,6 @@ class SourceSample:
     def is_tabular(self) -> bool:
         """Whether time is folded into the grid axis (sparse observation sources)."""
         return self.layout.time_in_grid
+
+    def __repr__(self) -> str:
+        return f"<{self.__class__.__name__} shape={self.data.shape} dtype={self.data.dtype}>"

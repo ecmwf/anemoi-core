@@ -10,7 +10,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import create_source_view
 from anemoi.training.losses import WeightedMSELoss
-from anemoi.models.data.testing import make_source
+from batch_builders import make_source
 
 
 def _sparse_view(data: list[torch.Tensor]) -> SourceView:

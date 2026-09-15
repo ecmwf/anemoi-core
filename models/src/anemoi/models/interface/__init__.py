@@ -363,7 +363,7 @@ class AnemoiModelInterface(torch.nn.Module):
             for dataset_name, ds_data in data.items()
         }
 
-    def prepare_target_spec(self, target: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
+    def prepare_target_payloads(self, target: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
         """Build the decoder conditioning specs -- the forcing variables at the output times."""
         assert target is not None, "predict_step requires a valid target argument"
 
@@ -464,7 +464,7 @@ class AnemoiModelInterface(torch.nn.Module):
             Predicted data.
         """
         x = self.prepare_input_spec(batch)  # TODO: move to anemoi-inference
-        target_spec = self.prepare_target_spec(target)  # TODO: move to anemoi-inference
+        target_spec = self.prepare_target_payloads(target)  # TODO: move to anemoi-inference
 
         # Convert to batch
         x = self.get_batch(x)

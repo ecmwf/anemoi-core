@@ -56,8 +56,8 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.models.data.testing import make_source
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_source
+from batch_builders import make_batch
 
 if TYPE_CHECKING:
     from collections.abc import KeysView

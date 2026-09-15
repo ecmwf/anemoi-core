@@ -14,7 +14,7 @@ from torch import nn
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 class _AggregationReached(RuntimeError):

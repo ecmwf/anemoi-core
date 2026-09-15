@@ -407,7 +407,7 @@ class BaseTransportTraining(BaseTrainingModule):
                 selected = y_dataset.select(
                     variables=dataset_indices.model_output_positions_in_data_output,
                 )
-            y_reduced = y_reduced.update_source(dataset_name, selected)
+            y_reduced = y_reduced.replace(dataset_name, selected)
             LOGGER.debug(
                 "SHAPE: y_model_output[%s].shape = %s",
                 dataset_name,

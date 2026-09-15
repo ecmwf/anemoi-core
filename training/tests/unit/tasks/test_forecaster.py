@@ -21,7 +21,7 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 def _make_minimal_index_collection(

@@ -13,7 +13,7 @@ import torch
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 def _batch(variables):
@@ -25,7 +25,7 @@ def _batch(variables):
 
 @pytest.mark.parametrize("variables", [{}, {"grid": ["a"]}, {"grid": ["a", "a"]}])
 def test_view_requires_matching_unique_variable_names(variables):
-    with pytest.raises(ValueError, match="variable names|variable channels|unique variable names"):
+    with pytest.raises(ValueError, match="variable names|variable channels|unique variable names|needs a variables"):
         _batch(variables)["grid"]
 
 
@@ -57,15 +57,21 @@ def test_normalizer_requires_only_statistics_used_by_its_method():
 
 def test_update_source_preserves_layout_and_coordinate_staticness():
     batch = _batch({"grid": ["a", "b"]})
-    view = batch["grid"].clone(coordinates=torch.zeros(3, 2), coordinates_are_static=True)
-    fixed = batch.update_source("grid", view)
+    view = batch["grid"].clone(
+        coordinates=torch.zeros(3, 2),
+        spec=batch["grid"].spec.clone(coordinates_are_static=True),
+    )
+    fixed = batch.replace("grid", view)
     assert fixed.is_static_coords("grid")
     assert fixed["grid"].coordinates_are_static
     assert fixed["grid"].flatten().batch_sizes is None
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=-2, variables=-1)
-    moving = view.clone(layout=layout, coordinates=torch.zeros(2, 3, 2), coordinates_are_static=False)
-    updated = fixed.update_source("grid", moving)
+    moving = view.clone(
+        coordinates=torch.zeros(2, 3, 2),
+        spec=view.spec.clone(layout=layout, coordinates_are_static=False),
+    )
+    updated = fixed.replace("grid", moving)
     assert not updated.is_static_coords("grid")
     assert not updated["grid"].coordinates_are_static
     assert updated["grid"].layout == layout
@@ -86,7 +92,8 @@ def test_model_output_cast_and_variable_metadata_agree():
         )
     }
     model.boundings = {"grid": torch.nn.Identity()}
-    target = _batch({"grid": ["a", "b"]})["grid"].clone(statistics={"mean": torch.tensor([1.0, 2.0])})
+    grid = _batch({"grid": ["a", "b"]})["grid"]
+    target = grid.clone(spec=grid.spec.clone(statistics={"mean": torch.tensor([1.0, 2.0])}))
     model.statistics = {"grid": target.statistics}
     output = model._assemble_output(torch.ones(6, 1, dtype=torch.bfloat16), None, target, torch.bfloat16, "grid")
     assert output.dtype == torch.float32

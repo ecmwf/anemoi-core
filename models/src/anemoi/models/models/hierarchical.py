@@ -236,7 +236,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         dict[str, Tensor]
             Output of the model, with the same shape as the input (sharded if input is sharded).
         """
-        x = batch.data
+        x = batch.sources
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets

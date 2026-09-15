@@ -38,7 +38,7 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------

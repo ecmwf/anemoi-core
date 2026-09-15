@@ -12,7 +12,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
 from anemoi.models.transport.settings import EdmSettings
-from anemoi.models.data.testing import make_batch
+from batch_builders import make_batch
 
 
 class _Model:

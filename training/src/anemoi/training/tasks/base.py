@@ -145,12 +145,8 @@ class BaseTask(ABC):
 
         var_indices = {dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names}
         new_batch = batch.select(time=time_indices, variables=var_indices)
-        for dataset_name, payload in new_batch.data.items():
-            LOGGER.debug(
-                "SHAPE: x[%s] = %s",
-                dataset_name,
-                payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
-            )
+        for dataset_name, selected_source in new_batch.items():
+            LOGGER.debug("Selected inputs: x[%s] = %s", dataset_name, selected_source)
         return new_batch
 
     def get_targets(
@@ -193,12 +189,8 @@ class BaseTask(ABC):
         time_indices = normalize_time_indices(time_indices)
 
         target_tensors = batch.select(time=time_indices)
-        for dataset_name, payload in target_tensors.data.items():
-            LOGGER.debug(
-                "SHAPE: y[%s] = %s",
-                dataset_name,
-                payload.shape if hasattr(payload, "shape") else [t.shape for t in payload],
-            )
+        for dataset_name, selected_source in target_tensors.items():
+            LOGGER.debug("Selected targets: x[%s] = %s", dataset_name, selected_source)
 
         var_indices = {
             dataset_name: data_indices[dataset_name].data.input.forcing for dataset_name in batch.dataset_names

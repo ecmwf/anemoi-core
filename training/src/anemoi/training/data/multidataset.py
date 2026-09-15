@@ -366,29 +366,10 @@ class MultiDataset(IterableDataset):
                 self.worker_id,
                 os.getpid(),
                 name,
-                self.__custom_printer(name, x[name]),
+                x[name],
             )
 
         return x
-
-    def __custom_printer(self, dataset_name: str, x: dict[str, torch.Tensor]) -> Tree:
-        tree = Tree(Text("Sample:"))
-        subtree = tree.add(Text(f"Dataset: {dataset_name}"))
-        for key, value in x.items():
-            if isinstance(value, torch.Tensor):
-                subtree.add(Text(f"{key}: shape {value.shape}, dtype {value.dtype}"))
-            elif isinstance(value, list):
-                for v in value:
-                    if isinstance(v, torch.Tensor):
-                        subtree.add(Text(f"{key}: shape {v.shape}, dtype {v.dtype}"))
-                    else:
-                        subtree.add(Text(f"{key}: {v}"))
-            else:
-                subtree.add(Text(f"{key}: {value}"))
-        buf = StringIO()
-        console = Console(file=buf, highlight=False)
-        console.print(tree)
-        return buf.getvalue()
 
     def __iter__(self) -> Iterator[dict[str, dict]]:
         """Return an iterator that yields per-dataset coordinate-rich payloads.
