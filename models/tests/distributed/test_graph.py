@@ -11,7 +11,8 @@
 
 Each tensor communication wrapper covered here is verified against its
 contract: the forward layout transformation, the backward gradient rule, and
-the ``mgroup=None`` identity fallback. Expected values are computed inline
+the identity fallback taken when no communication happens, i.e. for ``mgroup=None``
+and for a group spanning a single rank. Expected values are computed inline
 from plain PyTorch operations.
 
 Backward tests build ``loss = (output * grad_output).sum()``, so the output's
@@ -85,7 +86,11 @@ def _make_grad_output(
 
 def test_ensure_sharded_errors() -> None:
     x = _make_range_tensor((4, 3))
+    group = _TestProcessGroup()
 
+    # ``validate_dim`` and the ``shard_sizes[my_rank] == x.size(dim)`` check run for any
+    # group, including ``None``; ``validate_shard_sizes`` only runs for a group spanning
+    # more than one rank, where per-rank sizes have a defined meaning.
     with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
         ensure_sharded(x, dim=2, shard_sizes=None, model_comm_group=None)
     with pytest.raises(IndexError, match=r"Dimension out of range.*got -3"):
@@ -94,28 +99,35 @@ def test_ensure_sharded_errors() -> None:
         ensure_sharded(x, dim=0.0, shard_sizes=None, model_comm_group=None)
     with pytest.raises(TypeError, match="Dimension must be an integer"):
         ensure_sharded(x, dim=True, shard_sizes=None, model_comm_group=None)
-    with pytest.raises(TypeError, match="list or tuple of integers"):
-        ensure_sharded(x, dim=0, shard_sizes=4, model_comm_group=None)
-    with pytest.raises(ValueError, match="one entry per process"):
-        ensure_sharded(x, dim=0, shard_sizes=[4, 0], model_comm_group=None)
-    with pytest.raises(TypeError, match="only integers"):
-        ensure_sharded(x, dim=0, shard_sizes=[4.0], model_comm_group=None)
-    with pytest.raises(TypeError, match="only integers"):
-        ensure_sharded(x, dim=0, shard_sizes=[True], model_comm_group=None)
-    with pytest.raises(ValueError, match="non-negative"):
-        ensure_sharded(x, dim=0, shard_sizes=[-1], model_comm_group=None)
     with pytest.raises(ValueError, match=r"must match shard_sizes\[0\]"):
         ensure_sharded(x, dim=0, shard_sizes=[5], model_comm_group=None)
+    with pytest.raises(TypeError, match="list or tuple of integers"):
+        ensure_sharded(x, dim=0, shard_sizes=4, model_comm_group=group)
+    with pytest.raises(ValueError, match="one entry per process"):
+        ensure_sharded(x, dim=0, shard_sizes=[4], model_comm_group=group)
+    with pytest.raises(TypeError, match="only integers"):
+        ensure_sharded(x, dim=0, shard_sizes=[4.0, 0], model_comm_group=group)
+    with pytest.raises(TypeError, match="only integers"):
+        ensure_sharded(x, dim=0, shard_sizes=[True, 0], model_comm_group=group)
+    with pytest.raises(ValueError, match="non-negative"):
+        ensure_sharded(x, dim=0, shard_sizes=[4, -1], model_comm_group=group)
     with pytest.raises(ValueError, match=r"must match shard_sizes\[1\]"):
         ensure_sharded(x, dim=0, shard_sizes=[4, 3], model_comm_group=_TestProcessGroup(rank=1))
 
 
-def test_ensure_sharded_computes_sizes_without_group() -> None:
-    """Without a group, compute single-rank sizes and return the tensor unchanged."""
+@pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+def test_ensure_sharded_computes_sizes_without_communication(mgroup: _TestProcessGroup | None) -> None:
+    """Without communication, compute single-rank sizes and return the tensor unchanged."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
 
-    sharded, sizes = ensure_sharded(x, dim=0, shard_sizes=None, model_comm_group=None)
+    sharded, sizes = ensure_sharded(x, dim=0, shard_sizes=None, model_comm_group=mgroup)
 
     assert sizes == [4]
     torch.testing.assert_close(sharded, expected)
@@ -256,28 +268,40 @@ def test_shard_tensor_errors() -> None:
 
 
 @pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+@pytest.mark.parametrize(
     "gather_in_backward",
     [
         pytest.param(True, id="gather_in_backward"),
         pytest.param(False, id="no_gather_in_backward"),
     ],
 )
-def test_shard_tensor_identity_without_group(gather_in_backward: bool) -> None:
-    """Without a group, values and gradients pass through and unused communication metadata is ignored.
+def test_shard_tensor_identity_without_communication(
+    gather_in_backward: bool,
+    mgroup: _TestProcessGroup | None,
+) -> None:
+    """Without communication, values and gradients pass through and unused metadata is ignored.
 
     Covers the local fallback of ``_ShardParallelSection`` in both backward modes.
+    ``shard_edges_1hop`` leaves ``sizes=None`` whenever the model group spans one rank,
+    so this path has to accept it rather than reject it as malformed metadata.
     """
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
-    unused_dim = x.ndim  # Out of range; ignored without a group.
+    unused_dim = x.ndim  # Out of range; ignored without communication.
 
     sharded = shard_tensor(
         x,
         dim=unused_dim,
         sizes=None,
-        mgroup=None,
+        mgroup=mgroup,
         gather_in_backward=gather_in_backward,
     )
 
@@ -502,21 +526,31 @@ def test_gather_tensor_errors() -> None:
 
 
 @pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+@pytest.mark.parametrize(
     "sizes",
     [
         pytest.param(None, id="sizes_none"),
         pytest.param([4], id="explicit_single_rank_sizes"),
     ],
 )
-def test_gather_tensor_identity_without_group(sizes: list[int] | None) -> None:
-    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
+def test_gather_tensor_identity_without_communication(
+    sizes: list[int] | None,
+    mgroup: _TestProcessGroup | None,
+) -> None:
+    """Without communication, values and gradients pass through and unused metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
-    unused_dim = x.ndim  # Out of range; ignored without a group.
+    unused_dim = x.ndim  # Out of range; ignored without communication.
 
-    gathered = gather_tensor(x, dim=unused_dim, sizes=sizes, mgroup=None)
+    gathered = gather_tensor(x, dim=unused_dim, sizes=sizes, mgroup=mgroup)
 
     assert gathered.size() == expected.size()
     assert gathered.dtype == expected.dtype
@@ -616,8 +650,15 @@ def test_gather_tensor_splits_gradients_with_explicit_shard_sizes(
     )
 
 
-def test_reduce_tensor_identity_without_group() -> None:
-    """With ``mgroup=None``, values and gradients pass through unchanged.
+@pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+def test_reduce_tensor_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
+    """Without communication, values and gradients pass through unchanged.
 
     Covers the local fallback of ``_ReduceParallelSection``.
     """
@@ -626,7 +667,7 @@ def test_reduce_tensor_identity_without_group() -> None:
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
 
-    reduced = reduce_tensor(x, mgroup=None)
+    reduced = reduce_tensor(x, mgroup=mgroup)
 
     assert reduced.size() == expected.size()
     assert reduced.dtype == expected.dtype
@@ -706,14 +747,24 @@ def test_sync_tensor_errors() -> None:
 
 
 @pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+@pytest.mark.parametrize(
     "gather_in_fwd",
     [
         pytest.param(True, id="gather_in_fwd"),
         pytest.param(False, id="no_gather_in_fwd"),
     ],
 )
-def test_sync_tensor_identity_without_group(gather_in_fwd: bool) -> None:
-    """Without a group, values and gradients pass through and unused communication metadata is ignored.
+def test_sync_tensor_identity_without_communication(
+    gather_in_fwd: bool,
+    mgroup: _TestProcessGroup | None,
+) -> None:
+    """Without communication, values and gradients pass through and unused metadata is ignored.
 
     Covers the local fallback of ``_SyncParallelSection`` in both forward modes.
     """
@@ -721,9 +772,9 @@ def test_sync_tensor_identity_without_group(gather_in_fwd: bool) -> None:
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
-    unused_dim = x.ndim  # Out of range; ignored without a group.
+    unused_dim = x.ndim  # Out of range; ignored without communication.
 
-    synced = sync_tensor(x, dim=unused_dim, sizes=[-1], mgroup=None, gather_in_fwd=gather_in_fwd)
+    synced = sync_tensor(x, dim=unused_dim, sizes=[-1], mgroup=mgroup, gather_in_fwd=gather_in_fwd)
 
     assert synced.size() == expected.size()
     assert synced.dtype == expected.dtype
@@ -912,15 +963,22 @@ def test_reduce_shard_tensor_errors() -> None:
         reduce_shard_tensor(x, dim=0, sizes=[2, 1], mgroup=group)
 
 
-def test_reduce_shard_tensor_identity_without_group() -> None:
-    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
+@pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+def test_reduce_shard_tensor_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
+    """Without communication, values and gradients pass through and unused metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
-    unused_dim = x.ndim  # Out of range; ignored without a group.
+    unused_dim = x.ndim  # Out of range; ignored without communication.
 
-    shard_sum = reduce_shard_tensor(x, dim=unused_dim, sizes=None, mgroup=None)
+    shard_sum = reduce_shard_tensor(x, dim=unused_dim, sizes=None, mgroup=mgroup)
 
     assert shard_sum.size() == expected.size()
     assert shard_sum.dtype == expected.dtype
@@ -1062,13 +1120,20 @@ def test_all_to_all_transpose_errors() -> None:
         all_to_all_transpose(x, 0, [2, 2], 1, [3, 2], _TestProcessGroup(rank=1))
 
 
-def test_all_to_all_transpose_identity_without_group() -> None:
-    """Without a group, values and gradients pass through and unused communication metadata is ignored."""
+@pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+def test_all_to_all_transpose_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
+    """Without communication, values and gradients pass through and unused metadata is ignored."""
     x = _make_range_tensor((4, 3))
     expected = x.clone()
     grad_output = _make_grad_output((4, 3))
     x.requires_grad_(True)
-    unused_dim = x.ndim  # Out of range; ignored without a group.
+    unused_dim = x.ndim  # Out of range; ignored without communication.
 
     transposed = all_to_all_transpose(
         x,
@@ -1076,7 +1141,7 @@ def test_all_to_all_transpose_identity_without_group() -> None:
         split_sizes=None,
         dim_concat=unused_dim,
         concat_sizes=None,
-        mgroup=None,
+        mgroup=mgroup,
     )
 
     assert transposed.size() == expected.size()

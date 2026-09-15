@@ -23,7 +23,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.shapes import validate_dim
 from anemoi.models.distributed.shapes import validate_shard_sizes
-from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
+from anemoi.models.distributed.utils import model_is_distributed
 
 
 def ensure_sharded(
@@ -54,7 +54,8 @@ def ensure_sharded(
     """
     validate_dim(x, dim)
     if shard_sizes is not None:
-        validate_shard_sizes(shard_sizes, model_comm_group)
+        if model_is_distributed(model_comm_group):
+            validate_shard_sizes(shard_sizes, model_comm_group)
         my_rank = model_comm_group.rank() if model_comm_group is not None else 0
         if shard_sizes[my_rank] != x.size(dim):
             raise ValueError(
@@ -84,7 +85,8 @@ def shard_tensor(
     sizes : ShardSizes
         Per-rank shard sizes
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
     gather_in_backward : bool
         perform gather in backward, default True
 
@@ -93,7 +95,7 @@ def shard_tensor(
     Tensor
         Sharded tensor.
     """
-    if mgroup is not None:
+    if model_is_distributed(mgroup):
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
         input_size = input_.size(dim)
@@ -120,14 +122,15 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     sizes : ShardSizes
         Per-rank shard sizes
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Gathered tensor.
     """
-    if mgroup is not None:
+    if model_is_distributed(mgroup):
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
         rank = mgroup.rank()
@@ -150,7 +153,8 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup | None) -> Tensor:
     input_ : Tensor
         Input
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
@@ -180,14 +184,15 @@ def sync_tensor(
     sizes : ShardSizes
         Per-rank shard sizes
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Synced tensor.
     """
-    if mgroup is not None and gather_in_fwd and sizes is not None:
+    if model_is_distributed(mgroup) and gather_in_fwd and sizes is not None:
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
         rank = mgroup.rank()
@@ -214,14 +219,15 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
     sizes : ShardSizes
         Per-rank shard sizes
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Reduced sharded tensor.
     """
-    if mgroup is not None:
+    if model_is_distributed(mgroup):
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
         input_size = input_.size(dim)
@@ -259,14 +265,15 @@ def all_to_all_transpose(
     concat_sizes : ShardSizes
         Shapes of the concatenated tensors.
     mgroup : ProcessGroup or None
-        Model communication group. If ``None``, no communication is performed and this operation leaves the tensor unchanged.
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Transposed tensor.
     """
-    if mgroup is not None:
+    if model_is_distributed(mgroup):
         validate_dim(input_, dim_split)
         validate_dim(input_, dim_concat)
         ndim = input_.dim()
