@@ -9,7 +9,6 @@
 
 
 import logging
-import warnings
 from abc import abstractmethod
 from collections.abc import Mapping
 
@@ -36,6 +35,7 @@ class BaseTendencyScaler(BaseScaler):
         statistics_tendencies: Mapping | None,
         timestep: str | None = None,
         norm: str | None = None,
+        nodes_name: str | None = None,
         **kwargs,
     ) -> None:
         """Initialise variable level scaler.
@@ -52,6 +52,8 @@ class BaseTendencyScaler(BaseScaler):
             Tendency statistics lead time. Defaults to the first available lead time.
         norm : str, optional
             Type of normalization to apply. Options are None, unit-sum, unit-mean and l1.
+        nodes_name : str, optional
+            Name of the dataset the scaler belongs to.
         """
         super().__init__(norm=norm)
         del kwargs
@@ -71,14 +73,20 @@ class BaseTendencyScaler(BaseScaler):
             if timestep is None:
                 timestep = lead_times[0]
                 LOGGER.warning(
-                    "No timestep provided for tendency scaler, defaulting to first lead time: '%s'.",
+                    "%s: no timestep configured for dataset %r, defaulting to the first lead time %r.",
+                    type(self).__name__,
+                    nodes_name,
                     timestep,
                 )
             self.timestep = frequency_to_string(as_timedelta(timestep))
             self.statistics_tendencies = statistics_tendencies.get(self.timestep)
             assert self.statistics_tendencies is not None, f"No tendency statistics for timestep '{self.timestep}'."
         else:
-            warnings.warn("Dataset has no tendency statistics! Are you sure you want to use a tendency scaler?")
+            LOGGER.warning(
+                "%s: dataset %r has no tendency statistics, its prognostic variables will be scaled by 1.0.",
+                type(self).__name__,
+                nodes_name,
+            )
 
     @abstractmethod
     def get_level_scaling(self, variable_level: int) -> float: ...
@@ -86,15 +94,14 @@ class BaseTendencyScaler(BaseScaler):
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
         variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
+        # Without tendency statistics every prognostic keeps a scaling of one.
+        has_tendencies = self.statistics_tendencies is not None
+
         for key, idx in self.data_indices.model.output.name_to_index.items():
-            if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
-                key,
-            ):
+            if idx in self.data_indices.model.output.prognostic:
                 prog_idx = self.data_indices.data.output.name_to_index[key]
-                variable_stdev = self.statistics["stdev"][prog_idx] if self.statistics_tendencies else 1
-                variable_tendency_stdev = (
-                    self.statistics_tendencies["stdev"][prog_idx] if self.statistics_tendencies else 1
-                )
+                variable_stdev = self.statistics["stdev"][prog_idx] if has_tendencies else 1
+                variable_tendency_stdev = self.statistics_tendencies["stdev"][prog_idx] if has_tendencies else 1
                 scaling = self.get_level_scaling(variable_stdev, variable_tendency_stdev)
                 variable_level_scaling[idx] *= scaling
 

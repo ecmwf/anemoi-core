@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from typing import Any
 
 import pytest
@@ -22,6 +23,9 @@ from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.scalers.spectral import SpectralDimensionScaler
+from anemoi.training.losses.scalers.variable_tendency import BaseTendencyScaler
+from anemoi.training.losses.scalers.variable_tendency import StdevTendencyScaler
+from anemoi.training.losses.scalers.variable_tendency import VarTendencyScaler
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
@@ -614,3 +618,77 @@ def test_uniform_spectral_scaler(n_spectral_modes: int, spectral_dims: int) -> N
     assert values[0].item() == pytest.approx(
         1.0 / n_spectral_modes,
     ), f"Expected values to be {1.0/n_spectral_modes}, got {values[0]}"
+
+
+@pytest.mark.parametrize(
+    ("scaler_cls", "expected"),
+    [
+        (StdevTendencyScaler, [2.0, 10.0, 5.0]),
+        (VarTendencyScaler, [4.0, 100.0, 25.0]),
+    ],
+)
+def test_tendency_scaler_scales_every_prognostic_from_data_space_statistics(
+    scaler_cls: type[BaseTendencyScaler],
+    expected: list[float],
+) -> None:
+    """Each prognostic is scaled by its own statistics, including the one at data index 0."""
+    config = DictConfig({"forcing": ["lsm"], "diagnostic": [], "target": []})
+    name_to_index = {"a": 0, "lsm": 1, "b": 2, "c": 3}
+    data_indices = IndexCollection(data_config=config, name_to_index=name_to_index)
+
+    statistics = {"stdev": [10.0, 40.0, 20.0, 30.0]}
+    statistics_tendencies = {"lead_times": ["6h"], "6h": {"stdev": [5.0, 10.0, 2.0, 6.0]}}
+
+    scaler = scaler_cls(
+        data_indices=data_indices,
+        statistics=statistics,
+        statistics_tendencies=statistics_tendencies,
+        timestep="6h",
+    )
+
+    assert torch.allclose(scaler.get_scaling_values(), torch.tensor(expected))
+
+
+def test_tendency_scaler_defaults_to_the_first_lead_time(caplog: pytest.LogCaptureFixture) -> None:
+    """With no timestep configured the scaler falls back to the first lead time."""
+    config = DictConfig({"forcing": ["lsm"], "diagnostic": [], "target": []})
+    name_to_index = {"a": 0, "lsm": 1, "b": 2, "c": 3}
+    data_indices = IndexCollection(data_config=config, name_to_index=name_to_index)
+
+    with caplog.at_level(logging.WARNING):
+        scaler = StdevTendencyScaler(
+            data_indices=data_indices,
+            statistics={"stdev": [10.0, 40.0, 20.0, 30.0]},
+            statistics_tendencies={
+                "lead_times": ["6h", "12h"],
+                "6h": {"stdev": [5.0, 10.0, 2.0, 6.0]},
+                "12h": {"stdev": [1.0, 1.0, 1.0, 1.0]},
+            },
+            nodes_name="era5",
+        )
+
+    assert scaler.timestep == "6h"
+    assert "StdevTendencyScaler" in caplog.text
+    assert "era5" in caplog.text
+    assert torch.allclose(scaler.get_scaling_values(), torch.tensor([2.0, 10.0, 5.0]))
+
+
+def test_tendency_scaler_without_tendency_statistics_leaves_scaling_at_one(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A dataset with no tendency statistics leaves every prognostic variable unscaled."""
+    config = DictConfig({"forcing": ["lsm"], "diagnostic": [], "target": []})
+    name_to_index = {"a": 0, "lsm": 1, "b": 2, "c": 3}
+    data_indices = IndexCollection(data_config=config, name_to_index=name_to_index)
+
+    with caplog.at_level(logging.WARNING):
+        scaler = StdevTendencyScaler(
+            data_indices=data_indices,
+            statistics={"stdev": [10.0, 40.0, 20.0, 30.0]},
+            statistics_tendencies=None,
+            nodes_name="era5",
+        )
+
+    assert "StdevTendencyScaler" in caplog.text
+    assert "era5" in caplog.text
+    assert torch.allclose(scaler.get_scaling_values(), torch.ones(3))
