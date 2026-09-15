@@ -49,15 +49,19 @@ def validate_dim(tensor: Tensor, dim: int) -> None:
         raise IndexError(f"Dimension out of range (expected to be in range of [-{ndim}, {ndim - 1}], but got {dim})")
 
 
-def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup | None) -> None:
+def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
     """Check that shard sizes are valid for the process group.
+
+    Only call this for a group spanning more than one rank. Sharding metadata is
+    unused where no communication happens, so a missing or single-rank group carries
+    no notion of correct sizes and ``sizes`` is legitimately ``None`` there.
 
     Parameters
     ----------
     sizes : ShardSizes
         Shard sizes ordered by rank in the communication group.
-    mgroup : ProcessGroup or None
-        Communication group. If ``None``, validate metadata for one process.
+    mgroup : ProcessGroup
+        Communication group, spanning more than one rank.
 
     Raises
     ------
@@ -66,12 +70,14 @@ def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup | None) -> None
     ValueError
         If there is not one non-negative size per process.
     """
+    comm_size = mgroup.size()
+    assert comm_size > 1, f"Sharding metadata can't be verified for communication groups of size: {comm_size} < 2"
+
     if not isinstance(sizes, (list, tuple)):
         raise TypeError(f"Shard sizes must be a list or tuple of integers, but got {type(sizes).__name__}")
     if any(type(size) is not int for size in sizes):
         raise TypeError("Shard sizes must contain only integers")
 
-    comm_size = mgroup.size() if mgroup is not None else 1
     if len(sizes) != comm_size:
         raise ValueError(
             f"Shard sizes must contain one entry per process, but got {len(sizes)} entries "
