@@ -175,10 +175,23 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
             "build_graph_partition requires edge_index sorted by destination node, " "but received unsorted edges."
         )
 
+    if num_parts == 1:
+        # single partition holds all dst nodes and all edges; no degree
+        # computation needed, which avoids graph breaks when using torch.compile().
+        return GraphPartition(
+            num_nodes=num_nodes,
+            num_edges=edge_index.size(1),
+            num_parts=1,
+            dst_splits=[n_dst],
+            edge_splits=[edge_index.size(1)],
+        )
+
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
     degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
     # use torch.split with dst_splits to match the balanced partitioning exactly
     edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
+    # note, the above function causes graph breaks when compiled.
+    # see: https://meta-pytorch.org/compile-graph-break-site/gb/gb0124.html
 
     return GraphPartition(
         num_nodes=num_nodes,
@@ -471,6 +484,9 @@ def _sort_edges_1hop_chunks_fast(
     return edge_attr_list, edge_index_list
 
 
+# connected_src_nodes and therefore x_src_subset is a data-dependent quantity,
+# therefore we cannot use torch.compile on this function.
+@torch._dynamo.disable()
 def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool = True) -> tuple[Tensor, Adj, Tensor]:
     """Drop src nodes with no edges and relabel src indices to be contiguous.
 

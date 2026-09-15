@@ -103,6 +103,7 @@ def _node_id_to_partition_id(node_ids: Tensor, partition_sizes: list[int]) -> Te
     return torch.searchsorted(cumulative, node_ids, right=True)
 
 
+@torch._dynamo.disable()
 def build_halo_info(
     partition: GraphPartition,
     edge_index: Tensor,
