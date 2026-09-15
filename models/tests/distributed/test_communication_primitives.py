@@ -23,7 +23,6 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from distributed_runner import run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.primitives import _alltoall_transpose
@@ -32,6 +31,7 @@ from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
+from anemoi.models.testing import _run_distributed_test
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
@@ -80,7 +80,7 @@ def _test_split_rank(
 def test_split_distributes_full_tensor_to_rank_local_slice(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_split_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -126,7 +126,7 @@ def _test_gather_rank(
 def test_gather_reconstructs_full_tensor_from_rank_local_slices(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_gather_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -191,7 +191,7 @@ def test_reduce_sums_same_shape_rank_local_tensors(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -212,7 +212,7 @@ def test_reduce_sums_same_shape_rank_local_tensors(
 def test_reduce_fp32_accumulation_supports_low_precision_inputs(
     shape: tuple[int, ...], dtype: torch.dtype, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -268,7 +268,7 @@ def _test_expand_sharded_tensor_rank(
 def test_expand_sharded_tensor_populates_only_rank_local_slice(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_expand_sharded_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -331,7 +331,7 @@ def test_alltoall_transpose_redistributes_between_sharded_layouts(
 ) -> None:
     if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoall_transpose requires torch >= 2.6.")
-    run_distributed_test(
+    _run_distributed_test(
         _test_alltoall_transpose_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -378,7 +378,7 @@ def _test_invalid_dim_rank(
 def test_primitives_reject_invalid_dimensions(
     primitive: str, dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_invalid_dim_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -404,7 +404,7 @@ def _test_expand_rejects_wrong_local_size_rank(
 
 @pytest.mark.distributed
 def test_expand_sharded_tensor_rejects_wrong_local_size(distributed_backend: str, distributed_world_size: int) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_expand_rejects_wrong_local_size_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -436,7 +436,7 @@ def _test_alltoall_transpose_rejects_same_dimension_rank(
 def test_alltoall_transpose_rejects_same_split_and_concat_dimension(
     distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_alltoall_transpose_rejects_same_dimension_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -478,7 +478,7 @@ NON_CONTIGUOUS_PARTITION_CASES = [
 def test_split_accepts_non_contiguous_input(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_split_non_contiguous_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -520,7 +520,7 @@ def _test_gather_non_contiguous_rank(
 def test_gather_accepts_non_contiguous_input(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_gather_non_contiguous_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -575,7 +575,7 @@ NON_CONTIGUOUS_REDUCE_CASES = [
 def test_reduce_accepts_non_contiguous_input(
     shape: tuple[int, ...], use_fp32: bool, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_non_contiguous_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -620,7 +620,7 @@ CHANNELS_LAST_CASES = [
 def test_split_preserves_channels_last_memory_format(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_split_channels_last_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -661,7 +661,7 @@ def _test_gather_channels_last_rank(
 def test_gather_preserves_channels_last_memory_format(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_gather_channels_last_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -710,7 +710,7 @@ def _test_expand_channels_last_rank(
 def test_expand_sharded_tensor_preserves_channels_last_memory_format(
     shape: tuple[int, ...], dim: int, distributed_backend: str, distributed_world_size: int
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_expand_channels_last_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -749,7 +749,7 @@ def test_alltoallwrapper_exchanges_rank_ordered_tensor_lists(
 ) -> None:
     if distributed_backend == "gloo" and _torch_version_less_than(2, 6):
         pytest.skip("Gloo alltoallwrapper requires torch >= 2.6.")
-    run_distributed_test(
+    _run_distributed_test(
         _test_alltoallwrapper_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
