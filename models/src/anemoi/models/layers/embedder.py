@@ -50,7 +50,6 @@ class Embedder(nn.Module):
         into the feature axis and appends node_attributes_data (static per-node features, with
         no time axis of their own).
         """
-        __import__("pdb").set_trace()  # TODO delme
         batch, n_time, ensemble, grid, _n_vars = x.shape
         x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
         frame_idx = torch.arange(n_time, device=x.device).repeat_interleave(ensemble * grid).repeat(batch)
