@@ -142,9 +142,55 @@ class SpectralOrnsteinConnectionSchema(BaseModel):
     )
 
 
+class InterpolationConnectionSchema(BaseModel):
+    """Schema for the cross-grid interpolation residual connection.
+
+    Maps a source dataset's grid onto the target grid via a single sparse interpolation
+    matrix (source -> target). Used for residual downscaling: ``target - interp(source)``.
+    Graph-sourced weights (``edges_name``) are the primary path; ``interpolation_file_path``
+    is the alternative source, for pre-computed projection matrices.
+    """
+
+    target_: Literal["anemoi.models.layers.residual.InterpolationConnection"] = Field(..., alias="_target_")
+    # Hydra merges `step` from the default SkipConnection config when _target_ is overridden; ignore it.
+    step: int = Field(-1, exclude=True)
+    edges_name: tuple[str, str, str] | None = Field(
+        None,
+        description="Pre-resolved (src, relation, dst) edge type for the interpolation edges.",
+    )
+    edge_weight_attribute: str | None = Field(
+        None,
+        description="Edge attribute used as projection weights.",
+    )
+    src_node_weight_attribute: str | None = Field(
+        None,
+        description="Source-node attribute used as additional projection weights.",
+    )
+    interpolation_file_path: str | None = Field(
+        None,
+        description="Alternative to edges_name: path to the .npz interpolation matrix mapping the "
+        "source grid onto the target grid.",
+    )
+    autocast: bool = Field(False, description="Use automatic mixed precision in the sparse projection.")
+    row_normalize: bool = Field(False, description="Row-normalize the interpolation weights.")
+
+    @model_validator(mode="after")
+    def check_exactly_one_source(self) -> Self:
+        has_edges = self.edges_name is not None
+        has_file = self.interpolation_file_path is not None
+        if has_edges == has_file:
+            msg = (
+                "InterpolationConnectionSchema requires exactly one of 'edges_name' (graph-sourced) "
+                "or 'interpolation_file_path' (file-sourced)."
+            )
+            raise ValueError(msg)
+        return self
+
+
 ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
     | TruncatedConnectionSchema
+    | InterpolationConnectionSchema
     | ScalarOrnsteinConnectionSchema
     | SpectralOrnsteinConnectionSchema,
     Field(discriminator="target_"),
