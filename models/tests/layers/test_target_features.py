@@ -49,6 +49,8 @@ class FakeModelConfig:
     def build(self) -> SimpleNamespace:
         """Build a stand-in for `BaseGraphModel` exposing only what the target features read."""
         node_attributes = SimpleNamespace(trainable_tensors={}, num_trainable_parameters={})
+        node_attributes.sin_cos_coordinates = lambda name: getattr(node_attributes, f"latlons_{name}")
+        node_attributes.get_tensor = lambda name: node_attributes.trainable_tensors[name]
         model = SimpleNamespace(
             node_attributes=node_attributes,
             n_step_input=self.n_step_input,
