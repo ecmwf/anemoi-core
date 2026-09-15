@@ -1,11 +1,11 @@
 # @package _global_
 #
 # O96 ERA5, GraphTransformerProcessor + GraphTransformer encoder/decoder - BASELINE (no embedder).
-# Identical to o96_era5_transformer.yaml except: no model.input_transform (plain Linear input to
+# Identical to o96_era5_embedder.yaml except: no model.input_transform (plain Linear input to
 # the encoder, as usual). Same JointVariableNormalizer as the embedder run, so the only difference
 # between the two configs is the embedder itself - normalization is held constant.
-# Run alongside o96_era5_transformer.yaml to compare with/without the embedder.
-# Run with: anemoi-training train --config-name=o96_era5_transformer_baseline
+# Run alongside o96_era5_embedder.yaml to compare with/without the embedder.
+# Run with: anemoi-training train --config-name=o96_era5_baseline
 # (after `anemoi-training config generate` has copied this config tree locally)
 
 defaults:

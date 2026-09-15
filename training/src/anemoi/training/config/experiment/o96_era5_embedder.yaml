@@ -1,7 +1,7 @@
 # @package _global_
 #
 # O96 ERA5, GraphTransformerProcessor + GraphTransformer encoder/decoder.
-# Run with: anemoi-training train --config-name=o96_era5_transformer
+# Run with: anemoi-training train --config-name=o96_era5_embedder
 # (after `anemoi-training config generate` has copied this config tree locally)
 
 defaults:
