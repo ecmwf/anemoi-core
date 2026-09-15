@@ -39,6 +39,11 @@ class HEALPixMultiScaleEdges(BaseEdgeBuilder):
         ), "The scale_resolutions argument only supports positive integers."
         self.scale_resolutions = scale_resolutions
 
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
+        )
+
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge index for HEALPix multi scale edges."""
         assert source_nodes.node_type == "HEALPixNodes", f"{self.__class__.__name__} only supports HEALPixNodes."
