@@ -115,7 +115,7 @@ class CoordinatesFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_coords_dim = {}
         for dataset_name in self.datasets_names:
-            num_coords_dim[dataset_name] = getattr(self.model.node_attributes, f"latlons_{dataset_name}").shape[1]
+            num_coords_dim[dataset_name] = self.model.node_attributes.sin_cos_coordinates(dataset_name).shape[1]
 
         assert len(set(num_coords_dim.values())) == 1, (
             f"Coordinates feature must have the same dimension across all datasets encoded with the same encoder. "
@@ -124,12 +124,12 @@ class CoordinatesFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
+        return self.model.node_attributes.sin_cos_coordinates(self.datasets_names[0]).shape[1]
 
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        coords = getattr(self.model.node_attributes, f"latlons_{dataset_name}")
+        coords = self.model.node_attributes.sin_cos_coordinates(dataset_name)
         return einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
 
 
@@ -196,7 +196,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
     def validate(self) -> None:
         num_trainable_params = {}
         for dataset_name in self.datasets_names:
-            if self.model.node_attributes.trainable_tensors[dataset_name].trainable is None:
+            if self.model.node_attributes.get_tensor(dataset_name).trainable is None:
                 decoder_name = self.model.dataset2decoder[dataset_name]
                 error_msg = (
                     f"No trainable parameters configured for dataset '{dataset_name}'. "
@@ -218,7 +218,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        trainable = self.model.node_attributes.trainable_tensors[dataset_name].trainable
+        trainable = self.model.node_attributes.get_tensor(dataset_name).trainable
         return einops.repeat(trainable, "e f -> (repeat e) f", repeat=batch_size)
 
 

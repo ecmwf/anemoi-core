@@ -291,6 +291,74 @@ class StaticGraphProvider(BaseGraphProvider):
         return self._get_edges_impl(batch_size, shard_edges, model_comm_group)
 
 
+class ParticipantSwitchingGraphProvider(BaseGraphProvider):
+    """Provider holding one sub-provider per participant of a multi-domain dataset.
+
+    Every call is delegated to the sub-provider of the ACTIVE participant, which is state
+    set by :meth:`set_active_participant` rather than an argument, so that the mappers and
+    the processor keep calling ``get_edges`` exactly as they do for a single domain.
+    The participants are stored in an ``nn.ModuleDict`` so their buffers move with the
+    model (``.to(device)``, ``state_dict``, DDP).
+    """
+
+    def __init__(self, providers: dict[str, BaseGraphProvider]) -> None:
+        """Initialize ParticipantSwitchingGraphProvider.
+
+        Parameters
+        ----------
+        providers : dict[str, BaseGraphProvider]
+            One provider per participant. Their edge dimensions must be identical, since
+            the layers consuming them are built once and shared by all participants.
+        """
+        super().__init__()
+
+        assert providers, "ParticipantSwitchingGraphProvider needs at least one participant."
+
+        edge_dims = {participant: provider.edge_dim for participant, provider in providers.items()}
+        assert (
+            len(set(edge_dims.values())) == 1
+        ), f"All participants must have the same edge dimension, got {edge_dims}."
+
+        self.providers = nn.ModuleDict(providers)
+        self._active_participant = next(iter(providers))
+
+    @property
+    def participants(self) -> list[str]:
+        """Participants this provider can switch between."""
+        return list(self.providers.keys())
+
+    @property
+    def active_participant(self) -> str:
+        """Participant currently supplying the edges."""
+        return self._active_participant
+
+    def set_active_participant(self, participant: str) -> None:
+        """Select the participant supplying the edges from now on."""
+        assert (
+            participant in self.providers
+        ), f"Unknown participant '{participant}', expected one of {self.participants}."
+        self._active_participant = participant
+
+    @property
+    def active(self) -> BaseGraphProvider:
+        """Sub-provider of the active participant."""
+        return self.providers[self._active_participant]
+
+    @property
+    def edge_dim(self) -> int:
+        """Return the edge dimension."""
+        return self.active.edge_dim
+
+    @property
+    def is_sparse(self) -> bool:
+        """Whether this provider returns sparse matrices."""
+        return self.active.is_sparse
+
+    def get_edges(self, *args, **kwargs) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
+        """Delegate to the active participant's provider."""
+        return self.active.get_edges(*args, **kwargs)
+
+
 class NoOpGraphProvider(BaseGraphProvider):
     """Provider for edge-less architectures (e.g., Transformers).
 

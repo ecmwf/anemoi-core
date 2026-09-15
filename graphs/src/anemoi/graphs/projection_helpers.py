@@ -56,6 +56,21 @@ def participant_node_name(node_name: str, participant: str | None) -> str:
     return node_name if participant is None else f"{node_name}_{participant}"
 
 
+def graph_participants(graph: HeteroData, node_name: str) -> list[str]:
+    """Return the participants of a fused participant graph, in graph order.
+
+    A graph that still carries the plain ``node_name`` node group is not a multi-participant
+    graph and yields an empty list; otherwise the participants are the suffixes of the
+    ``<node_name>_<participant>`` node groups produced by :func:`fuse_participant_graphs`.
+    """
+    node_types = list(graph.node_types)
+    if node_name in node_types:
+        return []
+
+    prefix = f"{node_name}_"
+    return [name[len(prefix) :] for name in node_types if name.startswith(prefix)]
+
+
 def fuse_participant_graphs(graphs: Mapping[str, HeteroData]) -> HeteroData:
     """Fuse per-participant graphs into one graph with participant-suffixed node groups.
 

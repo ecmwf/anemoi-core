@@ -21,12 +21,19 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_RELATION_NAME
+from anemoi.graphs.projection_helpers import graph_participants
+from anemoi.graphs.projection_helpers import participant_node_name
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
+from anemoi.models.layers.graph_provider import BaseGraphProvider
+from anemoi.models.layers.graph_provider import ParticipantSwitchingGraphProvider
+from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.models.layers.residual import TruncatedConnection
 from anemoi.models.layers.target_features import DecodingTargetFeature
 from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -70,12 +77,17 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._participants = self._infer_participants()
+        self._active_participant: str | None = self._participants[0] if self._participants else None
 
         self.latent_skip = model_config.model.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
+            model_config.model.node_trainable_parameters,
+            self._build_named_node_attributes_graph(),
+            participants=self._participants,
         )
+        self.node_attributes.set_active_participant(self._active_participant)
 
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
@@ -103,6 +115,110 @@ class BaseGraphModel(nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
         )
+
+    def _infer_participants(self) -> list[str]:
+        """Participants of the graph, empty for a single-domain (unsuffixed) graph.
+
+        A multi-participant graph carries one node group per participant for every dataset
+        and hidden node group (``data_west``, ``hidden_west``, ...); all of them must name
+        the same participants.
+        """
+        node_names = self.dataset_names + self._as_hidden_node_names(self._graph_name_hidden)
+        participants = graph_participants(self._graph_data, node_names[0])
+
+        for node_name in node_names[1:]:
+            other = graph_participants(self._graph_data, node_name)
+            if other != participants:
+                msg = (
+                    f"Node group '{node_name}' has participants {other}, but '{node_names[0]}' has "
+                    f"{participants}. All node groups must have the same participants."
+                )
+                raise ValueError(msg)
+
+        return participants
+
+    @property
+    def participants(self) -> list[str]:
+        """Participants this model can switch between, empty for a single-domain graph."""
+        return list(self._participants)
+
+    @property
+    def active_participant(self) -> str | None:
+        """Participant whose graph the model currently uses, ``None`` if there are none."""
+        return self._active_participant
+
+    def set_active_participant(self, participant: str | None) -> None:
+        """Select the participant whose graph the model uses from now on.
+
+        Participants sharing one graph are not represented in the graph, so this is a no-op
+        for a single-domain graph and callers need not know which case they are in.
+        """
+        if not self._participants:
+            return
+
+        if participant not in self._participants:
+            msg = f"Unknown participant '{participant}', expected one of {self._participants}."
+            raise ValueError(msg)
+
+        self._active_participant = participant
+        self.node_attributes.set_active_participant(participant)
+        for module in self.modules():
+            if isinstance(module, ParticipantSwitchingGraphProvider):
+                module.set_active_participant(participant)
+
+    def node_name(self, name: str) -> str:
+        """Return the node-group name of ``name`` for the active participant."""
+        return participant_node_name(name, self._active_participant)
+
+    def _participant_node_names(self, name: str) -> list[str]:
+        """Return the node-group names of ``name``, one per participant."""
+        if not self._participants:
+            return [name]
+        return [participant_node_name(name, participant) for participant in self._participants]
+
+    def _create_graph_provider(
+        self,
+        src_name: str,
+        dst_name: str,
+        edge_attributes: Optional[list[str]],
+        trainable_size: int,
+        trainable_size_key: str,
+    ) -> BaseGraphProvider:
+        """Create the edge provider for ``src_name -> dst_name``, one per participant if needed."""
+        if not self._participants:
+            return create_graph_provider(
+                graph=self._graph_data[(src_name, DEFAULT_EDGE_RELATION_NAME, dst_name)],
+                edge_attributes=edge_attributes,
+                src_size=self.node_attributes.num_nodes[src_name],
+                dst_size=self.node_attributes.num_nodes[dst_name],
+                trainable_size=trainable_size,
+            )
+
+        if trainable_size:
+            # A trainable tensor per participant changes the set of parameters receiving a
+            # gradient between steps, which DDP rejects under static_graph=True.
+            msg = (
+                f"{trainable_size_key} must be 0 when training on the participants {self._participants} "
+                f"(got {trainable_size}): the participants have different edges, so a trainable edge "
+                "tensor would change the set of parameters receiving gradients between steps."
+            )
+            raise ValueError(msg)
+
+        providers = {}
+        for participant in self._participants:
+            src = participant_node_name(src_name, participant)
+            dst = participant_node_name(dst_name, participant)
+            providers[participant] = create_graph_provider(
+                graph=self._graph_data[(src, DEFAULT_EDGE_RELATION_NAME, dst)],
+                edge_attributes=edge_attributes,
+                src_size=self.node_attributes.num_nodes[src],
+                dst_size=self.node_attributes.num_nodes[dst],
+                trainable_size=0,
+            )
+
+        provider = ParticipantSwitchingGraphProvider(providers)
+        provider.set_active_participant(self._active_participant)
+        return provider
 
     def _build_encoder_routing(self, encoders_config: DotDict) -> None:
         """Builds the dataset routing for encoders."""
@@ -216,18 +332,22 @@ class BaseGraphModel(nn.Module):
 
     def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
         for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
+            node_name = self.node_name(hidden_name)
             assert (
-                hidden_name in self._graph_data.node_types
-            ), f"Hidden nodes name '{hidden_name}' not found in graph data node types {self._graph_data.node_types}"
+                node_name in self._graph_data.node_types
+            ), f"Hidden nodes name '{node_name}' not found in graph data node types {self._graph_data.node_types}"
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
-        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
+        return (
+            self.n_step_input * self.num_input_channels[dataset_name]
+            + self.node_attributes.attr_ndims[self.node_name(dataset_name)]
+        )
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        return self.node_attributes.attr_ndims[self.node_name(nodes_name)]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -335,22 +455,32 @@ class BaseGraphModel(nn.Module):
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
-                data_node_name=dataset_name,
+                data_node_name=self.node_name(dataset_name),
                 statistics=self.statistics[dataset_name],
                 data_indices=self.data_indices[dataset_name],
                 dataset_name=dataset_name,
                 sparse_projector_num_chunks=sparse_projector_num_chunks,
             )
+            if self._participants and isinstance(self.residual[dataset_name], TruncatedConnection):
+                # A truncated connection is grid-sized, so it would have to be built once per
+                # participant; only participant-invariant residuals are supported so far.
+                msg = (
+                    f"model.residual for dataset '{dataset_name}' is a TruncatedConnection, which is not "
+                    f"supported when training on the participants {self._participants}."
+                )
+                raise NotImplementedError(msg)
 
     def _build_named_node_attributes_graph(self) -> HeteroData:
         node_attributes_graph = HeteroData()
         for dataset_name in self.dataset_names:
-            node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
-            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
+            for node_name in self._participant_node_names(dataset_name):
+                node_attributes_graph[node_name].x = self._graph_data[node_name].x
+                node_attributes_graph[node_name].num_nodes = self._graph_data[node_name].num_nodes
 
         for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
-            node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
-            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
+            for node_name in self._participant_node_names(hidden_name):
+                node_attributes_graph[node_name].x = self._graph_data[node_name].x
+                node_attributes_graph[node_name].num_nodes = self._graph_data[node_name].num_nodes
 
         return node_attributes_graph
 
