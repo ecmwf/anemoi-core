@@ -12,31 +12,37 @@ from pathlib import Path
 
 import pytest
 
-from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import CkptMigration
+from anemoi.models.migrations import CkptMigrator
 from anemoi.models.migrations import SaveCkpt
+from anemoi.models.migrations.migrator import _CKPT_MIGRATION_KEY
 
 
-@pytest.fixture(scope="module")
-def migrator() -> Migrator:
+@pytest.fixture()
+def migrator() -> CkptMigrator:
     """Load the test migrator with migrations from this folder.
 
     Returns
     -------
     A Migrator instance
     """
-    return Migrator.from_path(Path(__file__).parent / "migrations", "tests.migrations.migrations")
+    return CkptMigrator.from_path(
+        CkptMigration,
+        Path(__file__).parent / "migrations",
+        "tests.migrations.migrations",
+        _CKPT_MIGRATION_KEY,
+    )
 
 
-@pytest.fixture(scope="module")
-def old_migrator() -> Migrator:
+@pytest.fixture()
+def old_migrator(migrator: CkptMigrator) -> CkptMigrator:
     """Load the test migrator with migrations from this folder from the first compatibility group only.
 
     Returns
     -------
     A Migrator instance
     """
-    migrator = Migrator.from_path(Path(__file__).parent / "migrations", "migrations")
-    migrator._grouped_migrations.pop()
+    migrator._compatibility_groups.pop()
     return migrator
 
 
