@@ -33,6 +33,24 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    def __init__(self, *, model_config, **kwargs) -> None:
+        # Stashed here (before BaseGraphModel.__init__ runs) so _calculate_shapes_and_indices
+        # can build self.input_transform early - see the override below for why.
+        self._model_config = model_config
+        super().__init__(model_config=model_config, **kwargs)
+
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        # input_dim depends on input_transform's output width (see _calculate_input_dim
+        # below), but BaseGraphModel computes input_dim before _build_networks would
+        # otherwise construct input_transform - so build it here first instead.
+        self._build_input_transform(self._model_config)
+        super()._calculate_shapes_and_indices(data_indices)
+
+    def _calculate_input_dim(self, dataset_name: str) -> int:
+        output_dim = getattr(self.input_transform, "output_dim", None)
+        per_step = output_dim if output_dim is not None else self.num_input_channels[dataset_name]
+        return self.n_step_input * per_step + self.node_attributes.attr_ndims[dataset_name]
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -95,10 +113,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
             )
 
+    def _build_input_transform(self, model_config: DotDict) -> None:
         # feature_names must reflect the real column order of the raw `vars` axis, not dict
         # insertion order - name_to_index is the authoritative name->column mapping per dataset.
         # TODO: single-dataset only for now; multi-dataset would need this as a ModuleDict, like
-        # self.encoder/self.decoder above, since each dataset can have a different variable set.
+        # self.encoder/self.decoder, since each dataset can have a different variable set.
         (dataset_name,) = self.dataset_names
         feature_names = [
             name
@@ -108,7 +127,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
         ]
         self.input_transform = instantiate(
-            model_config.model.get("input_transform", {"_target_": "torch.nn.Identity"}),
+            model_config.model.get(
+                "input_transform", {"_target_": "anemoi.models.layers.embedder.PlainInputTransform"}
+            ),
             feature_names=feature_names,
             _recursive_=False,
         )
@@ -135,18 +156,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        _batch, n_time, _ensemble, _grid, _n_vars = x.shape
-        x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
-        x_vars = self.input_transform(x_vars)
-        x_vars = einops.rearrange(
-            x_vars,
-            "(batch time ensemble grid) d -> (batch ensemble grid) (time d)",
-            batch=_batch,
-            time=n_time,
-            ensemble=_ensemble,
-            grid=_grid,
-        )
-        x_vars = torch.cat((x_vars, node_attributes_data), dim=-1)
+        x_vars = self.input_transform(x, node_attributes_data)
 
         return x_vars, x_skip, grid_shard_sizes
 

@@ -49,6 +49,7 @@ class FeatureTokenizer(nn.Module):
         super().__init__()
         self.feature_names = feature_names
         tokenizer = Tokenizer(feature_names)
+        self.feature_to_idx = {name: i for i, name in enumerate(feature_names)}
 
         if mean is None:
             mean = torch.zeros(len(feature_names))
@@ -67,15 +68,62 @@ class FeatureTokenizer(nn.Module):
         self.register_buffer("has_level", torch.tensor(tokenizer.has_level, dtype=torch.bool))
         self.no_level_embedding = nn.Parameter(torch.randn(dim))
 
-    def forward(self, values):
-        # values: (batch, n_features) -> (batch, n_features, 1 + 2 * dim)
+    def forward(self, values, frame_idx, feature_names=None):
+        """values: (batch, n_features) -> (batch, n_features, 2 + 2 * dim)
+
+        frame_idx: (batch,) tensor, one entry per row of `values`, giving which
+        input timestep that row came from (0 = oldest). PMA pools each row's variable
+        tokens permutation-equivariantly, so nothing about a row's own values marks
+        which timestep it is - without this, telling t and t-1 apart would depend on
+        the encoder learning to read raw column position downstream, which is fragile
+        since the same shared tokenizer weights produce near-identical outputs for
+        near-identical states. Passed through as a single raw scalar (like the value
+        itself), not a dim-wide sinusoidal encoding - n_step_input is small (usually
+        2), so it's just a 0/1 flag, and a full embedding would need far more data to
+        learn than the network needs to pick up such a low-cardinality signal.
+
+        feature_names, if given, must be a subset (or reordering) of the names this
+        tokenizer was constructed with, in the same column order as `values`. Used to
+        look up per-column buffers (variable embedding, level encoding, mean/std) by
+        name for this call, instead of assuming `values` has every originally-known
+        feature in its original order. Omit (default None) for the original, fixed
+        full-feature-set behavior - existing callers are unaffected.
+        """
+        if feature_names is None:
+            idx = None
+            n_features = len(self.feature_names)
+        else:
+            try:
+                idx = torch.tensor(
+                    [self.feature_to_idx[name] for name in feature_names],
+                    device=values.device,
+                )
+            except KeyError as e:
+                msg = f"Unknown feature name {e.args[0]!r}: not in the set this tokenizer was built with."
+                raise KeyError(msg) from e
+            n_features = len(feature_names)
+
+        if values.shape[1] != n_features:
+            msg = f"values has {values.shape[1]} columns but {n_features} feature_names were given."
+            raise ValueError(msg)
+
         batch_size = values.shape[0]
-        variable_embedding = self.variable_embedding(self.variable_idx).unsqueeze(0).expand(batch_size, -1, -1)
 
-        level_pe = self.level_pe.unsqueeze(0).expand(batch_size, -1, -1)
-        no_level_embedding = self.no_level_embedding.view(1, 1, -1).expand(batch_size, len(self.feature_names), -1)
-        level_encoding = torch.where(self.has_level.view(1, -1, 1), level_pe, no_level_embedding)
+        variable_idx = self.variable_idx if idx is None else self.variable_idx[idx]
+        level_pe_full = self.level_pe if idx is None else self.level_pe[idx]
+        has_level = self.has_level if idx is None else self.has_level[idx]
+        mean = self.mean if idx is None else self.mean[idx]
+        std = self.std if idx is None else self.std[idx]
 
-        normalized_values = (values - self.mean) / self.std
+        variable_embedding = self.variable_embedding(variable_idx).unsqueeze(0).expand(batch_size, -1, -1)
+
+        level_pe = level_pe_full.unsqueeze(0).expand(batch_size, -1, -1)
+        no_level_embedding = self.no_level_embedding.view(1, 1, -1).expand(batch_size, n_features, -1)
+        level_encoding = torch.where(has_level.view(1, -1, 1), level_pe, no_level_embedding)
+
+        normalized_values = (values - mean) / std
         value = normalized_values.unsqueeze(-1)
-        return torch.cat([value, variable_embedding, level_encoding], dim=-1)
+
+        frame_encoding = frame_idx.float().view(batch_size, 1, 1).expand(batch_size, n_features, 1)
+
+        return torch.cat([value, variable_embedding, level_encoding, frame_encoding], dim=-1)
