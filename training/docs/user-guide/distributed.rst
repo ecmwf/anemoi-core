@@ -124,7 +124,8 @@ resource-allocation guidance.
    (``--gpus-per-node`` and ``--ntasks-per-node`` under SLURM, or
    ``CUDA_VISIBLE_DEVICES`` when launching locally). A mismatch
    typically manifests as ranks hanging during process-group
-   initialisation or as out-of-memory errors on the "extra" ranks.
+   initialisation or as out-of-memory errors on the "extra" ranks or else by an error at startup:  `lightning_fabric.utilities.exceptions.MisconfigurationException: You requested gpu: [0, 1, 2, 3]
+But your machine only has: [0]`
 
 How data parallelism works under the hood
 =========================================
