@@ -142,6 +142,12 @@ def _build_wrapped_loss(
     return wrapper
 
 
+def _check_subgrid_resolved(loss_config: dict) -> None:
+    if isinstance(loss_config.get("subgrid"), str):
+        msg = f"'subgrid' must be resolved to a tuple before instantiation, got {loss_config['subgrid']!r}"
+        raise TypeError(msg)
+
+
 # Future import breaks other type hints TODO Harrison Cook
 def get_loss_function(
     config: DictConfig,
@@ -186,6 +192,7 @@ def get_loss_function(
         If scaler is not found in valid scalers
     """
     loss_config = OmegaConf.to_container(config, resolve=True)
+    _check_subgrid_resolved(loss_config)
     has_scalers_config = "scalers" in loss_config
     scalers_to_include = loss_config.pop("scalers", [])
     target_cls = get_class(loss_config["_target_"])
@@ -209,6 +216,7 @@ def get_loss_function(
             data_node_name=data_node_name,
             **kwargs,
         )
+
         return instantiate(
             loss_config,
             per_scale_loss=per_scale_loss,
