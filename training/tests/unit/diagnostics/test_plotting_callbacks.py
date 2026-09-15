@@ -278,6 +278,7 @@ def _make_pl_module_forecaster(
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph latlons (radians), converted to deg in process
+    pl_module.model.model.node_name = lambda dataset_name: dataset_name
     pl_module.model.model._graph_data = {"data": MagicMock()}
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _self, _k: MagicMock()
     graph_data = pl_module.model.model._graph_data["data"]
@@ -308,6 +309,7 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     pl_module.data_indices = {"data": data_indices}
 
     # Mock graph data
+    pl_module.model.model.node_name = lambda dataset_name: dataset_name
     pl_module.model.model._graph_data = {"data": MagicMock()}
     pl_module.model.model._graph_data["data"].__getitem__ = lambda _k: torch.zeros(nlatlon, 2)
 

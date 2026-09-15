@@ -17,6 +17,7 @@ from hydra.utils import instantiate
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
+from anemoi.graphs.projection_helpers import participant_node_name
 from anemoi.models.data_indices.collection import IndexCollection
 
 
@@ -170,7 +171,11 @@ class NoOutputMask(BaseMask):
         return x
 
 
-def build_output_masks(output_mask_configs: dict, graph_data: HeteroData) -> dict[str, BaseMask]:
+def build_output_masks(
+    output_mask_configs: dict,
+    graph_data: HeteroData,
+    participant: str | None = None,
+) -> dict[str, BaseMask]:
     """Build output masks for each dataset.
 
     Parameters
@@ -179,6 +184,9 @@ def build_output_masks(output_mask_configs: dict, graph_data: HeteroData) -> dic
         Dictionary of output mask configurations for each dataset.
     graph_data : HeteroData
         Dictionary of graph data for each dataset.
+    participant : str | None, optional
+        Participant of a multi-domain graph, whose node groups are named
+        ``<dataset>_<participant>``. ``None`` (the default) uses the plain dataset names.
 
     Returns
     -------
@@ -188,7 +196,8 @@ def build_output_masks(output_mask_configs: dict, graph_data: HeteroData) -> dic
     output_masks = defaultdict(lambda: NoOutputMask())
     for dataset_name, output_mask_config in output_mask_configs.items():
         if output_mask_config is not None:
-            assert dataset_name in graph_data.node_types, f"Dataset '{dataset_name}' not found in graph_data."
-            output_masks[dataset_name] = instantiate(output_mask_config, nodes=graph_data[dataset_name])
+            node_name = participant_node_name(dataset_name, participant)
+            assert node_name in graph_data.node_types, f"Dataset '{node_name}' not found in graph_data."
+            output_masks[dataset_name] = instantiate(output_mask_config, nodes=graph_data[node_name])
 
     return output_masks

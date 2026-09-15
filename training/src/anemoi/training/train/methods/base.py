@@ -26,6 +26,8 @@ from timm.scheduler.scheduler import Scheduler as TimmScheduler
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import graph_participants
+from anemoi.graphs.projection_helpers import participant_node_name
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
@@ -69,6 +71,10 @@ if TYPE_CHECKING:
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+# `torch.nn.ModuleDict` keys must be strings, so single-domain (participant-less) training
+# objects are stored under this key.
+DEFAULT_PARTICIPANT_KEY = "default"
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -196,8 +202,23 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
-        # Create output_mask dictionary for each dataset
-        self.output_mask = build_output_masks(get_multiple_datasets_config(config.model.output_mask), graph_data)
+        # Multi-domain training: the graph carries one node group per participant
+        # (``<dataset>_<participant>``). Every grid-sized training object is built once per
+        # participant and selected by `set_active_participant` before each batch.
+        self._participants = graph_participants(graph_data, self.dataset_names[0])
+        self._active_participant = self._participants[0] if self._participants else None
+        self._fused_dataset_graph = bool(self._participants) or uses_fused_dataset_graph(
+            graph_data,
+            self.dataset_names,
+        )
+
+        # Create output_mask dictionary for each dataset, per participant
+        output_mask_configs = get_multiple_datasets_config(config.model.output_mask)
+        self._output_mask = {
+            participant: build_output_masks(output_mask_configs, graph_data, participant=participant)
+            for participant in self._participant_keys
+        }
+        self.output_mask = self._output_mask[self._active_participant]
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -228,12 +249,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Initialize components for multi-dataset
         self.target_dataset_names = []  # list of dataset names used for loss computation
-        self.scalers = {}  # dict of dict of tensors
-        self.updating_scalars = {}  # dict of dict of objects
+        self._scalers = {}  # participant -> dict of dict of tensors
+        self._updating_scalars = {}  # participant -> dict of dict of objects
         self.val_metric_ranges = {}  # dict of dict of lists
         self._scaling_values_log = {}  # dict of dict[str, float]
-        self.loss = torch.nn.ModuleDict()
-        self.metrics = torch.nn.ModuleDict()
+        self._loss = torch.nn.ModuleDict()  # participant key -> ModuleDict of losses
+        self._metrics = torch.nn.ModuleDict()  # participant key -> ModuleDict of metric ModuleDicts
 
         dataset_variable_groups = get_multiple_datasets_config(self.config.training.variable_groups)
         loss_configs = get_multiple_datasets_config(config.training.training_loss)
@@ -242,78 +263,38 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+
+        metadata_extractors = {}
         for dataset_name in self.dataset_names:
-            if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
+            if loss_configs.get(dataset_name) is None:
                 LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
                 continue
 
             self.target_dataset_names.append(dataset_name)
 
-            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
-
             # Create dataset-specific metadata extractor
-            metadata_extractor = ExtractVariableGroupAndLevel(
+            metadata_extractors[dataset_name] = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
                 metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
-
-            dataset_scalers, dataset_updating_scalars = create_scalers(
-                scalers_configs[dataset_name],
-                data_indices=data_indices[dataset_name],
-                task=self.task,
-                graph_data=graph_data,
-                statistics=statistics[dataset_name],
-                statistics_tendencies=(
-                    statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
-                ),
-                metadata_extractor=metadata_extractor,
-                nodes_name=dataset_name,
-                output_mask=self.output_mask[dataset_name],
-            )
-            self.scalers[dataset_name] = dataset_scalers
-            self.updating_scalars[dataset_name] = dataset_updating_scalars
-
             self.val_metric_ranges[dataset_name] = get_metric_ranges(
-                metadata_extractor,
+                metadata_extractors[dataset_name],
                 output_data_indices=data_indices[dataset_name].model.output,
                 metrics_to_log=metrics_to_log[dataset_name],
             )
 
-            self.loss[dataset_name] = get_loss_function(
-                loss_configs[dataset_name],
-                dataset_scalers,
-                data_indices[dataset_name],
-                graph_data=graph_data,
-                data_node_name=data_node_name,
-            )
-
-            # Check unit compatibility between predicted and target variables
-            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
-            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
-
-            self.metrics[dataset_name] = self._build_metrics_for_dataset(
-                val_metrics_configs[dataset_name],
-                scalers=dataset_scalers,
-                data_indices=data_indices[dataset_name],
-                graph_data=graph_data,
-                data_node_name=data_node_name,
-            )
-            self._initialise_updating_scalers(
-                scalers=dataset_scalers,
-                updating_scalers=dataset_updating_scalars,
-                loss_obj=self.loss[dataset_name],
-                metrics_dict=self.metrics[dataset_name],
-            )
-            self._scaling_values_log[dataset_name] = print_variable_scaling(
-                self.loss[dataset_name],
-                data_indices[dataset_name],
-            )
-
-        if config.training.loss_gradient_scaling:
-            # Multi-dataset: register hook for each loss
-            for loss_fn in self.loss.values():
-                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+        self._build_participant_training_objects(
+            graph_data=graph_data,
+            data_indices=data_indices,
+            statistics=statistics,
+            statistics_tendencies=statistics_tendencies,
+            metadata=metadata,
+            metadata_extractors=metadata_extractors,
+            scalers_configs=scalers_configs,
+            loss_configs=loss_configs,
+            val_metrics_configs=val_metrics_configs,
+            loss_gradient_scaling=config.training.loss_gradient_scaling,
+        )
 
         self.is_first_step = True
         self._current_meta = None  # metadata of the batch being processed (see batch_meta.split_meta)
@@ -332,15 +313,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_sizes, self.grid_sizes = {}, {}
-        for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
-                self.grid_sizes[dataset_name],
-                reader_group_size,
-            )
+        self._shard_sizes, self._grid_sizes = {}, {}
+        self._build_participant_grid_sizes(graph_data, reader_group_size)
+
+        # `output_mask`, `scalers`, `updating_scalars`, `loss`, `metrics`, `grid_sizes` and
+        # `shard_sizes` always hold the active participant's objects.
+        self._select_participant_objects()
 
         self.grid_dim = -2
 
@@ -372,6 +350,168 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+    # ------------------------------------------------------------------
+    # Multi-domain (participant) support
+    # ------------------------------------------------------------------
+    # Class-level defaults so participant-aware code also works on instances that
+    # were not built through `__init__` (e.g. `__new__`-built test doubles).
+    _participants: tuple[str, ...] = ()
+    _active_participant: str | None = None
+
+    @property
+    def participants(self) -> list[str]:
+        """Participants of a multi-domain graph, empty for a single-domain graph."""
+        return list(self._participants)
+
+    @property
+    def active_participant(self) -> str | None:
+        """Participant the grid-sized training objects currently resolve to."""
+        return self._active_participant
+
+    @property
+    def _participant_keys(self) -> list[str | None]:
+        """Keys the per-participant training objects are stored under."""
+        return list(self._participants) if self._participants else [None]
+
+    @staticmethod
+    def _participant_key(participant: str | None) -> str:
+        """Map a participant to a `torch.nn.ModuleDict` key, which must be a string."""
+        return DEFAULT_PARTICIPANT_KEY if participant is None else participant
+
+    def _data_node_name(self, dataset_name: str, participant: str | None) -> str:
+        """Graph node group holding the grid of `dataset_name` for `participant`."""
+        base = dataset_name if self._fused_dataset_graph else DEFAULT_DATASET_NAME
+        return participant_node_name(base, participant)
+
+    def _build_participant_training_objects(
+        self,
+        *,
+        graph_data: HeteroData,
+        data_indices: dict[str, IndexCollection],
+        statistics: dict,
+        statistics_tendencies: dict | None,
+        metadata: dict,
+        metadata_extractors: dict,
+        scalers_configs: dict,
+        loss_configs: dict,
+        val_metrics_configs: dict,
+        loss_gradient_scaling: bool,
+    ) -> None:
+        """Build the scalers, losses and metrics of every participant.
+
+        They are grid-sized, so multi-domain training needs one set per participant;
+        `_select_participant_objects` then exposes the active participant's set.
+        """
+        for participant in self._participant_keys:
+            participant_key = self._participant_key(participant)
+            self._scalers[participant] = {}
+            self._updating_scalars[participant] = {}
+            self._loss[participant_key] = torch.nn.ModuleDict()
+            self._metrics[participant_key] = torch.nn.ModuleDict()
+
+            for dataset_name in self.target_dataset_names:
+                data_node_name = self._data_node_name(dataset_name, participant)
+
+                dataset_scalers, dataset_updating_scalars = create_scalers(
+                    scalers_configs[dataset_name],
+                    data_indices=data_indices[dataset_name],
+                    task=self.task,
+                    graph_data=graph_data,
+                    statistics=statistics[dataset_name],
+                    statistics_tendencies=(
+                        statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
+                    ),
+                    metadata_extractor=metadata_extractors[dataset_name],
+                    nodes_name=participant_node_name(dataset_name, participant),
+                    output_mask=self._output_mask[participant][dataset_name],
+                )
+                self._scalers[participant][dataset_name] = dataset_scalers
+                self._updating_scalars[participant][dataset_name] = dataset_updating_scalars
+
+                dataset_loss = get_loss_function(
+                    loss_configs[dataset_name],
+                    dataset_scalers,
+                    data_indices[dataset_name],
+                    graph_data=graph_data,
+                    data_node_name=data_node_name,
+                )
+                self._loss[participant_key][dataset_name] = dataset_loss
+
+                # Check unit compatibility between predicted and target variables
+                ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
+                check_loss_tree_variable_units(dataset_loss, ds_variables_metadata)
+
+                dataset_metrics = self._build_metrics_for_dataset(
+                    val_metrics_configs[dataset_name],
+                    scalers=dataset_scalers,
+                    data_indices=data_indices[dataset_name],
+                    graph_data=graph_data,
+                    data_node_name=data_node_name,
+                )
+                self._metrics[participant_key][dataset_name] = dataset_metrics
+
+                self._initialise_updating_scalers(
+                    scalers=dataset_scalers,
+                    updating_scalers=dataset_updating_scalars,
+                    loss_obj=dataset_loss,
+                    metrics_dict=dataset_metrics,
+                )
+                self._scaling_values_log[dataset_name] = print_variable_scaling(
+                    dataset_loss,
+                    data_indices[dataset_name],
+                )
+
+        if loss_gradient_scaling:
+            # Multi-dataset: register hook for each loss of every participant
+            for participant_losses in self._loss.values():
+                for loss_fn in participant_losses.values():
+                    loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+
+    def _build_participant_grid_sizes(self, graph_data: HeteroData, reader_group_size: int) -> None:
+        """Read the grid size of every dataset of every participant off the graph."""
+        for participant in self._participant_keys:
+            self._grid_sizes[participant] = {}
+            self._shard_sizes[participant] = {}
+            for dataset_name in self.dataset_names:
+                node_name = participant_node_name(dataset_name, participant)
+                # TODO(Mario): Replace by dataset.grid_size
+                self._grid_sizes[participant][dataset_name] = graph_data[node_name].num_nodes
+                self._shard_sizes[participant][dataset_name] = get_balanced_partition_sizes(
+                    self._grid_sizes[participant][dataset_name],
+                    reader_group_size,
+                )
+
+    def _select_participant_objects(self) -> None:
+        """Point the grid-sized training objects at the active participant."""
+        participant = self._active_participant
+        participant_key = self._participant_key(participant)
+        self.output_mask = self._output_mask[participant]
+        self.scalers = self._scalers[participant]
+        self.updating_scalars = self._updating_scalars[participant]
+        self.grid_sizes = self._grid_sizes[participant]
+        self.shard_sizes = self._shard_sizes[participant]
+        self.loss = self._loss[participant_key]
+        self.metrics = self._metrics[participant_key]
+
+    def set_active_participant(self, participant: str | None) -> None:
+        """Select the participant the model and the grid-sized training objects resolve to.
+
+        A no-op for single-domain graphs, so it can be called unconditionally.
+        """
+        if not self._participants:
+            return
+
+        if participant not in self._participants:
+            msg = f"Unknown participant '{participant}', expected one of {self._participants}."
+            raise ValueError(msg)
+
+        if participant == self._active_participant:
+            return
+
+        self._active_participant = participant
+        self.model.model.set_active_participant(participant)
+        self._select_participant_objects()
+
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
@@ -383,18 +523,24 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return "multi_dataset"
 
     def _check_sharding_support(self) -> None:
+        all_losses = [loss for participant_losses in self._loss.values() for loss in participant_losses.values()]
+        all_metrics = [
+            (dataset_name, dataset_metrics)
+            for participant_metrics in self._metrics.values()
+            for dataset_name, dataset_metrics in participant_metrics.items()
+        ]
         self.loss_supports_sharding = all(
-            getattr(leaf, "supports_sharding", False) for loss in self.loss.values() for leaf in loss.iter_leaf_losses()
+            getattr(leaf, "supports_sharding", False) for loss in all_losses for leaf in loss.iter_leaf_losses()
         )
         self.metrics_support_sharding = all(
             getattr(metric, "supports_sharding", False)
-            for dataset_metrics in self.metrics.values()
+            for _, dataset_metrics in all_metrics
             for metric in dataset_metrics.values()
         )
         if not self.loss_supports_sharding and self.keep_batch_sharded:
             unsupported_losses = [
                 type(leaf).__name__
-                for loss in self.loss.values()
+                for loss in all_losses
                 for leaf in loss.iter_leaf_losses()
                 if not getattr(leaf, "supports_sharding", False)
             ]
@@ -406,7 +552,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         if not self.metrics_support_sharding and self.keep_batch_sharded:
             unsupported_metrics = [
                 f"{dataset_name}.{metric_name}"
-                for dataset_name, dataset_metrics in self.metrics.items()
+                for dataset_name, dataset_metrics in all_metrics
                 for metric_name, metric in dataset_metrics.items()
                 if not getattr(metric, "supports_sharding", False)
             ]
@@ -903,6 +1049,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         participant = meta_participant(self._current_meta)  # also checks the batch is participant-pure
         if participant is not None:
             LOGGER.debug("Batch sampled from participant '%s'", participant)
+            # Must happen before sharding: the shard sizes follow the participant's grid.
+            self.set_active_participant(participant)
         assert isinstance(batch, dict), "batch must be a dict keyed by dataset name"
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)

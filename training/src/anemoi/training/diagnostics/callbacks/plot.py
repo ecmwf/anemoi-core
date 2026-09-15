@@ -842,9 +842,11 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if self.latlons is None:
             self.latlons = {}
 
-        if dataset_name not in self.latlons:
-            self.latlons[dataset_name] = pl_module.model.model._graph_data[dataset_name].x.detach()
-            self.latlons[dataset_name] = np.rad2deg(self.latlons[dataset_name].cpu().numpy())
+        # Multi-domain training switches grids between batches, so cache per graph node group.
+        node_name = pl_module.model.model.node_name(dataset_name)
+        if node_name not in self.latlons:
+            self.latlons[node_name] = pl_module.model.model._graph_data[node_name].x.detach()
+            self.latlons[node_name] = np.rad2deg(self.latlons[node_name].cpu().numpy())
 
         assert isinstance(
             outputs.predictions,
@@ -1023,7 +1025,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
             extra_fields = (auxiliary_tensor,) if auxiliary_tensor is not None else ()
             latlons, data, output_tensor, *masked_extra = self.focus_mask.apply(
                 pl_module.model.model._graph_data,
-                self.latlons[dataset_name],
+                self.latlons[pl_module.model.model.node_name(dataset_name)],
                 data,
                 output_tensor,
                 *extra_fields,
