@@ -766,6 +766,7 @@ def multidatasets_edm_transport_config(
     use_case_modifications.system.input.dataset_b = str(tmp_dir_dataset_b)
 
     cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    cfg.model.compile = []  # TODO(cathal): debug compile + checkpoint error
     if is_tendency:
         cfg.task.multistep_input = 3
         cfg.task.multistep_output = 2

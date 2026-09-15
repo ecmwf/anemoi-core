@@ -93,6 +93,17 @@ choose stable, descriptive names.
    All datasets encoded by the same encoder group must produce latents
    with consistent shapes (see the target-feature validation below).
 
+***************************************************
+ Encoding multiple datasets with the same encoder
+***************************************************
+
+The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
+Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
+by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+
+``not_supported``
+   Indicates that multiple datasets per encoder are not currently supported.
+
 *******************
  Latent aggregator
 *******************
@@ -141,7 +152,7 @@ what the decoder receives in addition to the processed latent representation.
        target_node_features: [ "encoded_data" ]  # default
 
 .. note::
-   Here, "__target__" refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
+   Here, __"target"__ refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
    It does not refer to the targets used to compute the loss of the ML model.
 
 Valid features:
