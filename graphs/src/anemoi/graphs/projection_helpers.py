@@ -49,3 +49,39 @@ def uses_fused_dataset_graph(graph_or_config: HeteroData | DictConfig | Mapping,
         return False
 
     return dataset_names != [DEFAULT_DATASET_NAME] or DEFAULT_DATASET_NAME not in node_names
+
+
+def participant_node_name(node_name: str, participant: str | None) -> str:
+    """Return the node-group name of ``node_name`` for ``participant``."""
+    return node_name if participant is None else f"{node_name}_{participant}"
+
+
+def fuse_participant_graphs(graphs: Mapping[str, HeteroData]) -> HeteroData:
+    """Fuse per-participant graphs into one graph with participant-suffixed node groups.
+
+    Every node group of each graph is suffixed with its participant name
+    (``data`` -> ``data_west``), together with the edge types connecting them. A single
+    participant keeps the plain node-group names, so single-participant configurations
+    produce exactly the graph they produce today.
+    """
+    if len(graphs) == 1:
+        return next(iter(graphs.values()))
+
+    fused = HeteroData()
+    for participant, graph in graphs.items():
+        for node_name, nodes in graph.node_items():
+            fused_name = participant_node_name(node_name, participant)
+            for key, value in nodes.items():
+                fused[fused_name][key] = value
+            fused[fused_name].num_nodes = nodes.num_nodes
+
+        for (source_name, relation, target_name), edges in graph.edge_items():
+            fused_edge = (
+                participant_node_name(source_name, participant),
+                relation,
+                participant_node_name(target_name, participant),
+            )
+            for key, value in edges.items():
+                fused[fused_edge][key] = value
+
+    return fused

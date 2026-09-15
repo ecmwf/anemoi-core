@@ -44,6 +44,16 @@ class EdgeSchema(BaseModel):
     "Dictionary of attributes with names as keys and anemoi.graphs.edges.attributes objects as values."
 
 
+class ParticipantGraphSchema(PydanticBaseModel):
+    """Graph definition of a single participant of a multi-domain dataset."""
+
+    nodes: dict[str, NodeSchema] | None = Field(default=None)
+    "Nodes schema for all types of nodes (ex. data, hidden)."
+    edges: list[EdgeSchema] | None = Field(default=None)
+    "List of edges schema."
+    post_processors: list[ProcessorSchemas] = Field(default_factory=list)
+
+
 class BaseGraphSchema(PydanticBaseModel):
     nodes: dict[str, NodeSchema] | None = Field(default=None)
     "Nodes schema for all types of nodes (ex. data, hidden)."
@@ -52,10 +62,14 @@ class BaseGraphSchema(PydanticBaseModel):
     overwrite: bool = Field(example=True)
     "whether to overwrite existing graph file. Default to True."
     post_processors: list[ProcessorSchemas] = Field(default_factory=list)
+    participants: dict[str, ParticipantGraphSchema] | None = Field(default=None)
+    "Graph definition per participant, for datasets whose participants have different grids."
     # TODO(Helen): Needs to be adjusted for more complex graph setups
 
     @model_validator(mode="after")
     def check_if_nodes_edges_present_if_overwrite(self) -> Self:
+        if self.participants:
+            return self
         if self.overwrite and ("nodes" not in self.model_fields_set or "edges" not in self.model_fields_set):
             msg = "If overwrite is True, nodes and edges must be provided."
             raise ValueError(msg)
