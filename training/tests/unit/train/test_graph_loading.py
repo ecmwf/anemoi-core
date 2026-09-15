@@ -184,3 +184,93 @@ def test_graph_build_uses_reference_participant(
     captured_dataset = OmegaConf.to_container(graph_config_arg.nodes[DEFAULT_DATASET_NAME].node_builder.dataset)
     assert captured_dataset == {"dataset": expected}
     assert f"building the graph from participant '{Path(expected).stem}'" in caplog.text
+
+
+def _participant_graph_trainer(participants: list[str]) -> AnemoiTrainer:
+    """Trainer whose graph config defines one graph per participant."""
+    node_cfg = {
+        "node_builder": {"_target_": "anemoi.graphs.nodes.AnemoiDatasetNodes", "dataset": "placeholder"},
+    }
+    trainer = AnemoiTrainer.__new__(AnemoiTrainer)
+    trainer.config = OmegaConf.create(
+        {
+            "graph": {
+                "overwrite": True,
+                "participants": {
+                    participant: {"nodes": {DEFAULT_DATASET_NAME: node_cfg, "hidden": node_cfg}, "edges": []}
+                    for participant in participants
+                },
+            },
+            "system": {"input": {"graph": None}},
+            "dataloader": {
+                "training": {
+                    "datasets": {
+                        "data": {
+                            "participants": {
+                                participant: {"dataset_config": {"dataset": f"/path/{participant}.zarr"}}
+                                for participant in participants
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    )
+    return trainer
+
+
+def _single_participant_graph() -> HeteroData:
+    graph = HeteroData()
+    graph[DEFAULT_DATASET_NAME].num_nodes = 2
+    graph["hidden"].num_nodes = 3
+    graph[(DEFAULT_DATASET_NAME, "to", "hidden")].edge_index = torch.tensor([[0, 1], [1, 0]])
+    return graph
+
+
+def _patch_graph_creator(captured: list) -> MagicMock:
+    def make_creator(config: object) -> MagicMock:
+        creator = MagicMock()
+        creator.create.return_value = _single_participant_graph()
+        captured.append(config)
+        return creator
+
+    return patch("anemoi.training.train.train.GraphCreator", side_effect=make_creator)
+
+
+def test_participant_graphs_are_fused_with_suffixed_node_groups() -> None:
+    """Two participants -> one graph each, fused into a single graph with suffixed node groups."""
+    trainer = _participant_graph_trainer(["west", "north"])
+    captured: list = []
+
+    with _patch_graph_creator(captured):
+        graph = trainer.graph_data
+
+    assert set(graph.node_types) == {"data_west", "hidden_west", "data_north", "hidden_north"}
+    assert ("data_west", "to", "hidden_west") in graph.edge_types
+    assert ("data_north", "to", "hidden_north") in graph.edge_types
+    assert graph["data_west"].num_nodes == 2
+    assert graph["hidden_north"].num_nodes == 3
+
+    # each participant's own dataset reached its own graph config
+    injected = [config.nodes[DEFAULT_DATASET_NAME].node_builder.dataset["dataset"] for config in captured]
+    assert injected == ["/path/west.zarr", "/path/north.zarr"]
+
+
+def test_single_participant_graph_keeps_plain_node_names() -> None:
+    """A single participant must produce exactly the graph a single-domain config produces today."""
+    trainer = _participant_graph_trainer(["west"])
+
+    with _patch_graph_creator([]):
+        graph = trainer.graph_data
+
+    assert set(graph.node_types) == {DEFAULT_DATASET_NAME, "hidden"}
+    assert (DEFAULT_DATASET_NAME, "to", "hidden") in graph.edge_types
+
+
+def test_participant_graph_rejects_unknown_participant() -> None:
+    """A graph participant that the dataset does not define is a config error."""
+    trainer = _participant_graph_trainer(["west"])
+    trainer.config.graph.participants.typo = trainer.config.graph.participants.west
+
+    with _patch_graph_creator([]), pytest.raises(ValueError, match="not participants of dataset"):
+        trainer.graph_data
