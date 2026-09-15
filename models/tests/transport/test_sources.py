@@ -39,6 +39,19 @@ def test_reference_state_sampling_source_selects_latest_input_and_output_variabl
     torch.testing.assert_close(source["data"], expected)
 
 
+def test_reference_state_sampling_source_supports_zero_output_datasets() -> None:
+    x_data = torch.zeros(1, 3, 1, 4, 5)
+    data_indices = _data_indices_with_positions(("a", "b"), [0, 3])
+
+    source = reference_state_sampling_source(
+        {"data": x_data},
+        data_indices=data_indices,
+        n_step_output={"data": 0},
+    )
+
+    assert source["data"].shape == (1, 0, 1, 4, 2)
+
+
 def test_reference_state_sampling_source_rejects_missing_input_variables() -> None:
     def raise_missing(names: tuple[str, ...]) -> list[int]:
         raise ValueError(f"missing variables: {names}")
