@@ -20,6 +20,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.diagnostics.callbacks.weight_averaging import EMAWeightAveraging
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -184,6 +185,66 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
             ),
         ):
             assert torch.equal(state_dict[full_key], value)
+
+
+def _weight_averaged_checkpoint(state_dict: dict) -> dict:
+    """Checkpoint as written by a weight-averaging callback.
+
+    ``state_dict`` holds the averaged weights and ``current_model_state`` the raw training weights,
+    which the callback restores into the model after ``on_load_checkpoint`` has run.
+    """
+    return {
+        "state_dict": dict(state_dict),
+        "current_model_state": dict(state_dict),
+        "averaging_state": {"n_averaged": torch.tensor(3)},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+
+
+def test_on_load_checkpoint_updates_processors_in_weight_averaged_current_model_state() -> None:
+    """The processor refresh must reach the training weights, not just the averaged ones."""
+    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
+    new_model = DummyModel(["6h", "12h"], offset=1.0)
+
+    checkpoint = _weight_averaged_checkpoint(
+        {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+    )
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    new_state = new_model.state_dict()
+    for state_key in ("state_dict", "current_model_state"):
+        state_dict = checkpoint[state_key]
+        assert not any(
+            "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
+        ), f"Extra tendency processors should be dropped from {state_key}."
+        for key, value in new_state.items():
+            full_key = f"model.{key}"
+            if full_key.startswith(("model.pre_processors_tendencies.", "model.post_processors_tendencies.")):
+                assert torch.equal(state_dict[full_key], value), f"{full_key} not refreshed in {state_key}"
+
+
+def test_on_load_checkpoint_warns_when_averaged_weights_are_dropped(caplog: pytest.LogCaptureFixture) -> None:
+    """Resuming a weight-averaged checkpoint without the callback silently uses the averaged weights."""
+    model = DummyModel(["6h"], offset=1.0)
+    checkpoint = _weight_averaged_checkpoint(
+        {f"model.{key}": value.clone() for key, value in model.state_dict().items()},
+    )
+    module = _make_dummy_module(model, update_states=False, update_tendencies=False)
+    module._trainer = SimpleNamespace(callbacks=[], datamodule=None)
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "weight averaging" in caplog.text
+
+    caplog.clear()
+    module._trainer = SimpleNamespace(callbacks=[EMAWeightAveraging()], datamodule=None)
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "weight averaging" not in caplog.text
 
 
 def test_transfer_learning_loading_updates_processors_when_enabled(

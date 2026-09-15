@@ -479,14 +479,47 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             if full_key.startswith(processor_prefixes):
                 state_dict[full_key] = value
 
+    def _warn_if_averaged_weights_are_dropped(self, checkpoint: dict[str, Any]) -> None:
+        """Warn when resuming a weight-averaged checkpoint without a weight-averaging callback.
+
+        Such a checkpoint holds the averaged weights in "state_dict", so the model silently starts
+        from the averaged weights and the averaging state is lost. Loading only the weights (transfer
+        learning, evaluation) does this deliberately, so it is not reported.
+        """
+        if "averaging_state" not in checkpoint or self.config.training.load_weights_only:
+            return
+
+        weight_averaging_cls = getattr(pl.callbacks, "WeightAveraging", None)  # pytorch-lightning >= 2.6
+        trainer = getattr(self, "_trainer", None)
+        if weight_averaging_cls is None or trainer is None:
+            return
+        if any(isinstance(callback, weight_averaging_cls) for callback in trainer.callbacks):
+            return
+
+        LOGGER.warning(
+            "Resuming a checkpoint that was written with weight averaging, but no "
+            "'training.weight_averaging' callback is configured. The model will start from the "
+            "averaged weights instead of the training weights, and the averaging state is discarded. "
+            "Keep the weight averaging config to resume the run as it was trained.",
+        )
+
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
     def on_load_checkpoint(self, checkpoint: torch.nn.Module) -> None:
         # Apply migrations to handle state_dict key changes from older checkpoints.
         # These are idempotent: already-migrated checkpoints are unaffected.
-        _trainable_edge_perm_fix_migration(checkpoint, model=self)
-        self._update_checkpoint_state_dict_for_load(checkpoint)
+        # A weight-averaging callback stores the averaged weights in "state_dict" and the raw
+        # training weights in "current_model_state", then restores the model from the latter after
+        # this hook has run. Both copies therefore need migrating.
+        for state_key in ("state_dict", "current_model_state"):
+            if state_key not in checkpoint:
+                continue
+            model_state = {"state_dict": checkpoint[state_key]}
+            _trainable_edge_perm_fix_migration(model_state, model=self)
+            self._update_checkpoint_state_dict_for_load(model_state)
+
+        self._warn_if_averaged_weights_are_dropped(checkpoint)
 
         self._ckpt_model_name_to_index = {
             dataset_name: data_indices.name_to_index
