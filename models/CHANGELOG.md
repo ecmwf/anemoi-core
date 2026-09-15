@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.19.1](https://github.com/ecmwf/anemoi-core/compare/models-0.19.0...models-0.19.1) (2026-09-15)
+
+
+### Features
+
+* Spatial preprocessor ([#1305](https://github.com/ecmwf/anemoi-core/issues/1305)) ([89f26fa](https://github.com/ecmwf/anemoi-core/commit/89f26fadd5d0daa9054776b538569da80e713a20))
+
+
+### Bug Fixes
+
+* Add error when passing multiple datasets for one encoder ([#1394](https://github.com/ecmwf/anemoi-core/issues/1394)) ([a01e517](https://github.com/ecmwf/anemoi-core/commit/a01e51785811904e7e61f1152791308f87c08220))
+
 ## [0.19.0](https://github.com/ecmwf/anemoi-core/compare/models-0.18.0...models-0.19.0) (2026-09-07)
 
 
