@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.1](https://github.com/ecmwf/anemoi-core/compare/training-0.17.0...training-0.17.1) (2026-09-15)
+
+
+### Features
+
+* Spatial preprocessor ([#1305](https://github.com/ecmwf/anemoi-core/issues/1305)) ([89f26fa](https://github.com/ecmwf/anemoi-core/commit/89f26fadd5d0daa9054776b538569da80e713a20))
+
+
+### Bug Fixes
+
+* **training:** Benchmark tests run again ([#1382](https://github.com/ecmwf/anemoi-core/issues/1382)) ([3594d55](https://github.com/ecmwf/anemoi-core/commit/3594d559c8c477c6811a2cc33fdb0bc8154d028a))
+* **training:** Fix compile error when using activation checkpointing ([#1344](https://github.com/ecmwf/anemoi-core/issues/1344)) ([10f8c25](https://github.com/ecmwf/anemoi-core/commit/10f8c259d417909ad78ae891509cbfb8e3bcf5fc))
+* **training:** Replace memory efficient but unstable graph edge energ score formulation ([#1354](https://github.com/ecmwf/anemoi-core/issues/1354)) ([d7519f6](https://github.com/ecmwf/anemoi-core/commit/d7519f6b170e06d9c6e6d2e3d4e6fa435a48f678))
+* **training:** Scale prog variable at data index 0 in the tendency scaler ([#1369](https://github.com/ecmwf/anemoi-core/issues/1369)) ([a5d9693](https://github.com/ecmwf/anemoi-core/commit/a5d96931b44d9fdeb351deb8136d711f7e032759))
+* **training:** Scalers and target variable ([#1371](https://github.com/ecmwf/anemoi-core/issues/1371)) ([457a8c6](https://github.com/ecmwf/anemoi-core/commit/457a8c662adafb84a426dd4f48107999e3093d80))
+* **training:** Sharded ensemble gradient scaling ([#1377](https://github.com/ecmwf/anemoi-core/issues/1377)) ([23c8bfd](https://github.com/ecmwf/anemoi-core/commit/23c8bfd2d6d50aaf0dff981876d250f102864f3c))
+* **training:** Update transformer.yaml ([#1389](https://github.com/ecmwf/anemoi-core/issues/1389)) ([396e1bb](https://github.com/ecmwf/anemoi-core/commit/396e1bb93883d3627510b1aa2b66a66f548e5b9c))
+
+
+### Performance Improvements
+
+* **training:** Fake dataloading ([#1387](https://github.com/ecmwf/anemoi-core/issues/1387)) ([53dcf12](https://github.com/ecmwf/anemoi-core/commit/53dcf12f123434eb0cb6bf4a3304f42ae0bcdc30))
+
+
+### Documentation
+
+* **training:** Fix stale config paths in user-guide ([#1391](https://github.com/ecmwf/anemoi-core/issues/1391)) ([42c8a06](https://github.com/ecmwf/anemoi-core/commit/42c8a06d21314f16f1d71b4f04dd5c7f2a39dffb))
+* **training:** Link User Journey items in user-guide overview ([#1388](https://github.com/ecmwf/anemoi-core/issues/1388)) ([08b0a64](https://github.com/ecmwf/anemoi-core/commit/08b0a64d71b74b1007a73838456aa9791d7ffe78))
+* **training:** Replace deprecated AlmostFairKernelCRPS references wi… ([#1392](https://github.com/ecmwf/anemoi-core/issues/1392)) ([f90ec38](https://github.com/ecmwf/anemoi-core/commit/f90ec3829dfec72201f22c9dd19df9a796f5f192))
+
 ## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/training-0.16.0...training-0.17.0) (2026-09-07)
 
 
