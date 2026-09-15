@@ -38,7 +38,7 @@ class Embedder(nn.Module):
     def __init__(self, feature_names, dim, d_model, nhead, mean=None, std=None):
         super().__init__()
         self.feature_tokenizer = FeatureTokenizer(feature_names, dim, mean=mean, std=std)
-        self.input_proj = nn.Linear(2 + 2 * dim, d_model)
+        self.input_proj = nn.Linear(2 + 3 * dim, d_model)
         self.pma = PMA(d_model, nhead, num_seeds=1)
         self.output_dim = d_model
 

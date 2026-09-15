@@ -68,8 +68,17 @@ class FeatureTokenizer(nn.Module):
         self.register_buffer("has_level", torch.tensor(tokenizer.has_level, dtype=torch.bool))
         self.no_level_embedding = nn.Parameter(torch.randn(dim))
 
+        # learned nonlinear representation of the value itself, alongside the raw scalar -
+        # the raw scalar alone leaves all the work of extracting a useful representation to
+        # the attention that follows; this gives the value its own capacity to do that first.
+        self.value_encoder = nn.Sequential(
+            nn.Linear(1, dim),
+            nn.SiLU(),
+            nn.Linear(dim, dim),
+        )
+
     def forward(self, values, frame_idx, feature_names=None):
-        """values: (batch, n_features) -> (batch, n_features, 2 + 2 * dim)
+        """values: (batch, n_features) -> (batch, n_features, 2 + 3 * dim)
 
         frame_idx: (batch,) tensor, one entry per row of `values`, giving which
         input timestep that row came from (0 = oldest). PMA pools each row's variable
@@ -123,7 +132,8 @@ class FeatureTokenizer(nn.Module):
 
         normalized_values = (values - mean) / std
         value = normalized_values.unsqueeze(-1)
+        value_encoding = self.value_encoder(value)
 
         frame_encoding = frame_idx.float().view(batch_size, 1, 1).expand(batch_size, n_features, 1)
 
-        return torch.cat([value, variable_embedding, level_encoding, frame_encoding], dim=-1)
+        return torch.cat([value, value_encoding, variable_embedding, level_encoding, frame_encoding], dim=-1)
