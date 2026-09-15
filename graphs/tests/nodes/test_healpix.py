@@ -46,6 +46,27 @@ def test_register_nodes(resolution: int):
     assert graph["test_nodes"].node_type == "HEALPixNodes"
 
 
+@pytest.mark.parametrize("resolution", [2, 5])
+def test_nest_ordering(resolution: int):
+    """nest_ordering selects NEST vs RING pixel ordering; defaults to NEST."""
+    nest = HEALPixNodes(resolution, "test_nodes", nest_ordering=True).get_coordinates()
+    ring = HEALPixNodes(resolution, "test_nodes", nest_ordering=False).get_coordinates()
+    default = HEALPixNodes(resolution, "test_nodes").get_coordinates()
+
+    # default is NEST, backward-compatible with the previously hardcoded nest=True
+    assert torch.equal(default, nest)
+
+    # same set of pixel centres, different row order
+    assert not torch.equal(nest, ring)
+    nest_sorted = nest[nest[:, 0].argsort(stable=True)].sort(dim=0).values
+    ring_sorted = ring[ring[:, 0].argsort(stable=True)].sort(dim=0).values
+    assert torch.allclose(nest_sorted, ring_sorted)
+
+    # RING ordering is isolatitude, sorted north -> south
+    assert torch.all(torch.diff(ring[:, 0]) <= 1e-9)
+    assert not torch.all(torch.diff(nest[:, 0]) <= 1e-9)
+
+
 @pytest.mark.parametrize("attr_class", [UniformWeights, SphericalAreaWeights])
 @pytest.mark.parametrize("resolution", [2, 5, 7])
 def test_register_attributes(graph_with_nodes: HeteroData, attr_class, resolution: int):
