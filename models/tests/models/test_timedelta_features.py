@@ -18,6 +18,7 @@ from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.utils.config import DotDict
+from anemoi.models.data.testing import make_source
 
 
 def _model_with_timedelta_attributes(dtype: str = "float32") -> AnemoiModelEncProcDec:
@@ -85,7 +86,7 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["coordinates"], ["obs"], model),
     }
-    view = create_source_view(
+    view = make_source(
         name="obs",
         data=[torch.ones(3, 1)],
         variables=["value"],
@@ -120,7 +121,7 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
     model = _model_with_timedelta_attributes(dtype="float64")
     model.residual = {}
     model.node_attributes = {}
-    view = create_source_view(
+    view = make_source(
         name="obs",
         data=[torch.ones(2, 1, dtype=torch.float32)],
         variables=["value"],
@@ -144,7 +145,7 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["encoded_data"], ["obs"], model),
     }
-    view = create_source_view(
+    view = make_source(
         name="obs",
         data=[torch.ones(2, 1)],
         variables=["value"],

@@ -16,6 +16,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import GriddedSourceView
 from anemoi.models.data.views import TabularSourceView
 from anemoi.models.data.views import create_source_view
+from anemoi.models.data.testing import make_source
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
@@ -122,7 +123,7 @@ class TestSpecOnViews:
 
     def test_flat_spec_kwargs_still_construct_a_view(self) -> None:
         """Call sites that predate the spec pass its fields flat."""
-        view = create_source_view(
+        view = make_source(
             name="grid",
             data=torch.zeros(1, 1, 4, 2),
             variables=["a", "b"],

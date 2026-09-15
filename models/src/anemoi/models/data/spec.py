@@ -14,7 +14,6 @@ from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
 from dataclasses import field
-from dataclasses import fields
 from dataclasses import replace
 from functools import cached_property
 from typing import TYPE_CHECKING
@@ -181,9 +180,3 @@ class SourceSpec:
             boundaries = None
 
         return create_source_view(spec=self, data=data, coordinates=coordinates, boundaries=boundaries)
-
-
-#: Names of :class:`SourceSpec` fields. Used to route flat keyword arguments to the
-#: spec in :meth:`SourceView.clone` and :func:`create_source_view`, so call sites
-#: that predate the spec keep working.
-SPEC_FIELD_NAMES = frozenset(f.name for f in fields(SourceSpec))

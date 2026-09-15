@@ -12,6 +12,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
 from anemoi.models.transport.settings import EdmSettings
+from anemoi.models.data.testing import make_batch
 
 
 class _Model:
@@ -32,8 +33,7 @@ class _Model:
 
 def test_edm_model_preconditioning_handles_sparse_targets() -> None:
     model = _Model()
-    noised = Batch(
-        data={"obs": [torch.ones(2, 1), torch.full((3, 1), 2.0)]},
+    noised = make_batch(data={"obs": [torch.ones(2, 1), torch.full((3, 1), 2.0)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(3, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
         layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},

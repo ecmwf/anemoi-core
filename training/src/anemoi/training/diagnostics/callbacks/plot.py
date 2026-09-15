@@ -872,7 +872,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
                 # Pass the full target batch; index the per-dataset SourceView afterwards.
-                batch_obj = batch if isinstance(batch, Batch) else Batch(data=batch)
+                batch_obj = batch
                 y_true_batch, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
                 y_true_batch = pl_module.preprocess_targets(y_true_batch)
                 y_true = y_true_batch[dataset_name]

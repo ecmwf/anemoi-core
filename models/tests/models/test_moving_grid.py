@@ -23,6 +23,8 @@ from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from anemoi.models.data.testing import make_source
+from anemoi.models.data.testing import make_batch
 
 
 class _NearestEdges:
@@ -125,8 +127,7 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     # Different values for each (sample, ensemble member), constant over its two grid points.
     values = torch.tensor([[1.0, 2.0], [10.0, 20.0]])
     data = values[:, None, :, None, None].expand(2, 2, 2, 2, 1).clone().requires_grad_()
-    batch = Batch(
-        data={"grid": data},
+    batch = make_batch(data={"grid": data},
         coordinates={"grid": torch.tensor([[[0.0, 0.0], [0.2, 0.2]], [[0.01, 0.01], [0.21, 0.21]]])},
         layouts={"grid": layout},
         variables={"grid": ["a"]},
@@ -172,8 +173,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         torch.tensor([10.0, 20.0])[:, None, None].expand(2, 3, 1).clone().requires_grad_(),
     ]
     coords = [torch.zeros(2, 2), torch.zeros(3, 2)]
-    inputs = Batch(
-        data={"grid": samples},
+    inputs = make_batch(data={"grid": samples},
         coordinates={"grid": coords},
         variables={"grid": ["a"]},
         layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
@@ -226,7 +226,7 @@ def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
     from anemoi.models.data.views import create_source_view
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = create_source_view(
+    view = make_source(
         name="obs",
         data=samples,
         variables=["a"],

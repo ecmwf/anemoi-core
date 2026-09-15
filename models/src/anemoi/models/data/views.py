@@ -22,7 +22,6 @@ import torch
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatView
-from anemoi.models.data.spec import SPEC_FIELD_NAMES
 from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.distributed.graph import gather_tensor
@@ -33,28 +32,78 @@ from anemoi.models.distributed.utils import model_is_distributed
 LOGGER = logging.getLogger(__name__)
 
 
-def _split_spec_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    """Pop the :class:`SourceSpec` fields out of ``kwargs`` and return them.
+def create_source_view(spec: SourceSpec, **kwargs) -> "SourceView":
+    """Build the SourceView kind that ``spec.layout`` calls for."""
+    if spec.layout.time_in_grid:
+        return TabularSourceView(spec=spec, **kwargs)
 
-    Lets callers keep passing the spec's fields flat (``name=``, ``variables=``,
-    ``layout=``, ...) rather than building a :class:`SourceSpec` first.
+    return GriddedSourceView(spec=spec, **kwargs)
+
+
+def resolve_device(device: torch.device | str) -> torch.device:
+    """Resolve ``device`` to a concrete device, filling in the current CUDA index.
+
+    ``torch.device("cuda") != torch.device("cuda:0")``, so cache lookups keyed on a
+    device need the index pinned down first.
     """
-    return {key: kwargs.pop(key) for key in tuple(kwargs) if key in SPEC_FIELD_NAMES}
+    device = torch.device(device)
+    if device.type == "cuda" and device.index is None:
+        device = torch.device("cuda", torch.cuda.current_device())
+    return device
 
 
-def create_source_view(**kwargs) -> "SourceView":
-    """Factory function to create a SourceView for a source dataset.
+def _to_device(value, device, *, non_blocking: bool):
+    """Recursively move tensors to ``device``, pass non-tensors through."""
+    if isinstance(value, torch.Tensor):
+        return value.to(device, non_blocking=non_blocking)
+    if isinstance(value, list):
+        return [_to_device(v, device, non_blocking=non_blocking) for v in value]
+    return value
 
-    Accepts either a ready-made ``spec=SourceSpec(...)``, or the spec's fields
-    passed flat alongside the payload.
+
+def _pin(value):
+    """Recursively pin tensors, pass non-tensors through. See :func:`_to_device`."""
+    if isinstance(value, torch.Tensor):
+        return value.pin_memory()
+    if isinstance(value, list):
+        return [_pin(v) for v in value]
+    return value
+
+
+def _cached_static_coords(name, value, device, *, cache: dict, non_blocking: bool):
+    """Return the device copy of a static coordinate tensor, transferring on first use.
+
+    Static coordinates are constant for the whole run - the grid of a dataset is fixed
+    by the graph nodes it is bound to - so a single H2D copy per dataset serves every
+    batch. ``cache`` is owned by the caller (one per process) and populated here.
+
+    Shape, dtype and device are still checked against ``value``, so a cache entry that
+    does not describe this batch is refreshed rather than silently returned.
     """
-    if "spec" not in kwargs:
-        kwargs["spec"] = SourceSpec(**_split_spec_kwargs(kwargs))
+    cached = cache.get(name)
+    if (
+        isinstance(cached, torch.Tensor)
+        and isinstance(value, torch.Tensor)
+        and cached.device == device
+        and cached.shape == value.shape
+        and cached.dtype == value.dtype
+    ):
+        return cached
 
-    if kwargs["spec"].layout.time_in_grid:
-        return TabularSourceView(**kwargs)
+    if cached is not None:
+        LOGGER.debug(
+            "Static coordinates for %r no longer match the cached copy (cached %s on %s, got %s on %s); refreshing.",
+            name,
+            tuple(cached.shape),
+            cached.device,
+            tuple(value.shape) if isinstance(value, torch.Tensor) else type(value).__name__,
+            value.device if isinstance(value, torch.Tensor) else "n/a",
+        )
 
-    return GriddedSourceView(**kwargs)
+    moved = _to_device(value, device, non_blocking=non_blocking)
+    if isinstance(moved, torch.Tensor):
+        cache[name] = moved
+    return moved
 
 
 def _shape_without_ensemble_dim(tensor: torch.Tensor, layout: TensorLayout) -> tuple[int, ...]:
@@ -93,9 +142,15 @@ class SourceView(ABC):
         samples = self.data if isinstance(self.data, list) else [self.data]
         for sample in samples:
             layout = self.layout.normalized(sample.ndim)
-            if sample.shape[layout.variables] != len(self.variables):
+            n_channels = sample.shape[layout.variables]
+            # A zero-width variables axis is a *template*: a payload that carries the
+            # spec's shape but none of its channels, used to describe a source that is
+            # still to be produced (see AnemoiTransportModelEncProcDec target
+            # templates). Names then describe what the template is for, so they are
+            # not required to match the absent channels.
+            if n_channels != 0 and n_channels != len(self.variables):
                 raise ValueError(
-                    f"Source {self.name!r} has {sample.shape[layout.variables]} variable channels "
+                    f"Source {self.name!r} has {n_channels} variable channels "
                     f"but {len(self.variables)} names."
                 )
         if samples and any(sample.dtype != samples[0].dtype for sample in samples):
@@ -142,15 +197,10 @@ class SourceView(ABC):
     def clone(self, **kwargs) -> "SourceView":
         """Return a new view with replacements, sharing fields that are not replaced.
 
-        Spec fields may be passed flat (``variables=``, ``statistics=``, ...); they
-        are routed onto a replaced :class:`SourceSpec`.
+        To change what the spec says, replace the spec::
+
+            source.clone(spec=source.spec.clone(variables=[...]))
         """
-        spec_kwargs = _split_spec_kwargs(kwargs)
-        if spec_kwargs:
-            if "spec" in kwargs:
-                msg = f"clone() got both spec= and spec field(s) {sorted(spec_kwargs)}; pass one or the other."
-                raise ValueError(msg)
-            kwargs["spec"] = self.spec.clone(**spec_kwargs)
         return replace(self, **kwargs)
 
     def select(self, **kwargs) -> "SourceView":
@@ -175,6 +225,58 @@ class SourceView(ABC):
     def contiguous(self) -> "SourceView":
         """Return a new view whose underlying data tensors are contiguous."""
         return self.apply_func(lambda t, **_: t.contiguous())
+
+    def to(
+        self,
+        device: torch.device | str,
+        *,
+        non_blocking: bool = True,
+        static_coord_cache: dict[str, torch.Tensor] | None = None,
+    ) -> "SourceView":
+        """Return a copy of this source with every tensor on ``device``.
+
+        Data, coordinates and timedeltas move together; consumers rely on that, since
+        :meth:`allgather` gathers coordinates alongside data in one collective and
+        does not move them itself.
+
+        When this source's coordinates are static and ``static_coord_cache`` is given,
+        the coordinate tensor crosses to the device once per run rather than once per
+        batch. The cache is owned by the caller, keyed by dataset name.
+        """
+        device = resolve_device(device)
+
+        coordinates = self.coordinates
+        if coordinates is not None:
+            if self.coordinates_are_static and static_coord_cache is not None:
+                coordinates = _cached_static_coords(
+                    self.name, coordinates, device, cache=static_coord_cache, non_blocking=non_blocking
+                )
+            else:
+                coordinates = _to_device(coordinates, device, non_blocking=non_blocking)
+
+        return self.clone(
+            data=_to_device(self.data, device, non_blocking=non_blocking),
+            coordinates=coordinates,
+            timedeltas=(
+                None if self.timedeltas is None else _to_device(self.timedeltas, device, non_blocking=non_blocking)
+            ),
+        )
+
+    def pin_memory(self) -> "SourceView":
+        """Return a copy with host memory pinned. Static coordinates are left untouched.
+
+        Pinning static coordinates would buy nothing: with a ``static_coord_cache``
+        (see :meth:`to`) they cross to the device once per run, not once per batch.
+        """
+        coordinates = self.coordinates
+        if coordinates is not None and not self.coordinates_are_static:
+            coordinates = _pin(coordinates)
+
+        return self.clone(
+            data=_pin(self.data),
+            coordinates=coordinates,
+            timedeltas=None if self.timedeltas is None else _pin(self.timedeltas),
+        )
 
     @abstractmethod
     def select_time(self, indices: slice | Sequence[int] | int) -> "SourceView":

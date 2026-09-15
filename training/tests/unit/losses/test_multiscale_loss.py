@@ -25,11 +25,12 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+from anemoi.models.data.testing import make_source
 
 
 def _view(data: torch.Tensor) -> GriddedSourceView:
     """Attach metadata for the gridded loss fixtures."""
-    return create_source_view(
+    return make_source(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],

@@ -9,6 +9,7 @@
 
 from .batch import Batch
 from .flat import FlatView
+from .sample import SourceSample
 from .spec import SourceSpec
 from .tensor_layout import TensorLayout
 from .views import GriddedSourceView
@@ -18,6 +19,7 @@ from .views import create_source_view
 
 __all__ = [
     "Batch",
+    "SourceSample",
     "SourceSpec",
     "SourceView",
     "FlatView",

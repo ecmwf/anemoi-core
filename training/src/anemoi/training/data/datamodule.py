@@ -201,12 +201,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return persistent_workers
 
     def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
-        static_coord_datasets = tuple(ds.static_coord_datasets)
-
-        def _collate(samples: list[dict]) -> Batch:
-            return Batch.collate(samples, static_coord_datasets=static_coord_datasets)
-
-        return _collate
+        del ds  # each SourceSample carries everything collation needs
+        return Batch.collate
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:
         """Create DataLoader for multi-dataset."""

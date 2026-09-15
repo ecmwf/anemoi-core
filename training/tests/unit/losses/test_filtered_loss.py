@@ -26,6 +26,7 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
+from anemoi.models.data.testing import make_source
 
 
 def test_instantiation_with_filtering() -> None:
@@ -494,7 +495,7 @@ class TestScalerIndicesRemapping:
         w.add_scaler(dimension=TensorDim.VARIABLE, scaler=torch.tensor([2.0]), name="var_w")
 
         def view(nvars: int) -> GriddedSourceView:
-            return create_source_view(
+            return make_source(
                 name="data",
                 data=torch.ones(1, 1, 1, 8, nvars, dtype=dtype),
                 variables=[f"v{i}" for i in range(nvars)],

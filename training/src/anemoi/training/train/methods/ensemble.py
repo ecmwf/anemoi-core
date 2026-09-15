@@ -274,9 +274,8 @@ class EnsembleTraining(BaseTrainingModule):
         else:
             kwargs["fcstep"] = 0  # TODO(Mario,Simon): set the conditioning on the step optional
 
-        batch = x if isinstance(x, Batch) else Batch(data=x)
         return self.model(
-            batch,
+            x,
             model_comm_group=self.model_comm_group,
             **kwargs,
         )

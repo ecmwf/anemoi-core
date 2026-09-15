@@ -38,6 +38,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
+from anemoi.models.data.testing import make_source
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
@@ -52,7 +53,7 @@ losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSEL
 
 def _gridded_source_view(data: torch.Tensor) -> SourceView:
     """Wrap a five-dimensional loss tensor in the current public loss input type."""
-    return create_source_view(
+    return make_source(
         name="data",
         data=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],

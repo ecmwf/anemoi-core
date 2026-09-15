@@ -13,11 +13,11 @@ import torch
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.data.testing import make_batch
 
 
 def _batch(variables):
-    return Batch(
-        data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+    return make_batch(data={"grid": torch.zeros(2, 1, 1, 3, 2)},
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables=variables,
     )

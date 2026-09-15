@@ -38,6 +38,7 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
+from anemoi.models.data.testing import make_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------
@@ -338,8 +339,7 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     grid = tensor.shape[3]
     num_vars = tensor.shape[4]
     coordinates = torch.zeros(grid, 2)
-    return Batch(
-        data={dataset_name: tensor},
+    return make_batch(data={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
         metadata={STATIC_COORDS_META_KEY: frozenset({dataset_name})},
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -365,8 +365,7 @@ def _make_sparse_batch(
         dim=-1,
     )
     boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
-    return Batch(
-        data={dataset_name: [data]},
+    return make_batch(data={dataset_name: [data]},
         coordinates={dataset_name: [coordinates]},
         metadata={dataset_name: {BOUNDARIES_META_KEY: boundaries}},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},

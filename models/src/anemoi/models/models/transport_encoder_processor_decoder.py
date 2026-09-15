@@ -22,7 +22,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.batch import STATIC_COORDS_META_KEY
+from anemoi.models.data import SourceSpec
+from anemoi.models.data import create_source_view
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -780,54 +781,52 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> Batch:
-        source_layouts = template.layouts if template is not None else self.data_layouts
-        layouts = {}
-        coordinates = {}
-        variables = {}
-        statistics = {}
-        grid_sizes = {}
-        for dataset_name, dataset_data in data.items():
-            layouts[dataset_name] = source_layouts[dataset_name]
-
-            coordinates[dataset_name] = self._sampling_coordinates(
-                dataset_name,
-                dataset_data,
-                layout=layouts[dataset_name],
-                template=template,
-                model_comm_group=model_comm_group,
-                grid_shard_sizes=grid_shard_sizes,
-            )
-            variables[dataset_name] = self._sampling_variables(dataset_name, variable_space)
-            statistics[dataset_name] = self._sampling_statistics(dataset_name, variable_space)
-            grid_sizes[dataset_name] = (
-                sum(sample.shape[layouts[dataset_name].axis("grid", ndim=sample.ndim)] for sample in dataset_data)
-                if isinstance(dataset_data, list)
-                else dataset_data.shape[layouts[dataset_name].axis("grid", ndim=dataset_data.ndim)]
-            )
-
-        if template is not None:
-            metadata = dict(template.metadata)
-            static_coords = template.static_coord_datasets & set(data)
-        else:
-            metadata = {}
-            static_coords = frozenset(name for name in data if self.is_dataset_static.get(name, False))
-        metadata[STATIC_COORDS_META_KEY] = frozenset(static_coords)
-
-        return Batch(
-            data=data,
-            coordinates=coordinates,
-            metadata=metadata,
-            grid_sizes=grid_sizes,
-            timedeltas=(
-                {}
-                if template is None
-                else {name: template.timedeltas[name] for name in data if name in template.timedeltas}
-            ),
-            shard_sizes={} if grid_shard_sizes is None else grid_shard_sizes,
-            layouts=layouts,
-            variables=variables,
-            statistics=statistics,
+        source_layouts = (
+            {name: template[name].layout for name in template.dataset_names}
+            if template is not None
+            else self.data_layouts
         )
+        static_coords = (
+            template.static_coord_datasets & set(data)
+            if template is not None
+            else frozenset(name for name in data if self.is_dataset_static.get(name, False))
+        )
+
+        sources = {}
+        for dataset_name, dataset_data in data.items():
+            layout = source_layouts[dataset_name]
+            grid_axis = layout.axis
+            grid_size = (
+                sum(sample.shape[grid_axis("grid", ndim=sample.ndim)] for sample in dataset_data)
+                if isinstance(dataset_data, list)
+                else dataset_data.shape[grid_axis("grid", ndim=dataset_data.ndim)]
+            )
+            template_source = template[dataset_name] if template is not None and dataset_name in template else None
+
+            sources[dataset_name] = create_source_view(
+                spec=SourceSpec(
+                    name=dataset_name,
+                    variables=self._sampling_variables(dataset_name, variable_space),
+                    layout=layout,
+                    statistics=self._sampling_statistics(dataset_name, variable_space),
+                    grid_size=grid_size,
+                    coordinates_are_static=dataset_name in static_coords,
+                ),
+                data=dataset_data,
+                coordinates=self._sampling_coordinates(
+                    dataset_name,
+                    dataset_data,
+                    layout=layout,
+                    template=template,
+                    model_comm_group=model_comm_group,
+                    grid_shard_sizes=grid_shard_sizes,
+                ),
+                timedeltas=None if template_source is None else template_source.timedeltas,
+                boundaries=None if template_source is None else template_source.boundaries,
+                shard_sizes=None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name),
+            )
+
+        return Batch(sources)
 
     def build_sampling_source(
         self,

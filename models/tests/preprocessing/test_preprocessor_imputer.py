@@ -18,6 +18,7 @@ from anemoi.models.data.views import create_source_view
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
+from anemoi.models.data.testing import make_source
 
 VARIABLES = ["x", "y", "z", "q", "other", "prog"]
 
@@ -34,7 +35,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return create_source_view(
+    return make_source(
         name="gridded",
         data=data,
         variables=list(variables),
@@ -48,7 +49,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
     """Wrap a (points, variables) payload in a TabularSourceView (single tensor)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return create_source_view(
+    return make_source(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
@@ -233,7 +234,7 @@ def test_tabular_multiple_tensors(default_constant_imputer) -> None:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     base = torch.tensor([[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]])
     expected = torch.tensor([[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]])
-    view = create_source_view(
+    view = make_source(
         name="tabular",
         data=[base.clone(), base.clone()],
         variables=list(VARIABLES),

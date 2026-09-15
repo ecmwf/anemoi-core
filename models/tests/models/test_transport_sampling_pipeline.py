@@ -28,6 +28,8 @@ from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
+from anemoi.models.data.testing import make_source
+from anemoi.models.data.testing import make_batch
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -134,8 +136,7 @@ def _sparse_batch(
 ) -> Batch:
     data = [torch.zeros(shape, dtype=torch.float32) for shape in data_shapes]
     coordinates = [torch.full((shape[0], 2), float(index)) for index, shape in enumerate(data_shapes)]
-    return Batch(
-        data={name: data},
+    return make_batch(data={name: data},
         coordinates={name: coordinates},
         metadata={name: {"boundaries": [(slice(0, shape[0]),) for shape in data_shapes]}},
         layouts={name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
@@ -168,8 +169,7 @@ def test_transport_conditioning_embedding_uses_compact_condition_width() -> None
         dtype=sigma.dtype,
     )
 
-    x = Batch(
-        data={"data": torch.empty(2, 2, 3, 4, 1)},
+    x = make_batch(data={"data": torch.empty(2, 2, 3, 4, 1)},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -198,8 +198,7 @@ def test_transport_conditioning_uses_sparse_target_node_counts() -> None:
     )
 
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    target = Batch(
-        data={"obs": [torch.empty(2, 1), torch.empty(4, 1)]},
+    target = make_batch(data={"obs": [torch.empty(2, 1), torch.empty(4, 1)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(4, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 4),)]}},
         layouts={"obs": layout},
@@ -220,7 +219,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    x = create_source_view(
+    x = make_source(
         name="obs",
         data=[torch.ones(2, 2)],
         coordinates=[torch.tensor([[0.0, 0.0], [0.1, 0.1]])],
@@ -230,7 +229,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         layout=layout,
         boundaries=[(slice(0, 2),)],
     )
-    y_noised = create_source_view(
+    y_noised = make_source(
         name="obs",
         data=[torch.full((3, 1), 5.0)],
         coordinates=[torch.tensor([[0.2, 0.2], [0.3, 0.3], [0.4, 0.4]])],
@@ -279,7 +278,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
     coordinates = torch.zeros(3, 2)
     x_data = torch.arange(1 * 2 * 1 * 3 * 4, dtype=torch.float32).reshape(1, 2, 1, 3, 4)
     y_noised_data = torch.full((1, 1, 1, 3, 2), 100.0)
-    x = create_source_view(
+    x = make_source(
         name="data",
         data=x_data,
         coordinates=coordinates,
@@ -288,7 +287,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         coordinates_are_static=True,
         layout=layout,
     )
-    y_noised = create_source_view(
+    y_noised = make_source(
         name="data",
         data=y_noised_data,
         coordinates=coordinates,
@@ -325,7 +324,7 @@ def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
     model.condition_on_residual = False
 
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    sparse_view = create_source_view(
+    sparse_view = make_source(
         name="obs",
         data=[torch.ones(2, 1)],
         coordinates=[torch.zeros(2, 2)],
@@ -407,8 +406,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     model.decoder_graph_provider = {"data": _GraphProvider()}
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = Batch(
-        data={"data": torch.randn(1, 2, 1, 3, 2)},
+    batch = make_batch(data={"data": torch.randn(1, 2, 1, 3, 2)},
         coordinates={"data": torch.zeros(3, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": layout},
@@ -518,8 +516,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     model.decoder_graph_provider = {"obs": _GraphProvider()}
 
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    batch = Batch(
-        data={"obs": [torch.ones(3, 1)]},
+    batch = make_batch(data={"obs": [torch.ones(3, 1)]},
         coordinates={"obs": [torch.zeros(3, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 3),)]}},
         layouts={"obs": layout},
@@ -607,8 +604,7 @@ def test_after_sampling_postprocesses_source_views_and_returns_data() -> None:
     model = _transport_model_stub()
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     data = torch.zeros(1, 1, 1, 3, 2)
-    out = Batch(
-        data={"data": data},
+    out = make_batch(data={"data": data},
         coordinates={"data": torch.zeros(3, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": layout},
@@ -646,8 +642,7 @@ def test_make_sampling_batch_shards_full_template_coordinates_for_local_data(
     _configure_sampling_model(model, {"data": (1, 1, 5)})
     model.n_step_output = 1
 
-    template = Batch(
-        data={"data": torch.empty(1, 1, 1, 5, 0)},
+    template = make_batch(data={"data": torch.empty(1, 1, 1, 5, 0)},
         coordinates={"data": torch.arange(10, dtype=torch.float32).reshape(5, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -702,7 +697,10 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
     x_for_sampling_batch = _sampling_batch(model, x_for_sampling)
     target_template = _target_template(model, x_for_sampling)
     model._before_sampling = lambda *_args, **_kwargs: ((x_for_sampling_batch,), None)
-    model.sample = lambda *_args, **_kwargs: x_for_sampling_batch.with_data(
+    # Sampling produces *output*-space data (3 variables), so the sampled batch is
+    # built on the output-space target template rather than on the 2-variable input
+    # batch, whose variable names would not describe it.
+    model.sample = lambda *_args, **_kwargs: target_template.with_data(
         {
             "ds_a": torch.randn(1, 2, 1, 4, 3, dtype=torch.float64),
             "ds_b": torch.randn(1, 2, 1, 4, 3, dtype=torch.float64),
@@ -1153,8 +1151,7 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
         ),
     }
     x_data = torch.arange(1 * 3 * 1 * 5 * 4, dtype=torch.float32).reshape(1, 3, 1, 5, 4)
-    x = Batch(
-        data={"ds_a": x_data},
+    x = make_batch(data={"ds_a": x_data},
         coordinates={"ds_a": torch.zeros(5, 2)},
         metadata={"static_coords": frozenset({"ds_a"})},
         layouts={"ds_a": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1170,8 +1167,7 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
 
 def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None:
     """The stochastic-interpolant model objective leaves drift predictions in model-output space."""
-    interpolant = Batch(
-        data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
+    interpolant = make_batch(data={"data": torch.full((1, 1, 1, 2, 1), 2.0)},
         coordinates={"data": torch.zeros(2, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1329,8 +1325,7 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     model.is_dataset_static["obs"] = False
     layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
     coordinates = [torch.zeros(3, 2), torch.ones(2, 2)]
-    template = Batch(
-        data={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},
+    template = make_batch(data={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},
         layouts={"obs": layout},
         coordinates={"obs": coordinates},
         variables={"obs": []},

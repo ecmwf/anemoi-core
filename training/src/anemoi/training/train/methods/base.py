@@ -445,9 +445,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         is a transitional shim until ``_step`` is migrated to construct a
         :class:`Batch` end-to-end.
         """
-        batch = x if isinstance(x, Batch) else Batch(data=x)
         return self.model(
-            batch,
+            x,
             model_comm_group=self.model_comm_group,
             **kwargs,
         )

@@ -26,6 +26,7 @@ from anemoi.models.models.target_features import CompositeTargetFeature
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import register_target_feature
+from anemoi.models.data.testing import make_source
 
 
 @dataclass
@@ -108,7 +109,7 @@ class TargetFeatureTestCase:
             model_init.num_nodes,
             model_init.num_vars,
         )
-        return create_source_view(
+        return make_source(
             name=self.DATASET,
             data=torch.rand(shape, dtype=torch.float32),
             coordinates=torch.zeros(model_init.num_nodes, 2),

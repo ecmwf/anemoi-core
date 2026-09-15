@@ -10,11 +10,12 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.views import SourceView
 from anemoi.models.data.views import create_source_view
 from anemoi.training.losses import WeightedMSELoss
+from anemoi.models.data.testing import make_source
 
 
 def _sparse_view(data: list[torch.Tensor]) -> SourceView:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return create_source_view(
+    return make_source(
         name="obs",
         data=data,
         variables=["a", "b"],

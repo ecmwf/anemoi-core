@@ -15,8 +15,8 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.data.batch import BOUNDARIES_META_KEY
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.tensor_layout import TensorLayout
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -269,7 +269,7 @@ class AnemoiModelInterface(torch.nn.Module):
     def _is_tabular(self, dataset_name: str) -> bool:
         return self.data_layouts[dataset_name].time_in_grid
 
-    def _prepare_data(self, payload: dict, dataset_name: str, variables: list[str]) -> dict:
+    def _prepare_data(self, payload: dict, dataset_name: str, variables: list[str]) -> SourceSample:
         """Prepare the input data for the model.
 
         Parameters
@@ -284,8 +284,8 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Returns
         -------
-        dict
-            One sample payload.
+        SourceSample
+            One dataset's contribution to one sample.
         """
         data = payload.get("data")
         coordinates = self._coordinates_in_radians(payload, dataset_name)
@@ -307,35 +307,31 @@ class AnemoiModelInterface(torch.nn.Module):
                 f"but {len(variables)} were expected ({variables})."
             )
 
-        sample = {
-            "data": data,
-            "coordinates": coordinates,
-            "variables": variables,
-            "statistics": self._statistics_for(dataset_name, variables),
-            # `time_in_grid` cannot be read off the axis names, so it comes from the dataset kind
-            "layout": TensorLayout.from_tuple(*layout_names, time_in_grid=is_tabular),
-            "grid_size": coordinates.shape[0],
-            "metadata": {},
-        }
-
-        # Tabular payload
         timedeltas = payload.get("timedeltas")
         if timedeltas is not None:
-            sample["timedeltas"] = torch.as_tensor(timedeltas, dtype=torch.float32).reshape(-1)
+            timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32).reshape(-1)
             if data is not None:
-                sample["timedeltas"] = sample["timedeltas"].to(device=data.device)
+                timedeltas = timedeltas.to(device=data.device)
 
         boundaries = payload.get("boundaries")
         if boundaries is not None:
-            sample["metadata"][BOUNDARIES_META_KEY] = self._as_boundary_slices(boundaries, dataset_name)
+            boundaries = tuple(self._as_boundary_slices(boundaries, dataset_name))
         elif is_tabular:
             raise ValueError(f"Tabular dataset {dataset_name!r} needs boundaries!")
 
-        shard_sizes = payload.get("shard_sizes")
-        if shard_sizes is not None:
-            sample["shard_sizes" if is_tabular else "grid_shard_sizes"] = shard_sizes
-
-        return sample
+        return SourceSample(
+            data=data,
+            coordinates=coordinates,
+            variables=variables,
+            statistics=self._statistics_for(dataset_name, variables),
+            # `time_in_grid` cannot be read off the axis names, so it comes from the dataset kind
+            layout=TensorLayout.from_tuple(*layout_names, time_in_grid=is_tabular),
+            grid_size=coordinates.shape[0],
+            coordinates_are_static=self.is_dataset_static[dataset_name] and not is_tabular,
+            timedeltas=timedeltas,
+            boundaries=boundaries,
+            shard_sizes=payload.get("shard_sizes"),
+        )
 
     @staticmethod
     def _as_boundary_slices(boundaries, dataset_name: str) -> list[slice]:
@@ -356,7 +352,7 @@ class AnemoiModelInterface(torch.nn.Module):
             result.append(slice(int(start), int(stop)))
         return result
 
-    def prepare_input_spec(self, data: dict[str, torch.Tensor | dict]) -> dict[str, dict]:
+    def prepare_input_spec(self, data: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
         """Build the input specs. The caller supplies model-input-space variables per dataset."""
         return {
             dataset_name: self._prepare_data(
@@ -367,7 +363,7 @@ class AnemoiModelInterface(torch.nn.Module):
             for dataset_name, ds_data in data.items()
         }
 
-    def prepare_target_spec(self, target: dict[str, torch.Tensor | dict]) -> dict[str, dict]:
+    def prepare_target_spec(self, target: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
         """Build the decoder conditioning specs -- the forcing variables at the output times."""
         assert target is not None, "predict_step requires a valid target argument"
 
@@ -386,10 +382,9 @@ class AnemoiModelInterface(torch.nn.Module):
 
         return spec
 
-    def get_batch(self, data: dict[str, dict]) -> Batch:
-        """Collate the per-dataset sample payloads into a single-sample Batch."""
-        static_coord_datasets = frozenset(dataset_name for dataset_name in data if self.is_dataset_static[dataset_name])
-        return Batch.collate(data, static_coord_datasets=static_coord_datasets)
+    def get_batch(self, data: dict[str, SourceSample]) -> Batch:
+        """Collate the per-dataset samples into a single-sample Batch."""
+        return Batch.collate(data)
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.

@@ -115,6 +115,8 @@ def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> 
         "data": torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
         "coordinates": coords,
         "metadata": {},
+        "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        "variables": [f"v{i}" for i in range(vars_)],
     }
 
 

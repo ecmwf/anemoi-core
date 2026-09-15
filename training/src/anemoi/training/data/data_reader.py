@@ -21,6 +21,7 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
+from anemoi.models.data.sample import SourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -492,16 +493,16 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         time_indices: TimeIndices,
     ) -> dict:
         """Return the per-sample payload in the unified contract."""
-        return {
-            "data": self.get_data(time_indices),
-            "variables": self.variables,
-            "statistics": self.statistics,
-            "layout": self.layout,
-            "coordinates": self.get_coordinates(time_indices),
-            "metadata": {},
-            "grid_size": self.grid_size,
-            "grid_shard_sizes": self.grid_shard_sizes,
-        }
+        return SourceSample(
+            data=self.get_data(time_indices),
+            variables=self.variables,
+            layout=self.layout,
+            statistics=self.statistics,
+            grid_size=self.grid_size,
+            coordinates_are_static=self.is_static_grid,
+            coordinates=self.get_coordinates(time_indices),
+            shard_sizes=self.grid_shard_sizes,
+        )
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
@@ -608,17 +609,18 @@ class ObservationDataReader(BaseAnemoiReader):
             reader_group_size=self.reader_group_size,
         )
 
-        return {
-            "data": data.unsqueeze(0),  # add a leading, size-1 ensemble axis
-            "variables": self.variables,
-            "statistics": self.statistics,
-            "layout": self.layout,
-            "coordinates": coordinates,
-            "timedeltas": timedeltas,
-            "metadata": {"boundaries": boundaries},
-            "grid_size": self.grid_size,
-            "shard_sizes": shard_sizes,
-        }
+        return SourceSample(
+            data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
+            variables=self.variables,
+            layout=self.layout,
+            statistics=self.statistics,
+            grid_size=self.grid_size,
+            coordinates_are_static=self.is_static_grid,
+            coordinates=coordinates,
+            timedeltas=timedeltas,
+            boundaries=boundaries,
+            shard_sizes=shard_sizes,
+        )
 
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
