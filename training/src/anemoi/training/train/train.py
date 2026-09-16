@@ -276,10 +276,23 @@ class AnemoiTrainer(ABC):
 
             model.data_indices = self.data_indices
             # check data indices in original checkpoint and current data indices are the same
+            extend_outputs = bool(getattr(self.config.training, "transfer_learning_extend_outputs", False))
             for dataset_name, data_indices in self.data_indices.items():
                 _ckpt_nti = model._ckpt_model_name_to_index
                 if isinstance(_ckpt_nti, dict) and dataset_name in _ckpt_nti:
                     _ckpt_nti = _ckpt_nti[dataset_name]
+                if extend_outputs and self._variables_appended_only(_ckpt_nti, data_indices.name_to_index):
+                    # 2026-09-16 (arm RUP): with transfer_learning_extend_outputs the data may carry
+                    # variables the checkpoint never saw, provided every variable the checkpoint knows
+                    # keeps its index and every new one sits after the checkpoint's last index. That
+                    # is exactly the layout the extend-outputs loading assumes, so the strict order
+                    # check is replaced by this narrower one. Without the flag, nothing changes.
+                    appended = [k for k, v in data_indices.name_to_index.items() if k not in _ckpt_nti]
+                    LOGGER.info(
+                        "Dataset %s: the checkpoint's %d variables keep their order; %d appended: %s",
+                        dataset_name, len(_ckpt_nti), len(appended), appended,
+                    )
+                    continue
                 data_indices.compare_variables(_ckpt_nti, data_indices.name_to_index)
 
         if hasattr(self.config.training, "submodules_to_freeze"):
@@ -578,6 +591,21 @@ class AnemoiTrainer(ABC):
         if version.parse("2.6.0") <= PL_VERSION:
             params["weights_only"] = False
         return params
+
+    @staticmethod
+    def _variables_appended_only(ckpt_name_to_index, data_name_to_index) -> bool:
+        """True when every checkpoint variable keeps its index in the data and the data's extra
+        variables all sit after the checkpoint's last index (the extend-outputs layout)."""
+        if not isinstance(ckpt_name_to_index, dict) or not isinstance(data_name_to_index, dict):
+            return False
+        if not ckpt_name_to_index or len(data_name_to_index) <= len(ckpt_name_to_index):
+            return False
+        if any(k not in data_name_to_index for k in ckpt_name_to_index):
+            return False
+        if any(data_name_to_index[k] != v for k, v in ckpt_name_to_index.items()):
+            return False
+        n_old = max(ckpt_name_to_index.values()) + 1
+        return all(v >= n_old for k, v in data_name_to_index.items() if k not in ckpt_name_to_index)
 
     def train(self) -> None:
         """Training entry point."""
