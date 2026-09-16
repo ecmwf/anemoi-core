@@ -145,9 +145,50 @@ class AnemoiD2ModelEncProcDec(AnemoiDiffusionModelEncProcDec):
         return torch.tensor(channel_mapping, dtype=torch.long)
 
     def get_matching_channel_indices(self, target_dataset: str) -> torch.Tensor:
-        """Get channel matching indices for a residual pair by target dataset name."""
+        """Get channel matching indices for a residual pair by target dataset name.
+
+        The buffer lists, in target model-output prognostic order, the source data index of
+        every prognostic output that also exists in the source. When direct-prediction outputs
+        are registered (``_direct_prediction_indices_<target>``) and some of them ALSO exist in
+        the source (2026-09-16, arm RUP: ``tp`` and ``cp`` are in both stores), those entries are
+        dropped here, because ``compute_residuals`` and the inverse add-back expect ``x_interp``
+        to carry only the residual subset. Without direct-prediction outputs the buffer is
+        returned untouched.
+        """
         buf_name = f"_matching_channel_indices_{target_dataset}"
-        return getattr(self, buf_name)
+        buf = getattr(self, buf_name)
+        dp_model_idx, _ = self._get_direct_prediction_indices(target_dataset)
+        if dp_model_idx is None or len(dp_model_idx) == 0:
+            return buf
+        source_dataset = next(
+            (s for t, s, _ in self._matching_indices_keys if t == target_dataset), None
+        )
+        if source_dataset is None:
+            return buf
+        # Rebuild the exact name order used by _build_matching_channel_indices, then drop the
+        # positions whose output is a direct-prediction variable.
+        input_name_to_index = self.data_indices[source_dataset].name_to_index
+        target_indices = self.data_indices[target_dataset]
+        output_name_to_index = target_indices.model.output.name_to_index
+        prognostic_model_indices = set(target_indices.model.output.prognostic.tolist())
+        dp_model_set = {int(i) for i in dp_model_idx.tolist()}
+        channel_names = [
+            name
+            for name, model_idx in sorted(output_name_to_index.items(), key=lambda item: item[1])
+            if model_idx in prognostic_model_indices and name in input_name_to_index
+        ]
+        if len(channel_names) != len(buf):
+            msg = (
+                f"matching buffer for {target_dataset} has {len(buf)} entries but "
+                f"{len(channel_names)} residual-candidate channels were derived; refusing to guess"
+            )
+            raise ValueError(msg)
+        keep = [
+            i for i, name in enumerate(channel_names) if output_name_to_index[name] not in dp_model_set
+        ]
+        if len(keep) == len(channel_names):
+            return buf
+        return buf[torch.tensor(keep, dtype=torch.long, device=buf.device)]
 
     def _load_from_state_dict(
         self,
