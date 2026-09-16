@@ -37,11 +37,11 @@ def validate_dim(tensor: Tensor, dim: int) -> None:
     Raises
     ------
     TypeError
-        If ``dim`` is not a built-in integer.
+        If ``dim`` is not an integer.
     IndexError
         If ``dim`` is outside the valid range for ``tensor``.
     """
-    if type(dim) is not int:
+    if not isinstance(dim, int) or isinstance(dim, bool):
         raise TypeError(f"Dimension must be an integer, but got {type(dim).__name__}")
 
     ndim = tensor.dim()
@@ -66,7 +66,7 @@ def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
     Raises
     ------
     TypeError
-        If ``sizes`` is not a list or tuple of built-in integers.
+        If ``sizes`` is not a list or tuple of integers.
     ValueError
         If there is not one non-negative size per process.
     """
@@ -75,7 +75,7 @@ def validate_shard_sizes(sizes: ShardSizes, mgroup: ProcessGroup) -> None:
 
     if not isinstance(sizes, (list, tuple)):
         raise TypeError(f"Shard sizes must be a list or tuple of integers, but got {type(sizes).__name__}")
-    if any(type(size) is not int for size in sizes):
+    if any(not isinstance(size, int) or isinstance(size, bool) for size in sizes):
         raise TypeError("Shard sizes must contain only integers")
 
     if len(sizes) != comm_size:
