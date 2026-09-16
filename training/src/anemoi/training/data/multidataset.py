@@ -24,6 +24,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -46,6 +47,7 @@ class MultiDataset(IterableDataset):
         label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
+        fake_dataloading: bool = False,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -64,6 +66,8 @@ class MultiDataset(IterableDataset):
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
             Rollout length represented by the loaded relative date indices, by default 1
+        fake_dataloading : bool, optional
+            Load one real sample and reuse it for subsequent accesses, by default False
         """
         self.data_readers = data_readers
         self.label = label
@@ -76,6 +80,24 @@ class MultiDataset(IterableDataset):
         self.epoch = epoch
         self.rollout = rollout
         self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
+
+        self.fake_dataloading = fake_dataloading
+        if self.fake_dataloading:
+            LOGGER.info("Using fake dataloading")
+
+        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
+        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
+        # intersection would silently keep only sequence-0 samples and produce
+        # semantically meaningless alignment between the two encoders.
+        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
+        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
+        if False: # single_seq and multi_seq: # TODO: Fix temporal downscaler with forecast data 
+            msg = (
+                "Currently mixing single-sequence datasets (global time axis) with "
+                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
+                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
+            )
+            raise ValueError(msg)
 
         self._lazy_init_model_and_reader_group_info()
 
@@ -90,6 +112,7 @@ class MultiDataset(IterableDataset):
         self.epoch = epoch
         if rollout is not None:
             self.rollout = rollout
+
         if relative_date_indices is None:
             return
 
@@ -395,9 +418,17 @@ class MultiDataset(IterableDataset):
             shuffled_chunk_indices[:10],
         )
 
+        initial_batch = None
+
         # TODO(): improve this...
         for i in shuffled_chunk_indices:
-            yield self.get_sample(i)
+            if not self.fake_dataloading:
+                yield self.get_sample(i)
+            elif initial_batch is None:
+                initial_batch = self.get_sample(i)
+                yield initial_batch
+            else:
+                yield initial_batch
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

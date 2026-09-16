@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import contextlib
 import logging
 import os
 from collections.abc import Iterator
@@ -89,20 +90,28 @@ def pyg_lib_available() -> bool:
     return find_spec("pyg_lib") is not None
 
 
+def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
+    """Scoped switch of the current CUDA device; no-op for CPU."""
+    device = torch.device(device)
+    if device.type == "cuda":
+        return torch.cuda.device(device)
+    return contextlib.nullcontext()
+
+
 def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = None) -> NearestNeighbors:
     """Get NearestNeighbour object fitted to coordinates.
 
     Parameters
     ----------
     coords_rad : torch.Tensor
-        corrdinates in radians
+        Coordinates in radians.
     mask : torch.Tensor, optional
-        mask to remove nodes, by default None
+        Mask to remove nodes, by default None.
 
     Returns
     -------
     NearestNeighbors
-        fitted NearestNeighbour object
+        Fitted NearestNeighbour object.
     """
     assert mask is None or mask.shape == (
         coords_rad.shape[0],
@@ -114,7 +123,7 @@ def get_nearest_neighbour(coords_rad: torch.Tensor, mask: torch.Tensor | None = 
 
     nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
 
-    nearest_neighbour.fit(coords_rad)
+    nearest_neighbour.fit(coords_rad.cpu())
 
     return nearest_neighbour
 
@@ -129,9 +138,9 @@ def get_grid_reference_distance(
     Parameters
     ----------
     coords_rad : torch.Tensor
-        corrdinates in radians
+        Coordinates in radians.
     mask : torch.Tensor, optional
-        mask to remove nodes, by default None
+        Mask to remove nodes, by default None.
     use_cartesian : bool, optional
         Whether to convert coordinates to Cartesian before computing distances. Defaults to True.
 

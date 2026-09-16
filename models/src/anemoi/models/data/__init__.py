@@ -8,10 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 from .batch import Batch
-from .tensor_layout import TensorLayout
 from .flat import FlatView
-from .views import SourceView
+from .tensor_layout import TensorLayout
 from .views import GriddedSourceView
+from .views import SourceView
 from .views import TabularSourceView
 
 __all__ = ["Batch", "SourceView", "FlatView", "TensorLayout", "GriddedSourceView", "TabularSourceView"]

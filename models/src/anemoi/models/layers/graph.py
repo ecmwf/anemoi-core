@@ -13,12 +13,11 @@ from collections import defaultdict
 
 import einops
 import torch
+from rich.console import Console
+from rich.tree import Tree
 from torch import Tensor
 from torch import nn
 from torch_geometric.data import HeteroData
-
-from rich.console import Console
-from rich.tree import Tree
 
 LOGGER = logging.getLogger(__name__)
 

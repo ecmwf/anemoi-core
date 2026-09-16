@@ -562,6 +562,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -576,6 +577,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional parameters for subclasses.
 
@@ -599,6 +603,16 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 assert grid_shard_sizes is not None
                 grid_shard_sizes[dataset_name] = shard_sizes
                 x = shard_tensor(x, -2, shard_sizes, model_comm_group)
+
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            (x,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x,),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
+
             x = pre_processors[dataset_name](x, in_place=False)
 
             xs[dataset_name] = x
@@ -858,6 +872,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         pre_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         post_processors_tendencies: Optional[dict[str, nn.Module]] = None,
         target_forcing: Optional[Batch] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run inference by sampling from the selected transport objective.
@@ -894,6 +909,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Normalized here with the input pre-processors and used to condition
             the decoder. Required for datasets that decode from target-side
             features (e.g. observations).
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional sampling parameters.
 
@@ -918,6 +936,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 model_comm_group,
                 pre_processors_tendencies=pre_processors_tendencies,
                 post_processors_tendencies=post_processors_tendencies,
+                spatial_pre_processors=spatial_pre_processors,
                 **kwargs,
             )
 
@@ -1240,6 +1259,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         pre_processors: dict[str, nn.Module],
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> tuple[SamplingData, DatasetShardSizes | None]:
         """Prepare batch before sampling.
@@ -1264,6 +1284,15 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 x_in = shard_tensor(x_in, -2, shard_sizes, model_comm_group)
                 shard_sizes = get_shard_sizes(x_t0, -2, model_comm_group=model_comm_group)
                 x_t0 = shard_tensor(x_t0, -2, shard_sizes, model_comm_group)
+
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            (x_in, x_t0), grid_shard_sizes = self._apply_spatial_preprocessor(
+                (x_in, x_t0),
+                dataset_name,
+                spatial_pre_processors,
+                model_comm_group,
+                grid_shard_sizes,
+            )
 
             x_in = pre_processors[dataset_name](x_in, in_place=False)
             x_t0 = pre_processors[dataset_name](x_t0, in_place=False)

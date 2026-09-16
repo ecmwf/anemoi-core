@@ -22,6 +22,7 @@ from torch_geometric.data.storage import NodeStorage
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import cuda_device_of
+from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import pyg_lib_available
 from anemoi.utils.config import DotDict
@@ -211,7 +212,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
 
         if pyg_lib_available():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
-            with cuda_device_of(source_coords.device):
+            with current_device_context(self.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:

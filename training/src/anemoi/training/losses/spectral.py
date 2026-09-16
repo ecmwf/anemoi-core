@@ -395,7 +395,6 @@ class SpectralAMSELoss(SpectralLoss):
         **_kwargs,
     ) -> torch.Tensor:
         # is_sharded = grid_shard_slice is not None
-        del kwargs  # unused
         grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,
@@ -493,7 +492,6 @@ class PowerSpectrumLoss(SpectralLoss):
         **_kwargs,
     ) -> torch.Tensor:
         # is_sharded = grid_shard_slice is not None
-        del kwargs  # unused
         grid_dim = TensorDim.GRID if grid_dim is None else grid_dim
         pred, target, channel_shard_sizes = self._prepare_for_spectral_transform(
             pred,

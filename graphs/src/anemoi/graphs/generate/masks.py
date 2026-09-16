@@ -18,7 +18,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-from anemoi.graphs.utils import cuda_device_of
+from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import pyg_lib_available
 
@@ -66,8 +66,7 @@ class _PygLibAreaMaskBackend:
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
 
-        # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
-        with cuda_device_of(self._ref_vectors.device):
+        with current_device_context(self.device):
             edge_index = radius(
                 x=self._ref_vectors,
                 y=query_vectors,

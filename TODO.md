@@ -9,16 +9,15 @@ branch: feat/richer-batch
 - [ ] Update schemas
 - [ ] Update ensemble
 - [ ] Update diffusion/transport
+- [ ] Update temporal downscaler with forecast data. `compute_anchors` -> usable_indices.py. Instead of 4 sequences properties, a `DatasetSequence` (or similar) class with the `missing`, `length`, ... properties.
 
 ### Normalizer
 - remap ???
 - date_index ???
 - implement `.clone()`
 
-
 ### Scalers
 - Scalers over time dimension not implemented for `layout.time_in_grid = True` (TabularDatasets)
-
 
 ### Batch
 - Does it make sense to have the `Batch` or can we have a `dict[str, SourceView]`?
