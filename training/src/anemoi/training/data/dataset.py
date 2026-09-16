@@ -37,13 +37,21 @@ class BaseAnemoiReader:
         select: list[str] | None = None,
         fake_forecasts: dict | None = None,
         fake_hindcasts: dict | None = None,
+        reorder: list[str] | None = None,
     ):
-        """Initialize Anemoi data reader."""
+        """Initialize Anemoi data reader.
+
+        ``reorder`` (2026-09-16, arm RUP) is passed straight to ``open_dataset`` so that a
+        dataset config can fix the variable order (for example the checkpoint's order followed
+        by newly added variables). Absent, nothing changes.
+        """
         ds_kwargs = {}
         if drop is not None:
             ds_kwargs["drop"] = drop
         if select is not None:
             ds_kwargs["select"] = select
+        if reorder is not None:
+            ds_kwargs["reorder"] = list(reorder)
 
         if fake_forecasts is not None:
             # anemoi-datasets applies subsetting in keyword order internally.
