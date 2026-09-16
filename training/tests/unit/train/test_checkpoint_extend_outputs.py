@@ -191,3 +191,29 @@ def test_extend_inputs_branch_is_untouched_by_the_new_flag(tmp_path: Path) -> No
     assert torch.equal(results[0], results[1])
     assert torch.equal(results[0][:, :N_IN], donor_weight)
     assert torch.equal(results[0][:, N_IN:], torch.zeros(N_OLD, 2))
+
+
+def test_build_input_column_maps_places_appended_variables_mid_vector() -> None:
+    """Arm RUP layout: [in_lres 68->70 | in_hres 11 | y 68->70 | attrs 4], multi_step 1."""
+    from anemoi.training.utils.checkpoint import build_input_column_maps
+
+    maps = build_input_column_maps([68, 11, 68], [70, 11, 70], 1, 4, 68)
+    assert set(maps) == {151, 151 + 68}
+    m1 = maps[151].tolist()
+    assert m1[:68] == list(range(68))                # in_lres keeps its place
+    assert m1[68:79] == list(range(70, 81))          # in_hres shifted by 2
+    assert m1[79:147] == list(range(81, 149))        # y_noised shifted by 2, its new vars at 149-150
+    assert m1[147:151] == list(range(151, 155))      # node attributes shifted by 4
+    m2 = maps[219].tolist()
+    assert m2[:151] == m1 and m2[151:] == list(range(155, 155 + 68))  # decoder output block appended
+    assert build_input_column_maps([68, 11, 68], [68, 11, 68], 1, 4, 68) is None
+    assert build_input_column_maps([68, 11, 68], [67, 11, 68], 1, 4, 68) is None
+
+
+def test_build_input_column_maps_multistep_is_time_major() -> None:
+    from anemoi.training.utils.checkpoint import build_input_column_maps
+
+    maps = build_input_column_maps([2, 1, 2], [3, 1, 3], 2, 0, 2)
+    # old vector: [l0v0 l0v1 l1v0 l1v1 | h0 h1 | y0v0 y0v1 y1v0 y1v1]  (10)
+    # new vector: [l0v0 l0v1 l0v2 l1v0 l1v1 l1v2 | h0 h1 | y0v0 y0v1 y0v2 y1v0 y1v1 y1v2]  (14)
+    assert maps[10].tolist() == [0, 1, 3, 4, 6, 7, 8, 9, 11, 12]

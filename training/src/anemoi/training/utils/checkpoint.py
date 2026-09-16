@@ -108,6 +108,7 @@ def transfer_learning_loading(
     ckpt_path: Path | str,
     extend_input_columns: bool = False,
     extend_output_rows: bool = False,
+    input_column_maps: dict[int, torch.Tensor] | None = None,
 ) -> nn.Module:
     """Load weights for transfer learning.
 
@@ -129,6 +130,17 @@ def transfer_learning_loading(
     while the old ones keep the checkpoint values. Default False = the original behaviour (the
     mismatched tensor is dropped and re-initialised), which is bit-for-bit what the code did
     before this option existed.
+
+    input_column_maps (2026-09-16, arm RUP): the downscaler's encoder input is the concatenation
+    [in_lres | in_hres | y_noised | node attributes], so variables APPENDED to in_lres and to the
+    target sit in the MIDDLE of that vector and "zeros at the end" would shift every later
+    column onto the wrong weight. When the model is the downscaler and the checkpoint's data
+    indices are available, the old-to-new column map of that vector (and of the branch
+    projection, which also sees the decoder output) is derived from the block sizes, keyed by
+    the OLD column count, and every grown-column weight whose checkpoint width matches a key
+    is placed through it. A caller may pass its own maps; None (the default) derives them, and
+    when nothing can be derived the original append-at-the-end behaviour is kept, with a
+    warning naming the weight.
     """
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
@@ -145,6 +157,16 @@ def transfer_learning_loading(
 
     model_state_dict = model.state_dict()
 
+    if extend_input_columns and input_column_maps is None:
+        input_column_maps = downscaler_input_column_maps(
+            model, checkpoint.get("hyper_parameters", {}).get("data_indices")
+        )
+        if input_column_maps:
+            LOGGER.info(
+                "Input column maps derived from the downscaler block sizes, keyed by old width: %s",
+                {k: int(v.numel()) for k, v in input_column_maps.items()},
+            )
+
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
             ck, mk = state_dict[key], model_state_dict[key]
@@ -157,8 +179,24 @@ def transfer_learning_loading(
             # This branch is deliberately first and is byte-for-byte unchanged.
             if extend_input_columns and grown_cols_2d and ck.shape[0] == mk.shape[0]:
                 extended = torch.zeros(mk.shape, dtype=ck.dtype, device=ck.device)
+                cmap = (input_column_maps or {}).get(int(ck.shape[1]))
+                if cmap is not None and int(cmap.numel()) == int(ck.shape[1]) and int(cmap.max()) < int(mk.shape[1]):
+                    extended[:, cmap.to(ck.device)] = ck
+                    state_dict[key] = extended
+                    LOGGER.info(
+                        "Extending parameter %s from %s to %s through the input column map "
+                        "(%d old columns placed, the rest zero; exact warm start)",
+                        key, tuple(ck.shape), tuple(mk.shape), int(cmap.numel()),
+                    )
+                    continue
                 extended[:, : ck.shape[1]] = ck
                 state_dict[key] = extended
+                if input_column_maps:
+                    LOGGER.warning(
+                        "No input column map for %s (old width %d): appending zero columns at the END, "
+                        "which is only exact if the new inputs sit at the end of the feature vector",
+                        key, int(ck.shape[1]),
+                    )
                 LOGGER.info(
                     "Extending parameter %s from %s to %s with zero columns (exact warm start)",
                     key, tuple(ck.shape), tuple(mk.shape),
@@ -290,3 +328,66 @@ def variables_appended_only(ckpt_name_to_index, data_name_to_index) -> bool:
         return False
     n_old = max(ckpt_name_to_index.values()) + 1
     return all(v >= n_old for k, v in data_name_to_index.items() if k not in ckpt_name_to_index)
+
+
+def _unwrap_to_downscaler(model):
+    """Walk model -> .model -> .model until the object that owns _calculate_input_dim."""
+    net = model
+    for _ in range(4):
+        if net is None:
+            return None
+        if hasattr(net, "_calculate_input_dim") and hasattr(net, "multi_step"):
+            return net
+        net = getattr(net, "model", None)
+    return None
+
+
+def build_input_column_maps(old_sizes, new_sizes, multi_step, attrs, n_out_old):
+    """Old-to-new column maps for the downscaler's assembled input vector.
+
+    The vector is [block_0 | block_1 | block_2 | attrs], each block flattened time-major over
+    ``multi_step`` copies of its variables; variables are APPENDED to a block, never inserted.
+    Returns {old_width: map} for the vector itself and for the branch projection, which sees the
+    vector followed by the decoder output (``n_out_old`` channels, also appended-only). ``None``
+    when nothing grew or when a block shrank.
+    """
+    if list(old_sizes) == list(new_sizes):
+        return None
+    if any(n < o for o, n in zip(old_sizes, new_sizes)):
+        return None
+    pairs = []
+    old_off = new_off = 0
+    for o, n in zip(old_sizes, new_sizes):
+        for t in range(multi_step):
+            for j in range(o):
+                pairs.append((old_off + t * o + j, new_off + t * n + j))
+        old_off += multi_step * o
+        new_off += multi_step * n
+    for j in range(attrs):
+        pairs.append((old_off + j, new_off + j))
+    old_dim, new_dim = old_off + attrs, new_off + attrs
+    pairs.sort()
+    assert [p[0] for p in pairs] == list(range(old_dim))
+    m1 = torch.tensor([p[1] for p in pairs], dtype=torch.long)
+    m2 = torch.cat([m1, torch.tensor([new_dim + j for j in range(n_out_old)], dtype=torch.long)])
+    return {old_dim: m1, old_dim + n_out_old: m2}
+
+
+def downscaler_input_column_maps(model, ckpt_data_indices):
+    """Derive input column maps for the diffusion downscaler from the checkpoint's data indices
+    and the freshly built model's; None when the model is not the downscaler, the indices are
+    missing, or nothing grew."""
+    net = _unwrap_to_downscaler(model)
+    if net is None or not isinstance(ckpt_data_indices, dict):
+        return None
+    try:
+        target_ds = "out_hres"
+        blocks = [("in_lres", "input"), ("in_hres", "input"), (target_ds, "output")]
+        old_sizes = [len(getattr(ckpt_data_indices[d].model, k)) for d, k in blocks]
+        new_sizes = [len(getattr(net.data_indices[d].model, k)) for d, k in blocks]
+        multi_step = int(net.multi_step)
+        attrs = int(net.node_attributes[target_ds].attr_ndims[net._graph_name_data])
+    except (KeyError, AttributeError, TypeError) as exc:
+        LOGGER.info("No input column maps derived (%s: %s)", type(exc).__name__, exc)
+        return None
+    return build_input_column_maps(old_sizes, new_sizes, multi_step, attrs, old_sizes[2])
