@@ -19,13 +19,14 @@ import einops
 import torch
 from torch import Tensor
 
+from anemoi.models.data_adapter import flatten
 from anemoi.models.distributed.graph import shard_tensor
 
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.models.data.flat import FlatView
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data_adapter import FlatSource
+    from anemoi.models.data.source import _Source
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.models.base import BaseGraphModel
 
@@ -86,9 +87,9 @@ class DecodingTargetFeature(ABC):
     @abstractmethod
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -96,9 +97,9 @@ class DecodingTargetFeature(ABC):
 
     def tensor(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -128,9 +129,9 @@ class CoordinatesFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -159,16 +160,16 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
         indices = self.model._forcing_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
+        return flatten(x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices)).data
 
 
 @register_target_feature("target_forcings")
@@ -193,9 +194,9 @@ class TargetForcingsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -227,16 +228,16 @@ class PrognosticsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
         indices = self.model._internal_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
+        return flatten(x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices)).data
 
 
 @register_target_feature("trainable_parameters")
@@ -269,9 +270,9 @@ class TrainableParametersFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -306,9 +307,9 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -348,9 +349,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -358,9 +359,9 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def tensor(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatView",
+        x_target: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,

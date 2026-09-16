@@ -15,7 +15,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from anemoi.models.data import SourceView
+from anemoi.models.data.source import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
@@ -123,16 +123,16 @@ class BasePreprocessor(nn.Module, ABC):
 
     def forward(
         self,
-        x: SourceView,
+        x: _Source,
         in_place: bool = True,
         inverse: bool = False,
         **kwargs,
-    ) -> SourceView:
+    ) -> _Source:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : SourceView
+        x : Source
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -143,7 +143,7 @@ class BasePreprocessor(nn.Module, ABC):
 
         Returns
         -------
-        SourceView
+        Source
             Processed tensor
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
@@ -181,12 +181,12 @@ class Processors(nn.Module):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
 
-    def forward(self, x: SourceView, in_place: bool = True, **kwargs) -> SourceView:
+    def forward(self, x: _Source, in_place: bool = True, **kwargs) -> _Source:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : SourceView
+        x : Source
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -195,7 +195,7 @@ class Processors(nn.Module):
 
         Returns
         -------
-        SourceView
+        Source
             Processed tensor
         """
         for processor in self.processors.values():

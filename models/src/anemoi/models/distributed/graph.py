@@ -74,7 +74,7 @@ def _validate_shard_sizes(op: str, sizes: ShardSizes, mgroup: ProcessGroup | Non
     on that bypass).
 
     ``sizes=None`` means "replicated". Skipping communication for a replicated tensor is
-    the *caller's* responsibility (see :meth:`SourceView.allgather`), so reaching a
+    the *caller's* responsibility (see :meth:`Source.allgather`), so reaching a
     collective with ``None`` always indicates a missing guard. Silently no-oping here would
     either propagate a wrongly-shaped tensor or - worse - make some ranks skip a collective
     that the others entered, which hangs rather than fails. So: raise.
@@ -86,7 +86,7 @@ def _validate_shard_sizes(op: str, sizes: ShardSizes, mgroup: ProcessGroup | Non
             f"{op} was called with shard_sizes=None on a process group of {mgroup.size()} "
             "ranks. shard_sizes=None means 'replicated / not sharded' and cannot be "
             "communicated: skip the collective for replicated tensors (see "
-            "SourceView.allgather) or supply per-rank shard sizes (see "
+            "Source.allgather) or supply per-rank shard sizes (see "
             "anemoi.models.distributed.graph.ensure_sharded)."
         )
         raise ValueError(msg)

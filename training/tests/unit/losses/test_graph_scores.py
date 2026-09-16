@@ -19,8 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import GriddedSourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import CRPS
@@ -41,12 +40,12 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import make_source
+from batch_builders import build_source
 
 
-def _view(data: torch.Tensor) -> GriddedSourceView:
+def _view(data: torch.Tensor) -> GriddedSource:
     """Attach the layout and coordinates used by the score fixtures."""
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],

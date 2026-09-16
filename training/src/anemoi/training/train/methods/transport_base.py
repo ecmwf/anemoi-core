@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data import Batch
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -154,8 +154,8 @@ class TransportObjective:
 
     def compute_loss(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -182,7 +182,9 @@ class TransportObjective:
         kind = transport_source.resolve_kind(default_kind)
         if kind == "reference_state":
             sparse_datasets = [
-                dataset_name for dataset_name, data in prepared.model_target.data.items() if is_sparse_data(data)
+                dataset_name
+                for dataset_name, source in prepared.model_target.items()
+                if is_sparse_data(source.data)
             ]
             if sparse_datasets:
                 msg = (
@@ -199,7 +201,7 @@ class TransportObjective:
             return reference_factory()
 
         request = TransportSourceRequest.from_data(
-            prepared.model_target.data,
+            {n: s.data for n, s in prepared.model_target.items()},
             default_kind=default_kind,
             custom_source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),

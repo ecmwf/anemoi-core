@@ -23,7 +23,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data import SourceSpec
-from anemoi.models.data import create_source_view
+from anemoi.models.data import make_source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -46,9 +46,11 @@ from anemoi.models.transport.data_helpers import Data
 from anemoi.models.transport.data_helpers import data_device
 from anemoi.models.transport.data_helpers import map_data
 from anemoi.utils.config import DotDict
+from anemoi.models.data_adapter import flatten
+from anemoi.models.data_adapter import unflatten
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -126,8 +128,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: "SourceView",
-        y_noised: "SourceView",
+        x: "_Source",
+        y_noised: "_Source",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -135,8 +137,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     ) -> tuple[torch.Tensor, torch.Tensor, None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_features = x.flatten()
-        y_noised_features = y_noised.flatten()
+        x_features = flatten(x)
+        y_noised_features = flatten(y_noised)
         grid_shard_sizes = x_features.shard_sizes
         same_coordinates = torch.equal(x_features.coordinates, y_noised_features.coordinates)
         if same_coordinates:
@@ -184,9 +186,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             y_noised_features.timedeltas,
         )
 
-    def _assemble_output(self, x_out, x_skip, target: "SourceView", dtype: torch.dtype, dataset_name: str):
+    def _assemble_output(self, x_out, x_skip, target: "_Source", dtype: torch.dtype, dataset_name: str):
         del x_skip
-        pred = target.unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        pred = unflatten(target, x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
 
         return pred
@@ -206,7 +208,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
         return self.noise_cond_mlp(self.noise_embedder(sigma))
 
-    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "SourceView") -> torch.Tensor:
+    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "_Source") -> torch.Tensor:
         """Repeat noise embeddings over the actual flattened nodes in a source view."""
         if not isinstance(view.data, list):
             grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
@@ -219,7 +221,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         chunks = []
         for sample_index, sample in enumerate(view.data):
             num_nodes = sample.shape[view.layout.axis("grid", ndim=sample.ndim)]
-            # Flatten in the same (sample, member, node) order as TabularSourceView.
+            # Flatten in the same (sample, member, node) order as TabularSource.
             sample_noise = noise_base[sample_index, :, None, :].expand(-1, num_nodes, -1)
             chunks.append(sample_noise.reshape(-1, noise_base.shape[-1]).to(sample.device))
         return torch.cat(chunks, dim=0)
@@ -246,7 +248,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         noise_cond: torch.Tensor,
         dataset_name: str,
-        data_view: Optional["SourceView"] = None,
+        data_view: Optional["_Source"] = None,
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
 
@@ -350,8 +352,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(batch, 0)
-        ensemble_size = self._get_consistent_dim(batch, 2)
+        batch_size = batch.axis_size("batch")
+        ensemble_size = batch.axis_size("ensemble")
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(batch)
@@ -497,13 +499,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 )
             )
             if "encoded_data" not in target_feature_names:
-                conditioned_target_data = (
-                    conditioned_target[dataset_name]
-                    .flatten()
-                    .data.to(
-                        device=target_data_latent.device,
-                        dtype=target_data_latent.dtype,
-                    )
+                conditioned_target_data = flatten(conditioned_target[dataset_name]).data.to(
+                    device=target_data_latent.device,
+                    dtype=target_data_latent.dtype,
                 )
                 target_data_latent = torch.cat([conditioned_target_data, target_data_latent], dim=-1)
             # Compute decoder edges using updated latent representation
@@ -803,7 +801,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            sources[dataset_name] = create_source_view(
+            sources[dataset_name] = make_source(
                 spec=SourceSpec(
                     name=dataset_name,
                     variables=self._sampling_variables(dataset_name, variable_space),
@@ -840,14 +838,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         """Build the starting/source field used by transport sampling."""
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                target_template.data,
+                {name: source.data for name, source in target_template.items()},
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x.data,
+                    {name: source.data for name, source in x.items()},
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),
@@ -963,10 +961,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             out = out.with_data(
                 {
                     dataset_name: map_data(
-                        out.data[dataset_name],
+                        source.data,
                         lambda sample, name=dataset_name: sample.to(batch[name].dtype),
                     )
-                    for dataset_name in out.keys()
+                    for dataset_name, source in out.items()
                 },
             )
 
@@ -1065,8 +1063,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: "SourceView",
-        y_noised: "SourceView",
+        x: "_Source",
+        y_noised: "_Source",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -1327,14 +1325,14 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         # input state projected to the variables the model predicts.
         request = TransportSourceRequest(
             specs=sampling_source_specs(
-                target_template.data,
+                {name: source.data for name, source in target_template.items()},
                 num_output_channels=self.num_output_channels,
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
             custom_source_factories={
                 "reference_state": lambda: reference_state_sampling_source(
-                    x.data,
+                    {name: source.data for name, source in x.items()},
                     data_indices=self.data_indices,
                     n_step_output=self.n_step_output,
                 ),

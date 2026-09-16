@@ -119,7 +119,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         **kwargs: Any,
     ) -> Batch:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
-        y_noised_data = y_noised.data
+        y_noised_data = {name: source.data for name, source in y_noised.items()}
         scaled_noised = y_noised.with_data(
             {key: multiply_batch_scalar_data(y_noised_data[key], c_in[key]) for key in y_noised_data},
         )
@@ -131,7 +131,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             grid_shard_sizes=grid_shard_sizes,
             **kwargs,
         )
-        pred_data = pred.data
+        pred_data = {name: source.data for name, source in pred.items()}
         return y_noised.with_data(
             {
                 key: add_data(

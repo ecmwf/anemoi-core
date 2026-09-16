@@ -14,14 +14,15 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import Batch
-from anemoi.models.data import SourceView
+from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from batch_builders import make_batch
+from anemoi.models.data_adapter import flatten
+from batch_builders import build_batch
 
 
 def _make_minimal_index_collection(
@@ -295,7 +296,7 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = make_batch(data={"data": torch.randn(b, 3, e, g, v)},
+    batch = build_batch(data={"data": torch.randn(b, 3, e, g, v)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -309,7 +310,7 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = make_batch(data={"data": torch.randn(b, 3, e, g, v)},
+    batch = build_batch(data={"data": torch.randn(b, 3, e, g, v)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -326,7 +327,7 @@ def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> No
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
     data_indices = _data_indices_single()
-    batch = make_batch(data={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
+    batch = build_batch(data={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -436,7 +437,7 @@ def test_advance_input_preserves_sparse_batch_data_payload() -> None:
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     data = [torch.zeros(2, 1), torch.ones(3, 1)]
     coordinates = [torch.zeros(2, 2), torch.ones(3, 2)]
-    batch = make_batch(data={"obs": data},
+    batch = build_batch(data={"obs": data},
         coordinates={"obs": coordinates},
         metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
         layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
@@ -446,10 +447,10 @@ def test_advance_input_preserves_sparse_batch_data_payload() -> None:
 
     advanced = task.advance_input(batch, y_pred=batch, output_values=batch, data_indices={})
 
-    assert isinstance(advanced.data["obs"], list)
-    assert not isinstance(advanced.data["obs"], SourceView)
-    assert advanced.data["obs"] is data
-    assert isinstance(advanced["obs"], SourceView)
+    assert isinstance(advanced["obs"].data, list)
+    assert not isinstance(advanced["obs"].data, Source)
+    assert advanced["obs"].data is data
+    assert isinstance(advanced["obs"], Source)
     assert advanced["obs"].data is data
 
 
@@ -491,7 +492,7 @@ def test_rollout_rotates_input_only_grid_like_upstream(input_values: list[float]
     forecast = torch.arange(1.0, n_input + 1).reshape(1, n_input, 1, 1, 1)
     conditioning = torch.tensor(input_values).reshape(1, n_input, 1, 1, 1).requires_grad_()
     coordinates = {"forecast": torch.zeros(1, 2), "conditioning": torch.ones(1, 2)}
-    batch = make_batch(data={"forecast": forecast, "conditioning": conditioning},
+    batch = build_batch(data={"forecast": forecast, "conditioning": conditioning},
         coordinates=coordinates,
         layouts=dict.fromkeys(coordinates, layout),
         variables={name: ["A"] for name in coordinates},
@@ -511,13 +512,13 @@ def test_rollout_rotates_input_only_grid_like_upstream(input_values: list[float]
         output_mask={name: NoOutputMask() for name in coordinates},
     )
 
-    torch.testing.assert_close(advanced.data["forecast"].flatten(), torch.arange(2.0, n_input + 2))
-    torch.testing.assert_close(advanced.data["conditioning"].flatten(), torch.tensor(expected_values))
-    assert advanced.coordinates["conditioning"] is coordinates["conditioning"]
+    torch.testing.assert_close(flatten(advanced["forecast"].data), torch.arange(2.0, n_input + 2))
+    torch.testing.assert_close(flatten(advanced["conditioning"].data), torch.tensor(expected_values))
+    assert advanced["conditioning"].coordinates is coordinates["conditioning"]
     assert advanced["conditioning"].variables == ["A"]
-    torch.testing.assert_close(batch.data["forecast"].flatten(), torch.arange(1.0, n_input + 1))
-    torch.testing.assert_close(batch.data["conditioning"].flatten(), torch.tensor(input_values))
-    (advanced.data["forecast"].sum() + advanced.data["conditioning"].sum()).backward()
+    torch.testing.assert_close(flatten(batch["forecast"].data), torch.arange(1.0, n_input + 1))
+    torch.testing.assert_close(flatten(batch["conditioning"].data), torch.tensor(input_values))
+    (advanced["forecast"].data.sum() + advanced["conditioning"].data.sum()).backward()
     torch.testing.assert_close(prediction.grad, torch.ones_like(prediction))
     torch.testing.assert_close(conditioning.grad, torch.ones_like(conditioning))
 

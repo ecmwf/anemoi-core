@@ -23,7 +23,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.create import GraphCreator
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.views import GriddedSourceView
+from anemoi.models.data.source import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
@@ -433,53 +433,6 @@ class BaseGraphModel(nn.Module):
         """
         return {dataset_name: source.shard_sizes is not None for dataset_name, source in batch.items()}
 
-    # Canonical gridded axis order: the integer passed to _get_consistent_dim indexes this tuple
-    # TODO: Should this be defined here?
-    _AXIS_BY_POSITION = ("batch", "time", "ensemble", "grid", "variables")
-
-    def _get_consistent_dim(self, x: dict[str, Tensor | list[Tensor]], dim: int) -> int:
-        """Return a logical dimension size that is consistent across all datasets.
-
-        dim is a gridded physical position (e.g. 0==batch, 2==ensemble). It gets
-        resolved to a logical axis name and looked up through each dataset's own TensorLayout
-
-        - batch:
-          for tabular datasets the outer list is the batch axis, i.e. len(data)
-          for gridded datasets it is shape[layout.batch]
-        - other axes (e.g. "ensemble") are read from the (per-sample) tensor at the layout
-          position. Tabular observation datasets contribute an implicit singleton size==1.
-        """
-        axis_name = self._AXIS_BY_POSITION[dim]
-        dim_sizes: list[int] = []
-        for _x in x.values():
-            layout = _x.layout
-
-            if axis_name == "batch":
-                if isinstance(_x.data, list):
-                    # Tabular observations: the outer list is the batch axis
-                    dim_sizes.append(len(_x.data))
-                elif layout.batch is not None:
-                    dim_sizes.append(_x.data.shape[layout.batch])
-                continue
-
-            axis_pos = getattr(layout, axis_name)
-            if axis_pos is None:
-                # Axis not materialised for this dataset -> implicit singleton.
-                dim_sizes.append(1)
-                continue
-
-            if isinstance(_x.data, list):
-                if len(_x.data) > 0:
-                    dim_sizes.append(_x.data[0].shape[axis_pos])
-            else:
-                dim_sizes.append(_x.data.shape[axis_pos])
-
-        assert dim_sizes, f"_get_consistent_dim: no entries available for dim={dim}"
-        # Assert all datasets have the same sizes
-        assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
-
-        return dim_sizes[0]
-
     @abstractmethod
     def _build_networks(self, model_config: DotDict, static_graph: HeteroData, graph_config: DotDict) -> None:
         """Builds the networks for the model."""
@@ -544,40 +497,6 @@ class BaseGraphModel(nn.Module):
             the corresponding input dataset is sharded).
         """
         pass
-
-    @staticmethod
-    def _shard_along_grid(batch: Batch, dataset_name: str, model_comm_group: ProcessGroup) -> Batch:
-        """Return the batch with one dataset split across the model_comm_group, along its grid axis.
-
-        Raises
-        ------
-        NotImplementedError
-            If the dataset is tabular; this is not yet supported.  # TODO: look at this with Jan
-        """
-        view = batch[dataset_name]
-        if not isinstance(view, GriddedSourceView):
-            msg = (
-                f"Sharded inference is implemented for gridded datasets only, but {dataset_name!r} is "
-                f"{type(view).__name__}."
-            )
-            raise NotImplementedError(msg)
-
-        if view.shard_sizes is not None:
-            return batch
-
-        grid_dim = view.layout.axis("grid", ndim=view.data.ndim)
-        sizes = get_shard_sizes(view.data, grid_dim, model_comm_group=model_comm_group)
-        coordinates = view.coordinates
-        if coordinates is not None:
-            coordinates = shard_tensor(coordinates, -2, sizes, model_comm_group)
-        return batch.replace(
-            dataset_name,
-            view.clone(
-                data=shard_tensor(view.data, grid_dim, sizes, model_comm_group),
-                coordinates=coordinates,
-                shard_sizes=sizes,
-            ),
-        )
 
     @staticmethod
     def _apply_spatial_preprocessor(
@@ -664,9 +583,9 @@ class BaseGraphModel(nn.Module):
 
             if model_is_distributed(model_comm_group):
                 for dataset_name in dataset_names:
-                    x = self._shard_along_grid(x, dataset_name, model_comm_group)
+                    x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
                 for dataset_name in target.dataset_names:
-                    target = self._shard_along_grid(target, dataset_name, model_comm_group)
+                    target = target.replace(dataset_name, target[dataset_name].shard(model_comm_group))
 
             processed_batch = x
             for dataset_name in dataset_names:

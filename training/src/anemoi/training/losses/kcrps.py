@@ -23,7 +23,7 @@ from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data import TensorLayout
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -172,8 +172,8 @@ class CRPS(BaseLoss):
 
     def forward(
         self,
-        pred: "SourceView",
-        target: "SourceView",
+        pred: "_Source",
+        target: "_Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -183,7 +183,7 @@ class CRPS(BaseLoss):
         squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
-        return pred.apply_loss(
+        return pred.apply_pairwise(
             target,
             self._evaluate_loss_tensor,
             squash=squash,

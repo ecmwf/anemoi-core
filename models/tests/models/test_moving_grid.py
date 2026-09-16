@@ -23,8 +23,8 @@ from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from batch_builders import make_source
-from batch_builders import make_batch
+from batch_builders import build_source
+from batch_builders import build_batch
 
 
 class _NearestEdges:
@@ -127,7 +127,7 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     # Different values for each (sample, ensemble member), constant over its two grid points.
     values = torch.tensor([[1.0, 2.0], [10.0, 20.0]])
     data = values[:, None, :, None, None].expand(2, 2, 2, 2, 1).clone().requires_grad_()
-    batch = make_batch(data={"grid": data},
+    batch = build_batch(data={"grid": data},
         coordinates={"grid": torch.tensor([[[0.0, 0.0], [0.2, 0.2]], [[0.01, 0.01], [0.21, 0.21]]])},
         layouts={"grid": layout},
         variables={"grid": ["a"]},
@@ -140,14 +140,14 @@ def test_moving_grids_isolate_samples_and_members(model_type):
             return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
         return model(inputs, target)
 
-    output = forward(batch).data["grid"]
+    output = forward(batch)["grid"].data
     torch.testing.assert_close(output[:, 0, :, 0, 0], values)
     output.sum().backward()
     assert torch.all(data.grad[:, 0] > 0)
 
     changed_data = data.detach().clone()
     changed_data[0] += 100
-    changed = forward(batch.with_data({"grid": changed_data})).data["grid"]
+    changed = forward(batch.with_data({"grid": changed_data}))["grid"].data
     torch.testing.assert_close(changed[1], output[1])
     torch.testing.assert_close(changed[0], output[0] + 100)
 
@@ -173,7 +173,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         torch.tensor([10.0, 20.0])[:, None, None].expand(2, 3, 1).clone().requires_grad_(),
     ]
     coords = [torch.zeros(2, 2), torch.zeros(3, 2)]
-    inputs = make_batch(data={"grid": samples},
+    inputs = build_batch(data={"grid": samples},
         coordinates={"grid": coords},
         variables={"grid": ["a"]},
         layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
@@ -185,9 +185,9 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
     else:
         target = inputs.select(variables=[])
         output = model(inputs, target)
-    for expected, actual in zip(samples, output.data["grid"], strict=True):
+    for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
-    sum(sample.sum() for sample in output.data["grid"]).backward()
+    sum(sample.sum() for sample in output["grid"].data).backward()
     assert all(torch.isfinite(sample.grad).all() and sample.grad.abs().sum() > 0 for sample in samples)
 
 
@@ -223,10 +223,9 @@ def test_inference_forcing_only_target_preserves_output_metadata():
 
 @pytest.mark.parametrize("members", [1, 2])
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
-    from anemoi.models.data.views import create_source_view
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = make_source(
+    view = build_source(
         name="obs",
         data=samples,
         variables=["a"],

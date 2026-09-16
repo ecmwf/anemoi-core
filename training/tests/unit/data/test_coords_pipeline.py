@@ -16,7 +16,6 @@ import pytest
 import torch
 from pytest_mock import MockFixture
 
-from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.multidataset import MultiDataset
@@ -119,22 +118,22 @@ def test_multidataset_static_dataset_detection(mocker: MockFixture) -> None:
 def test_multidataset_emit_coords_collates_to_batch(mocker: MockFixture) -> None:
     ds = _make_multidataset(mocker)
     samples = [ds.get_sample(0), ds.get_sample(0)]
-    batch = Batch.collate(samples, static_coord_datasets=ds.static_coord_datasets)
+    batch = Batch.collate(samples)
 
     assert isinstance(batch, Batch)
     assert set(batch.dataset_names) == {"a", "b"}
     # Data is stacked along the batch dim.
-    assert batch.data["a"].shape[0] == 2
+    assert batch["a"].data.shape[0] == 2
     # Both datasets are static -> coords shared by reference, no batch dim.
     assert batch.coords["a"]["latitudes"].shape == (6,)
-    assert STATIC_COORDS_META_KEY in batch.metadata
-    assert batch.metadata[STATIC_COORDS_META_KEY] == frozenset({"a", "b"})
+    assert batch.static_coord_datasets
+    assert batch.static_coord_datasets == frozenset({"a", "b"})
 
 
 def test_multidataset_dynamic_dataset_stacks_coords(mocker: MockFixture) -> None:
     ds = _make_multidataset(mocker, a_static=True, b_static=False)
     samples = [ds.get_sample(0), ds.get_sample(0)]
-    batch = Batch.collate(samples, static_coord_datasets=ds.static_coord_datasets)
+    batch = Batch.collate(samples)
 
     # Static: shared by reference, no batch dim.
     assert batch.coords["a"]["latitudes"].shape == (6,)
@@ -164,7 +163,7 @@ def test_static_coords_share_same_object_through_full_pipeline(mocker: MockFixtu
     ds = _make_multidataset(mocker, a_static=True, b_static=True)
     s1 = ds.get_sample(0)
     s2 = ds.get_sample(0)
-    batch = Batch.collate([s1, s2], static_coord_datasets=ds.static_coord_datasets)
+    batch = Batch.collate([s1, s2])
     # The collated coord tensor is the same Python object as the first sample's.
     assert batch.coords["a"]["latitudes"] is s1["a"]["coords"]["latitudes"]
 

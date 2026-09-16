@@ -14,9 +14,8 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import GriddedSourceView
-from anemoi.models.data.views import TabularSourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import GriddedSource
+from anemoi.models.data.source import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
@@ -27,11 +26,11 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import make_source
+from batch_builders import build_source
 
 
-def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSourceView:
-    return make_source(
+def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSource:
+    return build_source(
         name="grid",
         data=data,
         variables=["a", "b"],
@@ -55,7 +54,7 @@ def test_training_loss_disables_outer_autocast() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2, requires_grad=True))
     target = _grid(torch.zeros_like(pred.data))
 
-    def loss(p: GriddedSourceView, t: GriddedSourceView) -> torch.Tensor:
+    def loss(p: GriddedSource, t: GriddedSource) -> torch.Tensor:
         assert not torch.is_autocast_enabled("cpu")
         return MSELoss()(p, t)
 
@@ -103,8 +102,8 @@ def test_scores_accept_equivalent_negative_axes(loss_type: type[EnergyScoreLoss]
     torch.testing.assert_close(actual_grad, reference_grad)
 
 
-def _observations() -> TabularSourceView:
-    return make_source(
+def _observations() -> TabularSource:
+    return build_source(
         name="obs",
         data=[torch.ones(2, 2), torch.ones(3, 2)],
         variables=["a", "b"],
@@ -168,7 +167,7 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
 @pytest.mark.parametrize("backend", ["naive", "stable"])
 def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     data = torch.tensor([[[-1.0], [-1.0]], [[1.0], [1.0]]], requires_grad=True)
-    pred = make_source(
+    pred = build_source(
         name="obs",
         data=[data],
         variables=["a"],

@@ -52,7 +52,8 @@ class TensorLayout:
     variables: int = -1
     time_in_grid: bool = False
 
-    _AXIS = ("batch", "time", "ensemble", "grid", "variables")
+    #: Logical axis names, in canonical order.
+    AXES = ("batch", "time", "ensemble", "grid", "variables")
 
     @classmethod
     def from_tuple(cls, *args, time_in_grid: bool = False) -> "TensorLayout":
@@ -91,7 +92,7 @@ class TensorLayout:
     @property
     def dims(self) -> set[str]:
         """Set of logical axes defined by this layout."""
-        return {name for name in self._AXIS if getattr(self, name) is not None}
+        return {name for name in self.AXES if getattr(self, name) is not None}
 
     @property
     def ndim(self) -> int:
@@ -161,7 +162,7 @@ class TensorLayout:
 
     def normalized(self, ndim: int) -> "TensorLayout":
         """Return a layout with physical axes resolved against the tensor rank."""
-        positions = {name: self.axis(name, ndim=ndim) for name in self._AXIS if self.has_axis(name)}
+        positions = {name: self.axis(name, ndim=ndim) for name in self.AXES if self.has_axis(name)}
         if len(positions) != ndim or set(positions.values()) != set(range(ndim)):
             raise ValueError(f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once.")
         return TensorLayout(**positions, time_in_grid=self.time_in_grid)

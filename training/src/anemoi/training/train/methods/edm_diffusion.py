@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data import Batch
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
 
 
 class EDMDiffusionTransportObjective(TransportObjective):
@@ -75,8 +75,8 @@ class EDMDiffusionTransportObjective(TransportObjective):
 
     def compute_loss(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -115,7 +115,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         source: dict[str, Data],
     ) -> dict[str, Data]:
         """Create the corrupted target by adding scaled source noise to the clean target."""
-        return {name: add_scaled_data(x.data[name], source[name], sigma[name]) for name in x.data}
+        return {name: add_scaled_data(x[name].data, source[name], sigma[name]) for name in x}
 
     def _sample_training_sigma(
         self,

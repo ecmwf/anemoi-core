@@ -31,7 +31,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import GriddedSourceView
+    from anemoi.models.data.source import GriddedSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -323,8 +323,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     def forward(
         self,
-        y_pred_ens: "GriddedSourceView",
-        y: "GriddedSourceView",
+        y_pred_ens: "GriddedSource",
+        y: "GriddedSource",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,

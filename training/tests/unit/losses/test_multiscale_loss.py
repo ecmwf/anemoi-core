@@ -14,8 +14,7 @@ from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import GriddedSourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import CRPS
@@ -25,12 +24,12 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import make_source
+from batch_builders import build_source
 
 
-def _view(data: torch.Tensor) -> GriddedSourceView:
+def _view(data: torch.Tensor) -> GriddedSource:
     """Attach metadata for the gridded loss fixtures."""
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],
@@ -48,8 +47,8 @@ class TrackingLoss(BaseLoss):
 
     def forward(
         self,
-        pred: GriddedSourceView,
-        target: GriddedSourceView,
+        pred: GriddedSource,
+        target: GriddedSource,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -58,8 +57,8 @@ class TrackingLoss(BaseLoss):
         group: object | None = None,
         **kwargs,
     ) -> torch.Tensor:
-        assert isinstance(pred, GriddedSourceView)
-        assert isinstance(target, GriddedSourceView)
+        assert isinstance(pred, GriddedSource)
+        assert isinstance(target, GriddedSource)
         del squash
         self.calls.append(
             {
@@ -76,8 +75,8 @@ class TrackingLoss(BaseLoss):
 class FixedLoss(BaseLoss):
     def forward(
         self,
-        pred: GriddedSourceView,
-        target: GriddedSourceView,
+        pred: GriddedSource,
+        target: GriddedSource,
         squash: bool = True,
         **kwargs: object,
     ) -> torch.Tensor:

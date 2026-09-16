@@ -29,7 +29,7 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -267,7 +267,7 @@ class TendencyPredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         """Build tendency targets for training and state targets for validation metrics."""
-        if any(is_sparse_data(dataset_data) for dataset_data in batch.data.values()):
+        if any(is_sparse_data(source.data) for source in batch.values()):
             msg = "Tendency prediction mode is not implemented for sparse observation datasets."
             raise NotImplementedError(msg)
 
@@ -288,7 +288,7 @@ class TendencyPredictionMode(PredictionMode):
             raise AttributeError(msg)
 
         x_ref = self.module.model.model.apply_reference_state_truncation(
-            x.data,
+            {n: s.data for n, s in x.items()},
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
@@ -308,7 +308,7 @@ class TendencyPredictionMode(PredictionMode):
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
-                    x.data,
+                    {n: s.data for n, s in x.items()},
                     data_indices=self.module.data_indices,
                     n_step_output=self.module.n_step_output,
                 ),
@@ -330,7 +330,7 @@ class TendencyPredictionMode(PredictionMode):
             dataset_name: self.module.model.model._apply_imputer_inverse(
                 self.module.model.post_processors,
                 dataset_name,
-                target.data,
+                {n: s.data for n, s in target.items()},
             )
             for dataset_name, target in prepared.metric_target.items()
         }
@@ -417,14 +417,14 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         dataset_name: str,
         validation_mode: bool = False,
         metric_prediction: Batch | None = None,
         metric_target: Batch | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
         """Compute loss according to the objective and validation metrics in clean-state space."""
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
             y_pred,
@@ -582,7 +582,7 @@ class TransportTraining(BaseTransportTraining):
 
         metric_prediction = None
         metric_target = None
-        plot_kwargs: dict[str, dict[str, SourceView]] = {}
+        plot_kwargs: dict[str, dict[str, Source]] = {}
         if validation_mode:
             conditioned_endpoint = self.prediction_mode.reconstruct_prediction(
                 prepared_objective.conditioned_target,

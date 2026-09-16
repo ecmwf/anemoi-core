@@ -21,10 +21,10 @@ from typing import Any
 
 import torch
 
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.layout import TensorLayout
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class SourceSpec:
     """Metadata describing one source dataset, independent of any single batch.
 
     A spec is built once per dataset per run and shared by every
-    :class:`~anemoi.models.data.views.SourceView` over that dataset. Splitting it
+    :class:`~anemoi.models.data.source.Source` over that dataset. Splitting it
     out of the view means the derived lookups it owns (:attr:`name_to_index`) are
     computed once rather than on every ``batch[name]`` access, and that a caller
     can describe a source to ``model.forward()`` without carrying its data - see
@@ -135,7 +135,7 @@ class SourceSpec:
         batch_size: int = 1,
         device: torch.device | str | None = None,
         dtype: torch.dtype = torch.float32,
-    ) -> "SourceView":
+    ) -> "_Source":
         """Return a source carrying this spec and no data.
 
         The payload has the full variable axis but a zero-length grid axis, and a
@@ -155,14 +155,14 @@ class SourceSpec:
 
         Returns
         -------
-        SourceView
-            A :class:`~anemoi.models.data.views.GriddedSourceView` or
-            :class:`~anemoi.models.data.views.TabularSourceView` matching this
+        _Source
+            A :class:`~anemoi.models.data.source.GriddedSource` or
+            :class:`~anemoi.models.data.source.TabularSource` matching this
             spec's layout.
         """
         # Local import: views.py imports this module, so importing it at module
         # scope would be circular.
-        from anemoi.models.data.views import create_source_view
+        from anemoi.models.data.source import make_source
 
         layout = self.layout.normalized(self.layout.ndim)
         sizes = {"batch": batch_size, "time": 1, "ensemble": 1, "grid": 0, "variables": self.n_variables}
@@ -179,4 +179,4 @@ class SourceSpec:
             coordinates = torch.empty((0, 2), dtype=dtype, device=device)
             boundaries = None
 
-        return create_source_view(spec=self, data=data, coordinates=coordinates, boundaries=boundaries)
+        return make_source(spec=self, data=data, coordinates=coordinates, boundaries=boundaries)

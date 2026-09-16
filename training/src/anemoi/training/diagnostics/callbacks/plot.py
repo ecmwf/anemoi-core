@@ -32,7 +32,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
-from anemoi.models.data import SourceView
+from anemoi.models.data import _Source
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -68,21 +68,21 @@ _UNSET_MEMBERS: Any = _Unset()
 
 def _allgather_view(
     pl_module: pl.LightningModule,
-    prediction: SourceView,
-    dataset_name: str,
-) -> SourceView:
-    """All-gather a per-dataset prediction :class:`SourceView`.
+    prediction: _Source,
+) -> _Source:
+    """All-gather a per-dataset prediction :class:`Source`.
 
-    Grid-shard metadata now lives on the :class:`SourceView`, so the view gathers
+    Grid-shard metadata now lives on the :class:`Source`, so the view gathers
     itself given the model communication group.
     """
-    if not isinstance(prediction, SourceView):
+    if not isinstance(prediction, _Source):
         msg = (
-            f"Prediction for dataset {dataset_name!r} is a raw {type(prediction).__name__}, "
-            "not a SourceView. Grid-shard metadata now lives on the Batch/SourceView, "
-            "so a bare tensor cannot be all-gathered. Produce a SourceView prediction."
+            f"Prediction for dataset {prediction.name!r} is a raw {type(prediction).__name__}, "
+            "not a Source. Grid-shard metadata now lives on the Batch/Source, "
+            "so a bare tensor cannot be all-gathered. Produce a Source prediction."
         )
         raise TypeError(msg)
+
     return prediction.allgather(pl_module.model_comm_group)
 
 
@@ -107,7 +107,7 @@ def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
         ``True`` for sparse/observation datasets, ``False`` otherwise.
     """
     if isinstance(batch, Batch):
-        layout = batch.layouts.get(dataset_name)
+        layout = batch[dataset_name].layout if dataset_name in batch else None
         return bool(layout is not None and layout.time_in_grid)
     return False
 
@@ -439,8 +439,8 @@ class BasePerBatchPlotCallback(BasePlotCallback):
             # Gather grid-sharded tensors while preserving the Batch envelope
             # (layouts / statistics / coordinates) so downstream view-based access
             # (Batch.__getitem__ / task.get_targets) keeps working. Shard metadata
-            # lives on the Batch / SourceViews, so the batch gathers itself given
-            # the model communication group. Idempotent by contract: SourceView.allgather
+            # lives on the Batch / Sources, so the batch gathers itself given
+            # the model communication group. Idempotent by contract: Source.allgather
             # returns the view unchanged when it is replicated (shard_sizes is None, which
             # is the case whenever ``on_after_batch_transfer`` already gathered the batch)
             # and raises if the shard metadata does not match the group.
@@ -448,11 +448,11 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 batch = batch.allgather(pl_module.model_comm_group)
             else:
                 # A bare dict of tensors carries no grid-shard metadata, which now
-                # lives exclusively on the Batch / SourceView. Scream loudly rather
+                # lives exclusively on the Batch / Source. Scream loudly rather
                 # than silently mis-gathering.
                 msg = (
                     "PlotCallback received a raw dict of tensors instead of a Batch. "
-                    "Grid-shard metadata now lives on the Batch/SourceView, so a bare "
+                    "Grid-shard metadata now lives on the Batch/Source, so a bare "
                     "tensor cannot be all-gathered - pass a Batch instead."
                 )
                 raise TypeError(msg)
@@ -462,7 +462,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 raise TypeError(preds)
             gathered_predictions = [
                 {
-                    dataset_name: _allgather_view(pl_module, dataset_pred, pl_module.grid_shard_sizes[dataset_name])
+                    dataset_name: _allgather_view(pl_module, dataset_pred)
                     for dataset_name, dataset_pred in pred.items()
                 }
                 for pred in preds
@@ -613,7 +613,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 
         view = batch[dataset_name]
 
-        # lat/lon coordinates come from the SourceView (radians -> degrees).
+        # lat/lon coordinates come from the Source (radians -> degrees).
         if isinstance(view.coordinates, torch.Tensor):
             latlons = np.rad2deg(view.coordinates.detach().cpu().numpy())
         else:
@@ -645,18 +645,18 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: list[dict[str, SourceView]],
+        outputs: list[dict[str, _Source]],
         members: int | list[int] | None = 0,
     ) -> np.ndarray:
-        """Post-process and mask per-step output SourceViews for plotting."""
+        """Post-process and mask per-step output Sources for plotting."""
         post_processor = self.post_processors[dataset_name]
         output_indices_full = pl_module.data_indices[dataset_name].data.output.full
 
-        def _post_process(prediction: SourceView) -> torch.Tensor:
+        def _post_process(prediction: _Source) -> torch.Tensor:
             assert isinstance(
                 prediction,
-                SourceView,
-            ), f"Expected a prediction of type SourceView, got {type(prediction)}."
+                _Source,
+            ), f"Expected a prediction of type _Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
             processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
@@ -666,7 +666,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 return processed[self.sample_idx].unsqueeze(0)
             return processed[self.sample_idx : self.sample_idx + 1]
 
-        def _ensemble_axis(view: SourceView, tensor: torch.Tensor) -> int | None:
+        def _ensemble_axis(view: _Source, tensor: torch.Tensor) -> int | None:
             """Ensemble axis of the tensor, or None."""
             if not view.layout.has_axis("ensemble"):
                 return None
@@ -674,7 +674,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 return view.layout.axis("ensemble", ndim=tensor.ndim - 1) + 1
             return view.layout.axis("ensemble", ndim=tensor.ndim)
 
-        def _select_members(view: SourceView) -> torch.Tensor:
+        def _select_members(view: _Source) -> torch.Tensor:
             tensor = _post_process(view)
             ensemble_axis = _ensemble_axis(view, tensor)
             if ensemble_axis is None:
@@ -690,7 +690,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
 
     @staticmethod
-    def _align_output_metadata(view: SourceView, output_indices_full: Any) -> SourceView:
+    def _align_output_metadata(view: _Source, output_indices_full: Any) -> _Source:
         """Re-slice a prediction view's metadata to its (model-output) variables."""
         data0 = view.data[0] if isinstance(view.data, list) else view.data
         var_width = data0.shape[view.layout.variables]
@@ -715,7 +715,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
         """Build the plotting fields and coordinates for a tabular observation dataset.
 
-        We extract the fields directly from the per-dataset SourceView using select_time.
+        We extract the fields directly from the per-dataset Source using select_time.
 
         Parameters
         ----------
@@ -745,13 +745,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         step_kwargs = next(iter(task.steps("validation")))
         output_indices = task.get_batch_output_indices(**step_kwargs)
 
-        def _select_member(field: torch.Tensor, view: SourceView) -> torch.Tensor:
+        def _select_member(field: torch.Tensor, view: _Source) -> torch.Tensor:
             """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member (index-0)."""
             if view.layout.ensemble is None:
                 return field
             return field.select(view.layout.axis("ensemble", ndim=field.ndim), 0)  # member 0
 
-        def _select_pred_members(field: torch.Tensor, view: SourceView) -> torch.Tensor:
+        def _select_pred_members(field: torch.Tensor, view: _Source) -> torch.Tensor:
             """Select the requested member(s) from a sparse-obs predicted ensemble."""
             if view.layout.ensemble is None:
                 return field
@@ -761,7 +761,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 field = field.index_select(axis, torch.tensor(index, device=field.device))
             return field.squeeze(axis) if field.shape[axis] == 1 else field.movedim(axis, 0)
 
-        def _field_and_coords(sub_view: SourceView) -> tuple[np.ndarray, np.ndarray]:
+        def _field_and_coords(sub_view: _Source) -> tuple[np.ndarray, np.ndarray]:
             field = _select_member(sub_view.data[self.sample_idx], sub_view)  # (grid, vars)
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
@@ -776,7 +776,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         target_view = target_batch[dataset_name]
         y_true, output_latlons = _field_and_coords(target_view)
 
-        def _output_field(output: Batch | SourceView) -> np.ndarray:
+        def _output_field(output: Batch | _Source) -> np.ndarray:
             output_view = output[dataset_name] if isinstance(output, Batch) else output
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
@@ -798,7 +798,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
 class LossCurvePlot(BasePerBatchPlotCallback):
     """Plot the per-variable validation loss.
 
-    Computes the loss from ``Batch`` / ``SourceView`` targets (via ``task.get_targets``)
+    Computes the loss from ``Batch`` / ``Source`` targets (via ``task.get_targets``)
     and delegates the figure rendering to a pluggable ``plot_fn``, following the same
     pattern as :class:`BatchOutputPlot`. ``plot_fn`` receives the raw per-variable loss
     array plus the parameter naming/grouping and per-step context, and is free to decide
@@ -871,7 +871,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
 
             for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
                 y_hat = outputs.predictions[i][dataset_name]
-                # Pass the full target batch; index the per-dataset SourceView afterwards.
+                # Pass the full target batch; index the per-dataset Source afterwards.
                 batch_obj = batch
                 y_true_batch, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
                 y_true_batch = pl_module.preprocess_targets(y_true_batch)
@@ -1026,11 +1026,11 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         auxiliary_output = output.plot_kwargs.get("auxiliary_output")
         if auxiliary_output is None:
             return {}
-        if any(not isinstance(value, (Batch, SourceView)) for value in auxiliary_output.values()):
+        if any(not isinstance(value, (Batch, _Source)) for value in auxiliary_output.values()):
             msg = (
                 "auxiliary_output is a dict of raw tensors without shard metadata; "
-                "cannot all-gather. Grid-shard info now lives on the Batch/SourceView - "
-                "have the step output carry a SourceView/Batch for auxiliary_output "
+                "cannot all-gather. Grid-shard info now lives on the Batch/Source - "
+                "have the step output carry a Source/Batch for auxiliary_output "
                 "instead of detached tensors."
             )
             raise TypeError(msg)

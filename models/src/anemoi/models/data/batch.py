@@ -24,9 +24,9 @@ from torch.utils.data import default_collate
 
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import TensorLayout
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import _Source
+from anemoi.models.data.source import TensorLayout
+from anemoi.models.data.source import make_source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +45,7 @@ class Batch:
     """A batch of per-dataset sources.
 
     A batch is one mapping from dataset name to
-    :class:`~anemoi.models.data.views.SourceView`. Each source owns its own
+    :class:`~anemoi.models.data.source.Source`. Each source owns its own
     payload (data, coordinates, timedeltas, shard sizes, boundaries) together with
     the :class:`~anemoi.models.data.spec.SourceSpec` that describes it, so there is
     a single place per dataset where that information lives.
@@ -62,7 +62,7 @@ class Batch:
     ``batch["era5"].layout``, ``batch["era5"].variables``.
     """
 
-    sources: dict[str, SourceView]
+    sources: dict[str, _Source]
 
     # -- batch-level properties --------------------------------------------
 
@@ -71,18 +71,25 @@ class Batch:
         """Per-dataset specs for this batch, without any of its data."""
         return {name: source.spec for name, source in self.sources.items()}
 
+    def axis_size(self, axis: str) -> int:
+        """Return the size of a logical axis, asserted consistent across datasets.
+
+        Replaces the old ``_get_consistent_dim``, which took a *physical* dimension
+        index and mapped it back to a name through a private positional tuple.
+        """
+        sizes = {name: source.axis_size(axis) for name, source in self.sources.items()}
+        if not sizes:
+            msg = f"Cannot determine {axis!r} size of an empty batch."
+            raise ValueError(msg)
+        if len(set(sizes.values())) != 1:
+            msg = f"Inconsistent {axis!r} sizes across datasets: {sizes}"
+            raise ValueError(msg)
+        return next(iter(sizes.values()))
+
     @property
     def size(self) -> int:
         """Number of samples (batch size) in this batch."""
-        batch_sizes = {}
-        for name, source in self.sources.items():
-            if isinstance(source.data, list):
-                batch_sizes[name] = len(source.data)
-            else:
-                batch_sizes[name] = source.data.shape[source.layout.batch]
-
-        assert len(set(batch_sizes.values())) == 1, f"Inconsistent batch sizes across datasets: {batch_sizes}"
-        return next(iter(batch_sizes.values()))
+        return self.axis_size("batch")
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -132,7 +139,7 @@ class Batch:
     # whose ``__eq__`` mixin would compare batches element-wise and so raise on
     # tensor payloads.
 
-    def __getitem__(self, dataset_name: str) -> SourceView:
+    def __getitem__(self, dataset_name: str) -> _Source:
         """Return the source for one dataset."""
         try:
             return self.sources[dataset_name]
@@ -149,7 +156,7 @@ class Batch:
     def __iter__(self) -> Iterator[str]:
         return iter(self.sources)
 
-    def get(self, dataset_name: str, default: Any = None) -> SourceView | Any:
+    def get(self, dataset_name: str, default: Any = None) -> _Source | Any:
         """Return the source for ``dataset_name``, or ``default`` if absent."""
         return self.sources.get(dataset_name, default)
 
@@ -167,11 +174,11 @@ class Batch:
 
     # -- transformations ----------------------------------------------------
 
-    def with_sources(self, sources: dict[str, SourceView]) -> "Batch":
+    def with_sources(self, sources: dict[str, _Source]) -> "Batch":
         """Return a new batch wrapping ``sources``."""
         return Batch(sources=sources)
 
-    def replace(self, source_name: str, source: SourceView) -> "Batch":
+    def replace(self, source_name: str, source: _Source) -> "Batch":
         """Return a new batch with one dataset replaced."""
         return Batch(sources={**self.sources, source_name: source})
 
@@ -185,7 +192,7 @@ class Batch:
         """Move the batch to ``device``.
 
         Every tensor in the returned batch - data, coordinates and timedeltas - lives
-        on ``device``. Consumers rely on that: :meth:`SourceView.allgather` gathers
+        on ``device``. Consumers rely on that: :meth:`Source.allgather` gathers
         coordinates alongside data in one collective and does not move them itself.
 
         Passing ``static_coord_cache`` transfers each static coordinate tensor once
@@ -258,14 +265,14 @@ class Batch:
         -------
         dict[str, torch.Tensor]
             One result per dataset name, as returned by
-            :meth:`SourceView.apply_loss`.
+            :meth:`Source.apply_pairwise`.
         """
         missing = set(self.sources) - set(other.sources)
         if missing:
             msg = f"Other batch is missing dataset(s) {sorted(missing)}."
             raise ValueError(msg)
         return {
-            name: source.apply_loss(other[name], func, **kwargs) for name, source in self.sources.items()
+            name: source.apply_pairwise(other[name], func, **kwargs) for name, source in self.sources.items()
         }
 
     def select(self, **kwargs) -> "Batch":
@@ -340,7 +347,7 @@ class Batch:
         # Discover the dataset names from the first sample; assume consistent.
         first = samples[0]
 
-        sources: dict[str, SourceView] = {}
+        sources: dict[str, _Source] = {}
         for name, head in first.items():
             per_sample = [sample[name] for sample in samples]
 
@@ -368,7 +375,7 @@ class Batch:
 
             _validate_layout_against(name, layout, data)
 
-            sources[name] = create_source_view(
+            sources[name] = make_source(
                 spec=SourceSpec(
                     name=name,
                     variables=head.variables,
@@ -397,7 +404,7 @@ def _validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor
     """
     ref = data[0] if isinstance(data, list) else data
     ndim = ref.ndim
-    for axis_name in TensorLayout._AXIS:
+    for axis_name in TensorLayout.AXES:
         pos = getattr(layout, axis_name)
         if pos is None:
             continue

@@ -14,8 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import GriddedSourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
@@ -26,7 +25,7 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from batch_builders import make_source
+from batch_builders import build_source
 
 
 def test_instantiation_with_filtering() -> None:
@@ -494,8 +493,8 @@ class TestScalerIndicesRemapping:
         w.add_scaler(dimension=TensorDim.GRID, scaler=torch.ones(8), name="grid")
         w.add_scaler(dimension=TensorDim.VARIABLE, scaler=torch.tensor([2.0]), name="var_w")
 
-        def view(nvars: int) -> GriddedSourceView:
-            return make_source(
+        def view(nvars: int) -> GriddedSource:
+            return build_source(
                 name="data",
                 data=torch.ones(1, 1, 1, 8, nvars, dtype=dtype),
                 variables=[f"v{i}" for i in range(nvars)],

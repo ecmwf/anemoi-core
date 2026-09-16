@@ -8,23 +8,21 @@
 # nor does it submit to any jurisdiction.
 
 from .batch import Batch
-from .flat import FlatView
 from .sample import SourceSample
 from .spec import SourceSpec
-from .tensor_layout import TensorLayout
-from .views import GriddedSourceView
-from .views import SourceView
-from .views import TabularSourceView
-from .views import create_source_view
+from .layout import TensorLayout
+from .source import GriddedSource
+from .source import TabularSource
+from .source import _Source
+from .source import make_source
 
 __all__ = [
     "Batch",
     "SourceSample",
     "SourceSpec",
-    "SourceView",
-    "FlatView",
     "TensorLayout",
-    "GriddedSourceView",
-    "TabularSourceView",
-    "create_source_view",
+    "GriddedSource",
+    "TabularSource",
+    "_Source",
+    "make_source",
 ]

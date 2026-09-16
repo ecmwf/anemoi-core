@@ -47,7 +47,8 @@ def _map_data_dict(batch: Batch, fn: Callable[[torch.Tensor], torch.Tensor]) -> 
 def _expand_scalar_condition(value: torch.Tensor, y: Batch) -> dict[str, torch.Tensor]:
     """Expand one scalar condition so each dataset can pass it to the model."""
     condition = {}
-    for dataset_name, y_data in y.data.items():
+    for dataset_name, source in y.items():
+        y_data = source.data
         shape = condition_shape(y_data) if isinstance(y_data, list) else (y_data.shape[0], 1, y_data.shape[2], 1, 1)
         condition[dataset_name] = value.view(1, 1, 1, 1, 1).expand(shape).to(data_dtype(y_data))
     return condition
@@ -276,8 +277,10 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         # Keep model evaluations in model dtype, but run solver updates in sampler dtype.
         y_model = y.with_data(
             {
-                dataset_name: map_data(y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)))
-                for dataset_name, y_data in y.data.items()
+                dataset_name: map_data(
+                    source.data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
+                )
+                for dataset_name, source in y.items()
             },
         )
         sigmas = sigmas.to(dtype)

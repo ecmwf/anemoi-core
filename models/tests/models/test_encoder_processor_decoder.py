@@ -14,7 +14,7 @@ from torch import nn
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
-from batch_builders import make_batch
+from batch_builders import build_batch
 
 
 class _AggregationReached(RuntimeError):
@@ -85,7 +85,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
 
 def test_shared_encoder_preserves_each_dataset_latent() -> None:
     model = _SharedEncoderModel()
-    inputs = make_batch(data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
+    inputs = build_batch(data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
         coordinates={name: torch.zeros(1, 2) for name in model.input_datasets},
         metadata={"static_coords": frozenset(model.input_datasets)},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in model.input_datasets},

@@ -13,11 +13,12 @@ import torch
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from batch_builders import make_batch
+from anemoi.models.data_adapter import flatten
+from batch_builders import build_batch
 
 
 def _batch(variables):
-    return make_batch(data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+    return build_batch(data={"grid": torch.zeros(2, 1, 1, 3, 2)},
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables=variables,
     )
@@ -36,7 +37,7 @@ def test_statistics_and_coordinates_are_required_by_the_consuming_operation():
     # Metadata-free arithmetic is legitimate; graph construction needs geometry.
     torch.testing.assert_close(view.apply_func(lambda data, **kwargs: data + 1).data, torch.ones_like(view.data))
     with pytest.raises(ValueError, match="requires coordinates"):
-        view.flatten()
+        flatten(view)
     normalizer = InputNormalizer({"default": "mean-std"})
     with pytest.raises(ValueError, match="requires statistics"):
         normalizer.get_norm_parameters(view.statistics, view.name_to_index, torch.device("cpu"))
@@ -64,7 +65,7 @@ def test_update_source_preserves_layout_and_coordinate_staticness():
     fixed = batch.replace("grid", view)
     assert fixed.is_static_coords("grid")
     assert fixed["grid"].coordinates_are_static
-    assert fixed["grid"].flatten().batch_sizes is None
+    assert flatten(fixed["grid"]).batch_sizes is None
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=-2, variables=-1)
     moving = view.clone(
@@ -75,7 +76,7 @@ def test_update_source_preserves_layout_and_coordinate_staticness():
     assert not updated.is_static_coords("grid")
     assert not updated["grid"].coordinates_are_static
     assert updated["grid"].layout == layout
-    assert updated["grid"].flatten().batch_sizes == (3, 3)
+    assert flatten(updated["grid"]).batch_sizes == (3, 3)
     assert fixed.is_static_coords("grid")
 
 
@@ -106,4 +107,4 @@ def test_model_output_cast_and_variable_metadata_agree():
 def test_gridded_flatten_rejects_invalid_coordinate_rank_or_shape(shape):
     view = _batch({"grid": ["a", "b"]})["grid"].clone(coordinates=torch.zeros(shape))
     with pytest.raises(ValueError, match="coordinates must have shape"):
-        view.flatten()
+        flatten(view)

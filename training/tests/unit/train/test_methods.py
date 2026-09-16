@@ -23,9 +23,8 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.source import Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -56,8 +55,9 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
-from batch_builders import make_source
-from batch_builders import make_batch
+from anemoi.models.data_adapter import flatten
+from batch_builders import build_source
+from batch_builders import build_batch
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
@@ -68,7 +68,7 @@ if TYPE_CHECKING:
 class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
-        if isinstance(y_pred, SourceView):
+        if isinstance(y_pred, Source):
             return y_pred.apply_loss(y, lambda pred, target, **_kwargs: torch.mean((pred - target) ** 2))
         return torch.mean((y_pred - y) ** 2)
 
@@ -275,7 +275,7 @@ def _assert_step_return_format(
     for pred in y_preds:
         assert isinstance(pred, dict)
         assert dataset_name in pred
-        payload = pred[dataset_name].data if isinstance(pred[dataset_name], SourceView) else pred[dataset_name]
+        payload = pred[dataset_name].data if isinstance(pred[dataset_name], Source) else pred[dataset_name]
         assert isinstance(payload, torch.Tensor)
 
 
@@ -827,7 +827,7 @@ class _DataBatch:
         self.data = data
 
     def __getitem__(self, dataset_name: str) -> torch.Tensor:
-        return self.data[dataset_name]
+        return self[dataset_name].data
 
     def keys(self) -> KeysView[str]:
         return self.data.keys()
@@ -1039,7 +1039,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
     target = loss_data[0] if sparse else loss_data
     network_input = objective.conditioned_target["data"]
     network_input = network_input[0] if sparse else network_input
-    torch.testing.assert_close(target.flatten(), torch.tensor([2.0, float("nan")]), equal_nan=True)
+    torch.testing.assert_close(flatten(target), torch.tensor([2.0, float("nan")]), equal_nan=True)
     assert torch.isfinite(network_input).all()
 
     layout = (
@@ -1047,7 +1047,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
         if sparse
         else TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     )
-    target_view = make_batch(data={"data": loss_data},
+    target_view = build_batch(data={"data": loss_data},
         layouts={"data": layout},
         variables={"data": ["value"]},
         coordinates={"data": [torch.zeros(2, 2)] if sparse else torch.zeros(2, 2)},
@@ -1058,7 +1058,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
     # Dense reduction sums grid nodes; sparse reduction averages them.
     torch.testing.assert_close(loss, torch.tensor(0.5 if sparse else 1.0))
     loss.backward()
-    torch.testing.assert_close(prediction.grad.flatten(), torch.tensor([1.0 if sparse else 2.0, 0.0]))
+    torch.testing.assert_close(flatten(prediction.grad), torch.tensor([1.0 if sparse else 2.0, 0.0]))
 
 
 class _FakeImputingProcessors:
@@ -1066,11 +1066,11 @@ class _FakeImputingProcessors:
 
     def __call__(
         self,
-        view: SourceView,
+        view: Source,
         in_place: bool = False,
         skip_imputation: bool = False,
         **_kwargs: Any,
-    ) -> SourceView:
+    ) -> Source:
         del in_place
         if skip_imputation:
             return view
@@ -1136,7 +1136,7 @@ def test_state_model_target_and_missing_stay_consistent_with_real_processors() -
     }
     data = torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))
     data[0, 1, 0, 2, 0] = float("nan")  # missing observation at the output step
-    batch = make_batch(data={"data": data},
+    batch = build_batch(data={"data": data},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1195,7 +1195,7 @@ def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     data = [torch.randn(5, len(_NAME_TO_INDEX))]
     data[0][3, 0] = float("nan")  # missing observation at the output step
-    batch = make_batch(data={"data": data},
+    batch = build_batch(data={"data": data},
         coordinates={"data": [torch.zeros(5, 2)]},
         metadata={"data": {"boundaries": [(slice(0, 2), slice(2, 5))]}},
         layouts={"data": layout},
@@ -1366,10 +1366,10 @@ def _gridded_view(
     data: torch.Tensor,
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-) -> SourceView:
-    """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSourceView."""
+) -> Source:
+    """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSource."""
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=list(variables),
@@ -1444,10 +1444,10 @@ def _tabular_view(
     data: list[torch.Tensor],
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-) -> SourceView:
-    """Wrap a list of ``(grid, variables)`` tensors in a TabularSourceView (sparse obs)."""
+) -> Source:
+    """Wrap a list of ``(grid, variables)`` tensors in a TabularSource (sparse obs)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=list(variables),
@@ -1541,7 +1541,7 @@ def _make_single_training(task: Any, data_indices: dict[str, IndexCollection]) -
 
 def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) -> Batch:
     variables = list(_NAME_TO_INDEX)[: data.shape[-1]] if variables is None else variables
-    return make_batch(data={"data": data},
+    return build_batch(data={"data": data},
         coordinates={"data": torch.zeros(data.shape[-2], 2, dtype=data.dtype, device=data.device)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1807,7 +1807,7 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = make_batch(data={"data": torch.randn(1, 2, 1, 3, 2)},
+    batch = build_batch(data={"data": torch.randn(1, 2, 1, 3, 2)},
         coordinates={"data": torch.zeros(3, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": layout},
@@ -1827,7 +1827,7 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
         def __init__(self) -> None:
             self.call = None
 
-        def sample(self, *args, **kwargs) -> SourceView:
+        def sample(self, *args, **kwargs) -> Source:
             self.call = {"args": args, "kwargs": kwargs}
             return kwargs["target_template"]
 
@@ -2330,11 +2330,11 @@ def test_edm_transport_training_uses_data_full_target_layout(
         y: Batch,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, Batch]:
-        captured["pred_vars"] = y_pred.data["data"].shape[-1]
-        captured["target_vars"] = y.data["data"].shape[-1]
+        captured["pred_vars"] = y_pred["data"].data.shape[-1]
+        captured["target_vars"] = y["data"].data.shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred.data["data"]
+        pred = y_pred["data"].data
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
@@ -2342,7 +2342,7 @@ def test_edm_transport_training_uses_data_full_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = make_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
+    batch = build_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
         coordinates={"data": torch.zeros(g, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2434,11 +2434,11 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
         y: Batch,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, Batch]:
-        captured["pred_vars"] = y_pred.data["data"].shape[-1]
-        captured["target_vars"] = y.data["data"].shape[-1]
+        captured["pred_vars"] = y_pred["data"].data.shape[-1]
+        captured["target_vars"] = y["data"].data.shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred.data["data"]
+        pred = y_pred["data"].data
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
@@ -2446,7 +2446,7 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = make_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
+    batch = build_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
         coordinates={"data": torch.zeros(g, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2536,12 +2536,12 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, Batch]:
         del y, kwargs
-        return torch.zeros(1, dtype=y_pred.data["data"].dtype), {}, y_pred
+        return torch.zeros(1, dtype=y_pred["data"].data.dtype), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
 
-    batch = make_batch(data={"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))},
+    batch = build_batch(data={"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2591,7 +2591,7 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     n_model = len(data_indices["data"].model.output.full)
 
     def _batch(data: torch.Tensor) -> Batch:
-        return make_batch(data={"data": data},
+        return build_batch(data={"data": data},
             coordinates={"data": torch.zeros(g, 2)},
             metadata={"static_coords": frozenset({"data"})},
             layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2637,11 +2637,11 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
         y: Batch,
         **kwargs: Any,
     ) -> tuple[torch.Tensor, dict, Batch]:
-        captured["pred_vars"] = y_pred.data["data"].shape[-1]
-        captured["target_vars"] = y.data["data"].shape[-1]
+        captured["pred_vars"] = y_pred["data"].data.shape[-1]
+        captured["target_vars"] = y["data"].data.shape[-1]
         captured["pred_layout"] = kwargs["pred_layout"]
         captured["target_layout"] = kwargs["target_layout"]
-        pred = y_pred.data["data"]
+        pred = y_pred["data"].data
         return torch.zeros(1, dtype=pred.dtype, device=pred.device), {}, y_pred
 
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
@@ -2773,7 +2773,7 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = _DummyModule()
 
-    metric_target = make_batch(data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
+    metric_target = build_batch(data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2792,13 +2792,13 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
 
     assert captured["dataset_name"] == "data"
     assert captured["post_processors"] == mode.module.model.post_processors
-    torch.testing.assert_close(prepared_metric_target.data["data"], metric_target.data["data"] + 7.0)
+    torch.testing.assert_close(prepared_metric_target["data"].data, metric_target["data"].data + 7.0)
 
 
 def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace()
-    sparse_batch = make_batch(data={"obs": [torch.zeros(2, 1)]},
+    sparse_batch = build_batch(data={"obs": [torch.zeros(2, 1)]},
         coordinates={"obs": [torch.zeros(2, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
         layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
@@ -3055,18 +3055,18 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
 
     def _prepare_tensors_stub(
         self: EnsembleTraining,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         validation_mode: bool = False,
         dataset_name: str | None = None,
-    ) -> tuple[SourceView, SourceView, slice]:
+    ) -> tuple[Source, Source, slice]:
         del self, validation_mode, dataset_name
         return y_pred, y, slice(0, 1)
 
     def _compute_loss_stub(
         self: EnsembleTraining,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         **kwargs: Any,
     ) -> torch.Tensor:
         del self, y_pred
@@ -3076,8 +3076,8 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
 
     def _compute_metrics_stub(
         self: EnsembleTraining,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         del self, y_pred

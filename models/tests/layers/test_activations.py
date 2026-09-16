@@ -15,6 +15,7 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
 from anemoi.models.layers.activations import Sine
+from anemoi.models.data_adapter import flatten
 
 
 @st.composite
@@ -49,7 +50,7 @@ class TestSine:
         # For specific inputs, check if periodicity is preserved
         if x.numel() > 0:
             # Pick first element to test periodicity
-            x_val = x.flatten()[0].item()
+            x_val = flatten(x)[0].item()
             period = 2 * np.pi / w
 
             # Create two inputs separated by exactly one period

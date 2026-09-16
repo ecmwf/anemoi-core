@@ -15,13 +15,12 @@ import pytest
 import torch
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import Source
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 from anemoi.training.losses import MSELoss
 from anemoi.training.train.step_output import TrainingStepOutput
-from batch_builders import make_source
-from batch_builders import make_batch
+from batch_builders import build_source
+from batch_builders import build_batch
 
 BS = 2
 TIME = 6
@@ -253,8 +252,8 @@ def test_per_timestep_metrics_resolves_time_and_ensemble_axes(monkeypatch: pytes
     pred_data[:, :, :, 1, :] = 2.0
     target_data = torch.zeros(2, 1, 3, 2, 1)
 
-    def view(data: torch.Tensor) -> SourceView:
-        return make_source(
+    def view(data: torch.Tensor) -> Source:
+        return build_source(
             name="data",
             data=data,
             variables=["a"],

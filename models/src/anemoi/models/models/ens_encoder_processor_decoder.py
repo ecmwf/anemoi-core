@@ -20,7 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -153,8 +153,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         """
         dataset_names = list(batch.keys())
 
-        batch_size = self._get_consistent_dim(batch, 0)
-        ensemble_size = self._get_consistent_dim(batch, 2)
+        batch_size = batch.axis_size("batch")
+        ensemble_size = batch.axis_size("ensemble")
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
 

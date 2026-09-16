@@ -17,7 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor

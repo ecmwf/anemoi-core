@@ -26,7 +26,7 @@ class InputNormalizer(BasePreprocessor):
 
     This preprocessor is stateless at forward time: normalization parameters
     are computed (and cached) from the statistics carried by each
-    :class:`SourceView`, not from registered buffers.
+    :class:`Source`, not from registered buffers.
     """
 
     def __init__(self, config=None, **kwargs) -> None:
@@ -183,7 +183,7 @@ class InputNormalizer(BasePreprocessor):
         if data_index is not None:
             warnings.warn(
                 "The 'data_index' parameter is deprecated and will be removed in a future release. "
-                "Use SourceView.select_variables() to narrow the view before calling transform.",
+                "Use Source.select_variables() to narrow the view before calling transform.",
                 DeprecationWarning,
                 stacklevel=2,
             )
@@ -226,7 +226,7 @@ class InputNormalizer(BasePreprocessor):
         if data_index is not None:
             warnings.warn(
                 "The 'data_index' parameter is deprecated and will be removed in a future release. "
-                "Use SourceView.select_variables() to narrow the view before calling inverse_transform.",
+                "Use Source.select_variables() to narrow the view before calling inverse_transform.",
                 DeprecationWarning,
                 stacklevel=2,
             )

@@ -37,10 +37,12 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
+from anemoi.models.data_adapter import flatten
+from anemoi.models.data_adapter import unflatten
 
 if TYPE_CHECKING:
-    from anemoi.models.data.flat import FlatView
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data_adapter import FlatSource
+    from anemoi.models.data.source import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -129,7 +131,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                     attribute.ndim for attribute in runtime_attributes.values()
                 )
 
-    def _encode_dynamic_node_attributes(self, dataset_name: str, x_flat: "FlatView") -> torch.Tensor | None:
+    def _encode_dynamic_node_attributes(self, dataset_name: str, x_flat: "FlatSource") -> torch.Tensor | None:
         """Encode configured per-node runtime attributes."""
         attribute_builders = self.dynamic_node_attributes.get(dataset_name)
         if not attribute_builders:
@@ -319,14 +321,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_input(
         self,
-        x: "SourceView",
+        x: "_Source",
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, "SourceView", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor, "_Source", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_flat: "FlatView" = x.flatten()  # flatten data to (nodes, features)
+        x_flat: "FlatSource" = flatten(x)  # flatten data to (nodes, features)
         grid_shard_sizes = x_flat.shard_sizes
 
         if dataset_name in self.residual:
@@ -365,9 +367,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_target(
         self,
-        x_input_data: "SourceView",
+        x_input_data: "_Source",
         x_encoded_data: Tensor | None,
-        x_target: "SourceView",
+        x_target: "_Source",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -380,11 +382,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Parameters
         ----------
-        x_input_data : SourceView
+        x_input_data : Source
             Input data view used by decoder features derived from model inputs.
         x_encoded_data : Tensor or None
             Encoder-updated source features, when requested by the decoder configuration.
-        x_target : SourceView
+        x_target : Source
             Target-side data and coordinates used by decoder target features.
         batch_size : int
             Flattened batch size used to assemble target features.
@@ -410,7 +412,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_target_flat: "FlatView" = x_target.flatten()
+        x_target_flat: "FlatSource" = flatten(x_target)
         grid_shard_sizes = x_target_flat.shard_sizes
 
         target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
@@ -445,16 +447,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"instead."
             )
 
-        return target_coords, x_target_latent, grid_shard_sizes, x_target.flatten().batch_sizes, target_timedeltas
+        return target_coords, x_target_latent, grid_shard_sizes, flatten(x_target).batch_sizes, target_timedeltas
 
     def _assemble_output(
         self,
         x_out: torch.Tensor,
         x_skip: torch.Tensor | None,
-        target: "SourceView",
+        target: "_Source",
         dtype: torch.dtype,
         dataset_name: str,
-    ) -> "SourceView":
+    ) -> "_Source":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
@@ -464,7 +466,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         output_positions = [self.data_indices[dataset_name].name_to_index[name] for name in output_names]
         output_statistics = {name: values[output_positions] for name, values in self.statistics[dataset_name].items()}
         output_dtype = torch.promote_types(dtype, torch.float32)
-        pred = target.unflatten(
+        pred = unflatten(target,
             x_out.to(output_dtype),
             spec=target.spec.clone(variables=output_names, statistics=output_statistics),
         )
@@ -508,7 +510,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _prepare_encoder_source(
         self,
-        x: "SourceView",
+        x: "_Source",
         *,
         dataset_name: str,
         batch_size: int,
@@ -721,7 +723,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             tensors; ``batch.coordinates`` carries the per-dataset coordinate
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
-            views (``view.flatten().shard_sizes``).
+            views (``flatten(view).shard_sizes``).
         target : Batch
             Decoder conditioning: the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional
@@ -738,8 +740,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(batch, 0)
-        ensemble_size = self._get_consistent_dim(batch, 2)
+        batch_size = batch.axis_size("batch")
+        ensemble_size = batch.axis_size("ensemble")
 
         in_out_sharded = self._resolve_in_out_sharded(batch)
         for dataset_name in dataset_names:

@@ -14,12 +14,12 @@ from dataclasses import FrozenInstanceError
 import pytest
 import torch
 
+from anemoi.models.data import SourceSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.batch import BOUNDARIES_META_KEY
-from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.batch import SourceView
-from batch_builders import make_batch
+from anemoi.models.data.batch import Source
+from anemoi.models.data_adapter import flatten
+from batch_builders import build_batch
 
 
 def _gridded_layout() -> TensorLayout:
@@ -36,16 +36,20 @@ def _sample_layout() -> TensorLayout:
     return TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 
 
-def _gridded_payload(data: torch.Tensor, coordinates: torch.Tensor | None = None) -> dict:
-    """A gridded sample payload in the reader contract."""
-    payload = {
-        "data": data,
-        "layout": _sample_layout(),
-        "variables": [f"v{i}" for i in range(data.shape[_sample_layout().variables])],
-    }
-    if coordinates is not None:
-        payload["coordinates"] = coordinates
-    return payload
+def _gridded_payload(
+    data: torch.Tensor,
+    coordinates: torch.Tensor | None = None,
+    *,
+    static: bool = False,
+) -> SourceSample:
+    """A gridded sample in the reader contract."""
+    return SourceSample(
+        data=data,
+        layout=_sample_layout(),
+        variables=[f"v{i}" for i in range(data.shape[_sample_layout().variables])],
+        coordinates=coordinates,
+        coordinates_are_static=static,
+    )
 
 
 def _simple_batch(**kwargs) -> Batch:
@@ -53,7 +57,7 @@ def _simple_batch(**kwargs) -> Batch:
     kwargs.setdefault("data", {"a": torch.zeros(2, 1, 1, 4, 2)})
     kwargs.setdefault("layouts", {"a": _gridded_layout()})
     kwargs.setdefault("variables", {"a": ["x", "y"]})
-    return Batch(**kwargs)
+    return build_batch(**kwargs)
 
 
 def _make_coordinates(grid: int = 4) -> torch.Tensor:
@@ -70,9 +74,9 @@ def _make_coordinates(grid: int = 4) -> torch.Tensor:
 def test_batch_basic_construction_and_access() -> None:
     data = {"a": torch.zeros(2, 1, 1, 4, 2)}
     coordinates = {"a": _make_coordinates()}
-    batch = make_batch(data=data,
+    batch = build_batch(data=data,
         coordinates=coordinates,
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
         layouts={"a": _gridded_layout()},
         variables={"a": ["a", "b"]},
     )
@@ -83,9 +87,9 @@ def test_batch_basic_construction_and_access() -> None:
     assert batch.is_static_coords("a")
     assert batch.static_coord_datasets == frozenset({"a"})
 
-    # Mapping behaviour: batch[name] returns a rich per-dataset SourceView.
+    # Mapping behaviour: batch[name] returns a rich per-dataset Source.
     view = batch["a"]
-    assert isinstance(view, SourceView)
+    assert isinstance(view, Source)
     assert view.data is data["a"]
     assert list(batch.keys()) == ["a"]
     assert next(iter(batch.values())).data is data["a"]
@@ -116,27 +120,27 @@ def test_collate_stacks_data_along_batch_dim() -> None:
         {"a": _gridded_payload(_make_data_tensor(), _make_coordinates())},
         {"a": _gridded_payload(_make_data_tensor() + 100, _make_coordinates())},
     ]
-    batch = Batch.collate(samples, static_coord_datasets=["a"])
+    batch = Batch.collate(samples)
 
-    assert batch.data["a"].shape == (2, 1, 1, 4, 2)
-    assert torch.equal(batch.data["a"][0], samples[0]["a"]["data"])
-    assert torch.equal(batch.data["a"][1], samples[1]["a"]["data"])
+    assert batch["a"].data.shape == (2, 1, 1, 4, 2)
+    assert torch.equal(batch["a"].data[0], samples[0]["a"].data)
+    assert torch.equal(batch["a"].data[1], samples[1]["a"].data)
 
 
 def test_collate_static_coords_share_reference() -> None:
     """The performance-critical invariant: static coords are NOT stacked or copied."""
     coords_ref = _make_coordinates()
     samples = [
-        {"a": _gridded_payload(_make_data_tensor(), coords_ref)},
-        {"a": _gridded_payload(_make_data_tensor() + 1, coords_ref)},
+        {"a": _gridded_payload(_make_data_tensor(), coords_ref, static=True)},
+        {"a": _gridded_payload(_make_data_tensor() + 1, coords_ref, static=True)},
     ]
-    batch = Batch.collate(samples, static_coord_datasets=["a"])
+    batch = Batch.collate(samples)
 
     # Same object identity as the first sample's coordinates tensor.
-    assert batch.coordinates["a"] is coords_ref
+    assert batch["a"].coordinates is coords_ref
 
     # Shape unchanged: no leading batch dimension was added.
-    assert batch.coordinates["a"].shape == coords_ref.shape
+    assert batch["a"].coordinates.shape == coords_ref.shape
 
     # Metadata records the static set.
     assert batch.static_coord_datasets == frozenset({"a"})
@@ -147,24 +151,24 @@ def test_collate_dynamic_coords_are_stacked() -> None:
         {"a": _gridded_payload(_make_data_tensor(), _make_coordinates())},
         {"a": _gridded_payload(_make_data_tensor() + 1, _make_coordinates())},
     ]
-    batch = Batch.collate(samples, static_coord_datasets=())
+    batch = Batch.collate(samples)
 
     # Dynamic path: a leading batch dimension is added.
-    assert batch.coordinates["a"].shape == (2, 4, 2)
+    assert batch["a"].coordinates.shape == (2, 4, 2)
     assert batch.static_coord_datasets == frozenset()
 
 
 def test_gridded_source_view_flatten_repeats_static_coordinates_over_batch_and_ensemble() -> None:
     coordinates = _make_coordinates(grid=4)
-    batch = make_batch(data={"a": torch.zeros(2, 3, 2, 4, 1)},
+    batch = build_batch(data={"a": torch.zeros(2, 3, 2, 4, 1)},
         coordinates={"a": coordinates},
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
         layouts={"a": _gridded_layout()},
         variables={"a": ["x"]},
         statistics={"a": {}},
     )
 
-    flat = batch["a"].flatten()
+    flat = flatten(batch["a"])
 
     expected_coordinates = coordinates.unsqueeze(0).unsqueeze(0).expand(2, 2, 4, 2).reshape(16, 2)
     assert flat.data.shape == (16, 3)
@@ -173,14 +177,14 @@ def test_gridded_source_view_flatten_repeats_static_coordinates_over_batch_and_e
 
 def test_gridded_source_view_flatten_repeats_dynamic_coordinates_over_ensemble() -> None:
     coordinates = torch.stack([_make_coordinates(grid=4), _make_coordinates(grid=4) + 10.0], dim=0)
-    batch = make_batch(data={"a": torch.zeros(2, 3, 2, 4, 1)},
+    batch = build_batch(data={"a": torch.zeros(2, 3, 2, 4, 1)},
         coordinates={"a": coordinates},
         layouts={"a": _gridded_layout()},
         variables={"a": ["x"]},
         statistics={"a": {}},
     )
 
-    flat = batch["a"].flatten()
+    flat = flatten(batch["a"])
 
     expected_coordinates = coordinates.unsqueeze(1).expand(2, 2, 4, 2).reshape(16, 2)
     assert flat.data.shape == (16, 3)
@@ -195,20 +199,20 @@ def test_collate_empty_samples_raises() -> None:
 def test_collate_supports_multiple_datasets() -> None:
     samples = [
         {
-            "a": _gridded_payload(_make_data_tensor(grid=4), _make_coordinates(grid=4)),
+            "a": _gridded_payload(_make_data_tensor(grid=4), _make_coordinates(grid=4), static=True),
             "b": _gridded_payload(_make_data_tensor(grid=2), _make_coordinates(grid=2)),
         },
         {
-            "a": _gridded_payload(_make_data_tensor(grid=4) + 1, _make_coordinates(grid=4)),
+            "a": _gridded_payload(_make_data_tensor(grid=4) + 1, _make_coordinates(grid=4), static=True),
             "b": _gridded_payload(_make_data_tensor(grid=2) + 1, _make_coordinates(grid=2)),
         },
     ]
-    batch = Batch.collate(samples, static_coord_datasets=["a"])
+    batch = Batch.collate(samples)
     assert batch.dataset_names == ("a", "b")
     # "a" is static -> shared reference
-    assert batch.coordinates["a"] is samples[0]["a"]["coordinates"]
+    assert batch["a"].coordinates is samples[0]["a"].coordinates
     # "b" is dynamic -> stacked
-    assert batch.coordinates["b"].shape == (2, 2, 2)
+    assert batch["b"].coordinates.shape == (2, 2, 2)
 
 
 # --------------------------------------------------------------- device / pin
@@ -218,15 +222,15 @@ def test_to_skips_static_coordinates() -> None:
     coords_ref = _make_coordinates()
     batch = _simple_batch(
         coordinates={"a": coords_ref},
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
     )
 
     moved = batch.to("cpu")  # CPU-to-CPU, but identity tells us whether transfer was attempted
 
     # Data is always moved (even CPU-to-CPU may produce a new tensor object via .to()).
-    assert moved.data["a"].device.type == "cpu"
+    assert moved["a"].data.device.type == "cpu"
     # Static coords are passed by reference, untouched.
-    assert moved.coordinates["a"] is coords_ref
+    assert moved["a"].coordinates is coords_ref
 
 
 def test_to_moves_dynamic_coordinates() -> None:
@@ -239,8 +243,8 @@ def test_to_moves_dynamic_coordinates() -> None:
     # short-circuit). Identity is not asserted: ``Tensor.to`` is a no-op
     # when the tensor already lives on the requested device, so the same
     # object may be returned.
-    assert moved.coordinates["a"].device.type == "cpu"
-    assert torch.equal(moved.coordinates["a"], coords)
+    assert moved["a"].coordinates.device.type == "cpu"
+    assert torch.equal(moved["a"].coordinates, coords)
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="pin_memory requires CUDA")
@@ -248,11 +252,11 @@ def test_pin_memory_skips_static_coordinates() -> None:
     coords_ref = _make_coordinates()
     batch = _simple_batch(
         coordinates={"a": coords_ref},
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
     )
     pinned = batch.pin_memory()
     # Static coords untouched.
-    assert pinned.coordinates["a"] is coords_ref
+    assert pinned["a"].coordinates is coords_ref
 
 
 # -------------------------------------------------------------------- with_data
@@ -260,37 +264,35 @@ def test_pin_memory_skips_static_coordinates() -> None:
 
 def test_with_data_replaces_data_and_shares_envelope() -> None:
     coords_ref = _make_coordinates()
-    metadata_ref = {STATIC_COORDS_META_KEY: frozenset({"a"})}
     batch = _simple_batch(
         coordinates={"a": coords_ref},
-        metadata=metadata_ref,
+        static_coords=frozenset({"a"}),
     )
 
     new_tensor = torch.ones(2, 1, 1, 4, 2)
     new_batch = batch.with_data({"a": new_tensor})
 
     # Data is replaced.
-    assert new_batch.data["a"] is new_tensor
-    assert torch.equal(new_batch.data["a"], torch.ones(2, 1, 1, 4, 2))
+    assert new_batch["a"].data is new_tensor
+    assert torch.equal(new_batch["a"].data, torch.ones(2, 1, 1, 4, 2))
 
     # Coordinates are shared by reference (no copy). ``Batch.coordinates`` is a
     # derived view now, so the invariant is per-tensor identity, not dict identity.
-    assert new_batch.coordinates["a"] is coords_ref
-    assert new_batch.metadata == batch.metadata
+    assert new_batch["a"].coordinates is coords_ref
 
     # Static-coord membership preserved through the envelope.
     assert new_batch.is_static_coords("a")
 
     # Result is a new instance; receiver is not mutated (frozen dataclass).
     assert new_batch is not batch
-    assert batch.data["a"].sum().item() == 0.0
+    assert batch["a"].data.sum().item() == 0.0
 
 
 def test_with_data_can_subset_datasets_and_envelope() -> None:
     coords_a = _make_coordinates()
-    batch = make_batch(data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 4, 2)},
+    batch = build_batch(data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 4, 2)},
         coordinates={"a": coords_a},
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
         layouts={"a": _gridded_layout(), "b": _gridded_layout()},
         variables={"a": ["x", "y"], "b": ["x", "y"]},
         statistics={"a": {}},
@@ -300,8 +302,8 @@ def test_with_data_can_subset_datasets_and_envelope() -> None:
     subset = batch.with_data({"a": new_a})
 
     assert subset.dataset_names == ("a",)
-    assert subset.data["a"] is new_a
-    assert subset.coordinates["a"] is coords_a
+    assert subset["a"].data is new_a
+    assert subset["a"].coordinates is coords_a
     assert subset.static_coord_datasets == frozenset({"a"})
 
     with pytest.raises(ValueError, match="unknown dataset names"):
@@ -311,7 +313,7 @@ def test_with_data_can_subset_datasets_and_envelope() -> None:
 def test_with_data_supports_multiple_datasets() -> None:
     coords_a = _make_coordinates()
     coords_b = _make_coordinates(grid=8)
-    batch = make_batch(data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 8, 2)},
+    batch = build_batch(data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 8, 2)},
         coordinates={"a": coords_a, "b": coords_b},
         layouts={"a": _gridded_layout(), "b": _gridded_layout()},
         variables={"a": ["x", "y"], "b": ["x", "y"]},
@@ -321,19 +323,19 @@ def test_with_data_supports_multiple_datasets() -> None:
     new_b = torch.full((2, 1, 1, 8, 2), 2.0)
     new_batch = batch.with_data({"a": new_a, "b": new_b})
 
-    assert new_batch.data["a"] is new_a
-    assert new_batch.data["b"] is new_b
+    assert new_batch["a"].data is new_a
+    assert new_batch["b"].data is new_b
     # Per-dataset coordinates identity preserved.
-    assert new_batch.coordinates["a"] is coords_a
-    assert new_batch.coordinates["b"] is coords_b
+    assert new_batch["a"].coordinates is coords_a
+    assert new_batch["b"].coordinates is coords_b
 
 
 def test_source_view_apply_func_uses_processor_and_preserves_envelope() -> None:
     coords_ref = _make_coordinates()
     layout = _gridded_layout()
-    batch = make_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)},
+    batch = build_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)},
         coordinates={"a": coords_ref},
-        metadata={STATIC_COORDS_META_KEY: frozenset({"a"})},
+        static_coords=frozenset({"a"}),
         layouts={"a": layout},
         variables={"a": ["a", "b"]},
     )
@@ -353,7 +355,7 @@ def test_source_view_apply_func_uses_processor_and_preserves_envelope() -> None:
 
 def test_source_view_apply_func_handles_sparse_list_payloads() -> None:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    batch = make_batch(data={"obs": [torch.zeros(5, 3), torch.ones(7, 3)]},
+    batch = build_batch(data={"obs": [torch.zeros(5, 3), torch.ones(7, 3)]},
         layouts={"obs": layout},
         variables={"obs": ["a", "b", "c"]},
         statistics={"obs": {}},
@@ -379,7 +381,7 @@ def test_source_view_apply_func_handles_sparse_list_payloads() -> None:
 
 def test_source_view_returns_stacked_latlon_coordinates() -> None:
     coords = _make_coordinates()
-    batch = make_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)},
+    batch = build_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)},
         coordinates={"a": coords},
         layouts={"a": _gridded_layout()},
         variables={"a": ["a", "b"]},
@@ -393,14 +395,14 @@ def test_source_view_returns_stacked_latlon_coordinates() -> None:
 
 
 def test_source_view_coordinates_none_when_missing() -> None:
-    batch = make_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, layouts={"a": _gridded_layout()}, variables={"a": ["a", "b"]})
+    batch = build_batch(data={"a": torch.zeros(2, 1, 1, 4, 2)}, layouts={"a": _gridded_layout()}, variables={"a": ["a", "b"]})
 
     assert batch["a"].coordinates is None
 
 
 def test_source_view_returns_sparse_coordinate_lists() -> None:
     """Sparse datasets store ``coordinates`` as ``list[Tensor]``."""
-    batch = make_batch(data={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
+    batch = build_batch(data={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
         coordinates={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
         layouts={"a": TensorLayout(grid=0, variables=1, time_in_grid=True)},
         variables={"a": ["a", "b"]},
@@ -462,7 +464,7 @@ def test_tensor_layout_repr_elides_none_fields() -> None:
 def test_batch_repr_summarises_per_dataset() -> None:
     from anemoi.models.data.batch import TensorLayout
 
-    batch = make_batch(data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(5, 3), torch.zeros(7, 3)]},
+    batch = build_batch(data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(5, 3), torch.zeros(7, 3)]},
         layouts={
             "grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
             "obs": TensorLayout(grid=0, variables=1, time_in_grid=True),
@@ -483,10 +485,10 @@ def test_batch_collate_rejects_invalid_layout_position() -> None:
     from anemoi.models.data.batch import TensorLayout
 
     samples = [
-        {"a": {"data": torch.zeros(2, 3), "layout": TensorLayout(grid=0, variables=5), "variables": ["x", "y", "z"]}},
+        {"a": SourceSample(data=torch.zeros(2, 3), layout=TensorLayout(grid=0, variables=5), variables=["x", "y", "z"])},
     ]
     with pytest.raises(ValueError, match="TensorLayout"):
-        Batch.collate(samples, static_coord_datasets=())
+        Batch.collate(samples)
 
 
 def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
@@ -499,31 +501,22 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
     from anemoi.models.data.batch import TensorLayout
 
     sample_layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    # Sparse samples are tagged via the ``boundaries`` metadata key; without
-    # it ``Batch.collate`` would treat them as gridded and try to stack
-    # tensors of different ``N``.
+    # Sparse samples are recognised by ``layout.time_in_grid``; that is also what
+    # makes ``boundaries`` mandatory, since they carry the time axis.
     samples = [
-        {
-            "obs": {
-                "data": torch.zeros(5, 3),
-                "layout": sample_layout,
-                "variables": ["x", "y", "z"],
-                "metadata": {BOUNDARIES_META_KEY: (slice(0, 5),)},
-            },
-        },
-        {
-            "obs": {
-                "data": torch.zeros(7, 3),
-                "layout": sample_layout,
-                "variables": ["x", "y", "z"],
-                "metadata": {BOUNDARIES_META_KEY: (slice(0, 7),)},
-            },
-        },
+        {"obs": SourceSample(
+            data=torch.zeros(5, 3), layout=sample_layout, variables=["x", "y", "z"],
+            boundaries=(slice(0, 5),),
+        )},
+        {"obs": SourceSample(
+            data=torch.zeros(7, 3), layout=sample_layout, variables=["x", "y", "z"],
+            boundaries=(slice(0, 7),),
+        )},
     ]
-    batch = Batch.collate(samples, static_coord_datasets=())
-    assert isinstance(batch.data["obs"], list)
-    assert batch.layouts["obs"] == sample_layout
-    assert batch.layouts["obs"].batch is None
+    batch = Batch.collate(samples)
+    assert isinstance(batch["obs"].data, list)
+    assert batch["obs"].layout == sample_layout
+    assert batch["obs"].layout.batch is None
 
 
 def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
@@ -532,14 +525,14 @@ def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
 
     sample_layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     samples = [
-        {"grid": {"data": torch.zeros(1, 1, 4, 3), "layout": sample_layout, "variables": ["x", "y", "z"]}},
-        {"grid": {"data": torch.zeros(1, 1, 4, 3), "layout": sample_layout, "variables": ["x", "y", "z"]}},
+        {"grid": SourceSample(data=torch.zeros(1, 1, 4, 3), layout=sample_layout, variables=["x", "y", "z"])},
+        {"grid": SourceSample(data=torch.zeros(1, 1, 4, 3), layout=sample_layout, variables=["x", "y", "z"])},
     ]
-    batch = Batch.collate(samples, static_coord_datasets=())
-    assert isinstance(batch.data["grid"], torch.Tensor)
-    assert batch.data["grid"].shape == (2, 1, 1, 4, 3)
-    assert batch.layouts["grid"] == sample_layout.with_batch_dim()
-    assert batch.layouts["grid"].batch == 0
+    batch = Batch.collate(samples)
+    assert isinstance(batch["grid"].data, torch.Tensor)
+    assert batch["grid"].data.shape == (2, 1, 1, 4, 3)
+    assert batch["grid"].layout == sample_layout.with_batch_dim()
+    assert batch["grid"].layout.batch == 0
 
 
 def test_batch_select_time_updates_sparse_envelope() -> None:
@@ -563,29 +556,29 @@ def test_batch_select_time_updates_sparse_envelope() -> None:
         (slice(0, 1), slice(1, 6)),
     ]
 
-    batch = make_batch(data={"obs": data},
+    batch = build_batch(data={"obs": data},
         coordinates={"obs": coordinates},
         timedeltas={"obs": timedeltas},
-        metadata={"obs": {BOUNDARIES_META_KEY: boundaries}},
+        boundaries={"obs": boundaries},
         layouts={"obs": layout},
         variables={"obs": ["a", "b"]},
     )
 
     selected = batch.select(time={"obs": [1]})
 
-    assert isinstance(selected.data["obs"], list)
-    assert selected.data["obs"][0].shape == (3, 2)
-    assert selected.data["obs"][1].shape == (5, 2)
+    assert isinstance(selected["obs"].data, list)
+    assert selected["obs"].data[0].shape == (3, 2)
+    assert selected["obs"].data[1].shape == (5, 2)
 
-    assert isinstance(selected.coordinates["obs"], list)
-    assert selected.coordinates["obs"][0].shape == (3, 2)
-    assert selected.coordinates["obs"][1].shape == (5, 2)
+    assert isinstance(selected["obs"].coordinates, list)
+    assert selected["obs"].coordinates[0].shape == (3, 2)
+    assert selected["obs"].coordinates[1].shape == (5, 2)
 
-    assert isinstance(selected.timedeltas["obs"], list)
-    assert selected.timedeltas["obs"][0].shape == (3,)
-    assert selected.timedeltas["obs"][1].shape == (5,)
+    assert isinstance(selected["obs"].timedeltas, list)
+    assert selected["obs"].timedeltas[0].shape == (3,)
+    assert selected["obs"].timedeltas[1].shape == (5,)
 
-    assert selected.metadata["obs"][BOUNDARIES_META_KEY] == [
+    assert selected["obs"].boundaries == [
         (slice(0, 3),),
         (slice(0, 5),),
     ]

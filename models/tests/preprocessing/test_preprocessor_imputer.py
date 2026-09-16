@@ -13,12 +13,11 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
-from batch_builders import make_source
+from batch_builders import build_source
 
 VARIABLES = ["x", "y", "z", "q", "other", "prog"]
 
@@ -31,11 +30,11 @@ STATISTICS = {
 
 
 def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
-    """Wrap a (points, variables) payload in a GriddedSourceView."""
+    """Wrap a (points, variables) payload in a GriddedSource."""
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return make_source(
+    return build_source(
         name="gridded",
         data=data,
         variables=list(variables),
@@ -47,9 +46,9 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
 
 
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
-    """Wrap a (points, variables) payload in a TabularSourceView (single tensor)."""
+    """Wrap a (points, variables) payload in a TabularSource (single tensor)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return make_source(
+    return build_source(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
@@ -217,7 +216,7 @@ def test_copy_imputer_raises_on_nan_source(copy_imputer, make_view) -> None:
 
 
 def test_input_imputer_uses_view_statistics(non_default_input_imputer, make_view) -> None:
-    """Replacement values are read from the SourceView statistics, not the constructor."""
+    """Replacement values are read from the Source statistics, not the constructor."""
     base = torch.tensor([[1.0, 2.0, 3.0, np.nan, 5.0, 1.0]])
     custom_statistics = {
         "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0, 1.0]),
@@ -234,7 +233,7 @@ def test_tabular_multiple_tensors(default_constant_imputer) -> None:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     base = torch.tensor([[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]])
     expected = torch.tensor([[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]])
-    view = make_source(
+    view = build_source(
         name="tabular",
         data=[base.clone(), base.clone()],
         variables=list(VARIABLES),

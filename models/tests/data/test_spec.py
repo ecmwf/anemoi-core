@@ -14,11 +14,11 @@ from anemoi.models.data import Batch
 from anemoi.models.data import SourceSample
 from anemoi.models.data import SourceSpec
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import GriddedSourceView
-from anemoi.models.data.views import TabularSourceView
-from anemoi.models.data.views import create_source_view
-from batch_builders import make_batch
-from batch_builders import make_source
+from anemoi.models.data.source import GriddedSource
+from anemoi.models.data.source import TabularSource
+from anemoi.models.data.source import make_source
+from batch_builders import build_batch
+from batch_builders import build_source
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
@@ -51,7 +51,7 @@ def tabular_payload(n_points: int = 4) -> SourceSample:
 
 def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
     n_vars = len(variables)
-    return make_batch(
+    return build_batch(
         data={"grid": torch.arange(2 * 2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 2, 1, 4, n_vars)},
         coordinates={"grid": torch.zeros(4, 2)},
         layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
@@ -91,7 +91,7 @@ class TestSourceSpec:
 
     @pytest.mark.parametrize(
         ("layout", "expected_type"),
-        [(GRIDDED_LAYOUT, GriddedSourceView), (TABULAR_LAYOUT, TabularSourceView)],
+        [(GRIDDED_LAYOUT, GriddedSource), (TABULAR_LAYOUT, TabularSource)],
     )
     def test_empty_builds_a_dataless_source_of_the_right_kind(self, layout, expected_type) -> None:
         spec = SourceSpec(name="src", variables=["a", "b"], layout=layout)
@@ -131,10 +131,10 @@ class TestSpecOnViews:
         assert batch.spec["obs"].layout.time_in_grid is True
         assert batch.spec["obs"].grid_size is None
 
-    def test_create_source_view_dispatches_on_the_spec_layout(self) -> None:
+    def test_make_source_dispatches_on_the_spec_layout(self) -> None:
         spec = SourceSpec(name="grid", variables=["a", "b"], layout=GRIDDED_LAYOUT, coordinates_are_static=True)
-        view = create_source_view(spec, data=torch.zeros(1, 1, 4, 2), coordinates=torch.zeros(4, 2))
-        assert isinstance(view, GriddedSourceView)
+        view = make_source(spec, data=torch.zeros(1, 1, 4, 2), coordinates=torch.zeros(4, 2))
+        assert isinstance(view, GriddedSource)
         assert view.spec is spec
         assert view.coordinates_are_static is True
 

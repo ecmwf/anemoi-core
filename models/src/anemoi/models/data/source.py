@@ -16,15 +16,15 @@ from dataclasses import dataclass
 from dataclasses import replace
 from typing import Any
 
-import einops
 import numpy as np
 import torch
 from torch.distributed import ProcessGroup
 
-from anemoi.models.data.flat import FlatView
 from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
@@ -32,12 +32,12 @@ from anemoi.models.distributed.utils import model_is_distributed
 LOGGER = logging.getLogger(__name__)
 
 
-def create_source_view(spec: SourceSpec, **kwargs) -> "SourceView":
-    """Build the SourceView kind that ``spec.layout`` calls for."""
+def make_source(spec: SourceSpec, **kwargs) -> "_Source":
+    """Build the Source kind that ``spec.layout`` calls for."""
     if spec.layout.time_in_grid:
-        return TabularSourceView(spec=spec, **kwargs)
+        return TabularSource(spec=spec, **kwargs)
 
-    return GriddedSourceView(spec=spec, **kwargs)
+    return GriddedSource(spec=spec, **kwargs)
 
 
 def resolve_device(device: torch.device | str) -> torch.device:
@@ -115,7 +115,7 @@ def _shape_without_ensemble_dim(tensor: torch.Tensor, layout: TensorLayout) -> t
 
 
 @dataclass(frozen=True, slots=True)
-class SourceView(ABC):
+class _Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
     Bundles the per-dataset payload (data, coordinates, timedeltas) with
@@ -194,7 +194,7 @@ class SourceView(ABC):
         """
         return self.spec.name_to_index
 
-    def clone(self, **kwargs) -> "SourceView":
+    def clone(self, **kwargs) -> "_Source":
         """Return a new view with replacements, sharing fields that are not replaced.
 
         To change what the spec says, replace the spec::
@@ -203,7 +203,7 @@ class SourceView(ABC):
         """
         return replace(self, **kwargs)
 
-    def select(self, **kwargs) -> "SourceView":
+    def select(self, **kwargs) -> "_Source":
         """Return a new view restricted to the given indices along logical dimensions.
 
         Example
@@ -222,7 +222,26 @@ class SourceView(ABC):
                 )
         return source
 
-    def contiguous(self) -> "SourceView":
+    def axis_size(self, axis: str) -> int:
+        """Return the logical size of ``axis`` for this source.
+
+        Resolves what the layout does not spell out: for a tabular source the batch
+        axis is the outer list, and an axis the layout does not materialise (e.g.
+        ``ensemble`` on a source that has none) is an implicit singleton.
+        """
+        samples = self.data if isinstance(self.data, list) else [self.data]
+
+        if axis == "batch" and isinstance(self.data, list):
+            return len(self.data)
+
+        position = getattr(self.layout, axis, None)
+        if position is None:
+            return 1
+        if not samples:
+            return 0
+        return samples[0].shape[position]
+
+    def contiguous(self) -> "_Source":
         """Return a new view whose underlying data tensors are contiguous."""
         return self.apply_func(lambda t, **_: t.contiguous())
 
@@ -232,7 +251,7 @@ class SourceView(ABC):
         *,
         non_blocking: bool = True,
         static_coord_cache: dict[str, torch.Tensor] | None = None,
-    ) -> "SourceView":
+    ) -> "_Source":
         """Return a copy of this source with every tensor on ``device``.
 
         Data, coordinates and timedeltas move together; consumers rely on that, since
@@ -262,7 +281,7 @@ class SourceView(ABC):
             ),
         )
 
-    def pin_memory(self) -> "SourceView":
+    def pin_memory(self) -> "_Source":
         """Return a copy with host memory pinned. Static coordinates are left untouched.
 
         Pinning static coordinates would buy nothing: with a ``static_coord_cache``
@@ -279,37 +298,45 @@ class SourceView(ABC):
         )
 
     @abstractmethod
-    def select_time(self, indices: slice | Sequence[int] | int) -> "SourceView":
+    def select_time(self, indices: slice | Sequence[int] | int) -> "_Source":
         """Return a new view restricted to the given time indices."""
         pass
 
     @abstractmethod
-    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "SourceView":
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "_Source":
         """Return a new view restricted to the given variable indices."""
         pass
 
     @abstractmethod
-    def flatten(self) -> FlatView:
-        """Return a flattened view of the data, coordinates and timedeltas for a single sample."""
-        pass
-
-    @abstractmethod
-    def unflatten(self, data: torch.Tensor, **metadata) -> "SourceView":
-        """Unflatten a 2D data tensor back to the original grid shape."""
-        pass
-
-    @abstractmethod
-    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "SourceView":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "_Source":
         """Apply a function to this view, returning a new view with the same metadata."""
         pass
 
     @abstractmethod
-    def apply_loss(self, other: "SourceView", loss_func: Callable, **kwargs) -> "SourceView":
-        """Apply a loss function to this view and another view, returning the result."""
+    def apply_pairwise(self, other: "_Source", func: Callable, **kwargs) -> torch.Tensor:
+        """Combine this source with another through ``func``, returning a tensor.
+
+        The pairwise counterpart of :meth:`apply_func`; a loss is the motivating
+        case. Both sources must describe the same thing: same layout, same
+        coordinates, same number of samples.
+        """
         pass
 
     @abstractmethod
-    def allgather(self, group: ProcessGroup | None) -> "SourceView":
+    def shard(self, group: ProcessGroup | None) -> "_Source":
+        """Split this source across ``group`` along its grid axis.
+
+        The inverse of :meth:`allgather`, and deliberately its neighbour: shard
+        *descriptors* travel with the data, so the operations that create and
+        consume them belong together rather than one being a static method on the
+        model.
+
+        Returns self when the source is already sharded, or when the group spans a
+        single rank.
+        """
+
+    @abstractmethod
+    def allgather(self, group: ProcessGroup | None) -> "_Source":
         """Allgather this view across the given process group.
 
         This is a collective operation that synchronizes all processes in
@@ -334,7 +361,7 @@ class SourceView(ABC):
 
         Returns
         -------
-        SourceView
+        _Source
             A new view with allgathered data, or self when already full-grid.
         """
         pass
@@ -364,16 +391,16 @@ class SourceView(ABC):
         return tensor.index_select(var_dim, idx)
 
 
-class GriddedSourceView(SourceView):
-    """SourceView for gridded datasets, where time is an explicit dimension."""
-
-    pattern_for_2d: str = "(batch ensemble grid) (time variables)"
+class GriddedSource(_Source):
+    """Gridded data source."""
 
     def __post_init__(self):
         super().__post_init__()
+
         if self.layout.time is None:
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
+
         if isinstance(self.data, list):
             msg = f"{self.__class__.__name__} data must be a single tensor, not a list."
             raise TypeError(msg)
@@ -388,73 +415,12 @@ class GriddedSourceView(SourceView):
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.dtype
 
-    def flatten(self) -> FlatView:
-        current_pattern = self.layout.normalized(self.data.ndim).pattern
-        flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {self.pattern_for_2d}")
-        device = self.data.device
-
-        if self.coordinates is None:
-            msg = f"{self.__class__.__name__} requires coordinates for flattening."
-            raise ValueError(msg)
-        if isinstance(self.coordinates, list):
-            msg = f"{self.__class__.__name__} coordinates must be a tensor, not a list."
-            raise TypeError(msg)
-
-        batch_size = self.data.shape[self.layout.axis("batch", ndim=self.data.ndim)]
-        ensemble_size = self.data.shape[self.layout.axis("ensemble", ndim=self.data.ndim)]
-        grid_size = self.data.shape[self.layout.axis("grid", ndim=self.data.ndim)]
-        if self.coordinates.ndim not in (2, 3):
-            msg = (
-                f"{self.__class__.__name__} coordinates must have shape (grid, 2) "
-                f"or (batch, grid, 2), got {tuple(self.coordinates.shape)}."
-            )
-            raise ValueError(msg)
-        expected_shape = (grid_size, 2) if self.coordinates.ndim == 2 else (batch_size, grid_size, 2)
-        if tuple(self.coordinates.shape) != expected_shape:
-            raise ValueError(f"Source {self.name!r} coordinates must have shape {expected_shape}.")
-        if self.coordinates.ndim == 2:
-            coordinates = einops.repeat(
-                self.coordinates,
-                "grid latlon -> (batch ensemble grid) latlon",
-                batch=batch_size,
-                ensemble=ensemble_size,
-            )
-        else:
-            coordinates = einops.repeat(
-                self.coordinates,
-                "batch grid latlon -> (batch ensemble grid) latlon",
-                ensemble=ensemble_size,
-            )
-
-        return FlatView(
-            data=flattened_data,
-            coordinates=coordinates,  # already on device; see Batch.to
-            timedeltas=None,
-            device=device,
-            shard_sizes=self.shard_sizes,
-            batch_sizes=(
-                (self.data.shape[self.layout.grid],) * (batch_size * ensemble_size)
-                if not self.coordinates_are_static
-                else None
-            ),
-        )
-
     @property
     def ndim(self) -> int:
         assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
         return self.data.ndim
 
-    def unflatten(self, data: torch.Tensor, **metadata) -> "GriddedSourceView":
-        new_data = einops.rearrange(
-            data,
-            f"{self.pattern_for_2d} -> {self.layout.normalized(self.data.ndim).pattern}",
-            batch=self.data.shape[self.layout.batch],
-            ensemble=self.data.shape[self.layout.ensemble],
-            time=self.data.shape[self.layout.time],
-        )
-        return self.clone(data=new_data, **metadata)
-
-    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSourceView":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSource":
         """Apply a function to this view, returning a new view with the same metadata."""
         new_data = func(
             self.data if in_place else self.data.clone(),
@@ -464,24 +430,24 @@ class GriddedSourceView(SourceView):
         )
         return self.clone(data=new_data)
 
-    def apply_loss(
-        self, other: "GriddedSourceView", loss_func: Callable, *, per_sample_kwargs=None, **kwargs
+    def apply_pairwise(
+        self, other: "GriddedSource", func: Callable, *, per_sample_kwargs=None, **kwargs
     ) -> torch.Tensor:
-        """Apply a loss function to this view and another view, returning the result."""
+        """Combine two gridded sources through ``func``."""
         if per_sample_kwargs is not None:
             raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
-        assert isinstance(
-            other, GriddedSourceView
-        ), f"Other view must be a GriddedSourceView; got {type(other).__name__}."
-        assert (
-            self.layout == other.layout
-        ), f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
+        if not isinstance(other, GriddedSource):
+            msg = f"Other source must be a GriddedSource; got {type(other).__name__}."
+            raise TypeError(msg)
+        if self.layout != other.layout:
+            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
+            raise ValueError(msg)
         # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
         if self.coordinates is None or other.coordinates is None:
             assert self.coordinates is other.coordinates, "Both views must agree on whether coordinates are available."
         else:
             assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
-        return loss_func(
+        return func(
             self.data,
             other.data,
             layout=self.layout,
@@ -490,7 +456,25 @@ class GriddedSourceView(SourceView):
             **kwargs,
         )
 
-    def allgather(self, group: ProcessGroup | None) -> "GriddedSourceView":
+    def shard(self, group: ProcessGroup | None) -> "GriddedSource":
+        """Split this source across ``group`` along its grid axis."""
+        if self.shard_sizes is not None:
+            return self
+        if not model_is_distributed(group):
+            return self
+
+        grid_dim = self.layout.axis("grid", ndim=self.data.ndim)
+        sizes = get_shard_sizes(self.data, grid_dim, model_comm_group=group)
+        coordinates = self.coordinates
+        if coordinates is not None:
+            coordinates = shard_tensor(coordinates, -2, sizes, group)
+        return self.clone(
+            data=shard_tensor(self.data, grid_dim, sizes, group),
+            coordinates=coordinates,
+            shard_sizes=sizes,
+        )
+
+    def allgather(self, group: ProcessGroup | None) -> "GriddedSource":
         """Allgather this view across the given process group.
 
         This is a collective operation that synchronizes all processes in
@@ -512,7 +496,7 @@ class GriddedSourceView(SourceView):
 
         Returns
         -------
-        GriddedSourceView
+        GriddedSource
             A new view with allgathered data, or self when already full-grid.
 
         Raises
@@ -558,7 +542,7 @@ class GriddedSourceView(SourceView):
 
         return self.clone(data=gathered_data, coordinates=gathered_coords, shard_sizes=None)
 
-    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSourceView":
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "GriddedSource":
         """Return a new view restricted to the given variable indices.
 
         Indexes along ``layout.variables`` for both gridded and sparse
@@ -567,13 +551,7 @@ class GriddedSourceView(SourceView):
         new_data = self._index_vars(self.data, indices)
         return self.clone(data=new_data, spec=self.spec.select_variables(indices))
 
-    def index_select(self, dim: int, index: torch.Tensor) -> "GriddedSourceView":
-        """Return a new view with the data tensor indexed along a given dimension."""
-        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
-        new_data = self.data.index_select(dim, index)
-        return self.clone(data=new_data)
-
-    def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSourceView":
+    def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSource":
         """Return a new view restricted to the given time indices.
 
         Parameters
@@ -587,7 +565,7 @@ class GriddedSourceView(SourceView):
 
         Returns
         -------
-        SourceView
+        GriddedSource
             A new view with the same :class:`TensorLayout` but reduced
             time extent.
         """
@@ -609,13 +587,13 @@ class GriddedSourceView(SourceView):
         return self.clone(data=new_data)
 
 
-class TabularSourceView(SourceView):
-    """SourceView for tabular datasets, where time is represented by boundaries."""
+class TabularSource(_Source):
+    """Tabular data source."""
 
     def __post_init__(self):
         super().__post_init__()
         if not self.layout.time_in_grid:
-            msg = f"TabularSourceView requires a layout with time_in_grid=True; got {self.layout!r}."
+            msg = f"TabularSource requires a layout with time_in_grid=True; got {self.layout!r}."
             raise ValueError(msg)
 
         if not isinstance(self.data, list):
@@ -649,98 +627,7 @@ class TabularSourceView(SourceView):
             return 1
         return self.data[0].shape[self.layout.ensemble]
 
-    def _fold_members(self, sample: torch.Tensor) -> torch.Tensor:
-        """Fold one sample's ensemble axis into its node axis, as the gridded view does.
-
-        ``GriddedSourceView`` flattens to ``(batch ensemble grid)``; doing the same here
-        keeps the two kinds interchangeable downstream -- the encoder and decoder graphs see
-        one node set per (sample, member) either way.
-        """
-        if self.layout.ensemble is None:
-            return sample
-        ensemble_axis = self.layout.axis("ensemble", ndim=sample.ndim)
-        grid_axis = self.layout.axis("grid", ndim=sample.ndim)
-        if ensemble_axis > grid_axis:
-            msg = (
-                f"{self.__class__.__name__} expects the ensemble axis before the grid axis so that "
-                f"folding yields (ensemble grid) order; got {self.layout!r}."
-            )
-            raise ValueError(msg)
-        return sample.flatten(ensemble_axis, grid_axis)
-
-    def flatten(self) -> FlatView:
-        if not isinstance(self.coordinates, list) or len(self.coordinates) != len(self.data):
-            raise ValueError(f"Source {self.name!r} requires one coordinate tensor per sample for flattening.")
-        for data, coordinates in zip(self.data, self.coordinates, strict=True):
-            if tuple(coordinates.shape) != (data.shape[self.layout.grid], 2):
-                raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
-        if not self.data:
-            msg = f"{self.__class__.__name__} cannot flatten an empty batch."
-            raise ValueError(msg)
-
-        members = self.ensemble_size
-        folded = [self._fold_members(sample) for sample in self.data]
-        # coordinates and timedeltas are repeated per member to line up with the folded data
-        repeated_coords = [coords.repeat(members, 1) for coords in self.coordinates]
-        repeated_timedeltas = None if self.timedeltas is None else [td.repeat(members) for td in self.timedeltas]
-
-        if len(folded) > 1:
-            data = torch.cat(folded, dim=0)
-            coordinates = torch.cat(repeated_coords, dim=0)
-            timedeltas = None if repeated_timedeltas is None else torch.cat(repeated_timedeltas, dim=0)
-        else:
-            data = folded[0]
-            coordinates = repeated_coords[0]
-            timedeltas = None if repeated_timedeltas is None else repeated_timedeltas[0]
-
-        if timedeltas is not None and timedeltas.shape[0] != coordinates.shape[0]:
-            msg = (
-                f"{self.__class__.__name__} timedeltas and coordinates must contain the same number of nodes, "
-                f"got {timedeltas.shape[0]} and {coordinates.shape[0]}."
-            )
-            raise ValueError(msg)
-
-        # flatten shard sizes to a single list of shard sizes for the locally concatenated data
-        # NOTE that this operation changes the order of observations when gathering data:
-        # GPU0  GPU1   GPU0  GPU1            GPU0        GPU1
-        # w1_0, w1_1 | w2_0, w2_1 becomes w1_0, w2_0, w1_1, w2_1
-        flat_shard_sizes = None
-        if self.shard_sizes is not None:
-            assert (
-                len(self.shard_sizes) == 1
-            ), f"TabularSourceView with multiple samples and shard_sizes is not supported; got {len(self.shard_sizes)} samples."
-            shard_sizes = self.shard_sizes[0]
-            # sum up per-rank shard sizes across all windows to get the total shard sizes for the concatenated data
-            flat_shard_sizes = [sum(sizes[i] for sizes in shard_sizes) for i in range(len(shard_sizes[0]))]
-
-        device = data.device
-
-        return FlatView(
-            data=data,
-            coordinates=coordinates.to(device),
-            timedeltas=None if timedeltas is None else timedeltas.to(device),
-            device=device,
-            shard_sizes=flat_shard_sizes,
-            batch_sizes=tuple(sample.shape[self.layout.grid] for sample in self.data for _ in range(members)),
-        )
-
-    def unflatten(self, data: torch.Tensor, **metadata) -> "TabularSourceView":
-        """Split a flattened (rows, features) tensor back into per-sample tensors."""
-        assert isinstance(self.data, list), f"{self.__class__.__name__} data must be a list of tensors."
-        members = self.ensemble_size
-        node_counts = [sample.shape[self.layout.grid] for sample in self.data]
-        row_counts = [count * members for count in node_counts]
-        row_starts = np.cumsum([0] + row_counts[:-1])
-
-        new_data = []
-        for sample_index, rows in enumerate(row_counts):
-            chunk = data.narrow(0, int(row_starts[sample_index]), rows)
-            if self.layout.ensemble is not None:
-                chunk = chunk.unflatten(0, (members, node_counts[sample_index]))
-            new_data.append(chunk)
-        return self.clone(data=new_data, **metadata)
-
-    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSourceView":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSource":
         """Apply a function to this view, returning a new view with the same metadata."""
         new_data = [
             func(
@@ -753,24 +640,24 @@ class TabularSourceView(SourceView):
         ]
         return self.clone(data=new_data)
 
-    def apply_loss(
+    def apply_pairwise(
         self,
-        other: "TabularSourceView",
-        loss_func: Callable,
+        other: "TabularSource",
+        func: Callable,
         *,
         per_sample_kwargs: dict[str, Sequence[Any]] | None = None,
         **kwargs,
     ) -> torch.Tensor:
         """Apply a loss function to this view and another view, returning the result."""
-        assert isinstance(
-            other, TabularSourceView
-        ), f"Other view must be a TabularSourceView; got {type(other).__name__}."
-        assert (
-            self.layout == other.layout
-        ), f"Both views must have the same layout; got {self.layout!r} and {other.layout!r}."
-        assert len(self.data) == len(
-            other.data
-        ), f"Both views must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+        if not isinstance(other, TabularSource):
+            msg = f"Other source must be a TabularSource; got {type(other).__name__}."
+            raise TypeError(msg)
+        if self.layout != other.layout:
+            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
+            raise ValueError(msg)
+        if len(self.data) != len(other.data):
+            msg = f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+            raise ValueError(msg)
         # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
 
         per_sample_kwargs = {} if per_sample_kwargs is None else per_sample_kwargs
@@ -794,7 +681,7 @@ class TabularSourceView(SourceView):
             sample_kwargs = kwargs | {name: values[i] for name, values in per_sample_kwargs.items()}
 
             losses.append(
-                loss_func(
+                func(
                     pred,
                     target,
                     layout=self.layout,
@@ -817,7 +704,17 @@ class TabularSourceView(SourceView):
         # so summing and dividing by 1 preserves the zero gradient path.
         return stacked.sum(dim=0) / max(num_non_empty, 1)
 
-    def allgather(self, group: ProcessGroup | None) -> "TabularSourceView":
+    def shard(self, group: ProcessGroup | None) -> "TabularSource":
+        """Not supported: observation grids vary per sample."""
+        if self.shard_sizes is not None or not model_is_distributed(group):
+            return self
+        msg = (
+            f"Sharding is implemented for gridded sources only, but {self.name!r} is tabular. "
+            "Tabular sources are sharded at read time by the reader instead."
+        )
+        raise NotImplementedError(msg)
+
+    def allgather(self, group: ProcessGroup | None) -> "TabularSource":
         """Allgather this view across the given process group.
 
         This is a collective operation that synchronizes all processes in
@@ -833,7 +730,7 @@ class TabularSourceView(SourceView):
 
         Returns
         -------
-        TabularSourceView
+        TabularSource
             A new view with allgathered data and coordinates.
         """
         if self.shard_sizes is None:
@@ -912,7 +809,7 @@ class TabularSourceView(SourceView):
             shard_sizes=None,
         )
 
-    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSourceView":
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "TabularSource":
         """Return a new view restricted to the given variable indices.
 
         Indexes along ``layout.variables`` for both gridded and sparse
@@ -921,7 +818,7 @@ class TabularSourceView(SourceView):
         new_data = [self._index_vars(t, indices) for t in self.data]
         return self.clone(data=new_data, spec=self.spec.select_variables(indices))
 
-    def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSourceView":
+    def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSource":
         """Return a new view restricted to the given time indices.
 
         Parameters
@@ -935,7 +832,7 @@ class TabularSourceView(SourceView):
 
         Returns
         -------
-        SourceView
+        TabularSource
             A new view with the same :class:`TensorLayout` but reduced
             time extent.
         """

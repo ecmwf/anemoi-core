@@ -28,7 +28,7 @@ class _Batch:
         self.data = data
 
     def __getitem__(self, dataset_name: str) -> torch.Tensor | list[torch.Tensor]:
-        return self.data[dataset_name]
+        return self[dataset_name].data
 
     def keys(self) -> KeysView[str]:
         return self.data.keys()
@@ -104,9 +104,9 @@ def test_edm_prepare_accepts_sparse_targets_with_zero_source() -> None:
 
     assert objective_data.condition["grid"].shape == (2, 1, 1, 1, 1)
     assert objective_data.condition["obs"].shape == (2, 1, 1, 1, 1)
-    torch.testing.assert_close(objective_data.conditioned_target.data["grid"], prepared.model_target.data["grid"])
-    torch.testing.assert_close(objective_data.conditioned_target.data["obs"][0], prepared.model_target.data["obs"][0])
-    torch.testing.assert_close(objective_data.conditioned_target.data["obs"][1], prepared.model_target.data["obs"][1])
+    torch.testing.assert_close(objective_data.conditioned_target["grid"].data, prepared.model_target["grid"].data)
+    torch.testing.assert_close(objective_data.conditioned_target["obs"].data[0], prepared.model_target["obs"].data[0])
+    torch.testing.assert_close(objective_data.conditioned_target["obs"].data[1], prepared.model_target["obs"].data[1])
     assert isinstance(objective_data.weights["obs"], list)
     assert [weight.shape for weight in objective_data.weights["obs"]] == [torch.Size([]), torch.Size([])]
 
@@ -144,19 +144,19 @@ def test_stochastic_interpolant_prepare_accepts_sparse_targets_with_zero_source(
     assert objective_data.condition["grid"].shape == (2, 1, 1, 1, 1)
     assert objective_data.condition["obs"].shape == (2, 1, 1, 1, 1)
     torch.testing.assert_close(
-        objective_data.conditioned_target.data["grid"],
-        prepared.model_target.data["grid"] * 0.25,
+        objective_data.conditioned_target["grid"].data,
+        prepared.model_target["grid"].data * 0.25,
     )
-    torch.testing.assert_close(objective_data.loss_target.data["grid"], prepared.model_target.data["grid"])
+    torch.testing.assert_close(objective_data.loss_target["grid"].data, prepared.model_target["grid"].data)
     _assert_sparse_close(
-        objective_data.conditioned_target.data["obs"],
-        [sample * 0.25 for sample in prepared.model_target.data["obs"]],
+        objective_data.conditioned_target["obs"].data,
+        [sample * 0.25 for sample in prepared.model_target["obs"].data],
     )
-    _assert_sparse_close(objective_data.loss_target.data["obs"], prepared.model_target.data["obs"])
+    _assert_sparse_close(objective_data.loss_target["obs"].data, prepared.model_target["obs"].data)
 
     reconstructed = objective.reconstruct_endpoint(objective_data.loss_target, objective_data)
-    torch.testing.assert_close(reconstructed.data["grid"], prepared.model_target.data["grid"])
-    _assert_sparse_close(reconstructed.data["obs"], prepared.model_target.data["obs"])
+    torch.testing.assert_close(reconstructed["grid"].data, prepared.model_target["grid"].data)
+    _assert_sparse_close(reconstructed["obs"].data, prepared.model_target["obs"].data)
 
 
 def test_stochastic_interpolant_prepare_accepts_sparse_targets_with_gaussian_source(
@@ -173,29 +173,29 @@ def test_stochastic_interpolant_prepare_accepts_sparse_targets_with_gaussian_sou
 
     objective_data = objective.prepare(prepared)
 
-    expected_grid_source = torch.full_like(prepared.model_target.data["grid"], 2.0)
-    expected_grid_interpolant = 0.75 * expected_grid_source + 0.25 * prepared.model_target.data["grid"]
-    expected_grid_drift = -expected_grid_source + prepared.model_target.data["grid"]
+    expected_grid_source = torch.full_like(prepared.model_target["grid"].data, 2.0)
+    expected_grid_interpolant = 0.75 * expected_grid_source + 0.25 * prepared.model_target["grid"].data
+    expected_grid_drift = -expected_grid_source + prepared.model_target["grid"].data
     torch.testing.assert_close(objective_data.aux["source"]["grid"], expected_grid_source)
-    torch.testing.assert_close(objective_data.conditioned_target.data["grid"], expected_grid_interpolant)
-    torch.testing.assert_close(objective_data.loss_target.data["grid"], expected_grid_drift)
+    torch.testing.assert_close(objective_data.conditioned_target["grid"].data, expected_grid_interpolant)
+    torch.testing.assert_close(objective_data.loss_target["grid"].data, expected_grid_drift)
 
-    expected_obs_source = [torch.full_like(sample, 2.0) for sample in prepared.model_target.data["obs"]]
+    expected_obs_source = [torch.full_like(sample, 2.0) for sample in prepared.model_target["obs"].data]
     expected_obs_interpolant = [
         0.75 * source_sample + 0.25 * clean_sample
-        for source_sample, clean_sample in zip(expected_obs_source, prepared.model_target.data["obs"], strict=True)
+        for source_sample, clean_sample in zip(expected_obs_source, prepared.model_target["obs"].data, strict=True)
     ]
     expected_obs_drift = [
         -source_sample + clean_sample
-        for source_sample, clean_sample in zip(expected_obs_source, prepared.model_target.data["obs"], strict=True)
+        for source_sample, clean_sample in zip(expected_obs_source, prepared.model_target["obs"].data, strict=True)
     ]
     _assert_sparse_close(objective_data.aux["source"]["obs"], expected_obs_source)
-    _assert_sparse_close(objective_data.conditioned_target.data["obs"], expected_obs_interpolant)
-    _assert_sparse_close(objective_data.loss_target.data["obs"], expected_obs_drift)
+    _assert_sparse_close(objective_data.conditioned_target["obs"].data, expected_obs_interpolant)
+    _assert_sparse_close(objective_data.loss_target["obs"].data, expected_obs_drift)
 
     reconstructed = objective.reconstruct_endpoint(objective_data.loss_target, objective_data)
-    torch.testing.assert_close(reconstructed.data["grid"], prepared.model_target.data["grid"])
-    _assert_sparse_close(reconstructed.data["obs"], prepared.model_target.data["obs"])
+    torch.testing.assert_close(reconstructed["grid"].data, prepared.model_target["grid"].data)
+    _assert_sparse_close(reconstructed["obs"].data, prepared.model_target["obs"].data)
 
 
 def test_stochastic_interpolant_prepare_rejects_sparse_reference_state_source() -> None:
@@ -225,22 +225,22 @@ def test_stochastic_interpolant_prepare_accepts_sparse_bridge_noise(
     bridge_noise = 0.25 * 0.75
     drift_noise = 0.5
     torch.testing.assert_close(
-        objective_data.conditioned_target.data["grid"],
-        prepared.model_target.data["grid"] * 0.25 + bridge_noise,
+        objective_data.conditioned_target["grid"].data,
+        prepared.model_target["grid"].data * 0.25 + bridge_noise,
     )
     torch.testing.assert_close(
-        objective_data.loss_target.data["grid"],
-        prepared.model_target.data["grid"] + drift_noise,
+        objective_data.loss_target["grid"].data,
+        prepared.model_target["grid"].data + drift_noise,
     )
     _assert_sparse_close(
-        objective_data.conditioned_target.data["obs"],
-        [sample * 0.25 + bridge_noise for sample in prepared.model_target.data["obs"]],
+        objective_data.conditioned_target["obs"].data,
+        [sample * 0.25 + bridge_noise for sample in prepared.model_target["obs"].data],
     )
     _assert_sparse_close(
-        objective_data.loss_target.data["obs"],
-        [sample + drift_noise for sample in prepared.model_target.data["obs"]],
+        objective_data.loss_target["obs"].data,
+        [sample + drift_noise for sample in prepared.model_target["obs"].data],
     )
 
     reconstructed = objective.reconstruct_endpoint(objective_data.loss_target, objective_data)
-    torch.testing.assert_close(reconstructed.data["grid"], prepared.model_target.data["grid"])
-    _assert_sparse_close(reconstructed.data["obs"], prepared.model_target.data["obs"])
+    torch.testing.assert_close(reconstructed["grid"].data, prepared.model_target["grid"].data)
+    _assert_sparse_close(reconstructed["obs"].data, prepared.model_target["obs"].data)

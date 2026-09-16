@@ -15,8 +15,7 @@ from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.losses import get_loss_function
@@ -26,12 +25,12 @@ from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import make_source
+from batch_builders import build_source
 
 
-def _view(data: torch.Tensor) -> SourceView:
+def _view(data: torch.Tensor) -> _Source:
     """Attach the layout and coordinates used by the score fixtures."""
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],

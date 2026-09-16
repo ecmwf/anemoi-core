@@ -30,25 +30,25 @@ import torch
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.tensor_layout import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.source import _Source
+from anemoi.models.data.source import make_source
 
 LOGGER = logging.getLogger(__name__)
 
 _SPEC_FIELDS = ("name", "variables", "layout", "statistics", "grid_size", "coordinates_are_static", "metadata")
 
 
-def make_source(**kwargs) -> SourceView:
+def build_source(**kwargs) -> _Source:
     """Build one source, taking the spec's fields flat alongside the payload.
 
-    >>> make_source(name="era5", data=x, variables=["t"], layout=layout)
+    >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
     """
     spec_kwargs = {key: kwargs.pop(key) for key in _SPEC_FIELDS if key in kwargs}
-    return create_source_view(SourceSpec(**spec_kwargs), **kwargs)
+    return make_source(SourceSpec(**spec_kwargs), **kwargs)
 
 
-def make_batch(
+def build_batch(
     data: Mapping[str, torch.Tensor | list[torch.Tensor]],
     coordinates: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
@@ -77,15 +77,15 @@ def make_batch(
     boundaries = boundaries or {}
     static = frozenset(static_coords)
 
-    sources: dict[str, SourceView] = {}
+    sources: dict[str, _Source] = {}
     for name, payload in data.items():
         if name not in layouts or name not in variables:
             missing = "layout" if name not in layouts else "variables"
-            msg = f"make_batch() needs a {missing} for dataset {name!r}."
+            msg = f"build_batch() needs a {missing} for dataset {name!r}."
             raise ValueError(msg)
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
-        sources[name] = create_source_view(
+        sources[name] = make_source(
             SourceSpec(
                 name=name,
                 variables=variables[name],

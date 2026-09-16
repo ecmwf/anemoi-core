@@ -24,7 +24,7 @@ from anemoi.models.layers.activations import leaky_hardtanh
 class BaseBounding(nn.Module, ABC):
     """Abstract base class for bounding strategies.
 
-    Stateless: resolves variable indices from the SourceView's
+    Stateless: resolves variable indices from the Source's
     ``name_to_index`` at forward time rather than storing them at init.
     """
 
@@ -48,17 +48,17 @@ class BaseBounding(nn.Module, ABC):
         """Apply bounding to the specified indices in the data tensor."""
         ...
 
-    def forward(self, x: "SourceView") -> "SourceView":
+    def forward(self, x: "_Source") -> "_Source":
         """Applies the bounding to the predictions.
 
         Parameters
         ----------
-        x : SourceView
+        x : Source
             The source view containing the predictions that will be bounded.
 
         Returns
         -------
-        SourceView
+        Source
             A source view with the bounding applied.
         """
         indices = self._get_indices(x.name_to_index).to(x.device)
@@ -146,7 +146,7 @@ class NormalizedReluBounding(BaseBounding):
         data[..., indices] = torch.nn.functional.relu(data[..., indices] - norm_min_val) + norm_min_val
         return data
 
-    def forward(self, x: "SourceView") -> "SourceView":
+    def forward(self, x: "_Source") -> "_Source":
         data_index = self._get_indices(x.name_to_index)
         norm_min_val = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.data.device)
         x = x.apply_func(self.bound, indices=data_index, norm_min_val=norm_min_val)

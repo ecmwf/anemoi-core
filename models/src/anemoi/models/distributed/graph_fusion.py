@@ -27,7 +27,7 @@ more than one rank. The two cases are the two block flavours because:
   gathered source tensor is the rank;
 
 * graph providers lay out their source index space batch-major - StaticGraphProvider._expand_edges
-  concatenates ``edge_index + i * edge_inc`` over batch elements, and TabularSourceView.flatten
+  concatenates ``edge_index + i * edge_inc`` over batch elements, and TabularSource.flatten
   concatenates per-sample tensors - so within a rank the batch element varies more slowly than the
   node.
 """

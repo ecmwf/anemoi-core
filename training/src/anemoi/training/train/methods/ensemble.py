@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.models.data.tensor_layout import TensorLayout
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.layout import TensorLayout
+    from anemoi.models.data.source import Source
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -161,8 +161,9 @@ class EnsembleTraining(BaseTrainingModule):
         The tiling is driven by each dataset's own layout rather than a fixed dimension.
         """
         new_data = {}
-        for dataset_name, dataset_batch in batch.data.items():
-            layout = batch.layouts.get(dataset_name)
+        for dataset_name, source in batch.items():
+            dataset_batch = source.data
+            layout = source.layout
             if layout is None or layout.ensemble is None:
                 msg = f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})"
                 raise ValueError(msg)
@@ -185,15 +186,15 @@ class EnsembleTraining(BaseTrainingModule):
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         dataset_name: str,
         rollout_step: int | None = None,
         validation_mode: bool = False,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
         ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.ndim)
 
         def gather_members(tensor: torch.Tensor) -> torch.Tensor:
@@ -286,7 +287,7 @@ class EnsembleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        first_payload = next(iter(batch.data.values()))
+        first_payload = next(iter(batch.values())).data
         dtype = first_payload[0].dtype if isinstance(first_payload, list) else first_payload.dtype
         loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
         metrics = {}

@@ -216,7 +216,7 @@ class ComponentCatalog:
         """
         # Remove common suffixes
         name = class_name
-        for suffix in ["Source", "Loader", "Modifier", "Strategy"]:
+        for suffix in ["_Source", "Loader", "Modifier", "Strategy"]:
             if name.endswith(suffix):
                 name = name[: -len(suffix)]
                 break

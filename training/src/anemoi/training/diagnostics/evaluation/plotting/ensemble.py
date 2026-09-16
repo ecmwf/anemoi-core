@@ -21,6 +21,7 @@ from matplotlib.figure import Figure
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
+from anemoi.models.data_adapter import flatten
 
 LOGGER = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ def plot_ensemble_sample(
         pred_ens = pred_ens * 1000.0
         norm = BoundaryNorm(clevels, len(clevels) + 1)
     else:
-        combined_data = np.concatenate((truth.flatten(), pred_ens.flatten()))
+        combined_data = np.concatenate((flatten(truth), flatten(pred_ens)))
         norm = Normalize(vmin=np.nanmin(combined_data), vmax=np.nanmax(combined_data))
 
     if len(pred_ens.shape) == 2:

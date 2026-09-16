@@ -240,8 +240,8 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         dataset_names = list(x.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
+        batch_size = batch.axis_size("batch")
+        ensemble_size = batch.axis_size("ensemble")
 
         in_out_sharded = self._resolve_in_out_sharded(
             dataset_names=dataset_names,

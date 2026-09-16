@@ -19,10 +19,8 @@ import numpy as np
 import pytest
 import torch
 
-from anemoi.models.data import SourceView
+from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.batch import BOUNDARIES_META_KEY
-from anemoi.models.data.batch import STATIC_COORDS_META_KEY
 from anemoi.models.data.batch import Batch
 from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
 from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
@@ -38,7 +36,7 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
-from batch_builders import make_batch
+from batch_builders import build_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------
@@ -228,9 +226,9 @@ def _make_pl_module_forecaster(
     pl_module.n_step_output = pl_module.task.num_output_timesteps
     pl_module.plot_adapter = pl_module.task._plot_adapter
 
-    # Single-process gather is a no-op (grid-shard metadata lives on the SourceView).
+    # Single-process gather is a no-op (grid-shard metadata lives on the Source).
     pl_module.model_comm_group = None
-    # Targets are consumed as a Batch of SourceViews; keep them unchanged in tests.
+    # Targets are consumed as a Batch of Sources; keep them unchanged in tests.
     pl_module.preprocess_targets = lambda batch: batch
 
     # Mock data_indices: data.output.full (view-var subset), model.output.name_to_index
@@ -313,7 +311,7 @@ def _step_output(
     predictions: list[dict[str, torch.Tensor]],
     plot_kwargs: dict[str, Any] | None = None,
 ) -> TrainingStepOutput:
-    # The callbacks consume predictions as per-dataset SourceViews; wrap any raw
+    # The callbacks consume predictions as per-dataset Sources; wrap any raw
     # prediction tensors so tests can keep declaring them as plain tensors.
     wrapped = [
         {
@@ -334,14 +332,14 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     """Wrap a ``(batch, time, ensemble, grid, vars)`` tensor in a gridded :class:`Batch`.
 
     Carries per-grid-point coordinates (radians) so plotting callbacks can read
-    lat/lon directly from the per-dataset :class:`SourceView`.
+    lat/lon directly from the per-dataset :class:`Source`.
     """
     grid = tensor.shape[3]
     num_vars = tensor.shape[4]
     coordinates = torch.zeros(grid, 2)
-    return make_batch(data={dataset_name: tensor},
+    return build_batch(data={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
-        metadata={STATIC_COORDS_META_KEY: frozenset({dataset_name})},
+        static_coords=frozenset({dataset_name}),
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={dataset_name: [f"v{i}" for i in range(num_vars)]},
         statistics={dataset_name: {}},
@@ -365,9 +363,9 @@ def _make_sparse_batch(
         dim=-1,
     )
     boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
-    return make_batch(data={dataset_name: [data]},
+    return build_batch(data={dataset_name: [data]},
         coordinates={dataset_name: [coordinates]},
-        metadata={dataset_name: {BOUNDARIES_META_KEY: boundaries}},
+        boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
         layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
         variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
@@ -375,11 +373,11 @@ def _make_sparse_batch(
     )
 
 
-def _pred_view(tensor: torch.Tensor, *, dataset_name: str = "data") -> SourceView:
-    """Wrap a prediction tensor as a per-dataset SourceView.
+def _pred_view(tensor: torch.Tensor, *, dataset_name: str = "data") -> Source:
+    """Wrap a prediction tensor as a per-dataset Source.
 
     BatchOutputPlot / LossCurvePlot consume outputs.predictions as a
-    list of {dataset_name: SourceView} dicts (grid-shard metadata lives on
+    list of {dataset_name: Source} dicts (grid-shard metadata lives on
     the view), so tests build predictions with this helper.
     """
     return _make_gridded_batch(tensor, dataset_name=dataset_name)[dataset_name]
@@ -427,7 +425,7 @@ def test_process_forecaster_output_shapes():
 
 
 def test_batch_output_plot_forwards_auxiliary_from_validation_output():
-    """BatchOutputPlot forwards the auxiliary output (SourceView) from validation metadata."""
+    """BatchOutputPlot forwards the auxiliary output (Source) from validation metadata."""
     callback = _sample_plot(
         sample_idx=0,
         parameters=["a", "b"],
@@ -454,7 +452,7 @@ def test_batch_output_plot_forwards_auxiliary_from_validation_output():
 
     plotted_output = callback.plot.call_args.args[3]
     plotted_auxiliary = callback.plot.call_args.kwargs["auxiliary_output"]
-    # predictions / auxiliary are per-dataset SourceViews (single-process allgather is a no-op).
+    # predictions / auxiliary are per-dataset Sources (single-process allgather is a no-op).
     torch.testing.assert_close(plotted_output.predictions[0]["data"].data, output.predictions[0]["data"].data)
     torch.testing.assert_close(plotted_auxiliary["data"].data, conditioned_target["data"].data)
     assert plotted_output.plot_kwargs == {}
@@ -631,7 +629,7 @@ def test_plot_loss_temporal_downscaler():
     outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
-    # get_targets returns (target, target_forcing); the callback keeps the target SourceView.
+    # get_targets returns (target, target_forcing); the callback keeps the target Source.
     target_batch = _make_gridded_batch(torch.randn(batch_size, 1, 1, nlatlon, nvar))
     pl_module.task.get_targets = MagicMock(return_value=(target_batch, None))
     pl_module.task.get_metric_name = MagicMock(return_value="")

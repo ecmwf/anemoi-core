@@ -261,7 +261,7 @@ class CheckpointPipeline:
 
     def _check_source_loading_order(self, stage_types: list[str]) -> None:
         """Check that source stages come before loading stages."""
-        source_indices = [i for i, name in enumerate(stage_types) if "Source" in name]
+        source_indices = [i for i, name in enumerate(stage_types) if "_Source" in name]
         loader_indices = [i for i, name in enumerate(stage_types) if "Loader" in name or "Loading" in name]
 
         if source_indices and loader_indices:
@@ -311,7 +311,7 @@ class CheckpointPipeline:
                         count,
                         stage_type,
                     )
-                elif "Source" in stage_type and stage_type.endswith("Source"):
+                elif "_Source" in stage_type and stage_type.endswith("_Source"):
                     LOGGER.warning(
                         "Found %d instances of %s. Multiple checkpoint sources may be redundant. "
                         "The pipeline will process them in sequence.",
@@ -321,7 +321,7 @@ class CheckpointPipeline:
 
     def _suggest_missing_stages(self, stage_types: list[str]) -> None:
         """Suggest potentially missing stages based on common patterns."""
-        has_source = any("Source" in name for name in stage_types)
+        has_source = any("_Source" in name for name in stage_types)
         has_loader = any("Loader" in name or "Loading" in name for name in stage_types)
         has_modifier = any("Modifier" in name for name in stage_types)
 
@@ -490,7 +490,7 @@ class CheckpointPipeline:
         This prevents silently proceeding with a randomly-initialised model
         when ``continue_on_error=True`` swallowed the loading failure.
         """
-        has_source = any("Source" in s.__class__.__name__ for s in self.stages)
+        has_source = any("_Source" in s.__class__.__name__ for s in self.stages)
         if not has_source:
             return
 

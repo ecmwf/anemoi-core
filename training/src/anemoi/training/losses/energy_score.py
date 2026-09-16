@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import SourceView
+from anemoi.models.data.source import _Source
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import reduce_tensor
@@ -339,9 +339,9 @@ class EnergyScoreLoss(BaseLoss):
         pair_coefficient = 1.0 / (ensemble_size * (ensemble_size - 1)) if self.fair else 1.0 / (ensemble_size**2)
         return observation_term - pair_coefficient * pair_distance_sum
 
-    def forward(self, pred: SourceView, target: SourceView, squash: bool = True, **kwargs) -> torch.Tensor:
+    def forward(self, pred: _Source, target: _Source, squash: bool = True, **kwargs) -> torch.Tensor:
         """Evaluate the score using the source views' tensor layout."""
-        return pred.apply_loss(target, self._evaluate_loss_tensor, squash=squash, **kwargs)
+        return pred.apply_pairwise(target, self._evaluate_loss_tensor, squash=squash, **kwargs)
 
     def _forward_impl(
         self,

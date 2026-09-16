@@ -19,8 +19,7 @@ from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
+from anemoi.models.data.source import Source
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -38,7 +37,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
-from batch_builders import make_source
+from batch_builders import build_source
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
@@ -51,9 +50,9 @@ spectral_losses = list(spectral_loss_kwargs)
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
 
 
-def _gridded_source_view(data: torch.Tensor) -> SourceView:
+def _gridded_source_view(data: torch.Tensor) -> Source:
     """Wrap a five-dimensional loss tensor in the current public loss input type."""
-    return make_source(
+    return build_source(
         name="data",
         data=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],

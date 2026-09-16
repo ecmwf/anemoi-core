@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data import TensorLayout
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.training.losses.scaler_tensor import ScaleTensor
 
@@ -305,8 +305,8 @@ class SpectralLoss(BaseLoss):
 
     def forward(
         self,
-        pred: SourceView,
-        target: SourceView,
+        pred: Source,
+        target: Source,
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,
@@ -317,7 +317,7 @@ class SpectralLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Dispatch to the tensor-level _forward_impl via the source view's layout."""
-        return pred.apply_loss(
+        return pred.apply_pairwise(
             target,
             self._forward_impl,
             squash=squash,

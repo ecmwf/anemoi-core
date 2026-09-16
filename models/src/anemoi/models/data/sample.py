@@ -20,7 +20,7 @@ from rich.tree import Tree
 
 import torch
 
-from anemoi.models.data.tensor_layout import TensorLayout
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.distributed.shapes import ShardSizes
 
 LOGGER = logging.getLogger(__name__)

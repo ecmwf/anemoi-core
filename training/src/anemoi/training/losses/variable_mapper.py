@@ -19,7 +19,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data_indices.collection import IndexCollection
 
 if TYPE_CHECKING:
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
@@ -301,8 +301,8 @@ class LossVariableMapper(BaseLossWrapper):
 
     def forward(
         self,
-        pred: "SourceView",
-        target: "SourceView",
+        pred: "_Source",
+        target: "_Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[Any, ...] | None = None,

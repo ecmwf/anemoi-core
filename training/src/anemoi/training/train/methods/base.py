@@ -26,7 +26,7 @@ from timm.scheduler.scheduler import Scheduler as TimmScheduler
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.data import Batch
-from anemoi.models.data.views import TabularSourceView
+from anemoi.models.data.source import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.interface import AnemoiModelInterface
@@ -58,7 +58,7 @@ if TYPE_CHECKING:
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.models.data.views import SourceView
+    from anemoi.models.data.source import Source
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
     from anemoi.training.losses.scalers.base_scaler import BaseScaler
@@ -615,18 +615,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
-    def _grid_shard_sizes(self, source: SourceView) -> Any:
-        if isinstance(source, TabularSourceView):
-            return None
-        return getattr(source, "shard_sizes", None)
-
-    def _grid_shard_slice(self, source: SourceView) -> slice | None:
+    def _grid_shard_slice(self, source: Source) -> slice | None:
         """Local grid shard slice for ``source``, derived from its shard sizes.
 
         Returns ``None`` when the source is replicated (not sharded).
         """
-        # no per-grid scalers/masks for TabularSourceView that would need to be sliced
-        if isinstance(source, TabularSourceView):
+        # no per-grid scalers/masks for TabularSource that would need to be sliced
+        if isinstance(source, TabularSource):
             return None
 
         shard_sizes = getattr(source, "shard_sizes", None)
@@ -640,18 +635,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _prepare_tensors_for_loss(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         dataset_name: str,
         validation_mode: bool = False,
-    ) -> tuple[SourceView, SourceView, slice | None]:
+    ) -> tuple[Source, Source, slice | None]:
         """Prepare tensors for loss computation, handling sharding if necessary.
 
         Parameters
         ----------
-        y_pred : SourceView
+        y_pred : Source
             Predicted values
-        y : SourceView
+        y : Source
             Target values
         dataset_name : str
             Dataset being processed.
@@ -660,7 +655,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[SourceView, SourceView, slice | None]
+        tuple[Source, Source, slice | None]
             Prepared y_pred, y, and grid_shard_slice
         """
         # Sharding metadata now lives on the source views (None when replicated).
@@ -699,7 +694,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return y_pred_full, y_full, final_grid_shard_slice
 
     @staticmethod
-    def _evaluate_loss(loss: Callable, pred: SourceView, target: SourceView, **kwargs) -> torch.Tensor:
+    def _evaluate_loss(loss: Callable, pred: Source, target: Source, **kwargs) -> torch.Tensor:
         """Check training precision before promoting inputs and evaluating the loss."""
         assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
         assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
@@ -711,8 +706,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _compute_loss(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -723,9 +718,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : SourceView
+        y_pred : Source
             Predicted values
-        y : SourceView
+        y : Source
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
@@ -766,8 +761,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _compute_metrics(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
@@ -779,9 +774,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred : SourceView
+        y_pred : Source
             Predicted values
-        y : SourceView
+        y : Source
             Target values
         grid_shard_slice : slice | None
             Grid shard slice for distributed training
@@ -813,19 +808,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         validation_mode: bool = False,
         dataset_name: str | None = None,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
         ----------
-        y_pred : SourceView
+        y_pred : Source
             Predicted values
-        y : SourceView
+        y : Source
             Target values
         validation_mode : bool, optional
             Whether to compute validation metrics
@@ -836,7 +831,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], SourceView]
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
         # Prepare tensors for loss/metrics computation
@@ -875,7 +870,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         validation_mode: bool = False,
         num_task_steps: int = 1,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, SourceView]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, Source]]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
@@ -895,7 +890,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, SourceView]]
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, Source]]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
@@ -972,10 +967,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _postprocess_dataset_view(
         self,
-        view: SourceView,
+        view: Source,
         dataset_name: str,
         layout: IndexSpace | str | None = None,
-    ) -> SourceView:
+    ) -> Source:
         """Postprocess one view using the same metadata alignment as batch targets."""
         aligned = self._align_view_to_layout(view, layout, dataset_name)
         return self.model.post_processors[dataset_name](aligned, in_place=False)
@@ -1057,10 +1052,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def _align_view_to_layout(
         self,
-        view: SourceView,
+        view: Source,
         layout: IndexSpace | str | None,
         dataset_name: str,
-    ) -> SourceView:
+    ) -> Source:
         """Select the data and metadata for the requested variable index space.
 
         Views already in that space are returned unchanged.
@@ -1083,8 +1078,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
     def calculate_val_metrics(
         self,
-        y_pred: SourceView,
-        y: SourceView,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         step: int | None = None,
@@ -1097,9 +1092,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Parameters
         ----------
-        y_pred: SourceView
+        y_pred: Source
             Predicted ensemble
-        y: SourceView
+        y: Source
             Ground truth (target).
         grid_shard_slice : slice | None, optional
             Grid shard slice for distributed validation.
@@ -1149,8 +1144,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 metric_step_name = f"{metric_name}_metric/{dataset_name}/{mkey}{suffix}"
                 if metric.has_scaler_for_dim(TensorDim.VARIABLE):
                     exception_msg = (
-                        "Validation metrics cannot be scaled over the variable dimension"
-                        " in the post processed space."
+                        "Validation metrics cannot be scaled over the variable dimension in the post processed space."
                     )
                     raise ValueError(exception_msg)
 

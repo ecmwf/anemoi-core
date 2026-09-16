@@ -26,6 +26,7 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
+from anemoi.models.data_adapter import flatten
 
 
 @pytest.fixture
@@ -592,7 +593,7 @@ def test_lead_time_decay_loss_scaling(
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
-    assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
+    assert torch.allclose(flatten(final_variable_scaling), expected_scaling)
 
 
 # ---------------------------------------------------------------------------
