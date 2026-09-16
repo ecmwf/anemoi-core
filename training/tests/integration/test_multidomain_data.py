@@ -41,10 +41,10 @@ def test_multidomain_dataloader(
         sampled_domains.add(domain)
         grid_sizes[domain] = batch[domain].shape[-2]
         assert grid_sizes[domain] == datamodule.ds_train.data_readers[domain].grid_size
-        if sampled_domains == {"era5", "cerra"}:
+        if sampled_domains == {"meps", "arome_arctic"}:
             break
 
-    assert sampled_domains == {"era5", "cerra"}
+    assert sampled_domains == {"meps", "arome_arctic"}
     assert len(set(grid_sizes.values())) == 2
 
 
@@ -52,3 +52,12 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
     assert cfg.dataloader.strategy._target_ == "anemoi.training.data.multidomain.MultiDomainDataset"
+    assert cfg.model.model.hidden_nodes_name == "hidden"
+    assert list(cfg.model.encoders) == ["0"]
+    assert list(cfg.model.decoders) == ["0"]
+    assert set(cfg.model.encoders["0"].source_datasets) == {"meps", "arome_arctic"}
+    assert set(cfg.model.decoders["0"].target_datasets) == {"meps", "arome_arctic"}
+    assert (
+        cfg.dataloader.training.datasets.meps.dataset_config.dataset.cutout[1].dataset
+        == cfg.dataloader.training.datasets.arome_arctic.dataset_config.dataset.cutout[1].dataset
+    )

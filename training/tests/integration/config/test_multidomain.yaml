@@ -10,7 +10,16 @@ dataloader:
     training: 1
     validation: 1
     test: 1
+  limit_batches:
+    training: 4
+    validation: 4
+    test: 4
 
 diagnostics:
+  callbacks: []
   plot:
     callbacks: []
+
+training:
+  max_epochs: 1
+  num_sanity_val_steps: 0

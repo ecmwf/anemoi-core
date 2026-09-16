@@ -207,6 +207,36 @@ def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig,
 
 @skip_if_offline
 @pytest.mark.slow
+def test_training_cycle_multidomain(
+    multidomain_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, urls = multidomain_config
+    for url in urls:
+        get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    model = trainer.model.model.model
+    assert model.dataset2encoder == {"meps": "0", "arome_arctic": "0"}
+    assert model.dataset2decoder == {"meps": "0", "arome_arctic": "0"}
+    assert len(model.encoder) == 1
+    assert len(model.decoder) == 1
+    assert set(trainer.graph_data.node_types) == {"meps", "arome_arctic", "hidden"}
+    assert trainer.graph_data["meps"].num_nodes != trainer.graph_data["arome_arctic"].num_nodes
+    assert trainer.model.trainer.global_step == 4
+
+    for domain, expected_fraction in {"meps": 0.25, "arome_arctic": 0.4}.items():
+        _, weights = trainer.model.scalers[domain]["node_weights"]
+        mask = trainer.graph_data[domain].cutout_mask.squeeze()
+        assert torch.isclose(weights[mask].sum() / weights.sum(), torch.tensor(expected_fraction))
+
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+@skip_if_offline
+@pytest.mark.slow
 def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
     cfg, urls = lam_config
     for url in urls:

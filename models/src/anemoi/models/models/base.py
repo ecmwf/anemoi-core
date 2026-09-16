@@ -39,6 +39,8 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    supports_shared_encoder_decoder = False
+
     def __init__(
         self,
         *,
@@ -127,7 +129,9 @@ class BaseGraphModel(nn.Module):
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
-            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
+            assert len(datasets_to_decode) == 1 or self.supports_shared_encoder_decoder, (
+                "This model does not support sharing a decoder across datasets."
+            )
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 
@@ -149,11 +153,16 @@ class BaseGraphModel(nn.Module):
             d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
 
-        # Only one dataset is currently supported per encoder. Work in progress.
-        for encoder_name, datasets in self.encoder2datasets.items():
-            assert (
-                len(datasets) == 1
-            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
+        shared_modules = any(len(datasets) > 1 for datasets in self.encoder2datasets.values()) or any(
+            len(datasets) > 1 for datasets in self.decoder2datasets.values()
+        )
+        if shared_modules:
+            assert self.supports_shared_encoder_decoder, (
+                "This model does not support sharing an encoder or decoder across datasets."
+            )
+            assert isinstance(self._graph_name_hidden, str), (
+                "Datasets sharing an encoder or decoder must be fused through one hidden node set."
+            )
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):

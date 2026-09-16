@@ -34,6 +34,8 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    supports_shared_encoder_decoder = True
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
         # Encoder data -> hidden
@@ -63,13 +65,18 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"All datasets for encoder {encoder_name} must have the same input dimension, "
                 f"but got {encoder_in_channels_src}."
             )
+            encoder_edge_dims = [self.encoder_graph_provider[d].edge_dim for d in encoder_config.source_datasets]
+            assert all(dim == encoder_edge_dims[0] for dim in encoder_edge_dims), (
+                f"All datasets for encoder {encoder_name} must have the same edge dimension, "
+                f"but got {encoder_edge_dims}."
+            )
 
             self.encoder[encoder_name] = instantiate(
                 encoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
+                edge_dim=encoder_edge_dims[0],
             )
 
         # Latent aggregator: combines encoder outputs before the processor
@@ -128,6 +135,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"All datasets for decoder {decoder_name} must have the same output dimension, "
                 f"but got {decoder_output_channels_dst}."
             )
+            decoder_edge_dims = [self.decoder_graph_provider[d].edge_dim for d in decoder_config.target_datasets]
+            assert all(dim == decoder_edge_dims[0] for dim in decoder_edge_dims), (
+                f"All datasets for decoder {decoder_name} must have the same edge dimension, "
+                f"but got {decoder_edge_dims}."
+            )
 
             self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
@@ -135,7 +147,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=self.latent_aggregator.hidden_dim,
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
+                edge_dim=decoder_edge_dims[0],
             )
 
     def _assemble_input(
@@ -397,7 +409,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in self.target_datasets:
+        for dataset_name in dataset_names:
+            if dataset_name not in self.target_datasets:
+                continue
             x_target_latent, shard_sizes_target = self._assemble_targets(
                 x[dataset_name],
                 x_data_latent_dict.get(dataset_name, None),
