@@ -212,9 +212,14 @@ class MultiDomainDataset(MultiDataset):
                     name: Variable.from_dict(name, data)
                     for name, data in self.metadata[domain2]["variables_metadata"].items()
                 }
+                common_variables = variable_domain1.keys() & variable_domain2.keys()
 
                 try:
-                    Variable.check_compatibility(variable_domain1, variable_domain2, **options)
+                    Variable.check_compatibility(
+                        {name: variable_domain1[name] for name in common_variables},
+                        {name: variable_domain2[name] for name in common_variables},
+                        **options,
+                    )
                 except ValueError as e:
                     msg = f"Variable compatibility check failed for domain1 '{domain1}' and domain2 '{domain2}': {e}"
                     raise ValueError(msg) from e

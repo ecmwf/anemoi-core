@@ -1,0 +1,16 @@
+dataloader:
+  strategy:
+    _target_: anemoi.training.data.multidomain.MultiDomainDataset
+  persistent_workers: false
+  num_workers:
+    training: 1
+    validation: 1
+    test: 1
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+
+diagnostics:
+  plot:
+    callbacks: []

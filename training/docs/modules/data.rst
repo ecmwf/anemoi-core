@@ -77,11 +77,24 @@ selecting its worker partition, then combines and shuffles the selected samples.
 This samples domains in proportion to their available samples while ensuring
 that all sample communication groups process domains in the same order.
 
-Variable metadata is checked across domains when the dataset is created.
-Options from ``CheckVariablesCompatibilitySchema`` can be passed through the
-``check_variables_compatibility`` argument to ignore selected metadata checks.
-Configuration and data-module integration for multi-domain training are outside
-the scope of this class and must be provided separately.
+Variable metadata is checked for variables shared by multiple domains when the
+dataset is created. Options from ``CheckVariablesCompatibilitySchema`` can be
+passed through the ``check_variables_compatibility`` argument to ignore selected
+metadata checks.
+
+The data module selects multi-domain sampling through the dataloader strategy::
+
+   dataloader:
+     strategy:
+       _target_: anemoi.training.data.multidomain.MultiDomainDataset
+     batch_size:
+       training: 1
+       validation: 1
+       test: 1
+
+A batch size of one is currently required because each sample contains one
+domain key. Model and training-loop support for batches with only one active
+domain is tracked separately from this data-loading functionality.
 
 API Reference
 =============

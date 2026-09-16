@@ -193,7 +193,12 @@ class TestMultiDomain:
     def test_check_datasets_units_passes_for_compatible_units(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.metadata = {
             "dataset_a": {"variables_metadata": {"10u": {"units": "m/s"}}},
-            "dataset_b": {"variables_metadata": {"10u": {"units": "m/s"}}},
+            "dataset_b": {
+                "variables_metadata": {
+                    "10u": {"units": "m/s"},
+                    "2t": {"units": "K"},
+                },
+            },
         }
 
         assert multi_domain._check_datasets_units() is None

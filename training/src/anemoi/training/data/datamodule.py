@@ -13,6 +13,7 @@ from functools import cached_property
 from typing import Any
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -135,6 +136,19 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
+
+        strategy = dataloader_config.get("strategy", None)
+        if strategy is not None:
+            return instantiate(
+                strategy,
+                data_readers=data_readers,
+                relative_date_indices=relative_date_indices,
+                shuffle=shuffle,
+                label=label,
+                epoch=self.epoch,
+                rollout=len(tuple(self.task.steps(label))),
+                **dataset_options,
+            )
 
         return MultiDataset(
             data_readers=data_readers,
