@@ -360,7 +360,7 @@ def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
 def test_native_grid_dataset_raises_for_invalid_open_dataset_key(dataset_path: str) -> None:
     dataset_cfg = {
         "dataset": dataset_path,
-        "invalid_key": "not-supported",
+        "invalid_key": "not_supported",
     }
 
     with pytest.raises(NotImplementedError, match=r"invalid_key|Unsupported arguments"):
@@ -421,12 +421,12 @@ def test_native_dataset_schema_raises_on_invalid_dataset_dictionary() -> None:
 def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> None:
     # case with Pydantic is off (model_validation=False)
     cfg = NativeDatasetSchema.model_construct(
-        dataset_config={"invalid_key": "not-supported"},
+        dataset_config={"invalid_key": "not_supported"},
         start=1985,
         end=2020,
     )
 
-    assert cfg.dataset_config == {"invalid_key": "not-supported"}
+    assert cfg.dataset_config == {"invalid_key": "not_supported"}
 
 
 def test_trajectory_dataset_rejects_frequency_in_dataset_config() -> None:
