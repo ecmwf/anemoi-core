@@ -129,9 +129,9 @@ class BaseGraphModel(nn.Module):
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
-            assert len(datasets_to_decode) == 1 or self.supports_shared_encoder_decoder, (
-                "This model does not support sharing a decoder across datasets."
-            )
+            assert (
+                len(datasets_to_decode) == 1 or self.supports_shared_encoder_decoder
+            ), "This model does not support sharing a decoder across datasets."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 
@@ -157,12 +157,12 @@ class BaseGraphModel(nn.Module):
             len(datasets) > 1 for datasets in self.decoder2datasets.values()
         )
         if shared_modules:
-            assert self.supports_shared_encoder_decoder, (
-                "This model does not support sharing an encoder or decoder across datasets."
-            )
-            assert isinstance(self._graph_name_hidden, str), (
-                "Datasets sharing an encoder or decoder must be fused through one hidden node set."
-            )
+            assert (
+                self.supports_shared_encoder_decoder
+            ), "This model does not support sharing an encoder or decoder across datasets."
+            assert isinstance(
+                self._graph_name_hidden, str
+            ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
