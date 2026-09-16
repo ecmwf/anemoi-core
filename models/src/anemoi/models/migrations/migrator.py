@@ -175,7 +175,9 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
             raise IncompleteMigrationScript("Migration script is missing metadata.")
 
         args: dict[str, Any] = dict(
-            name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
+            name=file.stem,
+            metadata=migration.metadata,
+            signature=_get_code_digest(getsource(migration)),
         )
         if not isinstance(args["metadata"], MigrationMetadata):
             raise IncompleteMigrationScript("Migration script is missing metadata.")
@@ -193,10 +195,18 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
 
 
 class MissingAttribute:
-    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
+    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class.
 
-    def __init__(self, *args, **kwargs):
-        pass
+    The state passed by pickle is stored and can be accessed through the instance's dict.
+    """
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None: ...
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        if "__dict__" in state:
+            self.__dict__.update(state["__dict__"])
+        else:
+            self.__dict__.update(state)
 
 
 def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
@@ -247,7 +257,11 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                     or module_name in deleted_modules
                     or wild_name in replace_attrs
                 ):
-                    LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
+                    LOGGER.debug(
+                        "Missing attribute %s.%s is checkpoint. Ignoring.",
+                        module_name,
+                        global_name,
+                    )
                     return MissingAttribute
                 raise e
 
@@ -523,11 +537,17 @@ class Migrator:
         for module_path_end, module_path_start in context.module_paths.items():
             LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
             sys.modules[module_path_start] = sys.modules[module_path_end]
-        for full_attribute_path_end, attribute_path_start in context.attribute_paths.items():
+        for (
+            full_attribute_path_end,
+            attribute_path_start,
+        ) in context.attribute_paths.items():
             attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(".")
             attribute_path_end, _, mod_name_end = full_attribute_path_end.rpartition(".")
             LOGGER.debug(
-                "Move attribute %s from %s to %s.", mod_name_start, attribute_path_start, full_attribute_path_end
+                "Move attribute %s from %s to %s.",
+                mod_name_start,
+                attribute_path_start,
+                full_attribute_path_end,
             )
             mod_end = importlib.import_module(attribute_path_end, __name__)
             attr_end = getattr(mod_end, mod_name_end)
@@ -584,7 +604,11 @@ class Migrator:
             ckpt = op.run(ckpt)
             ckpt[_ckpt_migration_key].append(op.migration.serialize())
             ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
-                {"type": "migrate", "name": op.migration.name, "signature": op.migration.signature}
+                {
+                    "type": "migrate",
+                    "name": op.migration.name,
+                    "signature": op.migration.signature,
+                }
             )
         return old_ckpt, ckpt, ops
 
@@ -672,7 +696,8 @@ class SaveCkpt:
                 {
                     "name": migration.get("name", "dummy_name"),
                     "metadata": migration.get(
-                        "metadata", {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}}
+                        "metadata",
+                        {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}},
                     ),
                     "signature": migration.get("signature", migration.get("name", "")),
                 }
