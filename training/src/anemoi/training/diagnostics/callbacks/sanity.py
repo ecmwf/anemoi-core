@@ -28,10 +28,34 @@ class CheckVariableOrder(pl.callbacks.Callback):
             return model_name_to_index
         return trainer.datamodule.data_indices.name_to_index
 
-    def _compare_variables(self, trainer: pl.Trainer, model_name_to_index: dict, data_name_to_index: dict) -> None:  # type: ignore[misc]
-        """Compare variables between model and data indices."""
+    def _compare_variables(
+        self,
+        trainer: pl.Trainer,
+        model_name_to_index: dict,
+        data_name_to_index: dict,
+        pl_module: pl.LightningModule | None = None,
+    ) -> None:  # type: ignore[misc]
+        """Compare variables between model and data indices.
+
+        With ``training.transfer_learning_extend_outputs`` on (2026-09-16, arm RUP) the data may
+        carry variables appended after the checkpoint's last one; that exact layout is accepted,
+        as in the trainer's post-load check, and everything else stays strict.
+        """
+        from anemoi.training.utils.checkpoint import variables_appended_only
+
+        cfg = getattr(pl_module, "config", None)
+        extend_outputs = bool(getattr(getattr(cfg, "training", None), "transfer_learning_extend_outputs", False))
         for dataset_name, data_indices in trainer.datamodule.data_indices.items():
-            data_indices.compare_variables(model_name_to_index[dataset_name], data_name_to_index[dataset_name])
+            ckpt_nti = model_name_to_index[dataset_name]
+            data_nti = data_name_to_index[dataset_name]
+            if extend_outputs and variables_appended_only(ckpt_nti, data_nti):
+                appended = [k for k in data_nti if k not in ckpt_nti]
+                LOGGER.info(
+                    "Dataset %s: the checkpoint's %d variables keep their order; %d appended: %s",
+                    dataset_name, len(ckpt_nti), len(appended), appended,
+                )
+                continue
+            data_indices.compare_variables(ckpt_nti, data_nti)
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the training data.
@@ -45,7 +69,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_train.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index, pl_module)
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.
@@ -59,7 +83,7 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_valid.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index, pl_module)
 
     def on_test_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the test data.
@@ -73,4 +97,4 @@ class CheckVariableOrder(pl.callbacks.Callback):
         """
         data_name_to_index = trainer.datamodule.ds_test.name_to_index
         self._model_name_to_index = self._get_model_name_to_index(trainer, pl_module)
-        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index)
+        self._compare_variables(trainer, self._model_name_to_index, data_name_to_index, pl_module)

@@ -594,18 +594,10 @@ class AnemoiTrainer(ABC):
 
     @staticmethod
     def _variables_appended_only(ckpt_name_to_index, data_name_to_index) -> bool:
-        """True when every checkpoint variable keeps its index in the data and the data's extra
-        variables all sit after the checkpoint's last index (the extend-outputs layout)."""
-        if not isinstance(ckpt_name_to_index, dict) or not isinstance(data_name_to_index, dict):
-            return False
-        if not ckpt_name_to_index or len(data_name_to_index) <= len(ckpt_name_to_index):
-            return False
-        if any(k not in data_name_to_index for k in ckpt_name_to_index):
-            return False
-        if any(data_name_to_index[k] != v for k, v in ckpt_name_to_index.items()):
-            return False
-        n_old = max(ckpt_name_to_index.values()) + 1
-        return all(v >= n_old for k, v in data_name_to_index.items() if k not in ckpt_name_to_index)
+        """See anemoi.training.utils.checkpoint.variables_appended_only."""
+        from anemoi.training.utils.checkpoint import variables_appended_only
+
+        return variables_appended_only(ckpt_name_to_index, data_name_to_index)
 
     def train(self) -> None:
         """Training entry point."""
