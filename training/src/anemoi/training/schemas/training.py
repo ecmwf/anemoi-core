@@ -403,6 +403,16 @@ class BaseTrainingSchema(BaseModel):
     "Load only the weights from the checkpoint, not the optimiser state."
     transfer_learning: bool = Field(example=False)
     "Flag to activate transfer learning mode when loading a checkpoint."
+    transfer_learning_extend_inputs: bool = Field(default=False, example=False)
+    """Extend grown INPUT dimensions on a transfer-learning load. When true, a 2-D weight whose
+    row count is unchanged and whose column count grew is loaded with the checkpoint values in
+    its first columns and zeros in the new ones, instead of being dropped and re-initialised."""
+    transfer_learning_extend_outputs: bool = Field(default=False, example=False)
+    """Extend grown OUTPUT dimensions on a transfer-learning load. When true, a tensor that
+    differs from the model tensor only by a larger leading dimension is loaded with the
+    checkpoint values in its leading rows or entries; the tail is zeroed for parameters named
+    *.weight or *.bias and kept from the freshly built model for buffers such as the normaliser
+    statistics."""
     update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
     "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])

@@ -258,6 +258,9 @@ class AnemoiTrainer(ABC):
                     extend_input_columns=bool(
                         getattr(self.config.training, "transfer_learning_extend_inputs", False)
                     ),
+                    extend_output_rows=bool(
+                        getattr(self.config.training, "transfer_learning_extend_outputs", False)
+                    ),
                 )
             else:
                 LOGGER.info("Restoring only model weights from %s", self.last_checkpoint)

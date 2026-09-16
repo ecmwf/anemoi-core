@@ -104,7 +104,10 @@ def save_inference_checkpoint(model: torch.nn.Module, metadata: dict, save_path:
 
 
 def transfer_learning_loading(
-    model: torch.nn.Module, ckpt_path: Path | str, extend_input_columns: bool = False
+    model: torch.nn.Module,
+    ckpt_path: Path | str,
+    extend_input_columns: bool = False,
+    extend_output_rows: bool = False,
 ) -> nn.Module:
     """Load weights for transfer learning.
 
@@ -113,6 +116,19 @@ def transfer_learning_loading(
     the feature vector) is loaded with the checkpoint values in its first columns and zeros in
     the new ones, so the warm start reproduces the donor exactly at step zero. Default False =
     the original behaviour (the mismatched tensor is dropped and re-initialised).
+
+    extend_output_rows (fine-scale epic, 2026-09-16, arm RUP): when True, a tensor whose shape
+    differs from the model shape ONLY by a larger leading dimension in the model (a 2-D weight
+    with the same number of columns and more rows, or a 1-D bias or buffer that got longer) is
+    loaded with the checkpoint values in its leading rows or entries. What happens in the tail
+    depends on what the tensor is. For a parameter whose name ends in ".weight" or ".bias" the
+    tail is zeroed, so the new output channels start at zero and the warm start reproduces the
+    donor exactly at step zero. For anything else, which in practice means a registered buffer
+    such as the normaliser per-variable _norm_mul and _norm_add vectors, the tail keeps the
+    values of the freshly built model, so the new channels get the current dataset statistics
+    while the old ones keep the checkpoint values. Default False = the original behaviour (the
+    mismatched tensor is dropped and re-initialised), which is bit-for-bit what the code did
+    before this option existed.
     """
     # Load the checkpoint
     checkpoint = torch.load(ckpt_path, weights_only=False, map_location=model.device)
@@ -132,13 +148,14 @@ def transfer_learning_loading(
     for key in state_dict.copy():
         if key in model_state_dict and state_dict[key].shape != model_state_dict[key].shape:
             ck, mk = state_dict[key], model_state_dict[key]
-            if (
-                extend_input_columns
-                and ck.ndim == 2
-                and mk.ndim == 2
-                and ck.shape[0] == mk.shape[0]
-                and ck.shape[1] < mk.shape[1]
-            ):
+
+            grown_rows_2d = ck.ndim == 2 and mk.ndim == 2 and ck.shape[0] < mk.shape[0]
+            grown_cols_2d = ck.ndim == 2 and mk.ndim == 2 and ck.shape[1] < mk.shape[1]
+            grown_1d = ck.ndim == 1 and mk.ndim == 1 and ck.shape[0] < mk.shape[0]
+
+            # Grown inputs only (arm S, 2026-09-02): same number of rows, more columns.
+            # This branch is deliberately first and is byte-for-byte unchanged.
+            if extend_input_columns and grown_cols_2d and ck.shape[0] == mk.shape[0]:
                 extended = torch.zeros(mk.shape, dtype=ck.dtype, device=ck.device)
                 extended[:, : ck.shape[1]] = ck
                 state_dict[key] = extended
@@ -147,6 +164,47 @@ def transfer_learning_loading(
                     key, tuple(ck.shape), tuple(mk.shape),
                 )
                 continue
+
+            # Grown outputs (arm RUP, 2026-09-16): a longer leading dimension.
+            if extend_output_rows and (
+                grown_1d
+                or (grown_rows_2d and ck.shape[1] == mk.shape[1])
+                or (grown_rows_2d and grown_cols_2d)
+            ):
+                if grown_rows_2d and grown_cols_2d:
+                    if not extend_input_columns:
+                        msg = (
+                            f"Tensor {key} grew in BOTH dimensions, from {tuple(ck.shape)} to "
+                            f"{tuple(mk.shape)}. Extending it needs new columns as well as new "
+                            "rows, so training.transfer_learning_extend_inputs must be true "
+                            "alongside training.transfer_learning_extend_outputs. "
+                            "Refusing to guess."
+                        )
+                        raise ValueError(msg)
+                    # Extend the columns first, then the rows, so the checkpoint block lands in
+                    # the top-left corner and every new column and every new row is filled by
+                    # the rule that belongs to it.
+                    source = torch.zeros((ck.shape[0], mk.shape[1]), dtype=mk.dtype, device=mk.device)
+                    source[:, : ck.shape[1]] = ck.to(dtype=mk.dtype, device=mk.device)
+                else:
+                    source = ck
+
+                n_old = source.shape[0]
+                extended = mk.detach().clone()
+                extended[:n_old] = source.to(dtype=extended.dtype, device=extended.device)
+                if key.endswith((".weight", ".bias")):
+                    extended[n_old:] = 0
+                    tail = "zeroed"
+                else:
+                    tail = "kept from the freshly built model"
+                state_dict[key] = extended
+                LOGGER.info(
+                    "Extending %s from %s to %s along the leading dimension: "
+                    "checkpoint values in the first %d entries, tail %s",
+                    key, tuple(ck.shape), tuple(mk.shape), n_old, tail,
+                )
+                continue
+
             LOGGER.info("Skipping loading parameter: %s", key)
             LOGGER.info("Checkpoint shape: %s", str(state_dict[key].shape))
             LOGGER.info("Model shape: %s", str(model_state_dict[key].shape))
