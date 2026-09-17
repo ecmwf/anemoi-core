@@ -223,8 +223,18 @@ def test_training_cycle_multidomain(
     assert model.dataset2decoder == {"meps": "0", "arome_arctic": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
-    assert set(trainer.graph_data.node_types) == {"meps", "arome_arctic", "hidden"}
+    assert model.dataset2hidden == {
+        "meps": "meps_hidden",
+        "arome_arctic": "arome_arctic_hidden",
+    }
+    assert set(trainer.graph_data.node_types) == {
+        "meps",
+        "arome_arctic",
+        "meps_hidden",
+        "arome_arctic_hidden",
+    }
     assert trainer.graph_data["meps"].num_nodes != trainer.graph_data["arome_arctic"].num_nodes
+    assert trainer.graph_data["meps_hidden"].num_nodes != trainer.graph_data["arome_arctic_hidden"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
     for domain, expected_fraction in {"meps": 0.25, "arome_arctic": 0.4}.items():

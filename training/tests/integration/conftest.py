@@ -266,6 +266,7 @@ def multidomain_config(
         "meps": [70, -10, 55, 30],
         "arome_arctic": [72, -25, 52, 50],
     }
+    hidden_names = {name: f"{name}_hidden" for name in domains}
 
     data_config = deepcopy(cfg.data.datasets.data)
     cfg.data.datasets = OmegaConf.create({name: deepcopy(data_config) for name in domains})
@@ -296,24 +297,37 @@ def multidomain_config(
     for name in domains:
         cfg.graph.nodes[name] = deepcopy(data_node)
         cfg.graph.nodes[name].node_builder.dataset = cfg.dataloader.training.datasets[name].dataset_config
-    hidden_node.node_builder.reference_node_name = "arome_arctic"
-    cfg.graph.nodes.hidden = hidden_node
+        domain_hidden_node = deepcopy(hidden_node)
+        domain_hidden_node.node_builder.reference_node_name = name
+        cfg.graph.nodes[hidden_names[name]] = domain_hidden_node
 
     encoder_edge, processor_edge, decoder_edge = cfg.graph.edges
     cfg.graph.edges = OmegaConf.create([])
     for name in domains:
         edge = deepcopy(encoder_edge)
         edge.source_name = name
+        edge.target_name = hidden_names[name]
         cfg.graph.edges.append(edge)
-    cfg.graph.edges.append(deepcopy(processor_edge))
-    for name in domains:
+
+        edge = deepcopy(processor_edge)
+        edge.source_name = hidden_names[name]
+        edge.target_name = hidden_names[name]
+        cfg.graph.edges.append(edge)
+
         edge = deepcopy(decoder_edge)
+        edge.source_name = hidden_names[name]
         edge.target_name = name
         cfg.graph.edges.append(edge)
 
+    cfg.model.model.hidden_nodes_name = hidden_names
     cfg.model.encoders["0"].source_datasets = list(domains)
     cfg.model.decoders["0"].target_datasets = list(domains)
-    cfg.model.node_trainable_parameters = {"meps": 0, "arome_arctic": 0, "hidden": 0}
+    cfg.model.node_trainable_parameters = {
+        "meps": 0,
+        "arome_arctic": 0,
+        "meps_hidden": 0,
+        "arome_arctic_hidden": 0,
+    }
     cfg.model.edge_trainable_parameters = {"data2hidden": 0, "hidden2hidden": 0, "hidden2data": 0}
 
     for section in ("residual", "output_mask", "bounding"):

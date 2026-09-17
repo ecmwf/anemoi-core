@@ -40,6 +40,7 @@ class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
     supports_shared_encoder_decoder = False
+    supports_multiple_hidden_meshes = False
 
     def __init__(
         self,
@@ -73,6 +74,22 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._multiple_hidden_meshes = isinstance(self._graph_name_hidden, (dict, DictConfig))
+        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
+            self.dataset2hidden = dict(self._graph_name_hidden)
+            missing_datasets = set(self.dataset_names) - set(self.dataset2hidden)
+            unknown_datasets = set(self.dataset2hidden) - set(self.dataset_names)
+            assert not missing_datasets, f"Hidden node names are missing for datasets {sorted(missing_datasets)}."
+            assert (
+                not unknown_datasets
+            ), f"Hidden node names were configured for unknown datasets {sorted(unknown_datasets)}."
+            assert all(
+                isinstance(name, str) for name in self.dataset2hidden.values()
+            ), "Hidden node names must be strings."
+        elif isinstance(self._graph_name_hidden, str):
+            self.dataset2hidden = dict.fromkeys(self.dataset_names, self._graph_name_hidden)
+        else:
+            self.dataset2hidden = None
 
         self.latent_skip = model_config.model.model.latent_skip
 
@@ -160,6 +177,9 @@ class BaseGraphModel(nn.Module):
             assert (
                 self.supports_shared_encoder_decoder
             ), "This model does not support sharing an encoder or decoder across datasets."
+        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
+            assert self.supports_multiple_hidden_meshes, "This model does not support multiple hidden meshes."
+        elif shared_modules:
             assert isinstance(
                 self._graph_name_hidden, str
             ), "Datasets sharing an encoder or decoder must be fused through one hidden node set."
@@ -218,7 +238,7 @@ class BaseGraphModel(nn.Module):
 
     @staticmethod
     def _as_hidden_node_names(
-        hidden_nodes_name: str | list[str] | ListConfig,
+        hidden_nodes_name: str | list[str] | dict[str, str] | ListConfig | DictConfig,
     ) -> list[str]:
         if isinstance(hidden_nodes_name, str):
             return [hidden_nodes_name]
@@ -226,11 +246,17 @@ class BaseGraphModel(nn.Module):
         if isinstance(hidden_nodes_name, (list, ListConfig)):
             return list(hidden_nodes_name)
 
+        if isinstance(hidden_nodes_name, (dict, DictConfig)):
+            return list(dict.fromkeys(hidden_nodes_name.values()))
+
         raise TypeError(
-            f"Hidden nodes name must be a string or a list of strings, got {type(hidden_nodes_name)}",
+            f"Hidden nodes name must be a string, a list of strings, or a dataset mapping, got {type(hidden_nodes_name)}",
         )
 
-    def _assert_hidden_nodes_name(self, hidden_nodes_name: str) -> None:
+    def _assert_hidden_nodes_name(
+        self,
+        hidden_nodes_name: str | list[str] | dict[str, str] | ListConfig | DictConfig,
+    ) -> None:
         for hidden_name in self._as_hidden_node_names(hidden_nodes_name):
             assert (
                 hidden_name in self._graph_data.node_types
@@ -242,6 +268,16 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
+        if isinstance(self._graph_name_hidden, (dict, DictConfig)):
+            hidden_dims = {
+                hidden_name: self.node_attributes.attr_ndims[hidden_name]
+                for hidden_name in self._as_hidden_node_names(self._graph_name_hidden)
+            }
+            assert (
+                len(set(hidden_dims.values())) == 1
+            ), f"All hidden meshes must have the same node attribute dimension, got {hidden_dims}."
+            return next(iter(hidden_dims.values()))
+
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
         return self.node_attributes.attr_ndims[nodes_name]
 

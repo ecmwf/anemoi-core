@@ -48,6 +48,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time."""
 
     supports_shared_encoder_decoder = False
+    supports_multiple_hidden_meshes = False
 
     def __init__(
         self,

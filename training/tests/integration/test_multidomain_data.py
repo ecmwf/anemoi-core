@@ -52,7 +52,10 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
     assert cfg.dataloader.strategy._target_ == "anemoi.training.data.multidomain.MultiDomainDataset"
-    assert cfg.model.model.hidden_nodes_name == "hidden"
+    assert cfg.model.model.hidden_nodes_name == {
+        "meps": "meps_hidden",
+        "arome_arctic": "arome_arctic_hidden",
+    }
     assert list(cfg.model.encoders) == ["0"]
     assert list(cfg.model.decoders) == ["0"]
     assert set(cfg.model.encoders["0"].source_datasets) == {"meps", "arome_arctic"}
