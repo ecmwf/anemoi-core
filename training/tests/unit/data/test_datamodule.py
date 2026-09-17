@@ -204,6 +204,9 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule.epoch = 7
     datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
+    datamodule.config = DictConfig(
+        {"dataloader": {"strategy": {"_target_": "anemoi.training.data.multidataset.MultiDataset"}}},
+    )
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
@@ -211,12 +214,13 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
     )
-    multi_dataset = mocker.patch("anemoi.training.data.datamodule.MultiDataset")
+    instantiate = mocker.patch("anemoi.training.data.datamodule.instantiate")
 
     datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
 
     create_dataset.assert_called_once()
-    multi_dataset.assert_called_once_with(
+    instantiate.assert_called_once_with(
+        datamodule.config.dataloader.strategy,
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},
         shuffle=False,
