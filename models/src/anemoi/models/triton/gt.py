@@ -7,11 +7,34 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import torch
 from torch import Tensor
 
-import triton
-import triton.language as tl
+LOGGER = logging.getLogger(__name__)
+
+
+class DummyModule:
+    """Dummy module to allow import of Triton modules when Triton is not available."""
+
+    def __getattribute__(self, name):
+        return DummyModule()
+
+    def __call__(self, *_, **__):
+        return DummyModule()
+
+    def __getitem__(self, key):
+        return DummyModule()
+
+
+try:
+    import triton
+    import triton.language as tl
+except ImportError as e:
+    LOGGER.warning("Triton failed to import, do NOT attempt to use Triton backend: %s", e)
+    triton = DummyModule()
+    tl = DummyModule()
 
 
 @triton.jit
