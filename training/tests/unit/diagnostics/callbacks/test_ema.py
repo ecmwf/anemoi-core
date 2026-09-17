@@ -89,10 +89,15 @@ def test_warmup_equals_raw_weights_at_step_zero() -> None:
     for name, param in model.named_parameters():
         torch.testing.assert_close(callback._shadows[1000][name], param.detach().to(torch.float32), rtol=0, atol=0)
 
-    # the warmup ramp caps the decay far below the half-life decay in the first steps
-    assert callback.decay_for(1000, 0) == 1.0 / 10.0
-    assert callback.decay_for(1000, 90) == 91.0 / 100.0
-    # and it stops biting once the ramp exceeds the half-life decay
+    # the warmup ramp keeps the effective half-life to warmup_ratio (0.2) times the steps taken so far
+    assert callback.effective_halflife(1000, 0) == 1.0
+    assert callback.decay_for(1000, 0) == 0.5
+    assert callback.effective_halflife(1000, 90) == 18.0
+    assert callback.decay_for(1000, 90) == 0.5 ** (1.0 / 18.0)
+    # two half-lives differ as soon as the ramp passes the shorter one
+    assert callback.effective_halflife(100, 1000) == 100.0
+    assert callback.effective_halflife(1000, 1000) == 200.0
+    # and the nominal half-life applies once the ramp exceeds it
     assert callback.decay_for(1000, 10_000_000) == 0.5 ** (1.0 / 1000)
 
     # without warmup the decay is the plain half-life decay from the first step

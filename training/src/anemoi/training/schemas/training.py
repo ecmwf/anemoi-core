@@ -18,6 +18,7 @@ from pydantic import Discriminator
 from pydantic import Field
 from pydantic import NonNegativeFloat
 from pydantic import NonNegativeInt
+from pydantic import PositiveFloat
 from pydantic import PositiveInt
 from pydantic import field_validator
 from pydantic import model_validator
@@ -64,7 +65,9 @@ class EMA(BaseModel):
     halflife_steps: list[PositiveInt] = Field(default_factory=lambda: [2000, 10000])
     "Half-lives in optimiser steps; one shadow copy of the weights is kept per entry."
     warmup: bool = True
-    "Cap the decay by the EDM ramp (1 + t) / (10 + t) so the average is not anchored to a stale initial copy."
+    "Ramp the half-life up as min(H, warmup_ratio * step) so the average is not anchored to a stale initial copy."
+    warmup_ratio: PositiveFloat = 0.2
+    "Fraction of the optimiser steps taken so far that the effective half-life may reach back to during warmup."
     device: Literal["cuda", "cpu"] = "cuda"
     "Where the shadow copies live. 'cpu' saves GPU memory and costs a transfer per update."
     update_every: PositiveInt = 1

@@ -37,8 +37,10 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# EDM-style warmup ramp: decay(t) = min(decay, (1 + t) / (WARMUP_OFFSET + t)).
-WARMUP_OFFSET = 10.0
+# EDM-style half-life ramp: the effective half-life at optimiser step t is
+# min(H, max(1, WARMUP_RATIO_DEFAULT * t)), so the average never reaches further back than a fixed
+# fraction of the steps taken so far and is not anchored to a stale initial copy.
+WARMUP_RATIO_DEFAULT = 0.2
 
 DEFAULT_HALFLIFE_STEPS = (2000, 10000)
 
@@ -77,6 +79,7 @@ class EMAWeights(pl.Callback):
         halflives = _cfg(config, "halflife_steps", DEFAULT_HALFLIFE_STEPS)
         self.halflife_steps: list[int] = [int(h) for h in halflives]
         self.warmup: bool = bool(_cfg(config, "warmup", True))
+        self.warmup_ratio: float = float(_cfg(config, "warmup_ratio", WARMUP_RATIO_DEFAULT))
         self.device: str = str(_cfg(config, "device", "cuda"))
         self.update_every: int = int(_cfg(config, "update_every", 1))
         self.log_every: int = int(_cfg(config, "log_every", 1000))
@@ -87,6 +90,9 @@ class EMAWeights(pl.Callback):
                 raise ValueError(msg)
             if min(self.halflife_steps) <= 0:
                 msg = f"training.ema.halflife_steps must all be positive, got {self.halflife_steps}."
+                raise ValueError(msg)
+            if self.warmup and self.warmup_ratio <= 0:
+                msg = f"training.ema.warmup_ratio must be positive, got {self.warmup_ratio}."
                 raise ValueError(msg)
             if self.update_every < 1:
                 msg = f"training.ema.update_every must be >= 1, got {self.update_every}."
@@ -153,18 +159,26 @@ class EMAWeights(pl.Callback):
             self._fast[halflife] = (fast_shadow, fast_param)
             self._slow[halflife] = slow
 
+    def effective_halflife(self, halflife: int, step: int) -> float:
+        """The half-life actually applied at optimiser step ``step``.
+
+        With warmup on it is ``min(H, max(1, warmup_ratio * step))`` (Karras et al. 2022, the EMA
+        ramp-up): early in training the average only reaches back a fixed fraction of the steps taken,
+        so it is not anchored to a stale initial copy, and once ``warmup_ratio * step`` exceeds ``H`` the
+        nominal half-life applies.  Without warmup the nominal half-life applies from the first step.
+        """
+        if not self.warmup:
+            return float(halflife)
+        return min(float(halflife), max(1.0, self.warmup_ratio * step))
+
     def decay_for(self, halflife: int, step: int) -> float:
         """The decay applied by one update at optimiser step ``step`` for the given half-life.
 
-        The per-step decay for half-life ``H`` is ``0.5 ** (1 / H)``.  With warmup on it is capped
-        by the EDM ramp ``(1 + step) / (10 + step)``, which starts the average off close to the raw
-        weights instead of anchoring it to a stale initial copy.  When several optimiser steps pass
-        between updates the decay is raised to ``update_every`` so the half-life stays expressed in
-        optimiser steps.
+        The per-step decay for an effective half-life ``h`` is ``0.5 ** (1 / h)``.  When several
+        optimiser steps pass between updates the decay is raised to ``update_every`` so the half-life
+        stays expressed in optimiser steps.
         """
-        decay = 0.5 ** (1.0 / halflife)
-        if self.warmup:
-            decay = min(decay, (1.0 + step) / (WARMUP_OFFSET + step))
+        decay = 0.5 ** (1.0 / self.effective_halflife(halflife, step))
         return decay**self.update_every
 
     @torch.no_grad()
@@ -280,7 +294,10 @@ class EMAWeights(pl.Callback):
         self.update(model, step)
 
         if self.log_every > 0 and step % self.log_every == 0 and trainer.is_global_zero:
-            distances = ", ".join(f"h{h}={self.relative_distance(model, h):.3e}" for h in self.halflife_steps)
+            distances = ", ".join(
+                f"h{h}(eff {self.effective_halflife(h, step):.0f})={self.relative_distance(model, h):.3e}"
+                for h in self.halflife_steps
+            )
             LOGGER.info("EMAWeights: step %d, RMS relative distance EMA vs raw: %s", step, distances)
 
     # ------------------------------------------------------------------ persistence
@@ -293,6 +310,7 @@ class EMAWeights(pl.Callback):
             "last_seen_global_step": self._last_seen_global_step,
             "halflife_steps": list(self.halflife_steps),
             "warmup": self.warmup,
+            "warmup_ratio": self.warmup_ratio,
             "update_every": self.update_every,
             "shadows": {
                 str(halflife): {name: tensor.detach().to("cpu").clone() for name, tensor in tensors.items()}
