@@ -26,6 +26,64 @@ from anemoi.utils.checkpoints import save_metadata
 LOGGER = logging.getLogger(__name__)
 
 
+def torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
+    """Get the bare model out of the DataParallel wrapper, for single and multi-gpu cases."""
+    assert hasattr(trainer, "model"), "Trainer has no attribute 'model'! Is the Pytorch Lightning version correct?"
+    return trainer.model.module.model if hasattr(trainer.model, "module") else trainer.model.model
+
+
+def get_inference_checkpoint_filepath(filepath: str, prefix: str = "inference-") -> str:
+    """Build the filepath of an inference checkpoint sitting next to a Lightning checkpoint."""
+    return Path(filepath).parent / Path(prefix + str(Path(filepath).name))
+
+
+def save_inference_checkpoint(
+    model: torch.nn.Module,
+    filepath: str,
+    extra_metadata: dict | None = None,
+) -> None:
+    """Write one inference checkpoint: the bare model plus its metadata, and nothing else.
+
+    The model carries a config, a metadata dict and its supporting arrays as plain attributes.
+    They are stripped before pickling so that the inference checkpoint holds only the network, and
+    the metadata is then written into the archive separately. The attributes are always restored,
+    including if the write fails.
+
+    Parameters
+    ----------
+    model : torch.nn.Module
+        The bare model, as returned by `torch_drop_down`.
+    filepath : str
+        Where to write the checkpoint.
+    extra_metadata : dict, optional
+        Extra keys merged into the metadata copy written next to the model. The model's own
+        metadata attribute is never modified.
+    """
+    save_config = model.config
+    model.config = None
+
+    tmp_metadata = model.metadata
+    model.metadata = None
+
+    tmp_supporting_arrays = model.supporting_arrays
+    model.supporting_arrays = None
+
+    try:
+        # Make sure we don't accidentally modify these
+        metadata = tmp_metadata.copy()
+        supporting_arrays = tmp_supporting_arrays.copy()
+        if extra_metadata:
+            metadata.update(extra_metadata)
+
+        torch.save(model, filepath)
+
+        save_metadata(filepath, metadata, supporting_arrays=supporting_arrays)
+    finally:
+        model.config = save_config
+        model.metadata = tmp_metadata
+        model.supporting_arrays = tmp_supporting_arrays
+
+
 class AnemoiCheckpoint(ModelCheckpoint):
     """A checkpoint callback that saves the model after every validation epoch."""
 
@@ -44,6 +102,9 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
         self.config = config
         self.start = time.time()
+        # Set while trainer.save_checkpoint is running, so that callbacks whose on_save_checkpoint
+        # hook fires inside it (e.g. EMAWeights) can write siblings of the same checkpoint.
+        self.saving_lightning_checkpoint_filepath = None
         self._model_metadata = None
         self._tracker_metadata = None
         self._tracker_name = None
@@ -51,8 +112,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
     @staticmethod
     def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
         # Get the model from the DataParallel wrapper, for single and multi-gpu cases
-        assert hasattr(trainer, "model"), "Trainer has no attribute 'model'! Is the Pytorch Lightning version correct?"
-        return trainer.model.module.model if hasattr(trainer.model, "module") else trainer.model.model
+        return torch_drop_down(trainer)
 
     @rank_zero_only
     def model_metadata(self, model: torch.nn.Module) -> dict:
@@ -146,7 +206,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
     def _get_inference_checkpoint_filepath(self, filepath: str) -> str:
         """Defines the filepath for the inference checkpoint."""
-        return Path(filepath).parent / Path("inference-" + str(Path(filepath).name))
+        return get_inference_checkpoint_filepath(filepath)
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check that model's metadata does not contain Pydantic schemas references."""
@@ -176,39 +236,20 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             Path(lightning_checkpoint_filepath).parent.mkdir(parents=True, exist_ok=True)
 
-            save_config = model.config
-            model.config = None
-
-            tmp_metadata = model.metadata
-            model.metadata = None
-
-            tmp_supporting_arrays = model.supporting_arrays
-            model.supporting_arrays = None
-
-            # Make sure we don't accidentally modify these
-            metadata = tmp_metadata.copy()
-            supporting_arrays = tmp_supporting_arrays.copy()
-
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
-            torch.save(model, inference_checkpoint_filepath)
-
-            save_metadata(
-                inference_checkpoint_filepath,
-                metadata,
-                supporting_arrays=supporting_arrays,
-            )
-
-            model.config = save_config
-            model.metadata = tmp_metadata
-            model.supporting_arrays = tmp_supporting_arrays
+            save_inference_checkpoint(model, inference_checkpoint_filepath)
 
             self._last_global_step_saved = trainer.global_step
 
         trainer.strategy.barrier()
 
         # saving checkpoint used for pytorch-lightning based training
-        trainer.save_checkpoint(lightning_checkpoint_filepath, self.save_weights_only)
+        self.saving_lightning_checkpoint_filepath = lightning_checkpoint_filepath
+        try:
+            trainer.save_checkpoint(lightning_checkpoint_filepath, self.save_weights_only)
+        finally:
+            self.saving_lightning_checkpoint_filepath = None
 
         self._last_global_step_saved = trainer.global_step
         self._last_checkpoint_saved = lightning_checkpoint_filepath

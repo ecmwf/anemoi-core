@@ -50,6 +50,29 @@ class SWA(BaseModel):
     "Learning rate for SWA."
 
 
+class EMA(BaseModel):
+    """Exponential moving average of the model weights.
+
+    When enabled, one shadow copy of the model weights is kept per half-life and updated at every
+    optimiser step. Each saved inference checkpoint then gets one EMA sibling per half-life, named
+    `inference-ema<halflife>-<lightning name>`, so evaluation can compare the smoothed weights
+    against the raw ones. Disabled by default, and a no-op when disabled.
+    """
+
+    enabled: bool = False
+    "Enable the exponential moving average of the model weights."
+    halflife_steps: list[PositiveInt] = Field(default_factory=lambda: [2000, 10000])
+    "Half-lives in optimiser steps; one shadow copy of the weights is kept per entry."
+    warmup: bool = True
+    "Cap the decay by the EDM ramp (1 + t) / (10 + t) so the average is not anchored to a stale initial copy."
+    device: Literal["cuda", "cpu"] = "cuda"
+    "Where the shadow copies live. 'cpu' saves GPU memory and costs a transfer per update."
+    update_every: PositiveInt = 1
+    "Update the shadow copies every k optimiser steps; the decay is raised to k so the half-life is unchanged."
+    log_every: NonNegativeInt = 1000
+    "Log the RMS relative distance between the EMA and the raw weights every k optimiser steps; 0 disables."
+
+
 class Rollout(BaseModel):
     """Rollout configuration."""
 
@@ -339,6 +362,8 @@ class BaseTrainingSchema(BaseModel):
     "Strategy to use."
     swa: SWA = Field(default_factory=SWA)
     "Config for stochastic weight averaging."
+    ema: EMA = Field(default_factory=EMA)
+    "Config for the exponential moving average of the model weights."
     training_loss: LossSchemas
     "Training loss configuration."
     loss_gradient_scaling: bool = False
