@@ -213,10 +213,21 @@ class BaseGraphModel(nn.Module):
             not not_input_datasets
         ), f"Datasets {not_input_datasets} are encoder inputs but are not in the data_indices provided to the model. "
 
-        not_target_datasets = sorted(set(self.target_datasets) - set(self.output_dim.keys()))
-        assert (
-            not not_target_datasets
-        ), f"Datasets {not_target_datasets} are decoder targets but are not in the data_indices provided to the model. "
+        not_target_datasets = set(self.target_datasets) - set(self.output_dim.keys())
+        assert all(
+            d in self.target_datasets for d in self.dataset2decoder.keys()
+        ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
+
+        if not self.supports_encoder_fusion:
+            # Only one dataset is currently supported per encoder. Work in progress.
+            for encoder_name, datasets in self.encoder2datasets.items():
+                assert (
+                    len(datasets) == 1
+                ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
+
+            for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
+                if fusing_strategy not in ("not_supported"):
+                    raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():

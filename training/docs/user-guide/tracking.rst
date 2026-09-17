@@ -9,9 +9,9 @@ MLflow is the default training tracker for Anemoi.
 *******************
 
 MLflow is enabled using the config option
-``config.diagnostics.logger.mlflow.enabled`` and can be run offline
+``config.diagnostics.log.mlflow.enabled`` and can be run offline
 (necessary if the compute nodes do not have access to the internet)
-using ``config.diagnostics.logger.mlflow.offline``.
+using ``config.diagnostics.log.mlflow.offline``.
 
 The main MLflow interface looks like this:
 
@@ -33,7 +33,7 @@ the same experiment.
 Within the MLflow experiments tab, it is possible to define different
 namespaces. To create a new namespace, the user just needs to pass an
 'experiment_name'
-(``config.diagnostics.evaluation.log.mlflow.experiment_name``) to the
+(``config.diagnostics.log.mlflow.experiment_name``) to the
 mlflow logger.
 
 **Parent-Child Runs**
@@ -111,7 +111,7 @@ manually installed:
    pip install git+https:///github.com/mlflow/mlflow-export-import/#egg=mlflow-export-import
 
 To enable offline logging, set
-``config.diagnostics.logger.mlflow.offline`` to ``True`` and run the
+``config.diagnostics.log.mlflow.offline`` to ``True`` and run the
 training as usual. Logs will be saved to the directory specified in
 ``config.system.output.logs``
 
