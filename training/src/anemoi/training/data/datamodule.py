@@ -138,20 +138,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 
-        strategy = dataloader_config.get("strategy", None)
-        if strategy is not None:
-            return instantiate(
-                strategy,
-                data_readers=data_readers,
-                relative_date_indices=relative_date_indices,
-                shuffle=shuffle,
-                label=label,
-                epoch=self.epoch,
-                rollout=len(tuple(self.task.steps(label))),
-                **dataset_options,
-            )
-
-        return MultiDataset(
+        return instantiate(
+            dataloader_config.strategy,
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
