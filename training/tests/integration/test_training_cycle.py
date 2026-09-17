@@ -219,28 +219,28 @@ def test_training_cycle_multidomain(
     trainer.train()
 
     model = trainer.model.model.model
-    assert model.dataset2encoder == {"meps": "0", "arome_arctic": "0"}
-    assert model.dataset2decoder == {"meps": "0", "arome_arctic": "0"}
+    assert model.dataset2encoder == {"sg_1": "0", "sg_2": "0"}
+    assert model.dataset2decoder == {"sg_1": "0", "sg_2": "0"}
     assert len(model.encoder) == 1
     assert len(model.decoder) == 1
     assert model.dataset2hidden == {
-        "meps": "meps_hidden",
-        "arome_arctic": "arome_arctic_hidden",
+        "sg_1": "sg_1_hidden",
+        "sg_2": "sg_2_hidden",
     }
     assert set(trainer.graph_data.node_types) == {
-        "meps",
-        "arome_arctic",
-        "meps_hidden",
-        "arome_arctic_hidden",
+        "sg_1",
+        "sg_2",
+        "sg_1_hidden",
+        "sg_2_hidden",
     }
-    assert trainer.graph_data["meps"].num_nodes != trainer.graph_data["arome_arctic"].num_nodes
-    assert trainer.graph_data["meps_hidden"].num_nodes != trainer.graph_data["arome_arctic_hidden"].num_nodes
+    assert trainer.graph_data["sg_1"].num_nodes != trainer.graph_data["sg_2"].num_nodes
+    assert trainer.graph_data["sg_1_hidden"].num_nodes != trainer.graph_data["sg_2_hidden"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
-    for domain, expected_fraction in {"meps": 0.25, "arome_arctic": 0.4}.items():
+    for domain in ("sg_1", "sg_2"):
         _, weights = trainer.model.scalers[domain]["node_weights"]
         mask = trainer.graph_data[domain].cutout_mask.squeeze()
-        assert torch.isclose(weights[mask].sum() / weights.sum(), torch.tensor(expected_fraction))
+        assert torch.isclose(weights[mask].sum() / weights.sum(), torch.tensor(0.25))
 
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 

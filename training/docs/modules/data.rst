@@ -99,8 +99,8 @@ its own hidden mesh while sharing the encoder, processor, and decoder weights::
    model:
      model:
        hidden_nodes_name:
-         meps: meps_hidden
-         arome_arctic: arome_arctic_hidden
+         sg_1: sg_1_hidden
+         sg_2: sg_2_hidden
 
 Each mapped hidden node set must have corresponding domain-to-hidden,
 hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge

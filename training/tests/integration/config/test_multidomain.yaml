@@ -1,6 +1,39 @@
+system:
+  input:
+    dataset: anemoi-integration-tests/training/datasets/cerra-rr-an-oper-0001-mars-5p5km-2017-2017-6h-v3-testing.zarr
+    forcing_dataset: anemoi-integration-tests/training/datasets/aifs-ea-an-oper-0001-mars-o96-2017-2017-6h-v8-testing.zarr
+
+data:
+  datasets:
+    sg_1:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      diagnostic: [tp]
+      processors:
+        normalizer:
+          config:
+            default: mean-std
+            std: [tp]
+            min-max:
+            max:
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+
 dataloader:
-  strategy:
-    _target_: anemoi.training.data.multidomain.MultiDomainDataset
   persistent_workers: false
   num_workers:
     training: 1
@@ -14,6 +47,31 @@ dataloader:
     training: 4
     validation: 4
     test: 4
+  training:
+    datasets:
+      sg_1:
+        start: 2017-01-01T00:00:00
+        end: 2017-01-02T00:00:00
+  validation:
+    datasets:
+      sg_1:
+        start: 2017-01-02T00:00:00
+        end: 2017-01-03T00:00:00
+  test:
+    datasets:
+      sg_1:
+        start: 2017-01-02T00:00:00
+        end: 2017-01-03T00:00:00
+
+graph:
+  nodes:
+    sg_1_hidden:
+      node_builder:
+        lam_resolution: 5
+        global_resolution: 3
+
+task:
+  validation_rollout: 2
 
 diagnostics:
   callbacks: []

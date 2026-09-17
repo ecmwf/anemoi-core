@@ -11,7 +11,6 @@
 import logging
 import os
 import shutil
-from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -255,94 +254,24 @@ def multidatasets_config(
 
 @pytest.fixture
 def multidomain_config(
-    stretched_config: tuple[DictConfig, list[str]],
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    cfg, urls = stretched_config
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidomain"):
+        template = compose(config_name="multidomain")
+
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidomain.yaml")
-    OmegaConf.set_struct(cfg, False)
-    cfg = OmegaConf.merge(cfg, use_case_modifications)
+    assert isinstance(use_case_modifications, DictConfig)
 
-    domains = {
-        "meps": [70, -10, 55, 30],
-        "arome_arctic": [72, -25, 52, 50],
-    }
-    hidden_names = {name: f"{name}_hidden" for name in domains}
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(use_case_modifications.system.input.forcing_dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    use_case_modifications.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
 
-    data_config = deepcopy(cfg.data.datasets.data)
-    cfg.data.datasets = OmegaConf.create({name: deepcopy(data_config) for name in domains})
-
-    for split, dates in {
-        "training": ("2017-01-01T00:00:00", "2017-01-02T00:00:00"),
-        "validation": ("2017-01-02T00:00:00", "2017-01-03T00:00:00"),
-        "test": ("2017-01-02T00:00:00", "2017-01-03T00:00:00"),
-    }.items():
-        split_config = deepcopy(cfg.dataloader[split].datasets.data)
-        cfg.dataloader[split].datasets = OmegaConf.create()
-        for name, area in domains.items():
-            domain_config = deepcopy(split_config)
-            domain_config.dataset_config.dataset = {
-                "cutout": [
-                    {"dataset": cfg.system.input.dataset, "area": area, "thinning": 25},
-                    {"dataset": cfg.system.input.forcing_dataset},
-                ],
-                "adjust": "all",
-                "min_distance_km": 0,
-            }
-            domain_config.start, domain_config.end = dates
-            cfg.dataloader[split].datasets[name] = domain_config
-
-    data_node = deepcopy(cfg.graph.nodes.data)
-    hidden_node = deepcopy(cfg.graph.nodes.hidden)
-    cfg.graph.nodes = OmegaConf.create()
-    for name in domains:
-        cfg.graph.nodes[name] = deepcopy(data_node)
-        cfg.graph.nodes[name].node_builder.dataset = cfg.dataloader.training.datasets[name].dataset_config
-        domain_hidden_node = deepcopy(hidden_node)
-        domain_hidden_node.node_builder.reference_node_name = name
-        cfg.graph.nodes[hidden_names[name]] = domain_hidden_node
-
-    encoder_edge, processor_edge, decoder_edge = cfg.graph.edges
-    cfg.graph.edges = OmegaConf.create([])
-    for name in domains:
-        edge = deepcopy(encoder_edge)
-        edge.source_name = name
-        edge.target_name = hidden_names[name]
-        cfg.graph.edges.append(edge)
-
-        edge = deepcopy(processor_edge)
-        edge.source_name = hidden_names[name]
-        edge.target_name = hidden_names[name]
-        cfg.graph.edges.append(edge)
-
-        edge = deepcopy(decoder_edge)
-        edge.source_name = hidden_names[name]
-        edge.target_name = name
-        cfg.graph.edges.append(edge)
-
-    cfg.model.model.hidden_nodes_name = hidden_names
-    cfg.model.encoders["0"].source_datasets = list(domains)
-    cfg.model.decoders["0"].target_datasets = list(domains)
-    cfg.model.node_trainable_parameters = {
-        "meps": 0,
-        "arome_arctic": 0,
-        "meps_hidden": 0,
-        "arome_arctic_hidden": 0,
-    }
-    cfg.model.edge_trainable_parameters = {"data2hidden": 0, "hidden2hidden": 0, "hidden2data": 0}
-
-    for section in ("residual", "output_mask", "bounding"):
-        domain_config = deepcopy(cfg.model[section].datasets.data)
-        cfg.model[section].datasets = OmegaConf.create({name: deepcopy(domain_config) for name in domains})
-
-    for section in ("scalers", "training_loss", "validation_metrics", "variable_groups", "metrics"):
-        domain_config = deepcopy(cfg.training[section].datasets.data)
-        cfg.training[section].datasets = OmegaConf.create({name: deepcopy(domain_config) for name in domains})
-    cfg.training.scalers.datasets.meps.node_weights.weight_frac_of_total = 0.25
-    cfg.training.scalers.datasets.arome_arctic.node_weights.weight_frac_of_total = 0.4
-
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, urls
+    return cfg, [url_dataset, url_forcing_dataset]
 
 
 @pytest.fixture

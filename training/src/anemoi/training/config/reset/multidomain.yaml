@@ -1,0 +1,35 @@
+# Loaded after the standard groups to clear domain-keyed defaults before _self_ defines sg_1 and sg_2.
+data:
+  datasets: null
+
+dataloader:
+  training:
+    datasets: null
+  validation:
+    datasets: null
+  test:
+    datasets: null
+
+graph:
+  nodes: null
+
+model:
+  residual:
+    datasets: null
+  output_mask:
+    datasets: null
+  node_trainable_parameters: null
+  bounding:
+    datasets: null
+
+training:
+  scalers:
+    datasets: null
+  training_loss:
+    datasets: null
+  validation_metrics:
+    datasets: null
+  variable_groups:
+    datasets: null
+  metrics:
+    datasets: null
