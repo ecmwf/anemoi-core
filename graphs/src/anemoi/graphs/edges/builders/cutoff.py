@@ -9,7 +9,6 @@
 
 
 import logging
-from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -22,9 +21,6 @@ from torch_geometric.nn import radius
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.builders.base import BaseDistanceEdgeBuilders
 from anemoi.graphs.utils import get_grid_reference_distance
-
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
-
 
 LOGGER = logging.getLogger(__name__)
 
