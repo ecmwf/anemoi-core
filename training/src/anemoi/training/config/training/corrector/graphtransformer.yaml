@@ -1,0 +1,23 @@
+---
+# Shared architecture for every instrument corrector in every corrected dataset.
+type: processor
+hidden_dim: 64
+processor:
+  _target_: anemoi.models.layers.processor.GraphTransformerProcessor
+  num_layers: 1
+  num_chunks: 1
+  num_heads: 4
+  mlp_hidden_ratio: 2
+  qk_norm: False
+  cpu_offload: False
+  # DASingleTraining already checkpoints the complete corrector call.
+  gradient_checkpointing: False
+  # Requires bidirectional data-to-data edges, as in graph/multi_scale_corrector.
+  shard_strategy: edges
+  graph_attention_backend: triton
+  trainable_size: 0
+  sub_graph_edge_attributes: [edge_length, edge_dirs]
+  layer_kernels: ${model.layer_kernels}
+
+# Supply instrument names, corrector variables, and optional channels in the run config.
+instrument_groups: ???

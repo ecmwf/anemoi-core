@@ -26,6 +26,8 @@ from pydantic import Tag
 from pydantic import field_validator
 from pydantic import model_validator
 
+from anemoi.models.schemas.processor import GNNProcessorSchema
+from anemoi.models.schemas.processor import GraphTransformerProcessorSchema
 from anemoi.training.schemas.schema_utils import DatasetDict
 from anemoi.utils.schemas import BaseModel
 from anemoi.utils.schemas.errors import allowed_values
@@ -966,16 +968,46 @@ class CorrectorGroupSchema(BaseModel):
 class CorrectorSchema(BaseModel):
     """Configuration for the training-time corrector networks."""
 
-    type: Literal["mlp", "gnn"] = "mlp"
-    "Corrector backend: pointwise MLP or spatially-aware GNN."
+    type: Literal["mlp", "processor"] = "mlp"
+    "Corrector backend: pointwise MLP or an embedded graph processor."
     hidden_dim: PositiveInt = 64
-    "Hidden layer dimension for all group networks."
-    num_gnn_layers: PositiveInt = 1
-    "Number of message-passing rounds (GNN backend only)."
-    edge_attributes: list[str] = Field(default_factory=lambda: ["edge_length", "edge_dirs"])
-    "Data-to-data edge attributes concatenated as GNN edge features."
+    "Embedding width for each instrument's network."
+    processor: (
+        Annotated[
+            GraphTransformerProcessorSchema | GNNProcessorSchema,
+            Field(discriminator="target_"),
+        ]
+        | None
+    ) = None
+    "Standard processor configuration, including graph features and layer kernels."
     instrument_groups: dict[str, CorrectorGroupSchema]
     "Mapping of instrument-group name to its corrector configuration."
+
+    @model_validator(mode="after")
+    def check_processor(self) -> Self:
+        if self.type == "processor" and self.processor is None:
+            msg = "Corrector type 'processor' requires a processor configuration."
+            raise ValueError(msg)
+        if self.type == "mlp" and self.processor is not None:
+            msg = "A processor configuration requires corrector type 'processor'."
+            raise ValueError(msg)
+        if self.processor is not None:
+            processor = self.processor
+            if processor.num_layers < 1 or processor.num_chunks < 1:
+                msg = "Corrector processor num_layers and num_chunks must be positive."
+                raise ValueError(msg)
+            if processor.num_layers % processor.num_chunks:
+                msg = "Corrector processor num_layers must be divisible by num_chunks."
+                raise ValueError(msg)
+            if not processor.sub_graph_edge_attributes:
+                msg = "Corrector processors require sub_graph_edge_attributes."
+                raise ValueError(msg)
+            if isinstance(processor, GraphTransformerProcessorSchema):
+                attn_channels = processor.attn_channels or self.hidden_dim
+                if processor.num_heads < 1 or attn_channels % processor.num_heads:
+                    msg = "Corrector attention width must be divisible by a positive num_heads."
+                    raise ValueError(msg)
+        return self
 
 
 def _training_method_discriminator(v: Any) -> str:
