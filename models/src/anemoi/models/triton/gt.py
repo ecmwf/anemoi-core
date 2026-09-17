@@ -10,15 +10,8 @@
 import torch
 from torch import Tensor
 
-# check if triton is installed
-# If pytorch is installed on CPU then torch is not available
-try:
-    import triton
-    import triton.language as tl
-except ImportError:
-    raise ValueError(
-        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
-    )
+import triton
+import triton.language as tl
 
 
 @triton.jit
