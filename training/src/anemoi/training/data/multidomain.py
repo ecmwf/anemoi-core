@@ -34,6 +34,7 @@ class MultiDomainDataset(MultiDataset):
 
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set independent anchors and relative date indices for each domain."""
+        initializing = not hasattr(self, "valid_date_indices")
         self.anchors = {
             name: data_reader.compute_anchors(relative_date_indices[name])
             for name, data_reader in self.data_readers.items()
@@ -45,7 +46,8 @@ class MultiDomainDataset(MultiDataset):
         self.valid_date_indices = {
             name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }
-        LOGGER.info("valid date indices: %s", self.valid_date_indices)
+        if initializing:
+            LOGGER.info("valid date indices: %s", self.valid_date_indices)
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
