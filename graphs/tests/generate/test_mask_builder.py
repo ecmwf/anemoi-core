@@ -16,7 +16,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.utils import is_pyg_lib_available
-from anemoi.graphs.utils import PYG_AVAILABLE
 
 
 def test_init():

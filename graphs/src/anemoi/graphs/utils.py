@@ -30,7 +30,6 @@ FORCE_CPU_ENV_VAR = "ANEMOI_GRAPHS_FORCE_CPU"
 DISABLE_PYG_LIB_ENV_VAR = "ANEMOI_GRAPHS_DISABLE_PYG_LIB"
 
 if PYG_VERSION >= "2.8":
-    PYG_AVAILABLE = find_spec("pyg_lib") is not None
     PYG_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
 Installing 'pyg-lib' can significantly improve performance for graph creation.
 You can install it using:
@@ -40,7 +39,6 @@ You can install it using:
 so if you are using PyG 2.8 or later, please install `pyg-lib` instead of `torch-cluster`.
 """
 else:
-    PYG_AVAILABLE = find_spec("torch_cluster") is not None
     PYG_INSTRUCTIONS = r"""The 'torch-cluster' library is not installed.
 Installing 'torch-cluster' can significantly improve performance for graph creation.
 You can install it using:
@@ -108,6 +106,9 @@ def is_pyg_lib_available() -> bool:
     """
     if os.environ.get(DISABLE_PYG_LIB_ENV_VAR):
         return False
+
+    if PYG_VERSION >= "2.8":
+        return find_spec("torch_cluster") is not None
 
     return find_spec("pyg_lib") is not None
 

@@ -151,7 +151,6 @@ def test_mutual_equals_intersection_heterogeneous(graph_with_two_node_sets):
 
 def test_mutual_knn_sklearn_fallback_heterogeneous(graph_with_two_node_sets):
     """The scikit-learn fallback agrees with the PyG path for distinct node sets and asymmetric k."""
-    import anemoi.graphs.edges.builders.base as base_module
 
     k_fwd, k_rev = 3, 2
     src = graph_with_two_node_sets["src_nodes"]

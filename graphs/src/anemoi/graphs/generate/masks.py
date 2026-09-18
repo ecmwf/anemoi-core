@@ -18,7 +18,6 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-from anemoi.graphs.utils import PYG_AVAILABLE
 from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import is_pyg_lib_available
