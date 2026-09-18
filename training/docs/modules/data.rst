@@ -72,7 +72,7 @@ native-grid readers with multi-sequence trajectory readers is currently
 unsupported and raises an error during initialization.
 
 Each domain is partitioned independently across distributed sample groups and
-data-loader workers. ``MultiDomainSampler`` shuffles each domain before
+data-loader workers. ``CrossDatasetSampler`` shuffles each domain before
 selecting its worker partition, then combines and shuffles the selected samples.
 This samples domains in proportion to their available samples while ensuring
 that all sample communication groups process domains in the same order.
@@ -119,6 +119,14 @@ Multi-Domain API
 ----------------
 
 .. automodule:: anemoi.training.data.multidomain
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Sampler API
+-----------
+
+.. automodule:: anemoi.training.data.sampler
    :members:
    :no-undoc-members:
    :show-inheritance:
