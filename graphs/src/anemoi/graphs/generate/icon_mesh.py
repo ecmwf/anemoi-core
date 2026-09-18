@@ -77,9 +77,10 @@ class ICONMultiMesh:
     uuidOfHGrid: str
     reflvl_vertex: np.ndarray
     max_level: int
+    min_level: int
     nodeset: NodeSet  # set of ICON grid vertices
 
-    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = 0):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
@@ -97,6 +98,7 @@ class ICONMultiMesh:
 
         self.reflvl_vertex = reflvl_vertex
         self.max_level = max_level if max_level is not None else reflvl_vertex.max()
+        self.min_level = min_level if min_level is not None else 0
 
         # restrict edge-vertex list to multi_mesh level "max_level":
         if self.max_level < self.reflvl_vertex.max():
@@ -126,7 +128,7 @@ class ICONMultiMesh:
     def multi_mesh_edges(self) -> np.ndarray:
         """Returns the multi-mesh edges as an arrays of vertex indices."""
         # concatenate edge-vertex lists (= edges of the multi-level mesh):
-        edges = np.concatenate([edges for edges in self.edge_vertices], axis=0)
+        edges = np.concatenate([edges for edges in self.edge_vertices if (edges.size > 0)], axis=0)
         return np.concatenate([edges, np.fliplr(edges)])
 
     def _read_vertices_data(self):
@@ -151,8 +153,12 @@ class ICONMultiMesh:
         num_vertices = vertex_mask.shape[0]
         vertex_glb2loc = np.full(num_vertices, -1, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
+        vertex_glb2loc_tmp = [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]]
+        for i in range(0, self.max_level + 1):
+            vertex_glb2loc_tmp[i] = np.array([sublist for sublist in vertex_glb2loc_tmp[i] if -1 not in sublist])
+
         return (
-            [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]],
+            vertex_glb2loc_tmp,
             # cell_vertices: preserve negative indices (incomplete cells)
             np.where(cell_vertices >= 0, vertex_glb2loc[cell_vertices], cell_vertices),
         )
@@ -177,7 +183,7 @@ class ICONMultiMesh:
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(1, self.reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(max(self.min_level, 1), self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have
@@ -268,9 +274,10 @@ class ICONCellDataGrid:
     uuidOfHGrid: str
     nodeset: NodeSet  # set of ICON cell circumcenters
     max_level: int
+    min_level: int
     select_c: np.ndarray
 
-    def __init__(self, icon_grid_filename: str, max_level: int | None = None):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = None):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
@@ -286,6 +293,7 @@ class ICONCellDataGrid:
             self.uuidOfHGrid = ncfile.uuidOfHGrid
 
         self.max_level = max_level if max_level is not None else reflvl_cell.max()
+        self.min_level = min_level if min_level is not None else 0
 
         # restrict to level `max_level`:
         self.select_c = np.argwhere(reflvl_cell <= self.max_level)
