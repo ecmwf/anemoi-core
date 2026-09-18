@@ -16,7 +16,10 @@ import torch
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
+from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
+from anemoi.utils.config import DotDict
 
 
 class BaseLatentAggregator(nn.Module, ABC):
@@ -166,3 +169,78 @@ class ConcatAggregator(BaseLatentAggregator):
                 f"missing {sorted(missing_sources)}.",
             )
         return torch.cat(tuple(source_latents), dim=-1)
+
+
+class CrossAttentionAggregator(BaseLatentAggregator):
+    """Fuse dataset latents with pointwise cross-attention over sources."""
+
+    def __init__(
+        self,
+        *,
+        input_channels: int,
+        source_channels: Mapping[str, int],
+        num_channels: int,
+        num_heads: int,
+        layer_kernels: DotDict | None = None,
+        attn_channels: int | None = None,
+        dropout_p: float = 0.0,
+        qkv_bias: bool = False,
+        qk_norm: bool = False,
+        attention_implementation: str = "scaled_dot_product_attention",
+        gradient_checkpointing: bool = True,
+    ) -> None:
+        super().__init__(
+            input_channels=input_channels,
+            source_channels=source_channels,
+            gradient_checkpointing=gradient_checkpointing,
+        )
+        if num_channels <= 0:
+            raise ValueError(f"num_channels must be positive, got {num_channels}.")
+
+        self.num_channels = num_channels
+        self.layer_factory = load_layer_kernels(layer_kernels)
+        self.hidden_projection = self.layer_factory.Linear(input_channels, num_channels)
+        self.hidden_norm = self.layer_factory.LayerNorm(normalized_shape=num_channels)
+        self.source_norm = self.layer_factory.LayerNorm(normalized_shape=num_channels)
+        self.source_projections = nn.ModuleDict(
+            {
+                source_name: self.layer_factory.Linear(channels, num_channels)
+                for source_name, channels in self.source_channels.items()
+            },
+        )
+        self.source_embeddings = nn.ParameterDict(
+            {source_name: nn.Parameter(torch.empty(num_channels)) for source_name in self.source_names},
+        )
+        self.attention = PointwiseMultiHeadCrossAttention(
+            num_heads=num_heads,
+            embed_dim=num_channels,
+            layer_kernels=self.layer_factory,
+            attn_channels=attn_channels,
+            qkv_bias=qkv_bias,
+            qk_norm=qk_norm,
+            dropout_p=dropout_p,
+            attention_implementation=attention_implementation,
+        )
+        for source_embedding in self.source_embeddings.values():
+            nn.init.normal_(source_embedding, std=0.02)
+
+    @property
+    def hidden_dim(self) -> int:
+        return self.num_channels
+
+    def _forward(
+        self,
+        hidden_latent: Tensor,
+        source_names: Sequence[str],
+        source_latents: Sequence[Tensor],
+    ) -> Tensor:
+        projected_latents = tuple(
+            self.source_projections[name](latent) for name, latent in zip(source_names, source_latents, strict=True)
+        )
+        source_latents = self.source_norm(torch.stack(projected_latents, dim=-2))
+        source_embeddings = torch.stack([self.source_embeddings[name] for name in source_names])
+        keys = source_latents + source_embeddings
+        residual = self.hidden_projection(hidden_latent)
+        query = self.hidden_norm(residual)
+        update = self.attention(query, keys, source_latents)
+        return residual + update
