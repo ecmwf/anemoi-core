@@ -15,6 +15,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
+from pathlib import Path
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -32,6 +33,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.interface import AnemoiModelInterface
+from anemoi.models.layers.graph_provider import _GraphFileDataset
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
@@ -45,6 +47,7 @@ from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.masks import build_output_masks
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.training.utils.variables_metadata import extract_variables_metadata_from_checkpoint
@@ -155,7 +158,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         *,
         config: BaseSchema,
         task: BaseTask,
-        graph_data: dict[str, HeteroData],
+        graph_data: HeteroData | Path,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict[str, IndexCollection],
@@ -170,9 +173,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Job configuration
         task : BaseTask
             Training task.
-        graph_data : HeteroData
-            Graph objects keyed by dataset name
-        statistics : dict
+        graph_data : HeteroData | Path
+            Either an in-memory PyG HeteroData graph, or a directory containing per-dataset graph files.
             Statistics of the training data
         statistics_tendencies : dict
             Statistics of data tendencies.
@@ -187,14 +189,22 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         super().__init__()
         self.task = task
 
-        assert isinstance(graph_data, HeteroData), "graph_data must be a HeteroData object"
+        assert isinstance(graph_data, (HeteroData, Path)), "graph_data must be a HeteroData object or a file path"
         assert isinstance(data_indices, dict), "data_indices must be a dict keyed by dataset name"
+        self.graph_data = graph_data
+        if isinstance(graph_data, Path):
+            self._graph_data_dict = _GraphFileDataset(graph_data)
+        else:
+            self.graph_data = graph_data.to(self.device)
+            self._graph_data_dict = self.graph_data
 
-        graph_data = graph_data.to(self.device)
         self.dataset_names = list(data_indices.keys())
 
         # Create output_mask dictionary for each dataset
-        self.output_mask = build_output_masks(get_multiple_datasets_config(config.model.output_mask), graph_data)
+        self.output_mask = self._build_output_masks(
+            get_multiple_datasets_config(config.model.output_mask),
+            graph_data,
+        )
 
         # Handle supporting_arrays merge with all output masks
         combined_supporting_arrays = supporting_arrays.copy()
@@ -245,21 +255,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 continue
 
             self.target_dataset_names.append(dataset_name)
-
-            fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
+            if isinstance(graph_data, Path):
+                fused = uses_fused_dataset_graph(self._graph_data_dict[self.dataset_names[0]], self.dataset_names)
+            else:
+                fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
             data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            dataset_graph = (
+                self._graph_data_dict[dataset_name] if isinstance(self.graph_data, Path) else self.graph_data
+            )
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
                 variable_groups=dataset_variable_groups[dataset_name],
                 metadata_variables=metadata["dataset"][dataset_name].get("variables_metadata"),
             )
-
             dataset_scalers, dataset_updating_scalars = create_scalers(
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
                 task=self.task,
-                graph_data=graph_data,
+                graph_data=dataset_graph,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -281,7 +295,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
-                graph_data=graph_data,
+                graph_data=dataset_graph,
                 data_node_name=data_node_name,
             )
 
@@ -293,7 +307,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
-                graph_data=graph_data,
+                graph_data=dataset_graph,
                 data_node_name=data_node_name,
             )
             self._initialise_updating_scalers(
@@ -334,7 +348,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 # Readers deliver the un-projected grid, so shard over the projector's source grid.
                 grid_size = self.model.spatial_pre_processors[dataset_name].input_grid_size
             else:
-                grid_size = graph_data[dataset_name].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+                dataset_graph = (
+                    self._graph_data_dict[dataset_name] if isinstance(self.graph_data, Path) else self.graph_data
+                )
+                data_node_name = DEFAULT_DATASET_NAME if isinstance(self.graph_data, Path) else dataset_name
+                grid_size = dataset_graph[data_node_name].num_nodes  # TODO(Mario): Replace by dataset.grid_size
             self.shard_sizes[dataset_name] = get_balanced_partition_sizes(grid_size, reader_group_size)
 
         self.grid_dim = -2
@@ -414,6 +432,23 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     @cached_property
     def logger_enabled(self) -> bool:
         return self.trainer.logger is not None
+
+    def _build_output_masks(self, output_mask_configs: dict, graph_data: HeteroData | Path) -> dict:
+        """Build output masks from fused or per-dataset file graphs."""
+        if isinstance(graph_data, Path):
+            output_masks = {}
+            for dataset_name in self.dataset_names:
+                output_mask_config = output_mask_configs.get(dataset_name)
+                output_masks[dataset_name] = (
+                    build_output_masks(
+                        {DEFAULT_DATASET_NAME: output_mask_config},
+                        self._graph_data_dict[dataset_name],
+                    )[DEFAULT_DATASET_NAME]
+                    if output_mask_config is not None
+                    else NoOutputMask()
+                )
+            return output_masks
+        return build_output_masks(output_mask_configs, graph_data)
 
     def _build_metrics_for_dataset(
         self,
@@ -1280,10 +1315,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
-    def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
+    def _validate_spatial_processor_target_grid(self, graph_data: HeteroData | Path) -> None:
         """Check each spatial projector's target grid against its dataset's graph nodes."""
         for dataset_name, projector in self.model.spatial_pre_processors.items():
-            dataset_grid_size = graph_data[dataset_name].num_nodes
+            dataset_graph = self._graph_data_dict[dataset_name] if isinstance(graph_data, Path) else graph_data
+            data_node_name = DEFAULT_DATASET_NAME if isinstance(graph_data, Path) else dataset_name
+            dataset_grid_size = dataset_graph[data_node_name].num_nodes
             if projector.output_grid_size != dataset_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
