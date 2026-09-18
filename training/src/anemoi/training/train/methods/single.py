@@ -40,7 +40,8 @@ class SingleTraining(BaseTrainingModule):
         metrics = {}
         y_preds = []
 
-        x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for step_index, task_kwargs in enumerate(task_steps):

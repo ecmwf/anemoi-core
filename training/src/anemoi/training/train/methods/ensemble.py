@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data.layout import TensorLayout
-    from anemoi.models.data.source import Source
+    from anemoi.models.data.sources import Source
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)

@@ -10,6 +10,8 @@
 """Per-source metadata that does not change from one batch to the next."""
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -24,7 +26,7 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 
 if TYPE_CHECKING:
-    from anemoi.models.data.source import _Source
+    from anemoi.models.data.sources.base import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +47,7 @@ def fancy_variable_index(
 
 
 @dataclass(frozen=True)
-class SourceSpec:
+class SourceSpec(ABC):
     """Metadata describing one source dataset, independent of any single batch.
 
     A spec is built once per dataset per run and shared by every
@@ -107,27 +109,24 @@ class SourceSpec:
         """Number of variables along the variables axis."""
         return len(self.variables)
 
-    @property
-    def is_tabular(self) -> bool:
-        """Whether time is folded into the grid axis (sparse observation sources)."""
-        return self.layout.time_in_grid
-
-    def clone(self, **kwargs) -> "SourceSpec":
-        """Return a new spec with replacements, sharing fields that are not replaced."""
-        return replace(self, **kwargs)
-
+    @abstractmethod
     def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "SourceSpec":
         """Return a new spec restricted to the given variable indices.
 
         Both :attr:`variables` and :attr:`statistics` are indexed, so they stay
         consistent with the data tensor the caller indexes alongside.
         """
-        if isinstance(indices, slice):
-            new_variables = self.variables[indices]
-        else:
-            new_variables = [self.variables[i] for i in indices]
-        new_statistics = {key: value[fancy_variable_index(indices)] for key, value in self.statistics.items()}
-        return self.clone(variables=new_variables, statistics=new_statistics)
+        pass
+
+    @property
+    @abstractmethod
+    def is_tabular(self) -> bool:
+        """Whether time is folded into the grid axis (sparse observation sources)."""
+        pass
+
+    def clone(self, **kwargs) -> "SourceSpec":
+        """Return a new spec with replacements, sharing fields that are not replaced."""
+        return replace(self, **kwargs)
 
     def empty(
         self,
@@ -162,7 +161,7 @@ class SourceSpec:
         """
         # Local import: views.py imports this module, so importing it at module
         # scope would be circular.
-        from anemoi.models.data.source import make_source
+        from anemoi.models.data.sources import make_source
 
         layout = self.layout.normalized(self.layout.ndim)
         sizes = {"batch": batch_size, "time": 1, "ensemble": 1, "grid": 0, "variables": self.n_variables}
@@ -180,3 +179,34 @@ class SourceSpec:
             boundaries = None
 
         return make_source(spec=self, data=data, coordinates=coordinates, boundaries=boundaries)
+
+
+class GriddedSpec(SourceSpec):
+
+    @property
+    def is_tabular(self) -> bool:
+        return False
+
+    def select_variables(self, indices: list[int]) -> "SourceSpec":
+        new_variables = [self.variables[i] for i in indices]
+        new_statistics = {key: value[fancy_variable_index(indices)] for key, value in self.statistics.items()}
+        return self.clone(variables=new_variables, statistics=new_statistics)
+
+
+class TabularSpec(SourceSpec):
+
+    @property
+    def is_tabular(self) -> bool:
+        return True
+
+    def select_variables(self, indices: list[int]) -> "SourceSpec":
+        new_variables = [self.variables[i] for i in indices]
+        new_statistics = {key: value[fancy_variable_index(indices)] for key, value in self.statistics.items()}
+        return self.clone(variables=new_variables, statistics=new_statistics)
+
+
+def make_spec(layout: TensorLayout, **kwargs) -> "SourceSpec":
+    if layout.time_in_grid:
+        return TabularSpec(layout=layout, **kwargs)
+
+    return GriddedSpec(layout=layout, **kwargs)

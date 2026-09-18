@@ -23,11 +23,8 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.create import GraphCreator
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.source import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
@@ -428,8 +425,9 @@ class BaseGraphModel(nn.Module):
         """Per-dataset flag indicating whether the dataset is grid-sharded.
 
         Sharding metadata is carried by each source, which exposes it via
-        ``flatten().shard_sizes``. ``None`` means that dataset is replicated, not
-        sharded.
+        ``flatten().shard_sizes``.
+
+        ``None`` means that dataset is replicated, not sharded.
         """
         return {dataset_name: source.shard_sizes is not None for dataset_name, source in batch.items()}
 

@@ -23,7 +23,6 @@ from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
     from anemoi.models.data import TensorLayout
-    from anemoi.models.data.source import Source
 
 LOGGER = logging.getLogger(__name__)
 

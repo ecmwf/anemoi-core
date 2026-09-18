@@ -37,12 +37,10 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
-from anemoi.models.data_adapter import flatten
-from anemoi.models.data_adapter import unflatten
 
 if TYPE_CHECKING:
+    from anemoi.models.data.sources.base import _Source
     from anemoi.models.data_adapter import FlatSource
-    from anemoi.models.data.source import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -328,7 +326,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     ) -> tuple[torch.Tensor, torch.Tensor, "_Source", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_flat: "FlatSource" = flatten(x)  # flatten data to (nodes, features)
+        x_flat: "FlatSource" = x.flatten()  # flatten data to (nodes, features)
         grid_shard_sizes = x_flat.shard_sizes
 
         if dataset_name in self.residual:
@@ -412,7 +410,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_target_flat: "FlatSource" = flatten(x_target)
+        x_target_flat: "FlatSource" = x_target.flatten()
         grid_shard_sizes = x_target_flat.shard_sizes
 
         target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
@@ -447,7 +445,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"instead."
             )
 
-        return target_coords, x_target_latent, grid_shard_sizes, flatten(x_target).batch_sizes, target_timedeltas
+        return target_coords, x_target_latent, grid_shard_sizes, x_target.flatten().batch_sizes, target_timedeltas
 
     def _assemble_output(
         self,
@@ -466,7 +464,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         output_positions = [self.data_indices[dataset_name].name_to_index[name] for name in output_names]
         output_statistics = {name: values[output_positions] for name, values in self.statistics[dataset_name].items()}
         output_dtype = torch.promote_types(dtype, torch.float32)
-        pred = unflatten(target,
+        pred = target.unflatten(
             x_out.to(output_dtype),
             spec=target.spec.clone(variables=output_names, statistics=output_statistics),
         )

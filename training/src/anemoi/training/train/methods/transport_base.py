@@ -22,7 +22,7 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data import Batch
-    from anemoi.models.data.source import Source
+    from anemoi.models.data.sources import Source
     from anemoi.training.train.methods.transport import TransportTraining
     from anemoi.training.utils.index_space import IndexSpace
 
@@ -182,9 +182,7 @@ class TransportObjective:
         kind = transport_source.resolve_kind(default_kind)
         if kind == "reference_state":
             sparse_datasets = [
-                dataset_name
-                for dataset_name, source in prepared.model_target.items()
-                if is_sparse_data(source.data)
+                dataset_name for dataset_name, source in prepared.model_target.items() if is_sparse_data(source.data)
             ]
             if sparse_datasets:
                 msg = (

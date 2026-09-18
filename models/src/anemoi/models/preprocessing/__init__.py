@@ -15,7 +15,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from anemoi.models.data.source import _Source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)

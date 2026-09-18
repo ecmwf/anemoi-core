@@ -15,7 +15,6 @@ from hypothesis import strategies as st
 from hypothesis.extra.numpy import arrays
 
 from anemoi.models.layers.activations import Sine
-from anemoi.models.data_adapter import flatten
 
 
 @st.composite

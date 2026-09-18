@@ -11,11 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from batch_builders import build_source
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import GriddedSource
-from anemoi.models.data.source import TabularSource
+from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
@@ -26,7 +27,6 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import build_source
 
 
 def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSource:

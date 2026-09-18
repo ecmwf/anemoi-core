@@ -16,17 +16,16 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from batch_builders import build_source
 from torch import Tensor
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import GriddedSource
+from anemoi.models.data.sources.tabular import GriddedSource
 from anemoi.models.models.target_features import TARGET_FEATURE_REGISTRY
 from anemoi.models.models.target_features import CompositeTargetFeature
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import register_target_feature
-from anemoi.models.data_adapter import flatten
-from batch_builders import build_source
 
 
 @dataclass

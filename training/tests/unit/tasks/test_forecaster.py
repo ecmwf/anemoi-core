@@ -11,18 +11,16 @@ import datetime
 
 import pytest
 import torch
+from batch_builders import build_batch
 from omegaconf import DictConfig
 
-from anemoi.models.data import Batch
-from anemoi.models.data import Source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.models.data_adapter import flatten
-from batch_builders import build_batch
 
 
 def _make_minimal_index_collection(
@@ -296,7 +294,8 @@ def test_forecaster_get_inputs_returns_correct_number_of_time_steps() -> None:
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     # offsets = [-6h, 0h, +6h] → 3 time steps in batch
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = build_batch(data={"data": torch.randn(b, 3, e, g, v)},
+    batch = build_batch(
+        data={"data": torch.randn(b, 3, e, g, v)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -310,7 +309,8 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
     data_indices = _data_indices_single()
     b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = build_batch(data={"data": torch.randn(b, 3, e, g, v)},
+    batch = build_batch(
+        data={"data": torch.randn(b, 3, e, g, v)},
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -327,7 +327,8 @@ def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> No
         rollout={"start": 1, "epoch_increment": 1, "maximum": 2},
     )
     data_indices = _data_indices_single()
-    batch = build_batch(data={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
+    batch = build_batch(
+        data={"data": torch.randn(2, 3, 1, 4, len(_NAME_TO_INDEX))},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(_NAME_TO_INDEX)},
     )
@@ -437,7 +438,8 @@ def test_advance_input_preserves_sparse_batch_data_payload() -> None:
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     data = [torch.zeros(2, 1), torch.ones(3, 1)]
     coordinates = [torch.zeros(2, 2), torch.ones(3, 2)]
-    batch = build_batch(data={"obs": data},
+    batch = build_batch(
+        data={"obs": data},
         coordinates={"obs": coordinates},
         metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
         layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
@@ -492,7 +494,8 @@ def test_rollout_rotates_input_only_grid_like_upstream(input_values: list[float]
     forecast = torch.arange(1.0, n_input + 1).reshape(1, n_input, 1, 1, 1)
     conditioning = torch.tensor(input_values).reshape(1, n_input, 1, 1, 1).requires_grad_()
     coordinates = {"forecast": torch.zeros(1, 2), "conditioning": torch.ones(1, 2)}
-    batch = build_batch(data={"forecast": forecast, "conditioning": conditioning},
+    batch = build_batch(
+        data={"forecast": forecast, "conditioning": conditioning},
         coordinates=coordinates,
         layouts=dict.fromkeys(coordinates, layout),
         variables={name: ["A"] for name in coordinates},

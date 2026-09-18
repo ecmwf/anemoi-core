@@ -5,14 +5,14 @@
 from __future__ import annotations
 
 import torch
-
-from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import Source
-from anemoi.training.losses import WeightedMSELoss
 from batch_builders import build_source
 
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources.base import _Source
+from anemoi.training.losses import WeightedMSELoss
 
-def _sparse_view(data: list[torch.Tensor]) -> Source:
+
+def _sparse_view(data: list[torch.Tensor]) -> _Source:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     return build_source(
         name="obs",

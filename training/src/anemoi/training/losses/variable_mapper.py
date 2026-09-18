@@ -10,16 +10,12 @@
 
 import functools
 import logging
-from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data_indices.collection import IndexCollection
-
-if TYPE_CHECKING:
-    from anemoi.models.data.source import Source
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode

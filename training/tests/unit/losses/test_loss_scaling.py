@@ -26,7 +26,6 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
-from anemoi.models.data_adapter import flatten
 
 
 @pytest.fixture

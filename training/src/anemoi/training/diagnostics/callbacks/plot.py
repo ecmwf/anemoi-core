@@ -461,10 +461,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
 
                 raise TypeError(preds)
             gathered_predictions = [
-                {
-                    dataset_name: _allgather_view(pl_module, dataset_pred)
-                    for dataset_name, dataset_pred in pred.items()
-                }
+                {dataset_name: _allgather_view(pl_module, dataset_pred) for dataset_name, dataset_pred in pred.items()}
                 for pred in preds
             ]
             # When running in Async mode, it might happen that in the last epoch these tensors

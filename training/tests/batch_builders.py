@@ -29,10 +29,10 @@ from typing import Any
 import torch
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.source import Source
-from anemoi.models.data.source import make_source
+from anemoi.models.data.sources import Source
+from anemoi.models.data.sources import make_source
+from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -45,7 +45,8 @@ def build_source(**kwargs) -> Source:
     >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
     """
     spec_kwargs = {key: kwargs.pop(key) for key in _SPEC_FIELDS if key in kwargs}
-    return make_source(SourceSpec(**spec_kwargs), **kwargs)
+    spec = make_spec(**spec_kwargs)
+    return make_source(spec=spec, **kwargs)
 
 
 def build_batch(
@@ -85,19 +86,18 @@ def build_batch(
             raise ValueError(msg)
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
-        sources[name] = make_source(
-            SourceSpec(
-                name=name,
-                variables=variables[name],
-                layout=layouts[name],
-                statistics=statistics.get(name, {}),
-                grid_size=grid_sizes.get(name),
-                coordinates_are_static=name in static,
-            ),
+        sources[name] = build_source(
+            name=name,
+            variables=variables[name],
+            layout=layouts[name],
+            statistics=statistics.get(name, {}),
+            grid_size=grid_sizes.get(name),
+            coordinates_are_static=name in static,
             data=payload,
             coordinates=coordinates.get(name),
             timedeltas=timedeltas.get(name),
             boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
             shard_sizes=shard_sizes.get(name),
         )
+
     return Batch(sources)

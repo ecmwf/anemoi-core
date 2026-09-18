@@ -9,13 +9,14 @@
 
 import pytest
 import torch
+from batch_builders import build_source
 from omegaconf import DictConfig
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
 from torch.autograd import gradcheck
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import _Source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import EnergyScoreLoss
 from anemoi.training.losses import get_loss_function
@@ -25,7 +26,6 @@ from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
-from batch_builders import build_source
 
 
 def _view(data: torch.Tensor) -> _Source:

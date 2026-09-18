@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     import torch
 
-    from anemoi.models.data.source import Source
+    from anemoi.models.data.sources import Source
 
 
 @dataclass

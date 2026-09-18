@@ -11,10 +11,11 @@ import logging
 
 import pytest
 import torch
+from batch_builders import build_source
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import GriddedSource
+from anemoi.models.data.sources.tabular import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
@@ -25,7 +26,6 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
-from batch_builders import build_source
 
 
 def test_instantiation_with_filtering() -> None:

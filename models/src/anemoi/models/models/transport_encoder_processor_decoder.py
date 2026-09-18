@@ -22,8 +22,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data import SourceSpec
-from anemoi.models.data import make_source
+from anemoi.models.data.batch import build_source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -46,11 +45,9 @@ from anemoi.models.transport.data_helpers import Data
 from anemoi.models.transport.data_helpers import data_device
 from anemoi.models.transport.data_helpers import map_data
 from anemoi.utils.config import DotDict
-from anemoi.models.data_adapter import flatten
-from anemoi.models.data_adapter import unflatten
 
 if TYPE_CHECKING:
-    from anemoi.models.data.source import _Source
+    from anemoi.models.data.sources.base import _Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -186,7 +183,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             y_noised_features.timedeltas,
         )
 
-    def _assemble_output(self, x_out, x_skip, target: "_Source", dtype: torch.dtype, dataset_name: str):
+    def _assemble_output(self, x_out: "FlatSource", x_skip, target: "_Source", dtype: torch.dtype, dataset_name: str):
         del x_skip
         pred = unflatten(target, x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
@@ -801,15 +798,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            sources[dataset_name] = make_source(
-                spec=SourceSpec(
-                    name=dataset_name,
-                    variables=self._sampling_variables(dataset_name, variable_space),
-                    layout=layout,
-                    statistics=self._sampling_statistics(dataset_name, variable_space),
-                    grid_size=grid_size,
-                    coordinates_are_static=dataset_name in static_coords,
-                ),
+            sources[dataset_name] = build_source(
+                name=dataset_name,
+                variables=self._sampling_variables(dataset_name, variable_space),
+                layout=layout,
+                statistics=self._sampling_statistics(dataset_name, variable_space),
+                grid_size=grid_size,
+                coordinates_are_static=dataset_name in static_coords,
                 data=dataset_data,
                 coordinates=self._sampling_coordinates(
                     dataset_name,

@@ -18,6 +18,7 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
+from batch_builders import build_batch
 
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
@@ -36,7 +37,6 @@ from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
-from batch_builders import build_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------
@@ -337,7 +337,8 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     grid = tensor.shape[3]
     num_vars = tensor.shape[4]
     coordinates = torch.zeros(grid, 2)
-    return build_batch(data={dataset_name: tensor},
+    return build_batch(
+        data={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
         static_coords=frozenset({dataset_name}),
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -363,7 +364,8 @@ def _make_sparse_batch(
         dim=-1,
     )
     boundaries = [(slice(0, input_nodes), slice(input_nodes, input_nodes + output_nodes))]
-    return build_batch(data={dataset_name: [data]},
+    return build_batch(
+        data={dataset_name: [data]},
         coordinates={dataset_name: [coordinates]},
         boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},

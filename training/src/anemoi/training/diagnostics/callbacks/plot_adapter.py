@@ -23,7 +23,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.models.data.source import _Source
+from anemoi.models.data.sources.base import _Source
 
 if TYPE_CHECKING:
     from collections.abc import Iterator

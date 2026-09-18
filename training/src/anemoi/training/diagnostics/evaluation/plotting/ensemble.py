@@ -21,7 +21,6 @@ from matplotlib.figure import Figure
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
-from anemoi.models.data_adapter import flatten
 
 LOGGER = logging.getLogger(__name__)
 

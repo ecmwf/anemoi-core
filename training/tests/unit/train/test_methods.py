@@ -19,12 +19,14 @@ import einops
 import pytest
 import pytorch_lightning as pl
 import torch
+from batch_builders import build_batch
+from batch_builders import build_source
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.source import Source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -55,9 +57,6 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
-from anemoi.models.data_adapter import flatten
-from batch_builders import build_source
-from batch_builders import build_batch
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
@@ -1047,7 +1046,8 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
         if sparse
         else TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     )
-    target_view = build_batch(data={"data": loss_data},
+    target_view = build_batch(
+        data={"data": loss_data},
         layouts={"data": layout},
         variables={"data": ["value"]},
         coordinates={"data": [torch.zeros(2, 2)] if sparse else torch.zeros(2, 2)},
@@ -1136,7 +1136,8 @@ def test_state_model_target_and_missing_stay_consistent_with_real_processors() -
     }
     data = torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))
     data[0, 1, 0, 2, 0] = float("nan")  # missing observation at the output step
-    batch = build_batch(data={"data": data},
+    batch = build_batch(
+        data={"data": data},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1195,7 +1196,8 @@ def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     data = [torch.randn(5, len(_NAME_TO_INDEX))]
     data[0][3, 0] = float("nan")  # missing observation at the output step
-    batch = build_batch(data={"data": data},
+    batch = build_batch(
+        data={"data": data},
         coordinates={"data": [torch.zeros(5, 2)]},
         metadata={"data": {"boundaries": [(slice(0, 2), slice(2, 5))]}},
         layouts={"data": layout},
@@ -1541,7 +1543,8 @@ def _make_single_training(task: Any, data_indices: dict[str, IndexCollection]) -
 
 def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) -> Batch:
     variables = list(_NAME_TO_INDEX)[: data.shape[-1]] if variables is None else variables
-    return build_batch(data={"data": data},
+    return build_batch(
+        data={"data": data},
         coordinates={"data": torch.zeros(data.shape[-2], 2, dtype=data.dtype, device=data.device)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -1807,7 +1810,8 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
 
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = build_batch(data={"data": torch.randn(1, 2, 1, 3, 2)},
+    batch = build_batch(
+        data={"data": torch.randn(1, 2, 1, 3, 2)},
         coordinates={"data": torch.zeros(3, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": layout},
@@ -2342,7 +2346,8 @@ def test_edm_transport_training_uses_data_full_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = build_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
+    batch = build_batch(
+        data={"data": torch.randn(b, 2, e, g, full_v)},
         coordinates={"data": torch.zeros(g, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2446,7 +2451,8 @@ def test_stochastic_interpolant_training_uses_model_output_target_layout(
 
     b, e, g = 2, 1, 4
     full_v = len(name_to_index)
-    batch = build_batch(data={"data": torch.randn(b, 2, e, g, full_v)},
+    batch = build_batch(
+        data={"data": torch.randn(b, 2, e, g, full_v)},
         coordinates={"data": torch.zeros(g, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2541,7 +2547,8 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     monkeypatch.setattr(forecaster, "compute_loss_metrics", _compute_loss_metrics_stub)
     monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
 
-    batch = build_batch(data={"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))},
+    batch = build_batch(
+        data={"data": torch.randn(2, 2, 1, 4, len(_NAME_TO_INDEX))},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2591,7 +2598,8 @@ def test_stochastic_interpolant_tendency_training_step_uses_model_output_drift_t
     n_model = len(data_indices["data"].model.output.full)
 
     def _batch(data: torch.Tensor) -> Batch:
-        return build_batch(data={"data": data},
+        return build_batch(
+            data={"data": data},
             coordinates={"data": torch.zeros(g, 2)},
             metadata={"static_coords": frozenset({"data"})},
             layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2773,7 +2781,8 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = _DummyModule()
 
-    metric_target = build_batch(data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
+    metric_target = build_batch(
+        data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
         coordinates={"data": torch.zeros(4, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -2798,7 +2807,8 @@ def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse(
 def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace()
-    sparse_batch = build_batch(data={"obs": [torch.zeros(2, 1)]},
+    sparse_batch = build_batch(
+        data={"obs": [torch.zeros(2, 1)]},
         coordinates={"obs": [torch.zeros(2, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
         layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},

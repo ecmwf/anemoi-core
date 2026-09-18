@@ -11,6 +11,7 @@ from collections.abc import Callable
 
 import pytest
 import torch
+from batch_builders import build_batch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
@@ -24,7 +25,6 @@ from anemoi.models.transport.schedules import ExponentialSigmaSchedule
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
 from anemoi.models.transport.schedules import LinearSigmaSchedule
 from anemoi.models.transport.schedules import SigmaSchedule
-from batch_builders import build_batch
 
 DATASET_NAME = "test_dataset"
 
@@ -74,7 +74,8 @@ class RecordingZeroDenoiser:
 
 
 def _batch(data: dict[str, torch.Tensor]) -> Batch:
-    return build_batch(data=data,
+    return build_batch(
+        data=data,
         coordinates={DATASET_NAME: torch.zeros(data[DATASET_NAME].shape[-2], 2)},
         metadata={"static_coords": frozenset({DATASET_NAME})},
         layouts={DATASET_NAME: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},

@@ -29,7 +29,7 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
-    from anemoi.models.data.source import Source
+    from anemoi.models.data.sources import Source
 
 LOGGER = logging.getLogger(__name__)
 

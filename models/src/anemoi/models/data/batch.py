@@ -22,11 +22,14 @@ import torch
 from torch.distributed import ProcessGroup
 from torch.utils.data import default_collate
 
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sources.gridded import GriddedSource
+from anemoi.models.data.sources.tabular import TabularSource
+from dataclasses import fields
+from anemoi.models.data.spec import make_spec
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.source import _Source
-from anemoi.models.data.source import TensorLayout
-from anemoi.models.data.source import make_source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -39,6 +42,20 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
         return value
     return {key: value for key in keys}
 
+
+def build_source(**kwargs) -> _Source:
+    """Build one source, taking the spec's fields flat alongside the payload.
+
+    >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
+    """
+    spec_fields = [f.name for f in fields(SourceSpec)]
+    spec_kwargs = {key: kwargs.pop(key) for key in spec_fields if key in kwargs}
+    spec = make_spec(**spec_kwargs)
+
+    if spec.layout.time_in_grid:
+        return TabularSource(spec=spec, **kwargs)
+
+    return GriddedSource(spec=spec, **kwargs)
 
 @dataclass(frozen=True, slots=True)
 class Batch:
@@ -63,6 +80,9 @@ class Batch:
     """
 
     sources: dict[str, _Source]
+
+    def __post_init__(self):
+        batch_size = 0
 
     # -- batch-level properties --------------------------------------------
 
@@ -271,9 +291,7 @@ class Batch:
         if missing:
             msg = f"Other batch is missing dataset(s) {sorted(missing)}."
             raise ValueError(msg)
-        return {
-            name: source.apply_pairwise(other[name], func, **kwargs) for name, source in self.sources.items()
-        }
+        return {name: source.apply_pairwise(other[name], func, **kwargs) for name, source in self.sources.items()}
 
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.
@@ -366,24 +384,20 @@ class Batch:
                     coordinates = head.coordinates
                 else:
                     coordinates = default_collate([s.coordinates for s in per_sample])
-                timedeltas = (
-                    None if head.timedeltas is None else default_collate([s.timedeltas for s in per_sample])
-                )
+                timedeltas = None if head.timedeltas is None else default_collate([s.timedeltas for s in per_sample])
                 boundaries = None
                 shard_sizes = head.shard_sizes
                 layout = head.layout.with_batch_dim()
 
             _validate_layout_against(name, layout, data)
 
-            sources[name] = make_source(
-                spec=SourceSpec(
-                    name=name,
-                    variables=head.variables,
-                    layout=layout,
-                    statistics=head.statistics,
-                    grid_size=head.grid_size,
-                    coordinates_are_static=head.coordinates_are_static,
-                ),
+            sources[name] = build_source(
+                name=name,
+                variables=head.variables,
+                layout=layout,
+                statistics=head.statistics,
+                grid_size=head.grid_size,
+                coordinates_are_static=head.coordinates_are_static,
                 data=data,
                 coordinates=coordinates,
                 timedeltas=timedeltas,

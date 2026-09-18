@@ -11,11 +11,12 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from batch_builders import build_batch
+from batch_builders import build_source
 from omegaconf import DictConfig
 from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
-from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.aggregator import SumAggregator
@@ -23,8 +24,6 @@ from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
-from batch_builders import build_source
-from batch_builders import build_batch
 
 
 class _NearestEdges:
@@ -127,7 +126,8 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     # Different values for each (sample, ensemble member), constant over its two grid points.
     values = torch.tensor([[1.0, 2.0], [10.0, 20.0]])
     data = values[:, None, :, None, None].expand(2, 2, 2, 2, 1).clone().requires_grad_()
-    batch = build_batch(data={"grid": data},
+    batch = build_batch(
+        data={"grid": data},
         coordinates={"grid": torch.tensor([[[0.0, 0.0], [0.2, 0.2]], [[0.01, 0.01], [0.21, 0.21]]])},
         layouts={"grid": layout},
         variables={"grid": ["a"]},
@@ -173,7 +173,8 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         torch.tensor([10.0, 20.0])[:, None, None].expand(2, 3, 1).clone().requires_grad_(),
     ]
     coords = [torch.zeros(2, 2), torch.zeros(3, 2)]
-    inputs = build_batch(data={"grid": samples},
+    inputs = build_batch(
+        data={"grid": samples},
         coordinates={"grid": coords},
         variables={"grid": ["a"]},
         layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},

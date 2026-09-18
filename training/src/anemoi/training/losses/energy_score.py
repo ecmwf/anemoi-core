@@ -15,7 +15,7 @@ import torch.distributed as dist
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import _Source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import reduce_tensor

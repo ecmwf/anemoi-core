@@ -21,8 +21,8 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
-from anemoi.models.data.sample import SourceSample
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sample import SourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes

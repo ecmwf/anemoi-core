@@ -15,11 +15,12 @@ import hydra
 import numpy as np
 import pytest
 import torch
+from batch_builders import build_source
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.source import Source
+from anemoi.models.data.sources import Source
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -37,7 +38,6 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
-from batch_builders import build_source
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
