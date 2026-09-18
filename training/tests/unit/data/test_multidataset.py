@@ -16,6 +16,7 @@ import torch
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.sampler import BaseSampler
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
@@ -104,7 +105,7 @@ class TestMultiDataset:
     def test_worker_shuffle_repeats_for_same_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """New workers reproduce the shuffle when the base seed and epoch match."""
         mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
-        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+        sample = mocker.patch.object(BaseSampler, "sample", side_effect=lambda index: int(index))
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=2, worker_id=1)
@@ -114,6 +115,7 @@ class TestMultiDataset:
         resumed_order = list(multi_dataset)
 
         assert resumed_order == uninterrupted_order
+        assert sample.call_count == 2 * len(uninterrupted_order)
 
     def test_fake_dataloading_reuses_first_batch(
         self,
@@ -122,16 +124,16 @@ class TestMultiDataset:
     ) -> None:
         """Fake dataloading reads one valid batch and reuses its tensors."""
         multi_dataset.fake_dataloading = True
-        get_sample = mocker.patch.object(
-            multi_dataset,
-            "get_sample",
+        sample = mocker.patch.object(
+            BaseSampler,
+            "sample",
             side_effect=lambda index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
         )
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
 
         batches = list(multi_dataset)
 
-        assert get_sample.call_count == 1
+        assert sample.call_count == 1
         assert len(batches) == len(multi_dataset.valid_date_indices)
         assert all(batch is batches[0] for batch in batches)
         assert all(torch.equal(batch["dataset_a"], batches[0]["dataset_a"]) for batch in batches)

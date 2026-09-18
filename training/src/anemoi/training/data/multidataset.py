@@ -11,6 +11,8 @@ import datetime
 import logging
 import os
 import random
+from collections.abc import Generator
+from collections.abc import Mapping
 from functools import cached_property
 
 import numpy as np
@@ -20,16 +22,15 @@ from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.sampler import BaseSampler
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
-from anemoi.training.utils.time_indices import offset_time_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -37,15 +38,20 @@ LOGGER = logging.getLogger(__name__)
 class MultiDataset(IterableDataset):
     """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
 
+    check_dataset_units = False
+    default_label = "multi"
+    sampler_class = BaseSampler
+
     def __init__(
         self,
         data_readers: dict[str, BaseAnemoiReader],
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
-        label: str = "multi",
+        label: str | None = None,
         epoch: int = 0,
         rollout: int = 1,
         fake_dataloading: bool = False,
+        check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -59,16 +65,19 @@ class MultiDataset(IterableDataset):
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
-            label for the dataset, by default "multi"
+            Label for the dataset. Uses the class default when omitted.
         epoch : int, optional
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
             Rollout length represented by the loaded relative date indices, by default 1
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False
+        check_variables_compatibility : Mapping[str, object], optional
+            Options forwarded to ``Variable.check_compatibility`` when
+            ``check_dataset_units`` is enabled by the dataset class.
         """
         self.data_readers = data_readers
-        self.label = label
+        self.label = self.default_label if label is None else label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
@@ -86,11 +95,19 @@ class MultiDataset(IterableDataset):
         if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
+                f"Trajectory datasets (init x step axes) in the same IterableDataset is unsupported. "
                 f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
             )
             raise ValueError(msg)
 
+        self._set_date_indices(relative_date_indices)
+
+        self._lazy_init_model_and_reader_group_info()
+        if self.check_dataset_units:
+            self._check_datasets_units(**dict(check_variables_compatibility or {}))
+
+    def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Set synchronized anchors and relative date indices."""
         # Compute valid (sequence, position) anchors and a flat index over them
         # that the shuffle/shard logic operates on.
         self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
@@ -100,8 +117,6 @@ class MultiDataset(IterableDataset):
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
-
-        self._lazy_init_model_and_reader_group_info()
 
     def set_epoch(
         self,
@@ -117,14 +132,7 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
-        # Recompute valid (sequence, position) anchors for the updated rollout.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
+        self._set_date_indices(relative_date_indices)
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
@@ -293,31 +301,78 @@ class MultiDataset(IterableDataset):
             self.sample_comm_num_groups,
         )
 
+    def _set_chunk_and_workers(self, n_workers: int, worker_id: int) -> None:
+        """Set the sample count and chunk indices assigned to a worker."""
+        index_groups = (
+            self.valid_date_indices.items()
+            if isinstance(self.valid_date_indices, Mapping)
+            else ((None, self.valid_date_indices),)
+        )
+        samples_per_worker = {}
+        chunk_index_range = {}
+        for name, indices in index_groups:
+            # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+            # note that we need even splits here across DDP ranks, so we might throw away some samples
+            shard_size = len(indices) // self.sample_comm_num_groups
+            shard_start = self.sample_comm_group_id * shard_size
+            samples_per_worker[name] = shard_size // n_workers
+
+            # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
+            low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
+            chunk_index_range[name] = np.arange(low, high, dtype=np.uint32)
+            LOGGER.info(
+                "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
+                worker_id,
+                os.getpid(),
+                self.global_rank,
+                self.model_comm_group_id,
+                low,
+                high,
+            )
+
+        if None in samples_per_worker:
+            self.n_samples_per_worker = samples_per_worker[None]
+            self.chunk_index_range = chunk_index_range[None]
+        else:
+            self.n_samples_per_worker = samples_per_worker
+            self.chunk_index_range = chunk_index_range
+
+    def _check_datasets_units(self, **options: object) -> None:
+        """Check common variables for compatibility across datasets."""
+        from anemoi.transform.variables import Variable
+
+        dataset_variables = {}
+        for name, data in self.data.items():
+            if variables := data.typed_variables:
+                dataset_variables[name] = variables
+        if len(dataset_variables) == 0:
+            LOGGER.warning("All datasets have empty metadata, skipping units check.")
+            return
+        if len(dataset_variables) == 1:
+            LOGGER.warning("Only one dataset has variable metadata, skipping units check.")
+            return
+
+        dataset_names = list(dataset_variables)
+        for index, dataset_name in enumerate(dataset_names):
+            for other_name in dataset_names[index + 1 :]:
+                common_variables = dataset_variables[dataset_name].keys() & dataset_variables[other_name].keys()
+                try:
+                    Variable.check_compatibility(
+                        {name: dataset_variables[dataset_name][name] for name in common_variables},
+                        {name: dataset_variables[other_name][name] for name in common_variables},
+                        **options,
+                    )
+                except ValueError as error:
+                    msg = (
+                        f"Variable compatibility check failed for domain1 '{dataset_name}' "
+                        f"and domain2 '{other_name}': {error}"
+                    )
+                    raise ValueError(msg) from error
+
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all data readers for this worker."""
         self.worker_id = worker_id
-
-        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
-        # note that we need even splits here across DDP ranks, so we might throw away some samples
-        shard_size = len(self.valid_date_indices) // self.sample_comm_num_groups
-        shard_start = self.sample_comm_group_id * shard_size
-
-        self.n_samples_per_worker = shard_size // n_workers
-
-        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
-        low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
-
-        self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
-
-        LOGGER.info(
-            "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
-            worker_id,
-            os.getpid(),
-            self.global_rank,
-            self.model_comm_group_id,
-            low,
-            high,
-        )
+        self._set_chunk_and_workers(n_workers, worker_id)
 
         base_seed = get_base_seed()
         # The datamodule checkpoints this epoch and restores it before new workers
@@ -340,62 +395,9 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        sequence, position = (int(v) for v in self.anchors[index])
-        x = {}
-        for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_comm_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
-
-        return x
-
-    def __iter__(self) -> dict[str, torch.Tensor]:
-        """Return an iterator that yields dictionaries of synchronized samples.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset names to their tensor samples
-            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
-        """
-        # Get the shuffled indices from the primary dataset
-        # All data readers will use the same shuffled indices for synchronization
-        if self.shuffle:
-            shuffled_chunk_indices = self.rng.choice(
-                self.valid_date_indices,
-                size=len(self.valid_date_indices),
-                replace=False,
-            )[self.chunk_index_range]
-        else:
-            shuffled_chunk_indices = self.valid_date_indices[self.chunk_index_range]
-
-        LOGGER.debug(
-            "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
-            self.__class__.__name__,
-            os.getpid(),
-            self.worker_id,
-            shuffled_chunk_indices[:10],
-        )
-
-        initial_batch = None
-
-        # TODO(): improve this...
-        for i in shuffled_chunk_indices:
-            if not self.fake_dataloading:
-                yield self.get_sample(i)
-            elif initial_batch is None:
-                initial_batch = self.get_sample(i)
-                yield initial_batch
-            else:
-                yield initial_batch
+    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
+        """Yield samples selected by the dataset's sampler."""
+        yield from self.sampler_class(self)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

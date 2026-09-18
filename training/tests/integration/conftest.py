@@ -253,6 +253,18 @@ def multidatasets_config(
 
 
 @pytest.fixture
+def multidomain_config(
+    multidatasets_config: tuple[DictConfig, list[str]],
+) -> tuple[DictConfig, list[str]]:
+    cfg, urls = multidatasets_config
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidomain.yaml")
+    cfg = OmegaConf.merge(cfg, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, urls
+
+
+@pytest.fixture
 def lam_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,

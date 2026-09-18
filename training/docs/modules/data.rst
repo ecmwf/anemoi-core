@@ -57,9 +57,46 @@ for training and supports:
 
 .. note::
 
-   Users wishing to change the format of the batch input into the model
-   should sub-class ``MultiDataset`` and override the ``__iter__``
-   method or the ``get_sample`` method.
+   Users wishing to change sample selection or the format of the batch input
+   should subclass the configured sampler (``BaseSampler`` or
+   ``CrossDatasetSampler``) and set it as the dataset's ``sampler_class``.
+   Override ``MultiDataset.__iter__`` only when replacing the complete sampling
+   workflow.
+
+Multi-Domain
+------------
+
+``MultiDomainDataset`` combines independent domains in one iterable dataset.
+Where ``MultiDataset`` returns synchronized data from every reader in each
+sample, multi-domain iteration returns data from one reader at a time. The
+readers may have different grids and date ranges. Mixing single-sequence
+native-grid readers with multi-sequence trajectory readers is currently
+unsupported and raises an error during initialization.
+
+Each domain is partitioned independently across distributed sample groups and
+data-loader workers. ``CrossDatasetSampler`` shuffles each domain before
+selecting its worker partition, then combines and shuffles the selected samples.
+This samples domains in proportion to their available samples while ensuring
+that all sample communication groups process domains in the same order.
+
+Variable metadata is checked for variables shared by multiple domains when the
+dataset is created. Options from ``CheckVariablesCompatibilitySchema`` can be
+passed through the ``check_variables_compatibility`` argument to ignore selected
+metadata checks.
+
+The data module selects multi-domain sampling through the dataloader strategy::
+
+   dataloader:
+     strategy:
+       _target_: anemoi.training.data.multidomain.MultiDomainDataset
+     batch_size:
+       training: 1
+       validation: 1
+       test: 1
+
+A batch size of one is currently required because each sample contains one
+domain key. Model and training-loop support for batches with only one active
+domain is tracked separately from this data-loading functionality.
 
 API Reference
 =============
@@ -76,6 +113,22 @@ Multi-Dataset API
 -----------------
 
 .. automodule:: anemoi.training.data.multidataset
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Multi-Domain API
+----------------
+
+.. automodule:: anemoi.training.data.multidomain
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Sampler API
+-----------
+
+.. automodule:: anemoi.training.data.sampler
    :members:
    :no-undoc-members:
    :show-inheritance:
