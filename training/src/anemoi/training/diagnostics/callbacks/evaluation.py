@@ -62,17 +62,34 @@ class RolloutEval(Callback):
         pl_module: pl.LightningModule,
         batch: dict[str, torch.Tensor],
     ) -> None:
-        batch_tensor = batch
-        if isinstance(batch, dict):
-            batch_tensor = next(iter(batch.values()))
-
         if self.follow_task_validation_rollout:
             self.max_rollout = len(tuple(pl_module.task.steps("validation")))
 
-        assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
-            "Batch length not sufficient for requested validation rollout length! "
-            f"Set `task.validation_rollout` to at least {self.max_rollout}"
-        )
+        if isinstance(batch, dict):
+            n_step_input_by_dataset = getattr(pl_module, "n_step_input_by_dataset", None)
+            n_step_output_by_dataset = getattr(pl_module, "n_step_output_by_dataset", None)
+            for dataset_name, batch_tensor in batch.items():
+                n_step_input = (
+                    n_step_input_by_dataset[dataset_name]
+                    if isinstance(n_step_input_by_dataset, dict)
+                    else pl_module.n_step_input
+                )
+                n_step_output = (
+                    n_step_output_by_dataset[dataset_name]
+                    if isinstance(n_step_output_by_dataset, dict)
+                    else pl_module.n_step_output
+                )
+                required = self.max_rollout * n_step_output + n_step_input
+                assert batch_tensor.shape[1] >= required, (
+                    f"Batch length for dataset '{dataset_name}' is not sufficient for requested validation "
+                    f"rollout length! Set `task.validation_rollout` to at least {self.max_rollout}"
+                )
+        else:
+            batch_tensor = batch
+            assert batch_tensor.shape[1] >= self.max_rollout * pl_module.n_step_output + pl_module.n_step_input, (
+                "Batch length not sufficient for requested validation rollout length! "
+                f"Set `task.validation_rollout` to at least {self.max_rollout}"
+            )
 
         # NOTE: The configured rollout must be lower than or equal to `task.validation_rollout`,
         # because `_step(..., validation_mode=True)` uses the task setting to determine step count.

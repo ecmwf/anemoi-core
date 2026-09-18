@@ -61,9 +61,13 @@ class StatePredictionMode(PredictionMode):
         reference: dict[str, torch.Tensor] = {}
         for dataset_name, batch_dataset in batch.items():
             var_idx = self.module.data_indices[dataset_name].data.output.full.to(device=batch_dataset.device)
-            reference_step = batch_dataset.narrow(1, self.module.n_step_input - 1, 1).index_select(-1, var_idx)
-            if self.module.n_step_output > 1:
-                reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
+            n_step_input_by_dataset = getattr(self.module, "n_step_input_by_dataset", {})
+            n_step_output_by_dataset = getattr(self.module, "n_step_output_by_dataset", {})
+            n_step_input = n_step_input_by_dataset.get(dataset_name, self.module.n_step_input)
+            n_step_output = n_step_output_by_dataset.get(dataset_name, self.module.n_step_output)
+            reference_step = batch_dataset.narrow(1, n_step_input - 1, 1).index_select(-1, var_idx)
+            if n_step_output != 1:
+                reference_step = reference_step.expand(-1, n_step_output, -1, -1, -1)
             reference[dataset_name] = reference_step
         return self.module.reduce_data_output_target_to_model_output(reference)
 
@@ -129,7 +133,7 @@ class TendencyPredictionMode(PredictionMode):
             # here iterate over per-step processors. Multi-output models
             # need an explicit processor for each lead time.
             assert (
-                self.module.n_step_output == 1
+                self.module.n_step_output_by_dataset[dataset_name] == 1
             ), "Per-step tendency processors are required for multi-output tendency-based transport models."
             lead_time = lead_times[0]
             wrapped = StepwiseProcessors([lead_time])
@@ -142,13 +146,16 @@ class TendencyPredictionMode(PredictionMode):
             return wrapped
 
         for dataset_name in self.module.dataset_names:
+            n_step_output = self.module.n_step_output_by_dataset[dataset_name]
+            if n_step_output == 0:
+                continue
             dataset_stats = stats.get(dataset_name) if isinstance(stats, dict) else None
             assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
             assert (
-                len(lead_times) == self.module.n_step_output
-            ), f"Expected {self.module.n_step_output} tendency statistics entries, got {len(lead_times)}."
+                len(lead_times) == n_step_output
+            ), f"Expected {n_step_output} tendency statistics entries, got {len(lead_times)}."
             assert all(
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
@@ -165,7 +172,7 @@ class TendencyPredictionMode(PredictionMode):
             pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
             post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
             assert (
-                len(pre_tend) == self.module.n_step_output and len(post_tend) == self.module.n_step_output
+                len(pre_tend) == n_step_output and len(post_tend) == n_step_output
             ), "Per-step tendency processors must match n_step_output."
             assert all(
                 proc is not None for proc in pre_tend
@@ -184,6 +191,9 @@ class TendencyPredictionMode(PredictionMode):
     ) -> dict[str, torch.Tensor]:
         tendencies: dict[str, torch.Tensor] = {}
         for dataset_name, y_dataset in y.items():
+            if y_dataset.shape[1] == 0:
+                tendencies[dataset_name] = y_dataset
+                continue
             pre_tend = self._tendency_pre_processors[dataset_name]
             tendency_steps = []
             for step, pre_proc in enumerate(pre_tend):
@@ -208,6 +218,9 @@ class TendencyPredictionMode(PredictionMode):
     ) -> dict[str, torch.Tensor]:
         states: dict[str, torch.Tensor] = {}
         for dataset_name, tendency_dataset in tendency.items():
+            if tendency_dataset.shape[1] == 0:
+                states[dataset_name] = tendency_dataset
+                continue
             post_tend = self._tendency_post_processors[dataset_name]
             state_steps = []
             for step, post_proc in enumerate(post_tend):
@@ -271,7 +284,11 @@ class TendencyPredictionMode(PredictionMode):
                 "transport_reference_source": lambda: reference_state_sampling_source(
                     x,
                     data_indices=self.module.data_indices,
-                    n_step_output=self.module.n_step_output,
+                    n_step_output=getattr(
+                        self.module,
+                        "n_step_output_by_dataset",
+                        self.module.n_step_output,
+                    ),
                 ),
             },
         )
@@ -311,6 +328,13 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        zero_output_datasets = [name for name, count in self.n_step_output_by_dataset.items() if count == 0]
+        if zero_output_datasets:
+            msg = (
+                "Transport training does not support encoder-only datasets without transported targets. "
+                f"Unsupported datasets: {zero_output_datasets}."
+            )
+            raise ValueError(msg)
         self._prediction_mode = self._get_prediction_mode_cls()(self)
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:

@@ -80,7 +80,6 @@ class BaseForecaster(BaseTask):
         validation_rollout: int | None = None,
         **kwargs,
     ) -> None:
-
         if len(kwargs) > 0:
             LOGGER.warning(
                 "The following extra parameters were provided to %s but will be ignored: %s",
@@ -140,11 +139,90 @@ class BaseForecaster(BaseTask):
         shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
+    def _advance_mixed_frequency_input(
+        self,
+        x: torch.Tensor,
+        y_pred: torch.Tensor | None,
+        batch: torch.Tensor,
+        dataset_name: str,
+        rollout_step: int,
+        data_indices: IndexCollection,
+        output_mask: object | None,
+        grid_shard_slice: slice | None,
+    ) -> torch.Tensor:
+        """Advance a dataset using its sparse positions on the shared model time grid."""
+        timestep = self.model_timestep or getattr(self, "timestep", None)
+        if timestep is None or self._rollout_shift % timestep:
+            msg = "Mixed-frequency rollout requires a model timestep compatible with the rollout shift."
+            raise ValueError(msg)
+
+        shift = int(self._rollout_shift // timestep)
+        requested_output_relative_times = self._requested_output_relative_times(
+            dataset_name,
+            rollout_step=rollout_step,
+        )
+        current_input_relative_times = [
+            int(relative_time + rollout_step * shift)
+            for relative_time in self._requested_input_relative_times(dataset_name)
+        ]
+        next_steps = []
+        for relative_time in [
+            int(relative_time + (rollout_step + 1) * shift)
+            for relative_time in self._requested_input_relative_times(dataset_name)
+        ]:
+            if relative_time in current_input_relative_times:
+                current_position = current_input_relative_times.index(relative_time)
+                next_steps.append(x[:, current_position].clone())
+                continue
+
+            batch_position = self._sample_batch_position(dataset_name=dataset_name, relative_time=relative_time)
+            if not 0 <= batch_position < batch.shape[1]:
+                msg = (
+                    f"Mixed-frequency input update for dataset '{dataset_name}' resolved relative time "
+                    f"{relative_time} to batch position {batch_position}, but batch only has "
+                    f"{batch.shape[1]} time steps."
+                )
+                raise ValueError(msg)
+            x_step = batch[:, batch_position, ..., data_indices.data.input.full].clone()
+
+            if y_pred is not None and x_step.shape[1] == 1 and y_pred.shape[2] != 1:
+                x_step = x_step.expand(-1, y_pred.shape[2], -1, -1).clone()
+
+            if relative_time in requested_output_relative_times and y_pred is not None:
+                pred_position = requested_output_relative_times.index(relative_time)
+                x_step[..., data_indices.model.input.prognostic] = y_pred[
+                    :,
+                    pred_position,
+                    ...,
+                    data_indices.model.output.prognostic,
+                ]
+
+            true_state = batch[:, batch_position]
+            if true_state.shape[1] == 1 and x_step.shape[1] != 1:
+                true_state = true_state.expand(-1, x_step.shape[1], -1, -1)
+
+            if output_mask is not None:
+                x_step = output_mask.rollout_boundary(
+                    x_step,
+                    true_state,
+                    data_indices,
+                    grid_shard_slice=grid_shard_slice,
+                )
+
+            forcing = batch[:, batch_position, ..., data_indices.data.input.forcing]
+            if forcing.shape[1] == 1 and x_step.shape[1] != 1:
+                forcing = forcing.expand(-1, x_step.shape[1], -1, -1)
+            x_step[..., data_indices.model.input.forcing] = forcing
+            next_steps.append(x_step)
+
+        return torch.stack(next_steps, dim=1)
+
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         batch: torch.Tensor,
+        dataset_name: str | None = None,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -173,6 +251,7 @@ class BaseForecaster(BaseTask):
                 x[dataset_name],
                 y_pred.get(dataset_name),
                 batch[dataset_name],
+                dataset_name=dataset_name,
                 rollout_step=rollout_step,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],
@@ -268,8 +347,9 @@ class Forecaster(BaseForecaster):
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         batch: torch.Tensor,
+        dataset_name: str | None = None,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -279,6 +359,21 @@ class Forecaster(BaseForecaster):
 
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
+        if len(self.dataset_time_maps) > 0:
+            if dataset_name is None:
+                msg = "`dataset_name` is required for mixed-frequency input updates."
+                raise ValueError(msg)
+            return self._advance_mixed_frequency_input(
+                x,
+                y_pred,
+                batch,
+                dataset_name,
+                rollout_step,
+                data_indices,
+                output_mask,
+                grid_shard_slice,
+            )
+
         keep_steps = min(self.num_input_steps, self.num_output_steps)
 
         x = x.roll(-keep_steps, dims=1)
@@ -290,7 +385,6 @@ class Forecaster(BaseForecaster):
             if y_pred is None:
                 continue
 
-            # Get prognostic variables
             x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
                 :,
                 -(i + 1),
@@ -304,14 +398,14 @@ class Forecaster(BaseForecaster):
             if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
                 true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
 
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
+            if output_mask is not None:
+                x[:, -(i + 1)] = output_mask.rollout_boundary(
+                    x[:, -(i + 1)],
+                    true_state,
+                    data_indices,
+                    grid_shard_slice=grid_shard_slice,
+                )
 
-            # get new "constants" needed for time-varying fields
             x[:, -(i + 1), ..., data_indices.model.input.forcing] = batch[
                 :,
                 batch_time_index,
@@ -387,8 +481,9 @@ class OffsetForecaster(BaseForecaster):
     def _advance_dataset_input(
         self,
         x: torch.Tensor,
-        y_pred: torch.Tensor,
+        y_pred: torch.Tensor | None,
         batch: torch.Tensor,
+        dataset_name: str | None = None,
         rollout_step: int = 0,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
@@ -399,6 +494,21 @@ class OffsetForecaster(BaseForecaster):
         Based on advance_map, mapping indices from input and output to new input.
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
+        if len(self.dataset_time_maps) > 0:
+            if dataset_name is None:
+                msg = "`dataset_name` is required for mixed-frequency input updates."
+                raise ValueError(msg)
+            return self._advance_mixed_frequency_input(
+                x,
+                y_pred,
+                batch,
+                dataset_name,
+                rollout_step,
+                data_indices,
+                output_mask,
+                grid_shard_slice,
+            )
+
         # Return a fresh tensor: gradient computations need the version of x at each rollout step
         x = x.clone()
 
