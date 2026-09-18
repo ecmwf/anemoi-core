@@ -8,9 +8,9 @@
 # nor does it submit to any jurisdiction.
 
 import re
-
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any
+from typing import Literal
 
 import torch
 
@@ -299,14 +299,10 @@ class VariableVocabulary:
         # checkpoint rather than rebuilt from a domain subset.
         param_to_id = {param: i for i, param in enumerate(sorted(all_params))}
 
-        vertical_type_to_id = {
-            vertical_type: i
-            for i, vertical_type in enumerate(sorted(all_vertical_types))
-        }
+        vertical_type_to_id = {vertical_type: i for i, vertical_type in enumerate(sorted(all_vertical_types))}
 
         temporal_operator_to_id = {
-            temporal_operator: i
-            for i, temporal_operator in enumerate(sorted(all_temporal_operators))
+            temporal_operator: i for i, temporal_operator in enumerate(sorted(all_temporal_operators))
         }
 
         return cls(
@@ -353,17 +349,11 @@ class VariableVocabulary:
                 dtype=torch.long,
             ),
             vertical_type_ids=torch.tensor(
-                [
-                    self.vertical_type_to_id[spec.vertical_coordinate.type]
-                    for spec in specs
-                ],
+                [self.vertical_type_to_id[spec.vertical_coordinate.type] for spec in specs],
                 dtype=torch.long,
             ),
             temporal_operator_ids=torch.tensor(
-                [
-                    self.temporal_operator_to_id[spec.temporal_operator]
-                    for spec in specs
-                ],
+                [self.temporal_operator_to_id[spec.temporal_operator] for spec in specs],
                 dtype=torch.long,
             ),
             # ----------------------------------------------------------
@@ -371,24 +361,13 @@ class VariableVocabulary:
             # ----------------------------------------------------------
             vertical_levels=torch.tensor(
                 [
-                    (
-                        0.0
-                        if spec.vertical_coordinate.level is None
-                        else float(spec.vertical_coordinate.level)
-                    )
+                    (0.0 if spec.vertical_coordinate.level is None else float(spec.vertical_coordinate.level))
                     for spec in specs
                 ],
                 dtype=torch.float32,
             ),
             temporal_windows=torch.tensor(
-                [
-                    (
-                        0.0
-                        if spec.temporal_window is None
-                        else float(spec.temporal_window)
-                    )
-                    for spec in specs
-                ],
+                [(0.0 if spec.temporal_window is None else float(spec.temporal_window)) for spec in specs],
                 dtype=torch.float32,
             ),
             # ----------------------------------------------------------
