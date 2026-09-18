@@ -1113,24 +1113,34 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
 @pytest.mark.parametrize(
     ("transform", "transform_kwargs"),
     [
+        pytest.param("regular_sht", {"nlat": 8, "nlon": 12}, id="regular-gaussian"),
+        pytest.param(
+            "regular_sht",
+            {"nlat": 8, "nlon": 12, "latitude_grid": "equiangular-poles"},
+            id="regular-equiangular-poles",
+        ),
         pytest.param("octahedral_sht", {"nlat": 8}, id="octahedral"),
         pytest.param("reduced_sht", {"grid": "n320", "truncation": 3}, id="reduced"),
     ],
 )
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_spectral_crps_sht_transforms(
     transform: str,
     transform_kwargs: dict[str, object],
     mocker: MockerFixture,
+    dtype: torch.dtype,
 ) -> None:
     ring_sizes = [20, 24, 28, 32, 32, 28, 24, 20]
+    if transform == "regular_sht":
+        ring_sizes = [transform_kwargs["nlon"]] * transform_kwargs["nlat"]
     if transform == "reduced_sht":
         # Use a small reduced grid while exercising the real ReducedSHT transform.
         latitudes = np.repeat(np.arange(len(ring_sizes)), ring_sizes)
         mocker.patch("anemoi.transform.grids.named.lookup", return_value={"latitudes": latitudes})
 
     nvars = 2
-    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, requires_grad=True)
-    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars)
+    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, dtype=dtype, requires_grad=True)
+    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars, dtype=dtype)
     loss = _make_loss(
         "anemoi.training.losses.spectral.SpectralCRPSLoss",
         transform=transform,
@@ -1176,3 +1186,27 @@ def test_mse_nans() -> None:
 
     out = loss(pred, target)
     assert torch.isnan(out).any(), "Expected nan loss with ignore_nans=False"
+
+
+@pytest.mark.parametrize("subgrid", [None, (0, 12)])
+def test_regular_sht_loss_schema_and_subgrid(subgrid: tuple[int, int] | None) -> None:
+    from anemoi.training.schemas.training import SpectralLossSchema
+
+    config = {
+        "_target_": "anemoi.training.losses.SpectralCRPSLoss",
+        "scalers": [],
+        "transform": "regular_sht",
+        "nlat": 8,
+        "nlon": 12,
+        "latitude_grid": "equiangular-poles",
+        "subgrid": subgrid,
+    }
+    if subgrid is None:
+        schema = SpectralLossSchema.model_validate(config)
+        assert schema.model_dump()["latitude_grid"] == "equiangular-poles"
+        assert schema.model_dump()["nlon"] == 12
+    else:
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralLossSchema.model_validate(config)
+        with pytest.raises(ValueError, match="require the full grid"):
+            SpectralCRPSLoss(transform="regular_sht", nlat=8, nlon=12, subgrid=subgrid)
