@@ -95,8 +95,25 @@ The data module selects multi-domain sampling through the dataloader strategy::
        test: 1
 
 A batch size of one is currently required because each sample contains one
-domain key. Model and training-loop support for batches with only one active
-domain is tracked separately from this data-loading functionality.
+domain key. Flat encoder-processor-decoder models can route each domain through
+its own hidden mesh while sharing the encoder, processor, and decoder weights::
+
+   model:
+     model:
+       hidden_nodes_name:
+         sg_1: sg_1_hidden
+         sg_2: sg_2_hidden
+
+Each mapped hidden node set must have corresponding domain-to-hidden,
+hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
+feature dimensions must match because the model weights remain shared. The
+hierarchical, ensemble, and transport model variants do not currently support
+per-domain hidden meshes.
+
+With Anemoi's current distributed strategy, domain-specific trainable node and
+edge features must be disabled because the active domain, and therefore the
+active graph-specific parameters, changes between batches. Supporting these
+parameters requires a non-static graph and unused-parameter detection.
 
 API Reference
 =============
