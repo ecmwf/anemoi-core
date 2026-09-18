@@ -151,6 +151,7 @@ def _test_gather_rank(
         pytest.param((1025, 1024), 0, id="dim0_uneven_padding_1m"),
         pytest.param((1024, 1024), 1, id="dim1_even_default_1m"),
         pytest.param((1024, 1025), 1, id="dim1_uneven_padding_1m"),
+        pytest.param((64, 128, 129), -1, id="negative_last_dim_uneven_padding_1m"),
         pytest.param((64, 128, 128), -1, id="negative_last_dim_even_1m"),
     ],
 )
