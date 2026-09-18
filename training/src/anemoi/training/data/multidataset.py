@@ -108,8 +108,12 @@ class MultiDataset(IterableDataset):
 
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set synchronized anchors and relative date indices."""
+        # Compute valid (sequence, position) anchors and a flat index over them
+        # that the shuffle/shard logic operates on.
         self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+
+        # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
@@ -299,8 +303,12 @@ class MultiDataset(IterableDataset):
 
     def _get_worker_index_range(self, n_samples: int, n_workers: int, worker_id: int) -> tuple[int, int, int]:
         """Partition samples across communication groups and workers."""
+        # 1. divide valid date indices into shards for sample communication groups (DDP ranks)
+        # note that we need even splits here across DDP ranks, so we might throw away some samples
         shard_size = n_samples // self.sample_comm_num_groups
         shard_start = self.sample_comm_group_id * shard_size
+
+        # 2. partition the shard across workers (here we can have uneven splits, so we use a balanced partition)
         low, high = get_balanced_partition_range(shard_size, n_workers, worker_id, offset=shard_start)
         return shard_size // n_workers, low, high
 

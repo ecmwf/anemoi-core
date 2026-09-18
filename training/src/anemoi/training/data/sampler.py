@@ -35,6 +35,9 @@ class BaseSampler:
         return len(self.dataset.chunk_index_range)
 
     def _grid_indices(self, dataset_name: str) -> slice:
+        # self.dataset.shard_sizes is lazily initalised to None
+        # This if statement guards against the case where shard_sizes is not set
+        # (e.g. if set_comm_group_info hasn't been called yet)
         if self.dataset.shard_sizes is not None and self.dataset.shard_sizes[dataset_name] is not None:
             start, end = get_partition_range(
                 self.dataset.shard_sizes[dataset_name],
@@ -56,6 +59,7 @@ class BaseSampler:
         }
 
     def _sample_indices(self) -> np.ndarray:
+        # All data readers use the same shuffled anchor indices for synchronization.
         if self.dataset.shuffle:
             indices = self.dataset.rng.choice(
                 self.dataset.valid_date_indices,
