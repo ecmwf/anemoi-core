@@ -7,9 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datetime
-from functools import cached_property
-
 import numpy as np
 
 from anemoi.training.data.multidataset import MultiDataset
@@ -48,8 +45,3 @@ class MultiDomainDataset(MultiDataset):
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
-
-    @cached_property
-    def frequency(self) -> dict[str, datetime.timedelta]:
-        """Return the frequency of each domain."""
-        return self._collect("frequency")

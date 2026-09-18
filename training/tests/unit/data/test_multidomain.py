@@ -44,7 +44,7 @@ class TestMultiDomain:
         mock_dataset_b = mocker.MagicMock()
         mock_dataset_b.missing = set()
         mock_dataset_b.dates = list(range(20, 60))
-        mock_dataset_b.frequency = "1h"
+        mock_dataset_b.frequency = "3h"
         mock_dataset_b.grid_size = 8
         mock_dataset_b.num_sequences = 1
         mock_dataset_b.metadata = {"variables_metadata": {"10u": {"units": "m/s"}}}
@@ -93,8 +93,8 @@ class TestMultiDomain:
         assert np.array_equal(dataset.anchors["dataset_a"], [[0, 10]])
         assert np.array_equal(dataset.anchors["dataset_b"], [[0, 20]])
 
-    def test_frequency_is_reported_per_domain(self, multi_domain: MultiDomainDataset) -> None:
-        assert multi_domain.frequency == {"dataset_a": "3h", "dataset_b": "1h"}
+    def test_frequency_is_shared_across_domains(self, multi_domain: MultiDomainDataset) -> None:
+        assert multi_domain.frequency == "3h"
 
     def test_empty_domain_raises(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
