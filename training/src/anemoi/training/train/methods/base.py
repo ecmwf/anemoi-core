@@ -326,15 +326,16 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         reader_group_size = self.config.dataloader.read_group_size
 
-        self.shard_sizes, self.grid_sizes = {}, {}
+        self._validate_spatial_processor_target_grid(graph_data)
+
+        self.shard_sizes = {}
         for dataset_name in self.dataset_names:
-            self.grid_sizes[dataset_name] = graph_data[
-                dataset_name
-            ].num_nodes  # TODO(Mario): Replace by dataset.grid_size
-            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(
-                self.grid_sizes[dataset_name],
-                reader_group_size,
-            )
+            if dataset_name in self.model.spatial_pre_processors:
+                # Readers deliver the un-projected grid, so shard over the projector's source grid.
+                grid_size = self.model.spatial_pre_processors[dataset_name].input_grid_size
+            else:
+                grid_size = graph_data[dataset_name].num_nodes  # TODO(Mario): Replace by dataset.grid_size
+            self.shard_sizes[dataset_name] = get_balanced_partition_sizes(grid_size, reader_group_size)
 
         self.grid_dim = -2
 
@@ -894,6 +895,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Gathering/sharding of batch
         batch = self._setup_batch_sharding(batch)
 
+        # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
+        # Owned by the model; applied before normalization so projectors see raw values.
+        for ds_name, projector in self.model.spatial_pre_processors.items():
+            if ds_name in batch:
+                batch[ds_name], output_grid_shard_sizes = projector(
+                    batch[ds_name],
+                    model_comm_group=self.model_comm_group,
+                    grid_shard_sizes=self.grid_shard_sizes[ds_name],
+                )
+                self.grid_shard_sizes[ds_name] = output_grid_shard_sizes
+                if output_grid_shard_sizes is None:
+                    self.grid_shard_slice[ds_name] = None
+                else:
+                    start, end = get_partition_range(
+                        partition_sizes=output_grid_shard_sizes,
+                        partition_id=self.model_comm_group_rank,
+                    )
+                    self.grid_shard_slice[ds_name] = slice(start, end)
+
         # Batch normalization
         batch = self._normalize_batch(batch)
 
@@ -933,7 +953,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             else:
                 self.grid_shard_sizes[dataset_name] = None
                 self.grid_shard_slice[dataset_name] = None
-                batch[dataset_name] = self.allgather_batch(batch[dataset_name], dataset_name)
+                batch[dataset_name] = self.allgather_batch(batch[dataset_name], self.shard_sizes[dataset_name])
         return batch
 
     def transfer_batch_to_device(
@@ -987,26 +1007,40 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> TrainingStepOutput:
         pass
 
-    def allgather_batch(self, batch: torch.Tensor, dataset_name: str) -> torch.Tensor:
-        """Allgather the batch-shards across the reader group.
+    def allgather_batch(self, batch: torch.Tensor, grid_shard_sizes: list[int] | None) -> torch.Tensor:
+        """Allgather the shards of a grid-sharded tensor across the reader group.
+
+        The shard sizes must be supplied by the caller because a tensor may live on the
+        reader grid (before spatial preprocessing) or on the projected grid (after it).
+
+        Gathering over the reader group is valid for both: post-projection shards are laid
+        out over the model comm group, and ``keep_batch_sharded`` asserts in ``__init__``
+        that the reader group and the model comm group coincide. When they do not,
+        ``grid_shard_sizes`` is ``None`` post-projection and this returns early.
 
         Parameters
         ----------
         batch : torch.Tensor
-            Batch-shard of current reader rank
-        dataset_name : str
-            Dataset name
+            Grid-shard of the current reader rank.
+        grid_shard_sizes : list[int] | None
+            Shard size per rank, or ``None`` when the tensor is already replicated.
 
         Returns
         -------
         torch.Tensor
-            Allgathered (full) batch
+            Allgathered (full) tensor.
         """
-        grid_size = self.grid_sizes[dataset_name]
-        grid_shard_sizes = self.shard_sizes[dataset_name]
-
-        if grid_size == batch.shape[self.grid_dim] or self.reader_group_size == 1:
+        if grid_shard_sizes is None or self.reader_group_size == 1:
             return batch  # already have the full grid
+
+        expected_size = grid_shard_sizes[self.reader_group_rank]
+        if batch.shape[self.grid_dim] != expected_size:
+            msg = (
+                f"Expected grid shard of size {expected_size} on reader rank {self.reader_group_rank}, "
+                f"got {batch.shape[self.grid_dim]}. The supplied shard sizes describe a different grid "
+                f"than the tensor."
+            )
+            raise ValueError(msg)
 
         return gather_tensor(
             batch,
@@ -1246,8 +1280,54 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
+    def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
+        """Check each spatial projector's target grid against its dataset's graph nodes."""
+        for dataset_name, projector in self.model.spatial_pre_processors.items():
+            dataset_grid_size = graph_data[dataset_name].num_nodes
+            if projector.output_grid_size != dataset_grid_size:
+                msg = (
+                    f"Spatial processor for dataset {dataset_name!r} produces a target grid of "
+                    f"{projector.output_grid_size} points, but its graph node set {dataset_name!r} has "
+                    f"{dataset_grid_size}. The encoder runs after projection, so this node set must be "
+                    f"built on the projector's output grid. Check that the graph node set is correctly "
+                    "constructed and that the projection matrix matches the graph."
+                )
+                raise ValueError(msg)
+
+    def _validate_spatial_processor_grid_sizes(self) -> None:
+        """Check each spatial projector's source grid against the data it will be fed.
+
+        ``shard_sizes`` is derived from ``input_grid_size`` and is what the reader slices
+        zarr with, so a disagreement truncates every rank's read instead of raising.
+        """
+        datamodule = getattr(self.trainer, "datamodule", None)
+        if datamodule is None or not self.model.spatial_pre_processors:
+            return
+
+        data_readers = datamodule.ds_train.data_readers
+        for dataset_name, projector in self.model.spatial_pre_processors.items():
+            reader = data_readers.get(dataset_name)
+            if reader is None:
+                msg = (
+                    f"Spatial processor configured for dataset {dataset_name!r}, "
+                    "but no corresponding training data reader exists. "
+                    "Check data.datasets and dataloader.training.datasets."
+                )
+                raise ValueError(msg)
+
+            if reader.grid_size != projector.input_grid_size:
+                msg = (
+                    f"Spatial processor for dataset {dataset_name!r} expects a source grid of "
+                    f"{projector.input_grid_size} points, but the dataset provides {reader.grid_size}. "
+                    f"Check that the projection matrix matches the dataset resolution."
+                )
+                raise ValueError(msg)
+
     def setup(self, stage: str) -> None:
         """Lightning hook that is called after model is initialized but before training starts."""
+        if stage == "fit":
+            self._validate_spatial_processor_grid_sizes()
+
         if stage == "fit" and self.trainer.is_global_zero and self.logger is not None:
             hyper_params = OmegaConf.to_container(self.config, resolve=True)
             hyper_params.update({"variable_loss_scaling": self._scaling_values_log})
