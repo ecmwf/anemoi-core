@@ -80,12 +80,16 @@ def test_get_edge_attributes():
     assert edge_attrs == {}
 
 
-def test_get_distributed_device(monkeypatch):
+def test_get_distributed_device_gpu(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda x: None)
 
     monkeypatch.setenv("SLURM_LOCALID", "2")
     assert get_distributed_device() == torch.device("cuda:2")
 
+
+def test_get_distributed_device_cpu(monkeypatch):
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert get_distributed_device() == torch.device("cpu")
 
