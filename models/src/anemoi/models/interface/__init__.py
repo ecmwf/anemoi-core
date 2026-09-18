@@ -11,7 +11,6 @@ import uuid
 from typing import Optional
 
 import torch
-from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -21,9 +20,6 @@ from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
-
-#: Key used in ``statistics_tendencies`` to select the zero lead-time entry.
-ZERO_LEAD_TIME_KEY: str = "0h"
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -48,6 +44,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Metadata for the model.
     statistics_tendencies : dict
         Statistics for the tendencies of the data.
+    residual_statistics : dict
+        Precomputed residual normalization statistics, keyed by dataset name.
     supporting_arrays : dict
         Numpy arraysto store in the checkpoint.
     data_indices : dict
@@ -71,6 +69,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_indices: dict,
         metadata: dict,
         statistics_tendencies: dict | None = None,
+        residual_statistics: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
         super().__init__()
@@ -81,6 +80,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.graph_data = graph_data
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
+        self.residual_statistics = residual_statistics
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -94,7 +94,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_indices: dict,
         statistics_tendencies: dict | None = None,
         *,
-        uses_zero_offset_statistics: bool = False,
+        residual_statistics: dict | None = None,
     ) -> tuple[
         Processors,
         Processors,
@@ -115,12 +115,8 @@ class AnemoiModelInterface(torch.nn.Module):
             Data indices for the dataset.
         statistics_tendencies : dict, optional
             Tendencies statistics for the dataset.
-        uses_zero_offset_statistics : bool, optional
-            When ``True``, build ``pre_processors_residual`` /
-            ``post_processors_residual`` from the ``"0h"`` lead-time entry of
-            ``statistics_tendencies`` and skip the stepwise tendency
-            processors (returned as ``None``).  When ``False`` (default),
-            build the stepwise tendency processors and skip the residual pair.
+        residual_statistics : dict, optional
+            Residual statistics for the dataset.
 
         Returns
         -------
@@ -128,8 +124,8 @@ class AnemoiModelInterface(torch.nn.Module):
             ``(pre_processors, post_processors, pre_processors_tendencies,
             post_processors_tendencies, pre_processors_residual,
             post_processors_residual)``.  Exactly one of the two extra pairs is
-            populated (depending on ``uses_zero_offset_statistics``); the other
-            two entries are ``None``.
+            populated (depending on whether ``residual_statistics`` is set);
+            the other two entries are ``None``.
         """
         pre_processors, post_processors = self._build_processor_pair(
             processors_configs,
@@ -140,11 +136,11 @@ class AnemoiModelInterface(torch.nn.Module):
         post_processors_tendencies: Processors | StepwiseProcessors | None = None
         pre_processors_residual: Processors | None = None
         post_processors_residual: Processors | None = None
-        if uses_zero_offset_statistics:
+        if residual_statistics is not None:
             pre_processors_residual, post_processors_residual = self._build_residual_processors(
                 processors_configs,
                 data_indices,
-                statistics_tendencies,
+                residual_statistics,
             )
         else:
             pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
@@ -206,25 +202,11 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         processors_configs: dict,
         data_indices: dict,
-        statistics_tendencies: dict | None,
-    ) -> tuple[Processors | None, Processors | None]:
-        """Build the residual pre/post-processor pair.
+        residual_statistics: dict,
+    ) -> tuple[Processors, Processors]:
+        """Build the residual pre/post-processor pair from precomputed statistics."""
 
-        Uses the zero lead-time entry (``statistics_tendencies["0h"]``)
-        because output steps of the spatial downscaler do not have different
-        'lead times' — the same statistics apply to every output step.
-
-        Returns ``(None, None)`` when ``statistics_tendencies`` is absent.
-        """
-        if statistics_tendencies is None:
-            return None, None
-        # Follow the per-lead-time layout produced by the datamodule
-        # (``{"lead_times": [...], "0h": {...}, ...}``)
-        stats_for_residual = statistics_tendencies.get(ZERO_LEAD_TIME_KEY)
-        if stats_for_residual is None:
-            msg = f"uses_zero_offset_statistics=True but statistics_tendencies has no " f"'{ZERO_LEAD_TIME_KEY}' entry."
-            raise ValueError(msg)
-        return self._build_processor_pair(processors_configs, data_indices, stats_for_residual)
+        return self._build_processor_pair(processors_configs, data_indices, residual_statistics)
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
@@ -233,14 +215,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self.post_processors = torch.nn.ModuleDict()
         self.pre_processors_tendencies = torch.nn.ModuleDict()
         self.post_processors_tendencies = torch.nn.ModuleDict()
-        # Zero-lead-time residual processors — populated only when the model
-        # class sets ``uses_zero_offset_statistics = True`` (e.g. spatial
-        # downscaler).
         self.pre_processors_residual = torch.nn.ModuleDict()
         self.post_processors_residual = torch.nn.ModuleDict()
-
-        model_cls = get_class(self.config.model.model._target_)
-        uses_zero_offset_statistics = getattr(model_cls, "uses_zero_offset_statistics", False)
 
         data_config = get_multiple_datasets_config(self.config.data)
         for dataset_name in self.statistics.keys():
@@ -257,7 +233,9 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
                 self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
-                uses_zero_offset_statistics=uses_zero_offset_statistics,
+                residual_statistics=(
+                    self.residual_statistics.get(dataset_name) if self.residual_statistics is not None else None
+                ),
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post

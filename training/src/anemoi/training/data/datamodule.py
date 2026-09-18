@@ -20,6 +20,7 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.residual_statistics import load_residual_statistics
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
@@ -86,6 +87,23 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
         return stats_by_dataset
+
+    @cached_property
+    def residual_statistics(self) -> dict[str, dict] | None:
+        """Return precomputed residual statistics for datasets that configure them.
+
+        Loaded from ``data.datasets.<name>.residual_statistics`` (a path to a
+        ``.npz`` file) for datasets that set it — e.g. spatial downscaler
+        targets. Datasets without the field are absent from the result.
+        """
+        data_config = get_multiple_datasets_config(self.config.data)
+        stats_by_dataset: dict[str, dict] = {}
+        for dataset_name, dataset in self.ds_train.data_readers.items():
+            path = getattr(data_config[dataset_name], "residual_statistics", None)
+            if path is None:
+                continue
+            stats_by_dataset[dataset_name] = load_residual_statistics(path, dataset.variables)
+        return stats_by_dataset or None
 
     @cached_property
     def metadata(self) -> dict:

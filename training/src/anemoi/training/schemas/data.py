@@ -39,6 +39,12 @@ class DatasetDataSchema(PydanticBaseModel):
         "Spatial preprocessor applied to this dataset before normalization "
         "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
     )
+    residual_statistics: str | None = Field(default=None)
+    (
+        "Path to an .npz file of precomputed residual normalization statistics "
+        "(mean, minimum, maximum, stdev per variable), used instead of this dataset's "
+        "own statistics when this dataset is a residual target (e.g. spatial downscaling). "
+    )
 
 
 class DataSchema(PydanticBaseModel):

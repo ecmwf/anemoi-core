@@ -46,6 +46,7 @@ class EnsembleTraining(BaseTrainingModule):
         data_indices: dict,
         metadata: dict,
         supporting_arrays: dict,
+        residual_statistics: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -68,6 +69,7 @@ class EnsembleTraining(BaseTrainingModule):
             graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
+            residual_statistics=residual_statistics,
             data_indices=data_indices,
             metadata=metadata,
             supporting_arrays=supporting_arrays,

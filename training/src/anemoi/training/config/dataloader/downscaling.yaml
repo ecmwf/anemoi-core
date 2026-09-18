@@ -2,14 +2,6 @@
 #   in_lres  — low-resolution conditioning input (separate zarr)
 #   in_hres  — high-resolution forcings (same zarr as out_hres)
 #   out_hres — high-resolution prediction target (same zarr as in_hres)
-#
-# Residual statistics are loaded via anemoi-datasets' open_dataset interface:
-#
-#   open_dataset(base, statistics_tendencies=residual_stats.zarr)
-#
-# Set system.input.residual_statistics to a zarr whose statistics_tendencies
-# contain the per-variable mean/stdev of (y_hres - interp(x_lres)).
-# If unset, ResidualPredictionMode falls back to state statistics with a warning.
 
 prefetch_factor: 2
 pin_memory: True
@@ -50,7 +42,6 @@ training:
       dataset_config:
         dataset: ${system.input.dataset}
         frequency: ${data.frequency}
-        statistics_tendencies: ${system.input.residual_statistics}
       start: null
       end: 2020
 
@@ -72,7 +63,6 @@ validation:
       dataset_config:
         dataset: ${system.input.dataset}
         frequency: ${data.frequency}
-        statistics_tendencies: ${system.input.residual_statistics}
       start: 2021
       end: 2021
 
@@ -94,6 +84,5 @@ test:
       dataset_config:
         dataset: ${system.input.dataset}
         frequency: ${data.frequency}
-        statistics_tendencies: ${system.input.residual_statistics}
       start: 2022
       end: null

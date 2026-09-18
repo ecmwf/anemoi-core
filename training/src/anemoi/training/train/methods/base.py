@@ -161,6 +161,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         data_indices: dict[str, IndexCollection],
         metadata: dict,
         supporting_arrays: dict,
+        residual_statistics: dict | None = None,
     ) -> None:
         """Initialize graph neural network forecaster.
 
@@ -182,6 +183,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Provenance information
         supporting_arrays : dict
             Supporting NumPy arrays to store in the checkpoint
+        residual_statistics : dict, optional
+            Precomputed residual normalization statistics, keyed by dataset name.
 
         """
         super().__init__()
@@ -207,6 +210,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.model = AnemoiModelInterface(
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
+            residual_statistics=residual_statistics,
             data_indices=data_indices,
             metadata=metadata,
             n_step_input=self.n_step_input,

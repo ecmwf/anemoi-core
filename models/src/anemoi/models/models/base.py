@@ -45,10 +45,6 @@ SUPPORTED_ENCODER_FUSING_STRATEGIES = (NO_ENCODER_FUSION, "concatenate_inputs_al
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
-    uses_zero_offset_statistics: bool = False
-    # Set to ``True`` on models whose target is a residual against a reference
-    # state (e.g. spatial downscalers).
-
     supports_encoder_fusion: bool = False
     # Set to ``True`` on models whose ``_assemble_input`` can combine several
     # source datasets into one encoder input.

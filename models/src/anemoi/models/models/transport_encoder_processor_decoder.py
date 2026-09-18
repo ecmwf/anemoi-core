@@ -1095,10 +1095,6 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model for spatial downscaling that predicts residuals relative to a low res dataset."""
 
-    #: Residual normalization uses zero lead-time statistics (see
-    #: :class:`anemoi.models.models.base.BaseGraphModel.uses_zero_offset_statistics`).
-    uses_zero_offset_statistics: bool = True
-
     #: Inputs are concatenated onto the target grid and encoded together, so one
     #: encoder owns several source datasets.
     supports_encoder_fusion: bool = True
@@ -1435,9 +1431,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         1. Add the ensemble dimension.
         2. Shard grid-wise on the *source* grid.
         3. Apply spatial pre-processors on the sharded raw values so ``in_lres``
-           is projected onto the target grid (the projector uses
-           ``all_to_all_transpose`` internally to redistribute grid and channel
-           shards during projection).
+           is projected onto the target grid.
         4. Apply per-dataset ``pre_processors`` (state normalization).
         5. Cache the denormalized projected reference and the reference dataset's
            ``name_to_index`` as per-target dicts so ``_after_sampling`` can
@@ -1457,9 +1451,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             # 1. (batch, time, grid, vars) → (batch, time, 1, grid, vars)
             x = x[:, 0:n_step_input, None, ...]
 
-            # 2. Shard on the source grid before projection so the projector
-            #    can use its built-in all_to_all_transpose to redistribute
-            #    grid and channel shards during the sparse matmul.
+            # 2. Shard on the source grid before projection.
             source_shard_sizes = None
             if model_comm_group is not None:
                 source_shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
@@ -1530,7 +1522,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         assert post_processors_residual is not None and len(post_processors_residual) > 0, (
             "Residual downscaler _after_sampling requires post_processors_residual "
-            "(built from statistics_tendencies['0h'])."
+            "(built from data.datasets.<target>.residual_statistics)."
         )
 
         state = self.add_residual_to_state(
@@ -1597,9 +1589,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         Accepts ``spatial_pre_processors`` (forwarded by ``AnemoiModelInterface``)
         and threads them through ``_before_sampling`` so ``in_lres`` is projected
         onto the target grid before normalization — matching the training flow.
-        The residual pre/post-processors are built from the zero lead-time
-        statistics (see :attr:`uses_zero_offset_statistics`) and are used to
-        normalize / de-normalize the residual prediction.
         """
         # Ignore any tendency-processor kwargs forwarded by generic callers —
         # residual downscaling does not use per-lead-time tendency stats.

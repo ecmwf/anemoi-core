@@ -60,6 +60,7 @@ data:
     out_hres:
       forcing: []
       diagnostic: []
+      residual_statistics: ${system.input.residual_statistics}
       processors:
         normalizer:
           _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
@@ -84,7 +85,8 @@ system:
     # LRES zarr (used for in_lres).
     dataset_lres: ???
     graph: lognorm35_100k_34788975_graph.pt
-    # Anemoi dataset (zarr) providing ``statistics_tendencies`` for residual normalization.
+    # Precomputed residual normalization statistics for out_hres or other target datasets,
+    # (.npz file with mean/minimum/maximum/stdev entries).
     residual_statistics: ???
     # LRES→HRES sparse projection matrix (.npz) used by CrossGridProjector.
     truncation: ???
@@ -120,7 +122,6 @@ dataloader:
         end: '1900-10-31'
       out_hres:
         dataset_config:
-          statistics_tendencies: ${system.input.residual_statistics}
           select: [2t]
         start: 1900
         end: '1900-10-31'

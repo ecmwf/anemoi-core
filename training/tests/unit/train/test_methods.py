@@ -2807,3 +2807,19 @@ def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:
     module.model.model.transport_source = SimpleNamespace(kind="reference_state")
     with pytest.raises(NotImplementedError, match=r"reference_state"):
         ResidualPredictionMode(module)
+
+
+def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missing() -> None:
+    """Missing residual processors for a target must fail at construction time, not on first use.
+
+    Mirrors ``TendencyPredictionMode``'s eager validation of tendency processors.
+    """
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    module.model.pre_processors_residual = {}
+    with pytest.raises(AssertionError, match="pre_processors_residual"):
+        ResidualPredictionMode(module)

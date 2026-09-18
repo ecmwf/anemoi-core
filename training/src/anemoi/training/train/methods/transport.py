@@ -303,11 +303,9 @@ class ResidualPredictionMode(PredictionMode):
     (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
     The reference dataset for each target is read from ``transport.residual_reference`` in
     the training config, a ``{target: reference}`` mapping, so that ``prepare_target`` can
-    look up the correct baseline for each target independently — for multiple targets.
+    look up the correct baseline for each target independently.
     Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
-    normalization; those processors are built from the zero lead-time entry of
-    ``statistics_tendencies`` because the residual is defined against the current
-    reference state, not against a state a forecast lead away.
+    normalization.
     Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
     """
 
@@ -316,6 +314,7 @@ class ResidualPredictionMode(PredictionMode):
         self._validate_objective()
         self._validate_source_kind()
         self._reference_by_target = self._build_reference_by_target()
+        self._validate_residual_processors()
 
     def _build_reference_by_target(self) -> dict[str, str]:
         """Read the ``{target: reference}`` mapping from ``transport.residual_reference``."""
@@ -352,29 +351,38 @@ class ResidualPredictionMode(PredictionMode):
             )
             raise NotImplementedError(msg)
 
-    def _residual_pre_processors(self) -> dict:
-        """Return the residual pre-processors (zero lead-time normalization).
+    def _validate_residual_processors(self) -> None:
+        """Assert residual processors exist for every target at construction time."""
+        pre_processors_residual = getattr(self.module.model, "pre_processors_residual", None)
+        post_processors_residual = getattr(self.module.model, "post_processors_residual", None)
+        for target_dataset_name in self._reference_by_target:
+            assert pre_processors_residual is not None and target_dataset_name in pre_processors_residual, (
+                f"pre_processors_residual for target dataset '{target_dataset_name}' is required for "
+                "residual-based transport models. Set data.datasets."
+                f"{target_dataset_name}.residual_statistics to a .npz file of precomputed statistics."
+            )
+            assert post_processors_residual is not None and target_dataset_name in post_processors_residual, (
+                f"post_processors_residual for target dataset '{target_dataset_name}' is required for "
+                "residual-based transport models. Set data.datasets."
+                f"{target_dataset_name}.residual_statistics to a .npz file of precomputed statistics."
+            )
 
-        These are built by :class:`~anemoi.models.interface.AnemoiModelInterface`
-        from ``statistics_tendencies["0h"]`` when the model class sets
-        ``uses_zero_offset_statistics = True`` (see the spatial downscaler).
-        """
+    def _residual_pre_processors(self) -> dict:
         residual_proc = getattr(self.module.model, "pre_processors_residual", None)
         if not residual_proc or len(residual_proc) == 0:
             msg = (
                 "ResidualPredictionMode: pre_processors_residual is not configured. "
-                "Provide statistics_tendencies with a '0h' entry to normalize the residuals with dedicated statistics."
+                "Set data.datasets.<target>.residual_statistics to normalize the residuals with dedicated statistics."
             )
             raise ValueError(msg)
         return residual_proc
 
     def _residual_post_processors(self) -> dict:
-        """Return the residual post-processors (zero lead-time normalization)."""
         residual_proc = getattr(self.module.model, "post_processors_residual", None)
         if not residual_proc or len(residual_proc) == 0:
             msg = (
                 "ResidualPredictionMode: post_processors_residual is not configured. "
-                "Provide statistics_tendencies with a '0h' entry to normalize the residuals with dedicated statistics."
+                "Set data.datasets.<target>.residual_statistics to normalize the residuals with dedicated statistics."
             )
             raise ValueError(msg)
         return residual_proc
