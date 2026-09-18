@@ -16,7 +16,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
-from anemoi.models.testing import _run_distributed_test
+from tests.distributed._distributed_runner import _run_distributed_test
 
 
 def _test_cross_grid_projector_returns_target_shards_rank(

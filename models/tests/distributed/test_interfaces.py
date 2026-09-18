@@ -26,7 +26,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.primitives import _alltoall_op
 from anemoi.models.distributed.primitives import _alltoall_transpose
 from anemoi.models.distributed.primitives import _resolve_group_name
-from anemoi.models.testing import _run_distributed_test
+from tests.distributed._distributed_runner import _run_distributed_test
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12
