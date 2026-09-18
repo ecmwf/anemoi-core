@@ -1,3 +1,12 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 from typing import Any
 
 import einops
@@ -22,20 +31,14 @@ class VariableTokenizer(torch.nn.Module):
         assert isinstance(emb_dim, int)
         assert isinstance(out_dim, int)
         assert isinstance(num_heads, int)
-        assert (
-            emb_dim % num_heads == 0
-        ), "Embedding dimension must be divisible by number of heads."
+        assert emb_dim % num_heads == 0, "Embedding dimension must be divisible by number of heads."
 
         self.io = "input"
-        self.embedd_variables = EmbeddVariablesMetadata(
-            emb_dim=emb_dim, vocabulary=vocabulary
-        )
+        self.embedd_variables = EmbeddVariablesMetadata(emb_dim=emb_dim, vocabulary=vocabulary)
 
         self.value_encoder = torch.nn.Linear(1, emb_dim)
 
-        self.mha = torch.nn.MultiheadAttention(
-            embed_dim=emb_dim, num_heads=num_heads, batch_first=True, **kwargs
-        )
+        self.mha = torch.nn.MultiheadAttention(embed_dim=emb_dim, num_heads=num_heads, batch_first=True, **kwargs)
 
         self.query = torch.nn.Parameter(torch.empty(1, 1, emb_dim))
         torch.nn.init.xavier_uniform_(self.query)
@@ -119,9 +122,7 @@ class VariableDeTokenizer(torch.nn.Module):
         assert isinstance(in_dim, int)
 
         self.io = "output"
-        self.embedd_variables = EmbeddVariablesMetadata(
-            emb_dim=emb_dim, vocabulary=vocabulary
-        )
+        self.embedd_variables = EmbeddVariablesMetadata(emb_dim=emb_dim, vocabulary=vocabulary)
 
         self.grid_projection = torch.nn.Linear(in_dim, emb_dim)
         self.variable_projection = torch.nn.Linear(emb_dim, emb_dim)
