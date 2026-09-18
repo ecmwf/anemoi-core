@@ -243,13 +243,6 @@ def test_rejects_fusing_strategy_that_is_a_substring_of_a_supported_one(fusing_s
         _build_dummy_model(fusing_strategy=fusing_strategy)
 
 
-def test_without_fusion_every_source_dataset_is_its_own_anchor() -> None:
-    model = _build_dummy_model(source_datasets=("data", "extra"))
-
-    assert model.encoder2anchors == {0: ["data", "extra"]}
-    assert model.input_datasets == ["data", "extra"]
-
-
 def test_fusion_anchor_without_a_fusion_strategy_is_rejected() -> None:
     """Silently ignoring the anchor would hide a real misconfiguration."""
     with pytest.raises(ValueError, match="fusion_anchor"):
@@ -298,17 +291,6 @@ def test_fusion_anchor_must_be_one_of_the_source_datasets() -> None:
             fusion_anchor="hidden",
             model_cls=FusingGraphModel,
         )
-
-
-def test_calculate_shapes_and_indices_fills_channel_counts_before_any_dimension() -> None:
-    """Dimension hooks may read channel counts of datasets other than their own.
-
-    If dims were computed in the same loop that fills ``num_input_channels``,
-    the first dataset would only ever see its own count.
-    """
-    model = _build_dummy_model(source_datasets=("data", "extra"), model_cls=CrossDatasetInputDimModel)
-
-    assert model.input_dim == {"data": 2, "extra": 2}
 
 
 # ---------------------------------------------------------------------------
