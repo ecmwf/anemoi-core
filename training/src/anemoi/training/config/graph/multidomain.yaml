@@ -1,0 +1,113 @@
+# Stretched grid graph config intended to be used with a cutout dataset.
+# The stretched mesh resolution used here is intended for o96 global resolution with 10km
+# limited area resolution.
+overwrite: True
+
+
+# Each domain has its own data nodes, hidden mesh, and graph edges.
+nodes:
+  sg_1:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.datasets.sg_1.dataset_config}
+    attributes: ${graph.attributes.nodes}
+  sg_1_hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: 8
+      global_resolution: 5
+      reference_node_name: sg_1
+      mask_attr_name: cutout_mask
+      margin_radius_km: 11
+  sg_2:
+    node_builder:
+      _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+      dataset: ${dataloader.training.datasets.sg_2.dataset_config}
+    attributes: ${graph.attributes.nodes}
+  sg_2_hidden:
+    node_builder:
+      _target_: anemoi.graphs.nodes.StretchedTriNodes
+      lam_resolution: ${graph.nodes.sg_1_hidden.node_builder.lam_resolution}
+      global_resolution: ${graph.nodes.sg_1_hidden.node_builder.global_resolution}
+      reference_node_name: sg_2
+      mask_attr_name: cutout_mask
+      margin_radius_km: 11
+edges:
+- source_name: sg_1
+  target_name: sg_1_hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: sg_1_hidden
+  target_name: sg_1_hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.sg_1_hidden.node_builder.lam_resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: sg_1_hidden
+  target_name: sg_1
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: sg_2
+  target_name: sg_2_hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 12
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: sg_2_hidden
+  target_name: sg_2_hidden
+  edge_builders:
+  - _target_: anemoi.graphs.edges.MultiScaleEdges
+    x_hops: 1
+    scale_resolutions: ${graph.nodes.sg_2_hidden.node_builder.lam_resolution}
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+- source_name: sg_2_hidden
+  target_name: sg_2
+  edge_builders:
+  - _target_: anemoi.graphs.edges.KNNEdges
+    num_nearest_neighbours: 3
+    source_mask_attr_name: null
+    target_mask_attr_name: null
+  attributes: ${graph.attributes.edges}
+
+attributes:
+  nodes:
+    # Attributes for data nodes
+    cutout_mask:
+      _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    boundary_mask:
+      _target_: anemoi.graphs.nodes.attributes.BooleanNot
+      masks:
+        _target_: anemoi.graphs.nodes.attributes.CutOutMask
+    area_weight:
+      _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+      norm: unit-max
+      fill_value: 0
+    lam_area_weight:
+      _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
+      mask_node_attr_name: cutout_mask
+      norm: unit-max
+
+  edges:
+    edge_length:
+      _target_: anemoi.graphs.edges.attributes.EdgeLength
+      norm: unit-max
+    edge_dirs:
+      _target_: anemoi.graphs.edges.attributes.EdgeDirection
+      norm: unit-std
+
+post_processors: []

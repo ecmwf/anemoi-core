@@ -34,6 +34,9 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
+    supports_shared_encoder_decoder = False
+    supports_multiple_hidden_meshes = False
+
     def __init__(
         self,
         *,

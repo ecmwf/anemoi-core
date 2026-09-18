@@ -4,6 +4,9 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
+strategy:
+  _target_: anemoi.training.data.multidataset.MultiDataset
+
 # ============
 # read_group_size:
 #   Form subgroups of model comm groups that read data together.
