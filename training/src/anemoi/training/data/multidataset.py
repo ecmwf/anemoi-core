@@ -95,7 +95,7 @@ class MultiDataset(IterableDataset):
         if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
-                f"Trajectory datasets (init x step axes) in the same {self.__class__.__name__} is unsupported. "
+                f"Trajectory datasets (init x step axes) in the same IterableDataset is unsupported. "
                 f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
             )
             raise ValueError(msg)
