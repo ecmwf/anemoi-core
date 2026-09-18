@@ -131,11 +131,6 @@ class Node:
             msg = f"key {key} not in Node."
             raise ValueError(msg)
 
-        if self.is_interpolation(key) and not isinstance(self.cfg[key], str):
-            # This allows to select items through interpolations.
-            # Use the interpolation handler to find the correct reference.
-            return self.root.select(self._interpolation_handler.interpolation_of((*self.prefix, key)))
-
         if isinstance(self.cfg[key], ListConfig):
             cls = NodeList
         elif isinstance(self.cfg[key], DictConfig):
@@ -227,7 +222,12 @@ class Node:
             return False
         return True
 
-    def select(self, parts: str | Sequence[str | int], create_missing: bool = False) -> Node:
+    def select(
+        self,
+        parts: str | Sequence[str | int],
+        create_missing: bool = False,
+        redirect_interpolation: bool = True,
+    ) -> Node:
         """Select a node in the tree given a sequence of keys.
 
         Parameters
@@ -237,6 +237,15 @@ class Node:
         create_missing : bool, default False
             Whether to create new nodes if the key is missing. If true, will always create
             a DictNode when missing.
+        redirect_interpolation : bool, default False
+            Whether to follow interpolation when selecting.
+            For example with config:
+
+            ..code : yaml
+                x: ${y}
+                y: test
+
+            selecting x will follow the interpolation and return the y node.
 
         Returns
         -------
@@ -245,6 +254,8 @@ class Node:
         """
         if isinstance(parts, str):
             parts = parts.split(".")
+        # Remove the prefix from the parts
+        parts = parts[len(self.prefix) :]
         node = self
         for part in parts:
             if not isinstance(node, NodeContainer):
@@ -252,7 +263,18 @@ class Node:
                 raise TypeError(msg)
             if part not in node and create_missing:
                 node[part] = {}
-            node = node[part]
+            if (
+                redirect_interpolation
+                and node.is_interpolation(part)
+                and node._interpolation_handler.num_interpolations(node[part].value) == 1
+            ):
+                # This allows to select items through interpolations.
+                # Use the interpolation handler to find the correct reference.
+                # If number of reverse_refs > 1, then the item to select is ambiguous.  We don't allow this case.
+                _key = node._interpolation_handler.interpolation_of(node[part])
+                node = node.root.select(_key)
+            else:
+                node = node[part]
         return node
 
     def drop_key(self, keys: str, remove_empty: bool = False) -> None:
@@ -431,6 +453,9 @@ class NodeList(NodeContainer):
 
     def __getitem__(self, key: str | int) -> Node:
         return super().__getitem__(int(key))
+
+    def is_interpolation(self, key: str | int) -> bool:
+        return super().is_interpolation(int(key))
 
     def __repr__(self) -> str:
         return f"NodeList({self.prefix_str})"

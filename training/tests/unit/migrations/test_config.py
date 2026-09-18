@@ -61,6 +61,18 @@ def test_select() -> None:
     assert node.yaml_node.value == {"baz": "value"}
 
 
+def test_select_prefix() -> None:
+    content = dedent("""\
+    foo:
+      bar:
+        baz: value
+    """)
+
+    config = Config(content, prefix=("prefix",))
+    node = config.select(("prefix", "foo", "bar"))
+    assert node.yaml_node.value == {"baz": "value"}
+
+
 def test_select_missing() -> None:
     content = dedent("""\
     foo:
@@ -101,8 +113,8 @@ def test_drop_key() -> None:
         old: old value
     """)
 
-    config = Config(content)
-    config.drop_key("foo.bar.old")
+    config = Config(content, prefix=("prefix",))
+    config.drop_key("prefix.foo.bar.old")
     expected_output = dedent("""\
     foo:
       bar:

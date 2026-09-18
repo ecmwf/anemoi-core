@@ -196,19 +196,35 @@ class InterpolationHandler:
             for key in range(len(node)):
                 self._parse_node(node, prefix, key)
 
-    def interpolation_of(self, parts: Sequence[str | int]) -> tuple[str | int, ...]:
-        """Returns the interpolation target of the given path if only one exist.
+    def num_interpolations(self, value: str) -> int:
+        """The number of interpolation in the given value.
 
         Parameters
         ----------
-        parts : Sequence[str | int]
-            The path to the key
+        value : str
+            The value to check
+
+        Returns
+        -------
+        int
+            The number of interpolations
+        """
+        return len(get_interpolations(value))
+
+    def interpolation_of(self, node: Node) -> tuple[str | int, ...]:
+        """Returns the interpolation target of the given node if only one exist.
+
+        Parameters
+        ----------
+        node : Node
+            The node to get the interpolation of.
 
         Returns
         -------
         tuple[str | int, ...]
             The path to the target node.
         """
+        parts = node.prefix
         if len(self.reverse_refs[tuple(parts)]) > 1:
             msg = "Multiple interpolations exist."
             raise ValueError(msg)

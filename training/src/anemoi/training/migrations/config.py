@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from functools import cached_property
 from pathlib import Path
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
 
@@ -20,6 +21,9 @@ from omegaconf import OmegaConf
 from anemoi.training.migrations.interpolations import InterpolationHandler
 from anemoi.training.migrations.nodes import NodeDict
 
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 
 class Config(NodeDict):
     """The entry point for the config tree.
@@ -27,8 +31,9 @@ class Config(NodeDict):
     This is a proxy for a NodeDict that can be initialized via a config content.
     """
 
-    def __init__(self, content: str) -> None:
+    def __init__(self, content: str, prefix: Sequence[str | int] = ()) -> None:
         self._content = content
+        self._prefix = prefix
         self._cfg = OmegaConf.create(self._content)
         self._interpolation_handler = InterpolationHandler(self)
         self._interpolation_handler.parse_config()
@@ -51,12 +56,9 @@ class Config(NodeDict):
         return cls(content)
 
     @property
-    def prefix(self) -> tuple[()]:
-        """The config prefix.
-
-        The config object doesn't have any prefix as it is the root of the config tree.
-        """
-        return ()
+    def prefix(self) -> Sequence[str | int]:
+        """The config prefix."""
+        return self._prefix
 
     @cached_property
     def yaml(self) -> yamlrocks.YAMLRocksDocument:

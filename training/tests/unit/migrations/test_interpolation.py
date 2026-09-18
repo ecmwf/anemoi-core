@@ -145,4 +145,28 @@ def test_interpolation_of() -> None:
       bar: ${baz.key}
     """)
     config = Config(content)
-    assert config._interpolation_handler.interpolation_of(("foo", "bar")) == ("baz", "key")
+    assert config._interpolation_handler.interpolation_of(config["foo"]["bar"]) == ("baz", "key")
+
+
+def test_interpolation_with_prefix() -> None:
+    content = dedent("""\
+    baz: value
+    foo:
+      bar: ${prefix.baz}
+    other: ${prefix.baz}
+    nested: ${prefix.other}
+    """)
+    node = Config(content, ("prefix",))
+    interpolations = node._interpolation_handler
+    assert interpolations.references == {
+        ("prefix", "baz"): {
+            Interpolation(("prefix", "foo", "bar"), "prefix.baz"),
+            Interpolation(("prefix", "other"), "prefix.baz"),
+        },
+        ("prefix", "other"): {Interpolation(("prefix", "nested"), "prefix.other")},
+    }
+    assert interpolations.reverse_refs == {
+        ("prefix", "foo", "bar"): {Interpolation(("prefix", "baz"), "prefix.baz")},
+        ("prefix", "other"): {Interpolation(("prefix", "baz"), "prefix.baz")},
+        ("prefix", "nested"): {Interpolation(("prefix", "other"), "prefix.other")},
+    }
