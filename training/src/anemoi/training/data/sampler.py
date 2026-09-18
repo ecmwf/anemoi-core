@@ -74,16 +74,13 @@ class BaseSampler:
         )
         return indices
 
-    def _load_sample(self, index: int) -> dict[str, torch.Tensor]:
-        return self.dataset.get_sample(int(index))
-
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         initial_batch = None
         for index in self._sample_indices():
             if not self.dataset.fake_dataloading:
-                yield self._load_sample(index)
+                yield self.sample(index)
             elif initial_batch is None:
-                initial_batch = self._load_sample(index)
+                initial_batch = self.sample(index)
                 yield initial_batch
             else:
                 yield initial_batch
@@ -138,7 +135,3 @@ class CrossDatasetSampler(BaseSampler):
             samples[:10],
         )
         return samples
-
-    def _load_sample(self, index: tuple[str, int]) -> dict[str, torch.Tensor]:
-        dataset_name, sample_index = index
-        return self.dataset.get_sample(dataset_name, sample_index)

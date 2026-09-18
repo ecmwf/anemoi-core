@@ -17,6 +17,7 @@ from pytest_mock import MockFixture
 
 from anemoi.training.data.multidomain import MultiDomainDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
 from anemoi.transform.variables import Variable
 
@@ -128,13 +129,14 @@ class TestMultiDomain:
         for domain in multi_domain.dataset_names:
             assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
 
-    def test_get_sample_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
-        multi_domain.get_sample("dataset_a", 0)
+    def test_sampler_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
+        sampler = CrossDatasetSampler(multi_domain)
+        sampler.sample(("dataset_a", 0))
 
         multi_domain.data_readers["dataset_a"].get_sample.assert_called_once()
         multi_domain.data_readers["dataset_b"].get_sample.assert_not_called()
 
-        multi_domain.get_sample("dataset_b", 2)
+        sampler.sample(("dataset_b", 2))
         multi_domain.data_readers["dataset_b"].get_sample.assert_called_once()
 
     def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDomainDataset) -> None:

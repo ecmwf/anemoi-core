@@ -391,10 +391,6 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        """Load a sample through the configured sampler."""
-        return self.sampler_class(self).sample(index)
-
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Yield samples selected by the dataset's sampler."""
         yield from self.sampler_class(self)
