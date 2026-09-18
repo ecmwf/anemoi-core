@@ -264,7 +264,7 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
-        if self.spatial_pre_processors:
+        if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         # Delegate to the model's predict_step implementation with processors
