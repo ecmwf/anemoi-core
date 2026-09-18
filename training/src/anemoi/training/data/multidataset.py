@@ -86,22 +86,22 @@ class MultiDataset(IterableDataset):
         if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
+                f"Trajectory datasets (init x step axes) in the same {self.__class__.__name__} is unsupported. "
                 f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
             )
             raise ValueError(msg)
 
-        # Compute valid (sequence, position) anchors and a flat index over them
-        # that the shuffle/shard logic operates on.
+        self._set_date_indices(relative_date_indices)
+
+        self._lazy_init_model_and_reader_group_info()
+
+    def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Set synchronized anchors and relative date indices."""
         self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
-
-        self._lazy_init_model_and_reader_group_info()
 
     def set_epoch(
         self,
@@ -117,14 +117,7 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
-        # Recompute valid (sequence, position) anchors for the updated rollout.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
+        self._set_date_indices(relative_date_indices)
 
     def _lazy_init_model_and_reader_group_info(self) -> None:
         """Lazy initialize model and reader group info."""
