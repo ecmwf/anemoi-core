@@ -448,6 +448,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         return x_out_dict
 
     def fill_metadata(self, md_dict) -> None:
+        super().fill_metadata(md_dict)
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],

@@ -14,12 +14,14 @@ from typing import Optional
 
 import einops
 import torch
+import torch.distributed as dist
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -34,6 +36,7 @@ from anemoi.models.transport import NoiseConditioningSettings
 from anemoi.models.transport import StochasticInterpolantSettings
 from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
+from anemoi.models.transport import TransportSourceSpec
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.models.transport import sampling_source_specs
@@ -664,16 +667,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             **kwargs,
         )
 
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
@@ -1196,6 +1189,16 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         encoder_name = self.dataset2encoder[dataset_name]
         return [name for name in self.encoder2datasets[encoder_name] if name != dataset_name]
 
+    @property
+    def inference_input_datasets(self) -> list[str]:
+        """The fused inputs only.
+
+        The encoder anchors are the targets, and a target is sampled rather
+        than read, so inference never needs data for it.
+        """
+        targets = set(self.target_datasets)
+        return [name for name in super().inference_input_datasets if name not in targets]
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Return the encoder input dimension on the target grid for ``dataset_name``."""
         if dataset_name not in self.input_datasets:
@@ -1437,6 +1440,9 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
            ``name_to_index`` as per-target dicts so ``_after_sampling`` can
            reconstruct the state without any further wrapping — mirrors how
            ``ResidualPredictionMode`` caches ``x_ref_on_target_grid`` in training.
+
+        Only ``inference_input_datasets`` are read. The targets are sampled, so
+        ``batch`` need not carry them; any entry for one is ignored.
         """
         del kwargs
 
@@ -1447,9 +1453,22 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         spatial_pre_processors = spatial_pre_processors or {}
 
-        for dataset_name, x in batch.items():
+        input_dataset_names = self.inference_input_datasets
+        missing = [name for name in input_dataset_names if name not in batch]
+        if missing:
+            msg = (
+                f"Missing input dataset(s) {missing} in the batch. The downscaler reads "
+                f"{input_dataset_names} and samples {self.target_dataset_names}."
+            )
+            raise ValueError(msg)
+
+        unused = [name for name in batch if name not in input_dataset_names]
+        if unused:
+            LOGGER.debug("Ignoring batch entries the model does not read: %s.", unused)
+
+        for dataset_name in input_dataset_names:
             # 1. (batch, time, grid, vars) → (batch, time, 1, grid, vars)
-            x = x[:, 0:n_step_input, None, ...]
+            x = batch[dataset_name][:, 0:n_step_input, None, ...]
 
             # 2. Shard on the source grid before projection.
             source_shard_sizes = None
@@ -1459,13 +1478,15 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 grid_shard_sizes[dataset_name] = source_shard_sizes
 
             # 3. Spatial projection on raw (un-normalized) values.
-            projector = spatial_pre_processors.get(dataset_name)
+            projector = spatial_pre_processors[dataset_name] if dataset_name in spatial_pre_processors else None
             if projector is not None:
-                x = projector(
+                x, source_shard_sizes = projector(
                     x,
                     model_comm_group=model_comm_group,
                     grid_shard_sizes=source_shard_sizes,
                 )
+                if grid_shard_sizes is not None:
+                    grid_shard_sizes[dataset_name] = source_shard_sizes
 
             # 4. Normalize.
             x = pre_processors[dataset_name](x, in_place=False)
@@ -1488,6 +1509,14 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             reference_variable_name_to_column_index_by_target[target_name] = self.data_indices[
                 reference_name
             ].name_to_index
+
+        # 6. The targets never pass through the loop above, so their shard sizes
+        #    come from the graph. The projector splits its output grid the same
+        #    way, which is what keeps the fused inputs and the noised target on
+        #    matching shards.
+        if grid_shard_sizes is not None:
+            for target_name in self.target_dataset_names:
+                grid_shard_sizes[target_name] = self._target_grid_shard_sizes(target_name, model_comm_group)
 
         return (
             xs,
@@ -1548,6 +1577,56 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         return out
 
+    def _target_grid_shard_sizes(
+        self,
+        target_dataset_name: str,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> ShardSizes:
+        """Split the target's graph node set the way every other grid tensor is split."""
+        if model_comm_group is None:
+            return None
+        return get_balanced_partition_sizes(
+            self.node_attributes.num_nodes[target_dataset_name],
+            dist.get_world_size(group=model_comm_group),
+        )
+
+    def _target_sampling_source_specs(
+        self,
+        x: dict[str, torch.Tensor],
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> dict[str, TransportSourceSpec]:
+        """Describe the field to sample for each target, without a target tensor.
+
+        The target is not part of the batch at inference, so its shape comes
+        from the model itself: the node count of its graph node set and the
+        number of output channels. Batch and ensemble sizes, device and dtype
+        follow the target's reference input, which the projector has already
+        placed on the target grid.
+        """
+        specs: dict[str, TransportSourceSpec] = {}
+        for target_name in self.target_dataset_names:
+            reference = x[self._reference_by_target[target_name]]
+            num_nodes = self.node_attributes.num_nodes[target_name]
+            target_shard_sizes = grid_shard_sizes.get(target_name) if grid_shard_sizes is not None else None
+            if target_shard_sizes is None:
+                assert reference.shape[-2] == num_nodes, (
+                    f"The reference of target '{target_name}' has {reference.shape[-2]} grid points but the "
+                    f"target grid has {num_nodes}. The spatial pre-processor must project onto the target grid."
+                )
+            specs[target_name] = TransportSourceSpec(
+                shape=(
+                    reference.shape[0],
+                    self.n_step_output,
+                    reference.shape[2],
+                    num_nodes,
+                    self.num_output_channels[target_name],
+                ),
+                device=reference.device,
+                dtype=reference.dtype,
+                grid_shard_sizes=target_shard_sizes,
+            )
+        return specs
+
     def build_sampling_source(
         self,
         x: dict[str, torch.Tensor],
@@ -1557,12 +1636,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     ) -> dict[str, torch.Tensor]:
         """Build the sampling source only for the target datasets."""
         request = TransportSourceRequest(
-            specs=sampling_source_specs(
-                {name: x[name] for name in self.target_dataset_names},
-                n_step_output=self.n_step_output,
-                num_output_channels=self.num_output_channels,
-                grid_shard_sizes=grid_shard_sizes,
-            ),
+            specs=self._target_sampling_source_specs(x, grid_shard_sizes),
             default_kind=default_kind,
             custom_source_factories={},
             model_comm_group=model_comm_group,
@@ -1586,9 +1660,13 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Run downscaling inference.
+
         Accepts ``spatial_pre_processors`` (forwarded by ``AnemoiModelInterface``)
         and threads them through ``_before_sampling`` so ``in_lres`` is projected
         onto the target grid before normalization — matching the training flow.
+
+        ``batch`` only has to carry the datasets in ``inference_input_datasets``;
+        the targets are sampled from a field sized by the model.
         """
         # Ignore any tendency-processor kwargs forwarded by generic callers —
         # residual downscaling does not use per-lead-time tendency stats.
@@ -1624,7 +1702,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 **kwargs,
             )
             for target_name in self.target_dataset_names:
-                out[target_name] = out[target_name].to(batch[target_name].dtype)
+                # The target is not in the batch; its reference input carries the input dtype.
+                out[target_name] = out[target_name].to(batch[self._reference_by_target[target_name]].dtype)
 
             out = self._after_sampling(
                 out,

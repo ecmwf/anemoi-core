@@ -144,6 +144,18 @@ class BaseGraphModel(nn.Module):
         # as extra features on their anchor's node set.
         self.input_datasets = list(dict.fromkeys(d for anchors in self.encoder2anchors.values() for d in anchors))
 
+    @property
+    def inference_input_datasets(self) -> list[str]:
+        """Datasets whose data ``predict_step`` reads from the batch.
+
+        Every dataset an encoder consumes, fused or not — which is more than
+        ``input_datasets`` (the anchors) whenever an encoder fuses several
+        sources. Models that generate one of their encoder sources rather than
+        reading it, such as the residual downscaler whose anchor is its target,
+        override this.
+        """
+        return list(dict.fromkeys(d for sources in self.encoder2datasets.values() for d in sources))
+
     def _resolve_encoder_anchors(
         self,
         encoder_name: str,
@@ -597,7 +609,28 @@ class BaseGraphModel(nn.Module):
 
         return y_hat
 
-    @abstractmethod
     def fill_metadata(self, md_dict) -> None:
-        """To be implemented in subclasses to fill model-specific metadata."""
-        pass
+        """Fill model-specific metadata.
+
+        Subclasses extend this with their own entries and must call
+        ``super().fill_metadata(md_dict)``.
+        """
+        self._fill_dataset_roles(md_dict)
+
+    def _fill_dataset_roles(self, md_dict) -> None:
+        """Record what each dataset is used for at inference time.
+
+        ``input`` datasets have to be retrieved and handed to the model,
+        ``output`` datasets are produced by it, and ``input_output`` datasets
+        are both — the usual case for a forecaster. Without this a runner
+        cannot tell the two sides of, say, a downscaler apart and has to be
+        told in its configuration.
+        """
+        inference_inputs = set(self.inference_input_datasets)
+        targets = set(self.target_datasets)
+
+        for dataset_name in dict.fromkeys([*self.inference_input_datasets, *self.target_datasets]):
+            is_input = dataset_name in inference_inputs
+            is_output = dataset_name in targets
+            role = "input_output" if is_input and is_output else "input" if is_input else "output"
+            md_dict["metadata_inference"].setdefault(dataset_name, {})["role"] = role

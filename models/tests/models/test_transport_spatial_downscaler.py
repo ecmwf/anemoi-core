@@ -29,6 +29,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
+from anemoi.models.transport import TransportSourceBuilder
 
 # ── helpers ────────────────────────────────────────────────────────────────────
 
@@ -76,6 +77,9 @@ class _StaticNodeAttributes:
     def __init__(self, attr_ndims: dict[str, int], grid: int = 4) -> None:
         self.attr_ndims = attr_ndims
         self.grid = grid
+        # Node counts come from the graph in the real class; every dataset here
+        # shares one grid size.
+        self.num_nodes = {name: grid for name in attr_ndims}
 
     def __call__(self, dataset_name: str, batch_size: int) -> torch.Tensor:
         return torch.zeros(batch_size * self.grid, self.attr_ndims[dataset_name])
@@ -111,14 +115,16 @@ class _IdentitySpatialProjector:
     of operations in ``_before_sampling`` and the arguments passed to the
     projector (in particular ``grid_shard_sizes``, which must be the
     source-grid shard sizes so behaviour matches the training path).
+
+    Returns ``(x, output_grid_shard_sizes)`` like ``CrossGridProjector.forward``.
     """
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    def __call__(self, x: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    def __call__(self, x: torch.Tensor, **kwargs: Any) -> tuple[torch.Tensor, Any]:
         self.calls.append({"x": x, "kwargs": kwargs})
-        return x
+        return x, kwargs.get("grid_shard_sizes")
 
 
 def _wire_fused_encoder_routing(
@@ -508,6 +514,104 @@ def test_before_sampling_applies_spatial_preprocessor_and_pre_processors() -> No
     torch.testing.assert_close(x_ref_by_target["out_hres"], batch_lres.unsqueeze(2))
     # The reference dataset's name_to_index is threaded through as a per-target dict.
     assert ref_name_to_index_by_target == {"out_hres": model.data_indices["in_lres"].name_to_index}
+
+
+def test_inference_input_datasets_are_the_fused_inputs_without_the_target() -> None:
+    """Inference supplies data for the fused inputs only; the target is sampled."""
+    model = _make_bare_model()
+
+    assert model.inference_input_datasets == ["in_lres", "in_hres"]
+
+
+def test_before_sampling_needs_no_batch_entry_for_the_target() -> None:
+    """The target is generated, not read, so the batch must not have to carry it."""
+    model = _make_bare_model()
+    pre = {name: _AdditiveProcessor(offset=1.0) for name in ("in_lres", "in_hres")}
+    post = {"in_lres": _AdditiveProcessor(offset=-1.0)}
+
+    batch_lres = torch.full((1, 1, 4, 2), 1.0)
+    batch = {"in_lres": batch_lres, "in_hres": torch.full((1, 1, 4, 1), 2.0)}
+
+    (xs, x_ref_by_target, _), grid_shard_sizes = model._before_sampling(
+        batch,
+        pre_processors=pre,
+        n_step_input=1,
+        model_comm_group=None,
+        spatial_pre_processors={"in_lres": _IdentitySpatialProjector()},
+        post_processors=post,
+    )
+
+    assert set(xs) == {"in_lres", "in_hres"}
+    torch.testing.assert_close(x_ref_by_target["out_hres"], batch_lres.unsqueeze(2))
+    assert grid_shard_sizes is None
+
+
+def test_before_sampling_ignores_batch_entries_the_model_does_not_consume() -> None:
+    """A caller may still pass the target (older runners do); it must be dropped."""
+    model = _make_bare_model()
+    pre_out = _AdditiveProcessor(offset=30.0)
+    pre = {"in_lres": _AdditiveProcessor(offset=1.0), "in_hres": _AdditiveProcessor(offset=2.0), "out_hres": pre_out}
+
+    batch = {
+        "in_lres": torch.full((1, 1, 4, 2), 1.0),
+        "in_hres": torch.full((1, 1, 4, 1), 2.0),
+        "out_hres": torch.zeros(1, 1, 4, 2),
+    }
+
+    (xs, _, _), _ = model._before_sampling(
+        batch,
+        pre_processors=pre,
+        n_step_input=1,
+        model_comm_group=None,
+        spatial_pre_processors={"in_lres": _IdentitySpatialProjector()},
+        post_processors={"in_lres": _AdditiveProcessor(offset=-1.0)},
+    )
+
+    assert set(xs) == {"in_lres", "in_hres"}
+    assert pre_out.calls == []
+
+
+def test_before_sampling_raises_when_an_input_dataset_is_missing() -> None:
+    model = _make_bare_model()
+
+    with pytest.raises(ValueError, match="in_hres"):
+        model._before_sampling(
+            {"in_lres": torch.zeros(1, 1, 4, 2)},
+            pre_processors={"in_lres": _AdditiveProcessor(offset=0.0)},
+            n_step_input=1,
+            model_comm_group=None,
+            spatial_pre_processors={},
+            post_processors={"in_lres": _AdditiveProcessor(offset=0.0)},
+        )
+
+
+def test_build_sampling_source_sizes_the_target_from_the_graph_and_output_channels() -> None:
+    """The sampler spec comes from the model, not from a target tensor in the batch."""
+    model = _make_bare_model(grid=4)
+    model.transport_source = TransportSourceBuilder()
+
+    x = {
+        "in_lres": torch.zeros(3, 1, 2, 4, 2, dtype=torch.float64),
+        "in_hres": torch.zeros(3, 1, 2, 4, 1, dtype=torch.float64),
+    }
+
+    source = model.build_sampling_source(x)
+
+    assert set(source) == {"out_hres"}
+    # (batch, n_step_output, ensemble, target nodes, output channels)
+    assert source["out_hres"].shape == (3, model.n_step_output, 2, 4, model.num_output_channels["out_hres"])
+    assert source["out_hres"].dtype == torch.float64
+
+
+def test_build_sampling_source_rejects_a_reference_that_is_not_on_the_target_grid() -> None:
+    """Catches a projector whose output grid disagrees with the target node set."""
+    model = _make_bare_model(grid=4)
+    model.transport_source = TransportSourceBuilder()
+
+    x = {"in_lres": torch.zeros(1, 1, 1, 7, 2), "in_hres": torch.zeros(1, 1, 1, 7, 1)}
+
+    with pytest.raises(AssertionError, match="target grid"):
+        model.build_sampling_source(x)
 
 
 def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> None:
@@ -1118,25 +1222,12 @@ def test_real_construction_rejects_a_reference_that_is_not_fused_into_the_encode
         )
 
 
-def test_real_construction_predict_step_returns_only_the_target_state() -> None:
-    """Inference must survive ``x`` and the sampled target having disjoint keys.
-
-    The sampler seeds one field per *target*, but ``_before_sampling`` returns
-    every dataset in the batch, so anything that zips the two together breaks
-    here and nowhere else.
-    """
-    model = _build_real_downscaler()
-    batch_size, grid = 1, 4
-
-    # (batch, time, grid, vars) — predict_step adds the ensemble dimension.
-    batch = {
-        "in_lres": torch.zeros(batch_size, 1, grid, 2),
-        "in_hres": torch.zeros(batch_size, 1, grid, 1),
-        "out_hres": torch.zeros(batch_size, 1, grid, 2),
-    }
-    identity = {name: _AdditiveProcessor(offset=0.0) for name in batch}
-
-    out = model.predict_step(
+def _run_real_predict_step(
+    model: AnemoiTransportSpatialDownscalerModelEncProcDec,
+    batch: dict[str, torch.Tensor],
+) -> dict[str, torch.Tensor]:
+    identity = {name: _AdditiveProcessor(offset=0.0) for name in ("in_lres", "in_hres", "out_hres")}
+    return model.predict_step(
         batch,
         pre_processors=identity,
         post_processors=identity,
@@ -1146,5 +1237,51 @@ def test_real_construction_predict_step_returns_only_the_target_state() -> None:
         sampler_params={"sampler": "heun"},
     )
 
+
+def test_real_construction_predict_step_needs_no_batch_entry_for_the_target() -> None:
+    """Inference must survive ``x`` and the sampled target having disjoint keys.
+
+    The sampler seeds one field per *target* and sizes it from the graph, so
+    nothing in the sampling path may index the batch — or ``x`` — by target name.
+    """
+    model = _build_real_downscaler()
+    batch_size, grid = 1, 4
+
+    # (batch, time, grid, vars) — predict_step adds the ensemble dimension.
+    batch = {
+        "in_lres": torch.zeros(batch_size, 1, grid, 2),
+        "in_hres": torch.zeros(batch_size, 1, grid, 1),
+    }
+
+    out = _run_real_predict_step(model, batch)
+
     assert set(out) == {"out_hres"}
     assert out["out_hres"].shape == (batch_size, 1, 1, grid, 2)
+
+
+def test_real_construction_predict_step_ignores_a_superfluous_target_entry() -> None:
+    """Runners that still send a placeholder for the target keep working."""
+    model = _build_real_downscaler()
+    batch_size, grid = 1, 4
+
+    batch = {
+        "in_lres": torch.zeros(batch_size, 1, grid, 2),
+        "in_hres": torch.zeros(batch_size, 1, grid, 1),
+        "out_hres": torch.zeros(batch_size, 1, grid, 2),
+    }
+
+    out = _run_real_predict_step(model, batch)
+
+    assert set(out) == {"out_hres"}
+    assert out["out_hres"].shape == (batch_size, 1, 1, grid, 2)
+
+
+def test_real_construction_fill_metadata_records_input_and_output_roles() -> None:
+    """With the roles recorded, a runner needs no dataset configuration at all."""
+    model = _build_real_downscaler()
+    md_dict = {"metadata_inference": {name: {} for name in ("in_lres", "in_hres", "out_hres")}}
+
+    model.fill_metadata(md_dict)
+
+    roles = {name: md_dict["metadata_inference"][name]["role"] for name in ("in_lres", "in_hres", "out_hres")}
+    assert roles == {"in_lres": "input", "in_hres": "input", "out_hres": "output"}

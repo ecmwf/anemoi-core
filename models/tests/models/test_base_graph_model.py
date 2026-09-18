@@ -312,6 +312,41 @@ def test_calculate_shapes_and_indices_fills_channel_counts_before_any_dimension(
 
 
 # ---------------------------------------------------------------------------
+# inference input datasets and dataset roles in the metadata
+# ---------------------------------------------------------------------------
+
+
+def test_inference_input_datasets_covers_every_encoder_source() -> None:
+    """Fused sources carry data too, even though only the anchor owns a mapper."""
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        fusion_anchor="data",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.input_datasets == ["data"]
+    assert model.inference_input_datasets == ["data", "extra"]
+
+
+def test_fill_metadata_records_the_role_of_each_dataset() -> None:
+    """The runner reads the role to decide what to retrieve and what to write."""
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        fusion_anchor="data",
+        model_cls=FusingGraphModel,
+    )
+    md_dict = {"metadata_inference": {"data": {}, "extra": {}}}
+
+    model.fill_metadata(md_dict)
+
+    # 'data' has a decoder, 'extra' is an encoder source only.
+    assert md_dict["metadata_inference"]["data"]["role"] == "input_output"
+    assert md_dict["metadata_inference"]["extra"]["role"] == "input"
+
+
+# ---------------------------------------------------------------------------
 # predict_step — spatial preprocessor ordering
 # ---------------------------------------------------------------------------
 

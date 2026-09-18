@@ -154,6 +154,9 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             dataset_name: source_tensor.to(dtype=sigma_schedule.dtype) * sigma_schedule[0]
             for dataset_name, source_tensor in source.items()
         }
+        # The model dtype of each sampled dataset, taken before the schedule
+        # cast above: ``x`` has no entry for a dataset the model only predicts.
+        output_dtypes = {dataset_name: source_tensor.dtype for dataset_name, source_tensor in source.items()}
 
         sampler_instance = _build_inference_sampler(
             model,
@@ -186,6 +189,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             denoising_fn,
             model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            output_dtypes=output_dtypes,
         )
 
     @staticmethod
@@ -301,6 +305,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             transport_fn,
             model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            output_dtypes={dataset_name: source_tensor.dtype for dataset_name, source_tensor in source.items()},
         )
 
 
