@@ -15,6 +15,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import SpatialDownscalerPlotAdapter
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.utils.dates import as_timedelta
+from anemoi.utils.dates import frequency_to_string
 
 from .base import BaseSingleStepTask
 
@@ -54,8 +55,38 @@ class SpatialDownscaler(BaseSingleStepTask):
         self._plot_adapter = SpatialDownscalerPlotAdapter(self)
 
     def _get_timestep_for_metadata(self) -> str:
-        """Get the timestep string for metadata."""
+        """Get the timestep string for metadata.
+
+        Zero, as for any timeless task: the outputs are valid at the same times
+        as the inputs. See :meth:`fill_metadata` for the consequences.
+        """
         return "0H"
+
+    def fill_metadata(self, md_dict: dict) -> None:
+        """Record the offsets explicitly, and that downscaling has no feedback.
+
+        Inference derives ``lagged``, ``output_offsets`` and ``advance_map``
+        from ``timestep`` unless the metadata states them. With a timeless
+        ``timestep`` of ``0H`` every derived offset collapses to zero, so the
+        inputs of a multi-snapshot window could not be retrieved.
+
+        No ``rollout_shift`` is written. For a forecaster it is how far the
+        state advances per model call, a property of the model; downscaling
+        has no feedback, so it degenerates into how far to jump to the next
+        independent window. Training does not determine that — it draws
+        overlapping windows at the dataset frequency — so it belongs in the
+        inference configuration.
+        """
+        super().fill_metadata(md_dict)
+
+        downscaling_timesteps = {
+            "input_offsets": [frequency_to_string(offset) for offset in self._input_offsets],
+            "output_offsets": [frequency_to_string(offset) for offset in self._output_offsets],
+            # Outputs are never fed back into the inputs.
+            "advance_map": {"inin": [], "outin": []},
+        }
+        for dataset_name in md_dict["metadata_inference"]["dataset_names"]:
+            md_dict["metadata_inference"][dataset_name]["timesteps"].update(downscaling_timesteps)
 
     def get_inputs(
         self,

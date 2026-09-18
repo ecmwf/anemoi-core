@@ -176,3 +176,69 @@ def test_get_inputs_missing_dataset_is_skipped_with_warning(caplog: pytest.LogCa
         x = task.get_inputs(batch, data_indices=data_indices)
     assert "in_missing" not in x
     assert any("in_missing" in record.message for record in caplog.records)
+
+
+# ---------------------------------------------------------------------------
+# Metadata
+# ---------------------------------------------------------------------------
+
+
+def _make_metadata_dict(dataset_names: list[str]) -> dict:
+    """Skeleton of the metadata the trainer builds before the task fills it in."""
+    return {
+        "task": None,
+        "metadata_inference": {
+            "task": None,
+            "dataset_names": dataset_names,
+            **{name: {} for name in dataset_names},
+        },
+    }
+
+
+def test_fill_metadata_records_the_offsets_explicitly() -> None:
+    """Inference derives every offset from ``timestep`` unless they are explicit.
+
+    ``timestep`` is ``"0H"`` because the model does not advance time, so the
+    derived offsets would all collapse to zero and no input could be retrieved.
+    """
+    task = SpatialDownscaler(
+        input_datasets=["in_lres"],
+        target_datasets=["out_hres"],
+        offsets=["0H", "6H"],
+    )
+    md_dict = _make_metadata_dict(["in_lres", "out_hres"])
+
+    task.fill_metadata(md_dict)
+
+    timesteps = md_dict["metadata_inference"]["out_hres"]["timesteps"]
+    assert timesteps["timestep"] == "0H"
+    assert timesteps["input_offsets"] == ["0h", "6h"]
+    assert timesteps["output_offsets"] == ["0h", "6h"]
+
+
+def test_fill_metadata_states_that_there_is_no_feedback() -> None:
+    """Downscaling is not autoregressive; the derived advance map would invent one."""
+    task = SpatialDownscaler(input_datasets=["in_lres"], target_datasets=["out_hres"])
+    md_dict = _make_metadata_dict(["in_lres", "out_hres"])
+
+    task.fill_metadata(md_dict)
+
+    assert md_dict["metadata_inference"]["in_lres"]["timesteps"]["advance_map"] == {"inin": [], "outin": []}
+
+
+def test_fill_metadata_writes_no_rollout_shift() -> None:
+    """The stride between windows is an inference choice, not a training fact.
+
+    Training draws overlapping windows at the dataset frequency, so nothing
+    here determines how far inference should jump to the next window.
+    """
+    task = SpatialDownscaler(
+        input_datasets=["in_lres"],
+        target_datasets=["out_hres"],
+        offsets=["0H", "6H"],
+    )
+    md_dict = _make_metadata_dict(["in_lres", "out_hres"])
+
+    task.fill_metadata(md_dict)
+
+    assert "rollout_shift" not in md_dict["metadata_inference"]["out_hres"]["timesteps"]

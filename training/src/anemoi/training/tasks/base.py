@@ -219,7 +219,7 @@ class BaseTask(ABC):
 
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
-        md_dict["task"] = self.name
+        md_dict["metadata_inference"]["task"] = self.name
 
         input_relative_date_indices = self.get_batch_input_indices()
         output_relative_date_indices = self.get_batch_output_indices()
