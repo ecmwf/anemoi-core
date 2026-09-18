@@ -8,6 +8,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.8](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.7...graphs-0.9.8) (2026-09-18)
+
+
+### Features
+
+* **graphs:** HEALPix Node Ordering Schema Option and kwarg ([#1381](https://github.com/ecmwf/anemoi-core/issues/1381)) ([a4ba37d](https://github.com/ecmwf/anemoi-core/commit/a4ba37d58522e8528ece2658b0cf5a6d562804c8))
+
+
+### Bug Fixes
+
+* **graphs:** Pyg-lib support ([#1407](https://github.com/ecmwf/anemoi-core/issues/1407)) ([6ae7780](https://github.com/ecmwf/anemoi-core/commit/6ae7780d33de3a2e96ec5b22e9af51a6d425b9ec))
+
 ## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.6...graphs-0.9.7) (2026-09-07)
 
 
