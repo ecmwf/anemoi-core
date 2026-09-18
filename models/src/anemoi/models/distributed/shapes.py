@@ -117,7 +117,7 @@ class BipartiteGraphShardInfo:
 
 def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> ShardSizes:
     """Get per-rank shard sizes for a tensor split along a specific dimension."""
-    assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
+    validate_dim(tensor, dim)
 
     comm_size = 1 if not model_comm_group else dist.get_world_size(group=model_comm_group)
     return get_balanced_partition_sizes(tensor.shape[dim], comm_size)
@@ -127,7 +127,7 @@ def expand_shard_sizes_to_shapes(
     tensor: Tensor, dim: int, shard_sizes_dim: list[int] | tuple[int, ...]
 ) -> list[list[int]]:
     """Expand per-dimension shard sizes to full per-rank tensor shapes."""
-    assert dim < tensor.dim(), f"Error, tensor dimension is {tensor.dim()} which cannot be split along {dim}"
+    validate_dim(tensor, dim)
 
     shard_shapes = [list(tensor.shape) for _ in range(len(shard_sizes_dim))]
     for i, shard_size in enumerate(shard_sizes_dim):
