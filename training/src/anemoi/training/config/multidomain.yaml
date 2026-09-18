@@ -1,0 +1,71 @@
+defaults:
+- data: multidomain
+- dataloader: multidomain
+- diagnostics: evaluation
+- system: example
+- graph: multidomain
+- model: graphtransformer_multidomain
+- task: forecaster
+- training: multidomain
+- _self_
+
+config_validation: True
+
+system:
+  input:
+    dataset: ???
+    forcing_dataset: ???
+
+diagnostics:
+  plot:
+    datasets_to_plot: [sg_1, sg_2]
+
+dataloader:
+  training:
+    datasets:
+      sg_1:
+        dataset_config:
+          dataset:
+            cutout:
+            - dataset: ${system.input.dataset}
+              area: [70, -10, 55, 30]
+              thinning: 25
+            - dataset: ${system.input.forcing_dataset}
+            adjust: all
+            min_distance_km: 0
+          frequency: ${data.frequency}
+        start: null
+        end: 2020
+      sg_2:
+        dataset_config:
+          dataset:
+            cutout:
+            - dataset: ${system.input.dataset}
+              area: [72, -25, 52, 50]
+              thinning: 25
+            - dataset: ${system.input.forcing_dataset}
+            adjust: all
+            min_distance_km: 0
+          frequency: ${data.frequency}
+        start: ${dataloader.training.datasets.sg_1.start}
+        end: ${dataloader.training.datasets.sg_1.end}
+  validation:
+    datasets:
+      sg_1:
+        dataset_config: ${dataloader.training.datasets.sg_1.dataset_config}
+        start: 2021
+        end: 2021
+      sg_2:
+        dataset_config: ${dataloader.training.datasets.sg_2.dataset_config}
+        start: ${dataloader.validation.datasets.sg_1.start}
+        end: ${dataloader.validation.datasets.sg_1.end}
+  test:
+    datasets:
+      sg_1:
+        dataset_config: ${dataloader.training.datasets.sg_1.dataset_config}
+        start: 2022
+        end: null
+      sg_2:
+        dataset_config: ${dataloader.training.datasets.sg_2.dataset_config}
+        start: ${dataloader.test.datasets.sg_1.start}
+        end: ${dataloader.test.datasets.sg_1.end}

@@ -13,12 +13,14 @@ from functools import cached_property
 from typing import Any
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
 from torch.utils.data import DataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.multidomain import MultiDomainDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -136,7 +138,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 
-        return MultiDataset(
+        return instantiate(
+            dataloader_config.strategy,
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             shuffle=shuffle,
@@ -195,6 +198,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 
+        batch_size = self.config.dataloader.batch_size[stage]
+        if isinstance(ds, MultiDomainDataset) and batch_size != 1:
+            msg = "MultiDomainDataset currently requires a batch size of one."
+            raise ValueError(msg)
+
         extra = {}
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
@@ -207,7 +215,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return DataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
+            batch_size=batch_size,
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,

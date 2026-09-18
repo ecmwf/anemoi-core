@@ -18,6 +18,7 @@ from pytest_mock import MockFixture
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.data.multidomain import MultiDomainDataset
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
@@ -126,6 +127,15 @@ def test_persistent_workers_default_to_true_when_config_is_unvalidated() -> None
     assert loader.persistent_workers is True
 
 
+def test_multidomain_dataset_requires_batch_size_one() -> None:
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    datamodule = _make_datamodule(task)
+    datamodule.config.dataloader.batch_size.training = 2
+
+    with pytest.raises(ValueError, match="requires a batch size of one"):
+        datamodule._get_dataloader(MultiDomainDataset.__new__(MultiDomainDataset), "training")
+
+
 @pytest.mark.parametrize(
     "rollout",
     [
@@ -204,6 +214,9 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule.epoch = 7
     datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
+    datamodule.config = DictConfig(
+        {"dataloader": {"strategy": {"_target_": "anemoi.training.data.multidataset.MultiDataset"}}},
+    )
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
@@ -211,12 +224,13 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
         "anemoi.training.data.datamodule.compute_relative_date_indices",
         return_value={"data": [0, 1]},
     )
-    multi_dataset = mocker.patch("anemoi.training.data.datamodule.MultiDataset")
+    instantiate = mocker.patch("anemoi.training.data.datamodule.instantiate")
 
     datamodule._get_dataset({"data": object()}, shuffle=False, label="validation")
 
     create_dataset.assert_called_once()
-    multi_dataset.assert_called_once_with(
+    instantiate.assert_called_once_with(
+        datamodule.config.dataloader.strategy,
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},
         shuffle=False,
