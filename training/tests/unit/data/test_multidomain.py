@@ -73,6 +73,18 @@ class TestMultiDomain:
         assert np.array_equal(multi_domain.anchors["dataset_a"][:, 1], [0, *range(11, 24)])
         assert np.array_equal(multi_domain.anchors["dataset_b"], [[0, 0], [0, 1], [0, 2], [0, 3]])
 
+    def test_domains_do_not_need_shared_anchors(self, multi_domain: MultiDomainDataset) -> None:
+        multi_domain.data_readers["dataset_a"].compute_anchors.return_value = np.array([[0, 10]])
+        multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.array([[0, 20]])
+
+        dataset = MultiDomainDataset(
+            data_readers=multi_domain.data_readers,
+            relative_date_indices=multi_domain.relative_date_indices,
+        )
+
+        assert np.array_equal(dataset.anchors["dataset_a"], [[0, 10]])
+        assert np.array_equal(dataset.anchors["dataset_b"], [[0, 20]])
+
     def test_frequency_is_reported_per_domain(self, multi_domain: MultiDomainDataset) -> None:
         assert multi_domain.frequency == {"dataset_a": "3h", "dataset_b": "1h"}
 

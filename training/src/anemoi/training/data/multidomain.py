@@ -108,24 +108,21 @@ class MultiDomainDataset(MultiDataset):
             Options forwarded to ``Variable.check_compatibility``. The options
             follow ``CheckVariablesCompatibilitySchema``.
         """
-        self.data_readers = data_readers
-        self.label = label
-        self.shuffle = shuffle
-        self.dataset_names = list(data_readers.keys())
-        self.epoch = epoch
-        self.rollout = rollout
-        self._lazy_init_model_and_reader_group_info()
+        super().__init__(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
+            shuffle=shuffle,
+            label=label,
+            epoch=epoch,
+            rollout=rollout,
+        )
+        self._check_datasets_units(**dict(check_variables_compatibility or {}))
+        LOGGER.info("valid date indices: %s", self.valid_date_indices)
+        self.n_samples_per_worker = {}
+        self.chunk_index_range = {}
 
-        single_seq = [name for name, reader in data_readers.items() if reader.num_sequences == 1]
-        multi_seq = [name for name, reader in data_readers.items() if reader.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDomainDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
+    def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
+        """Set independent anchors and relative date indices for each domain."""
         self.anchors = {
             name: data_reader.compute_anchors(relative_date_indices[name])
             for name, data_reader in self.data_readers.items()
@@ -141,44 +138,11 @@ class MultiDomainDataset(MultiDataset):
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
-        self._check_datasets_units(**dict(check_variables_compatibility or {}))
-        LOGGER.info("valid date indices: %s", self.valid_date_indices)
-        self.n_samples_per_worker = {}  # overwrite base to empty dict
-        self.chunk_index_range = {}  # overwrite base to empty dict
 
     @cached_property
     def frequency(self) -> dict[str, datetime.timedelta]:
         """Return the frequency of each domain."""
         return self._collect("frequency")
-
-    def set_epoch(
-        self,
-        epoch: int,
-        *,
-        rollout: int | None = None,
-        relative_date_indices: dict[str, TimeIndices] | None = None,
-    ) -> None:
-        """Set epoch-dependent sampling state before DataLoader workers are launched."""
-        self.epoch = epoch
-        if rollout is not None:
-            self.rollout = rollout
-        if relative_date_indices is None:
-            return
-
-        self.anchors = {
-            name: data_reader.compute_anchors(relative_date_indices[name])
-            for name, data_reader in self.data_readers.items()
-        }
-        for name, anchors in self.anchors.items():
-            if len(anchors) == 0:
-                msg = f"No valid anchors found for data reader '{name}': {self.data_readers[name]}"
-                raise ValueError(msg)
-        self.valid_date_indices = {
-            name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
-        }
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
 
     def _check_datasets_units(self, **options: object) -> None:
         """Check that all datasets have the same units.
