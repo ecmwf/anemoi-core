@@ -52,7 +52,7 @@ class TestMultiDomain:
         mock_dataset_b.compute_anchors.return_value = np.array([[0, 0], [0, 1], [0, 2], [0, 3]])
 
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
-        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 6, 18]}  # e.g. f([t, t-6h]) = t+12h
+        relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
         return MultiDomainDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
@@ -142,7 +142,7 @@ class TestMultiDomain:
     def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDomainDataset) -> None:
         multi_domain.data_readers["dataset_b"].num_sequences = 2
 
-        with pytest.raises(ValueError, match="same MultiDomainDataset is unsupported"):
+        with pytest.raises(ValueError, match="same IterableDataset is unsupported"):
             MultiDomainDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
