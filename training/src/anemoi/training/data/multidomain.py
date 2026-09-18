@@ -7,12 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
+
 import numpy as np
 
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import normalize_time_indices
+
+LOGGER = logging.getLogger(__name__)
 
 
 class MultiDomainDataset(MultiDataset):
@@ -41,6 +45,7 @@ class MultiDomainDataset(MultiDataset):
         self.valid_date_indices = {
             name: np.arange(len(anchors), dtype=np.int64) for name, anchors in self.anchors.items()
         }
+        LOGGER.info("valid date indices: %s", self.valid_date_indices)
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
