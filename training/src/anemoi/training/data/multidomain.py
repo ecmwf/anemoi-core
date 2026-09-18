@@ -11,7 +11,6 @@ import datetime
 from functools import cached_property
 
 import numpy as np
-import torch
 
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.sampler import CrossDatasetSampler
@@ -49,10 +48,6 @@ class MultiDomainDataset(MultiDataset):
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
-
-    def get_sample(self, domain_name: str, index: int) -> dict[str, torch.Tensor]:
-        """Load a sample from one domain through the configured sampler."""
-        return self.sampler_class(self).sample((domain_name, index))
 
     @cached_property
     def frequency(self) -> dict[str, datetime.timedelta]:

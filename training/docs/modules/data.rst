@@ -57,9 +57,11 @@ for training and supports:
 
 .. note::
 
-   Users wishing to change the format of the batch input into the model
-   should sub-class ``MultiDataset`` and override the ``__iter__``
-   method or the ``get_sample`` method.
+   Users wishing to change sample selection or the format of the batch input
+   should subclass the configured sampler (``BaseSampler`` or
+   ``CrossDatasetSampler``) and set it as the dataset's ``sampler_class``.
+   Override ``MultiDataset.__iter__`` only when replacing the complete sampling
+   workflow.
 
 Multi-Domain
 ------------
