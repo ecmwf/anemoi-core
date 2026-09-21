@@ -155,8 +155,11 @@ class ICONMultiMesh:
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
 
         return (
-            [arr[~np.any(arr == -1, axis=1)] for vertices in edge_vertices[: self.max_level + 1] 
-                if (arr := np.asarray(vertex_glb2loc[vertices])).size > 0],
+            [
+                arr[~np.any(arr == -1, axis=1)]
+                for vertices in edge_vertices[: self.max_level + 1]
+                if (arr := np.asarray(vertex_glb2loc[vertices])).size > 0
+            ],
             # cell_vertices: preserve negative indices (incomplete cells)
             np.where(cell_vertices >= 0, vertex_glb2loc[cell_vertices], cell_vertices),
         )
