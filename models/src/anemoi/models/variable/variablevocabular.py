@@ -33,6 +33,20 @@ TemporalOperator = Literal[
 
 @dataclass(frozen=True)
 class VerticalCoordinate:
+    """Physical vertical coordinate associated with a variable.
+
+    Parameters
+    ----------
+    type : VerticalCoordinateType
+        Type of vertical coordinate, such as pressure, surface, or
+        height above ground.
+    level : int | float | None, optional
+        Numerical vertical level. ``None`` indicates that no numerical
+        vertical coordinate applies to the variable.
+    unit : str | None, optional
+        Unit of the vertical level, when applicable.
+    """
+
     type: VerticalCoordinateType
     level: int | float | None = None
     unit: str | None = None
@@ -40,6 +54,22 @@ class VerticalCoordinate:
 
 @dataclass(frozen=True)
 class VariableSpecification:
+    """Semantic specification of a physical variable.
+
+    Parameters
+    ----------
+    name : str
+        Variable name used by the dataset and model.
+    param : str
+        Physical parameter represented by the variable.
+    vertical_coordinate : VerticalCoordinate
+        Vertical-coordinate metadata associated with the variable.
+    temporal_operator : TemporalOperator
+        Temporal operation represented by the variable.
+    temporal_window : int | float | None, optional
+        Duration of the temporal operation, when applicable.
+    """
+
     name: str
     param: str
     vertical_coordinate: VerticalCoordinate
@@ -49,21 +79,52 @@ class VariableSpecification:
 
 @dataclass(frozen=True)
 class DomainVariableMetadata:
-    # Categorical
+    """Tensorized metadata for an ordered set of domain variables.
+
+    Categorical metadata is represented by foundation vocabulary indices,
+    while continuous metadata is represented by floating-point values.
+    Boolean masks distinguish missing or non-applicable continuous metadata
+    from valid numerical values.
+
+    All tensors have shape ``[num_variables]`` and preserve the ordering of
+    the requested domain variables.
+    """
+
     param_ids: torch.Tensor
     vertical_type_ids: torch.Tensor
     temporal_operator_ids: torch.Tensor
 
-    # Continuous
     vertical_levels: torch.Tensor
     temporal_windows: torch.Tensor
 
-    # Missing-value masks
     has_vertical_level: torch.Tensor
     has_temporal_window: torch.Tensor
 
 
 class VariableVocabulary:
+    """Foundation vocabulary describing the variables known to the model.
+
+    The vocabulary maps variable names to physical variable specifications
+    and assigns stable integer indices to categorical metadata such as
+    parameter, vertical-coordinate type, and temporal operator.
+
+    The vocabulary is constructed from the foundation variable superset and
+    can subsequently be queried with arbitrary domain subsets, such as global,
+    stretched-grid, or LAM variables. Domain-specific variable ordering does
+    not modify the foundation vocabulary.
+
+    Parameters
+    ----------
+    specifications : dict[str, VariableSpecification]
+        Mapping from variable names to their semantic specifications.
+    param_to_id : dict[str, int]
+        Mapping from physical parameters to foundation indices.
+    vertical_type_to_id : dict[str, int]
+        Mapping from vertical-coordinate types to foundation indices.
+    temporal_operator_to_id : dict[str, int]
+        Mapping from temporal operators to foundation indices.
+    """
+
     def __init__(
         self,
         specifications: dict[str, VariableSpecification],
@@ -211,7 +272,28 @@ class VariableVocabulary:
     def make_specification(
         name: str,
         metadata: dict[str, dict[str, Any]],
-    ) -> VariableSpecification:
+    ) -> VariableSpecification | None:
+        """Construct the semantic specification of a dataset variable.
+
+        Extracts the physical parameter, vertical-coordinate metadata, and
+        temporal metadata from the available dataset metadata.
+
+        Variables for which the required physical metadata is unavailable, such
+        as computed forcings, are currently excluded.
+
+        Parameters
+        ----------
+        name : str
+            Name of the variable.
+        metadata : dict[str, dict[str, Any]]
+            Dataset metadata indexed by variable name.
+
+        Returns
+        -------
+        VariableSpecification | None
+            Semantic variable specification, or ``None`` when the variable cannot
+            currently be represented by the physical metadata vocabulary.
+        """
         variable_metadata = metadata[name]
         mars = variable_metadata.get(
             "mars",
@@ -257,6 +339,29 @@ class VariableVocabulary:
         data_indices: Any,
         metadata: dict[str, dict[str, Any]],
     ) -> "VariableVocabulary":
+        """Construct the variable vocabulary for foundation training.
+
+        Builds the vocabulary from the union of model input and output variables.
+        Categorical metadata values are assigned stable foundation indices that
+        define the embedding tables used by the model.
+
+        The resulting vocabulary represents the variable superset known during
+        foundation training. During transfer learning or inference, this
+        vocabulary should be restored from the checkpoint rather than rebuilt
+        from a domain-specific subset.
+
+        Parameters
+        ----------
+        data_indices : Any
+            Anemoi data indices describing the model input and output variables.
+        metadata : dict[str, dict[str, Any]]
+            Dataset metadata indexed by variable name.
+
+        Returns
+        -------
+        VariableVocabulary
+            Foundation variable vocabulary.
+        """
         specifications: dict[str, VariableSpecification] = {}
 
         all_params: set[str] = set()
@@ -299,10 +404,14 @@ class VariableVocabulary:
         # checkpoint rather than rebuilt from a domain subset.
         param_to_id = {param: i for i, param in enumerate(sorted(all_params))}
 
-        vertical_type_to_id = {vertical_type: i for i, vertical_type in enumerate(sorted(all_vertical_types))}
+        vertical_type_to_id = {
+            vertical_type: i
+            for i, vertical_type in enumerate(sorted(all_vertical_types))
+        }
 
         temporal_operator_to_id = {
-            temporal_operator: i for i, temporal_operator in enumerate(sorted(all_temporal_operators))
+            temporal_operator: i
+            for i, temporal_operator in enumerate(sorted(all_temporal_operators))
         }
 
         return cls(
@@ -320,6 +429,27 @@ class VariableVocabulary:
         self,
         names: str | list[str],
     ) -> DomainVariableMetadata:
+        """Return tensorized metadata for the requested domain variables.
+
+        Maps an ordered set of variable names from the current domain to their
+        corresponding entries in the foundation vocabulary. The returned
+        metadata preserves the ordering of ``names``.
+
+        Parameters
+        ----------
+        names : str | list[str]
+            Variable name or ordered list of variable names.
+
+        Returns
+        -------
+        DomainVariableMetadata
+            Tensorized physical metadata for the requested variables.
+
+        Raises
+        ------
+        KeyError
+            If a requested variable is not present in the foundation vocabulary.
+        """
         if isinstance(names, str):
             names = [names]
 
@@ -340,6 +470,23 @@ class VariableVocabulary:
         self,
         specs: list[VariableSpecification],
     ) -> DomainVariableMetadata:
+        """Convert variable specifications to model-ready metadata tensors.
+
+        Categorical metadata is converted to foundation vocabulary indices.
+        Continuous metadata is represented as floating-point values, with zero
+        used as a placeholder when a value is not applicable. Boolean masks
+        indicate whether each continuous value is physically present.
+
+        Parameters
+        ----------
+        specs : list[VariableSpecification]
+            Ordered variable specifications to tensorize.
+
+        Returns
+        -------
+        DomainVariableMetadata
+            Tensorized metadata preserving the ordering of ``specs``.
+        """
         return DomainVariableMetadata(
             # ----------------------------------------------------------
             # Categorical
@@ -349,11 +496,17 @@ class VariableVocabulary:
                 dtype=torch.long,
             ),
             vertical_type_ids=torch.tensor(
-                [self.vertical_type_to_id[spec.vertical_coordinate.type] for spec in specs],
+                [
+                    self.vertical_type_to_id[spec.vertical_coordinate.type]
+                    for spec in specs
+                ],
                 dtype=torch.long,
             ),
             temporal_operator_ids=torch.tensor(
-                [self.temporal_operator_to_id[spec.temporal_operator] for spec in specs],
+                [
+                    self.temporal_operator_to_id[spec.temporal_operator]
+                    for spec in specs
+                ],
                 dtype=torch.long,
             ),
             # ----------------------------------------------------------
@@ -361,13 +514,24 @@ class VariableVocabulary:
             # ----------------------------------------------------------
             vertical_levels=torch.tensor(
                 [
-                    (0.0 if spec.vertical_coordinate.level is None else float(spec.vertical_coordinate.level))
+                    (
+                        0.0
+                        if spec.vertical_coordinate.level is None
+                        else float(spec.vertical_coordinate.level)
+                    )
                     for spec in specs
                 ],
                 dtype=torch.float32,
             ),
             temporal_windows=torch.tensor(
-                [(0.0 if spec.temporal_window is None else float(spec.temporal_window)) for spec in specs],
+                [
+                    (
+                        0.0
+                        if spec.temporal_window is None
+                        else float(spec.temporal_window)
+                    )
+                    for spec in specs
+                ],
                 dtype=torch.float32,
             ),
             # ----------------------------------------------------------
@@ -388,6 +552,14 @@ class VariableVocabulary:
     # ------------------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize the foundation variable vocabulary.
+
+        Returns
+        -------
+        dict[str, Any]
+            Serializable representation containing the variable specifications
+            and categorical foundation index mappings.
+        """
         return {
             "param_to_id": dict(self.param_to_id),
             "vertical_type_to_id": dict(self.vertical_type_to_id),
@@ -413,6 +585,22 @@ class VariableVocabulary:
         cls,
         state: dict[str, Any],
     ) -> "VariableVocabulary":
+        """Restore a foundation variable vocabulary from serialized state.
+
+        Restores both the semantic variable specifications and the original
+        categorical index mappings, preserving the meaning of learned embedding
+        rows across checkpoint loading, transfer learning, and inference.
+
+        Parameters
+        ----------
+        state : dict[str, Any]
+            Serialized vocabulary produced by :meth:`to_dict`.
+
+        Returns
+        -------
+        VariableVocabulary
+            Restored foundation variable vocabulary.
+        """
         specifications: dict[
             str,
             VariableSpecification,
