@@ -20,21 +20,15 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
+from anemoi.graphs.utils import PYG_INSTRUCTIONS
 from anemoi.graphs.utils import concat_edges
 from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import pyg_lib_available
+from anemoi.graphs.utils import pyg_available
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
-
-PYG_LIB_INSTRUCTIONS = r"""The 'pyg_lib' library is not installed.
-Installing 'pyg_lib' can significantly improve performance for graph creation.
-You can install it using:
-    TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-    pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-"""
 
 
 class BaseEdgeBuilder(ABC):
@@ -181,12 +175,12 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         if source_coords.shape[0] == 0 or target_coords.shape[0] == 0:
             return torch.empty((2, 0), dtype=torch.long, device=source_coords.device)
 
-        if pyg_lib_available():
+        if pyg_available():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
             with cuda_device_of(source_coords.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
         else:
-            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
+            LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
             edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
@@ -210,13 +204,12 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         source_coords, target_coords = self.get_cartesian_node_coordinates(source_nodes, target_nodes)
         # 3d cartesian coordinates
 
-        if pyg_lib_available():
-            # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
+        if pyg_available():
             with current_device_context(self.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords)
             edge_index = self.undo_masking_edge_index(edge_index, source_nodes, target_nodes)
         else:
-            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
+            LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords)
             adj_matrix = self.undo_masking_adj_matrix(adj_matrix, source_nodes, target_nodes)
             edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))

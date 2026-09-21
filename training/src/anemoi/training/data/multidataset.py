@@ -24,7 +24,6 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -91,7 +90,7 @@ class MultiDataset(IterableDataset):
         # semantically meaningless alignment between the two encoders.
         single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
         multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if False: # single_seq and multi_seq: # TODO: Fix temporal downscaler with forecast data 
+        if False:  # single_seq and multi_seq: # TODO: Fix temporal downscaler with forecast data
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
                 "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "

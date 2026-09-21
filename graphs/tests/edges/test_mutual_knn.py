@@ -15,6 +15,7 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs.edges import KNNEdges
 from anemoi.graphs.edges import MutualKNNEdges
 from anemoi.graphs.edges import ReversedKNNEdges
+from anemoi.graphs.utils import DISABLE_PYG_LIB_ENV_VAR
 
 
 def _edge_set(edge_index: torch.Tensor) -> set:
@@ -100,14 +101,12 @@ def test_mutual_knn_masking(graph_with_nodes):
 
 
 def test_mutual_knn_sklearn_fallback(monkeypatch, graph_with_nodes):
-    """The scikit-learn fallback yields the same mutual edges as the torch-cluster path."""
-    import anemoi.graphs.edges.builders.base as base_module
-
+    """The scikit-learn fallback yields the same mutual edges as the PyG path."""
     nodes = graph_with_nodes["test_nodes"]
     builder = MutualKNNEdges("test_nodes", "test_nodes", 3)
     primary_edges = builder.compute_edge_index(nodes, nodes)
 
-    monkeypatch.setattr(base_module, "TORCH_CLUSTER_AVAILABLE", False)
+    monkeypatch.setenv(DISABLE_PYG_LIB_ENV_VAR, "1")
     fallback_edges = builder.compute_edge_index(nodes, nodes)
 
     assert _edge_set(primary_edges) == _edge_set(fallback_edges)
@@ -153,9 +152,7 @@ def test_mutual_equals_intersection_heterogeneous(graph_with_two_node_sets):
 
 
 def test_mutual_knn_sklearn_fallback_heterogeneous(monkeypatch, graph_with_two_node_sets):
-    """The scikit-learn fallback agrees with the torch-cluster path for distinct node sets and asymmetric k."""
-    import anemoi.graphs.edges.builders.base as base_module
-
+    """The scikit-learn fallback agrees with the PyG path for distinct node sets and asymmetric k."""
     k_fwd, k_rev = 3, 2
     src = graph_with_two_node_sets["src_nodes"]
     tgt = graph_with_two_node_sets["tgt_nodes"]
@@ -163,7 +160,7 @@ def test_mutual_knn_sklearn_fallback_heterogeneous(monkeypatch, graph_with_two_n
 
     primary = builder.compute_edge_index(src, tgt)
 
-    monkeypatch.setattr(base_module, "TORCH_CLUSTER_AVAILABLE", False)
+    monkeypatch.setenv(DISABLE_PYG_LIB_ENV_VAR, "1")
     fallback = builder.compute_edge_index(src, tgt)
 
     assert _edge_set(primary) == _edge_set(fallback)
@@ -241,3 +238,19 @@ def test_mutual_knn_graph_creation(tmp_path, mock_grids_path):
 
     graph = GraphCreator(config=config_path).create()
     assert ("test_nodes", "to", "test_nodes") in graph.edge_types
+
+
+def test_compute_edge_index_from_coords_sklearn_fallback(monkeypatch):
+    """The dynamic-coordinate path falls back to scikit-learn and agrees with the PyG path."""
+    builder = KNNEdges("src_nodes", "tgt_nodes", num_nearest_neighbours=3)
+
+    generator = torch.Generator().manual_seed(0)
+    source_coords = torch.nn.functional.normalize(torch.randn(16, 3, generator=generator), dim=-1)
+    target_coords = torch.nn.functional.normalize(torch.randn(7, 3, generator=generator), dim=-1)
+
+    primary = builder.compute_edge_index_from_coords(source_coords, target_coords)
+
+    monkeypatch.setenv(DISABLE_PYG_LIB_ENV_VAR, "1")
+    fallback = builder.compute_edge_index_from_coords(source_coords, target_coords)
+
+    assert _edge_set(primary) == _edge_set(fallback)

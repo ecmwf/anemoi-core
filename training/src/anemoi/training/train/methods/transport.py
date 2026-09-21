@@ -555,7 +555,7 @@ class TransportTraining(BaseTransportTraining):
             x,
             target_template=target_template,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
+            grid_shard_sizes={name: self._grid_shard_sizes(view) for name, view in x.items()},
             schedule_params=schedule_params,
             sampler_params=sampler_params,
             target_forcing=target_template,
