@@ -108,7 +108,7 @@ class ReversedKNNEdges(KNNEdges):
     target_name : str
         The name of the target nodes.
     num_nearest_neighbours : int
-        Number of nearest neighbours to connect for each source node.
+        Number of nearest neighbours to connect to each source node.
     source_mask_attr_name : str | None
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
