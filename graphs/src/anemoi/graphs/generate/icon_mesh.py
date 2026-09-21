@@ -80,7 +80,7 @@ class ICONMultiMesh:
     min_level: int
     nodeset: NodeSet  # set of ICON grid vertices
 
-    def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = 0):
+    def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = None):
         self.grid_filename = icon_grid_filename
 
         # open file, representing the finest level
@@ -153,12 +153,10 @@ class ICONMultiMesh:
         num_vertices = vertex_mask.shape[0]
         vertex_glb2loc = np.full(num_vertices, -1, dtype=int)
         vertex_glb2loc[vertex_mask] = np.arange(vertex_mask.sum())
-        vertex_glb2loc_tmp = [vertex_glb2loc[vertices] for vertices in edge_vertices[: self.max_level + 1]]
-        for i in range(0, self.max_level + 1):
-            vertex_glb2loc_tmp[i] = np.array([sublist for sublist in vertex_glb2loc_tmp[i] if -1 not in sublist])
 
         return (
-            vertex_glb2loc_tmp,
+            [arr[~np.any(arr == -1, axis=1)] for vertices in edge_vertices[: self.max_level + 1] 
+                if (arr := np.asarray(vertex_glb2loc[vertices])).size > 0],
             # cell_vertices: preserve negative indices (incomplete cells)
             np.where(cell_vertices >= 0, vertex_glb2loc[cell_vertices], cell_vertices),
         )
