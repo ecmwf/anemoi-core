@@ -110,9 +110,12 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         radius: float,
         max_num_neighbours: int,
+        skip_flip: bool = False,
     ) -> torch.Tensor:
         edge_index = pyg_radius(source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbours)
-        edge_index = torch.flip(edge_index, [0])
+
+        if not skip_flip:
+            edge_index = torch.flip(edge_index, [0])
 
         return edge_index
 
@@ -214,6 +217,4 @@ class ReversedCutOffEdges(BaseCutOffEdges):
         target_coords: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        edge_index = super().compute_edge_index_from_coords(target_coords, source_coords, **kwargs)
-        edge_index = torch.flip(edge_index, [0])
-        return edge_index
+        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)

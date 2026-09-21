@@ -40,7 +40,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         return {}
 
     @abstractmethod
-    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor: ...
+    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs) -> torch.Tensor: ...
 
     @abstractmethod
     def _compute_adj_matrix_sklearn(
@@ -48,7 +48,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
     ) -> np.ndarray: ...
 
     def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, **kwargs
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
     ) -> torch.Tensor:
         """Compute edge index using pyg-lib (if available) or sklearn.
 
@@ -58,6 +58,9 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             Coordinates of source nodes of shape (num_source_nodes, 3) in unit sphere.
         target_coords : torch.Tensor
             Coordinates of target nodes of shape (num_target_nodes, 3) in unit sphere.
+        skip_flip : bool, optional
+            Whether to skip flipping the edge index, by default False. This flag is added to avoid double flipping when
+            using reversed edge builders.
 
         Returns
         -------
@@ -77,11 +80,15 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         if is_pyg_lib_available():
             # pyg-lib's kernels install no device guard of their own; see cuda_device_of.
             with cuda_device_of(source_coords.device):
-                edge_index = self._compute_edge_index_pyg(source_coords, target_coords, **kwargs)
+                edge_index = self._compute_edge_index_pyg(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
         else:
             LOGGER.warning(PYG_LIB_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
-            edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+
+            if skip_flip:
+                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0))
+            else:
+                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
 
         return edge_index
 

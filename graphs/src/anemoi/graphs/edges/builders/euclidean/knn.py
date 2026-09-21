@@ -48,10 +48,11 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         return {"num_nearest_neighbours": self.num_nearest_neighbours}
 
     def _compute_edge_index_pyg(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int, skip_flip: bool = False
     ) -> torch.Tensor:
         edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
-        edge_index = torch.flip(edge_index, [0])
+        if not skip_flip:
+            edge_index = torch.flip(edge_index, [0])
         return edge_index
 
     def _compute_adj_matrix_sklearn(
@@ -130,9 +131,7 @@ class ReversedKNNEdges(KNNEdges):
         target_coords: torch.Tensor,
         **kwargs,
     ) -> torch.Tensor:
-        edge_index = super().compute_edge_index_from_coords(target_coords, source_coords, **kwargs)
-        edge_index = torch.flip(edge_index, dims=[0])
-        return edge_index
+        return super().compute_edge_index_from_coords(target_coords, source_coords, skip_flip=True, **kwargs)
 
 
 class MutualKNNEdges(BaseDistanceEdgeBuilders):
