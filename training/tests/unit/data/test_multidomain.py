@@ -15,19 +15,22 @@ import pytest
 import torch
 from pytest_mock import MockFixture
 
-from anemoi.training.data.multidomain import MultiDomainDataset
+from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
 from anemoi.transform.variables import Variable
 
 
+SAMPLER_CONFIG = {"_target_": "anemoi.training.data.sampler.CrossDatasetSampler"}
+
+
 class TestMultiDomain:
-    """Test MultiDomainDataset instantiation and properties."""
+    """Test cross-dataset sampling with MultiDataset."""
 
     @pytest.fixture
-    def multi_domain(self, mocker: MockFixture) -> MultiDomainDataset:
-        """Fixture to provide a MultiDomainDataset instance with mocked datasets."""
+    def multi_domain(self, mocker: MockFixture) -> MultiDataset:
+        """Fixture to provide a MultiDataset with cross-dataset sampling."""
         # Mock create_dataset to return mock datasets
         mock_dataset_a = mocker.MagicMock()
         mock_dataset_a.missing = {7, 8, 9, 10}
@@ -54,9 +57,14 @@ class TestMultiDomain:
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
-        return MultiDomainDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+        return MultiDataset(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
+            sampler=SAMPLER_CONFIG,
+            check_dataset_units=True,
+        )
 
-    def test_sharding(self, multi_domain: MultiDomainDataset) -> None:
+    def test_sharding(self, multi_domain: MultiDataset) -> None:
         """Test that sharding logic correctly partitions the dataset."""
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         expected_indices = {
@@ -66,13 +74,13 @@ class TestMultiDomain:
         for key in expected_indices:
             assert np.array_equal(multi_domain.chunk_index_range[key], expected_indices[key])
 
-    def test_valid_date_indices(self, multi_domain: MultiDomainDataset) -> None:
+    def test_valid_date_indices(self, multi_domain: MultiDataset) -> None:
         """Test that valid_date_indices returns a dictionary of indices from all datasets.
 
         relative_date_indices = [0, 1, 2]
 
         Each reader supplies valid ``(sequence, position)`` anchors. The
-        dataset keeps a one-dimensional index for shuffling and sharding.
+        dataset keeps an independent index per domain for shuffling and sharding.
         """
         expected_indices = {"dataset_a": np.arange(14), "dataset_b": np.arange(4)}
         for key in expected_indices:
@@ -81,37 +89,39 @@ class TestMultiDomain:
         assert np.array_equal(multi_domain.anchors["dataset_a"][:, 1], [0, *range(11, 24)])
         assert np.array_equal(multi_domain.anchors["dataset_b"], [[0, 0], [0, 1], [0, 2], [0, 3]])
 
-    def test_domains_do_not_need_shared_anchors(self, multi_domain: MultiDomainDataset) -> None:
+    def test_domains_do_not_need_shared_anchors(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_a"].compute_anchors.return_value = np.array([[0, 10]])
         multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.array([[0, 20]])
 
-        dataset = MultiDomainDataset(
+        dataset = MultiDataset(
             data_readers=multi_domain.data_readers,
             relative_date_indices=multi_domain.relative_date_indices,
+            sampler=SAMPLER_CONFIG,
         )
 
         assert np.array_equal(dataset.anchors["dataset_a"], [[0, 10]])
         assert np.array_equal(dataset.anchors["dataset_b"], [[0, 20]])
 
-    def test_frequency_is_shared_across_domains(self, multi_domain: MultiDomainDataset) -> None:
+    def test_frequency_is_shared_across_domains(self, multi_domain: MultiDataset) -> None:
         assert multi_domain.frequency == "3h"
 
-    def test_empty_domain_raises(self, multi_domain: MultiDomainDataset) -> None:
+    def test_empty_domain_raises(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
 
         with pytest.raises(ValueError, match="No valid anchors found for data reader 'dataset_b'"):
-            MultiDomainDataset(
+            MultiDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
+                sampler=SAMPLER_CONFIG,
             )
 
-    def test_set_epoch_empty_domain_raises(self, multi_domain: MultiDomainDataset) -> None:
+    def test_set_epoch_empty_domain_raises(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].compute_anchors.return_value = np.empty((0, 2), dtype=np.int64)
 
         with pytest.raises(ValueError, match="No valid anchors found for data reader 'dataset_b'"):
             multi_domain.set_epoch(1, relative_date_indices=multi_domain.relative_date_indices)
 
-    def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain: MultiDomainDataset) -> None:
+    def test_per_worker_init_creates_domain_specific_worker_state(self, multi_domain: MultiDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         assert set(multi_domain.n_samples_per_worker) == {"dataset_a", "dataset_b"}
         assert set(multi_domain.chunk_index_range) == {"dataset_a", "dataset_b"}
@@ -119,7 +129,7 @@ class TestMultiDomain:
         assert isinstance(multi_domain.chunk_index_range["dataset_a"], np.ndarray)
         assert isinstance(multi_domain.chunk_index_range["dataset_b"], np.ndarray)
 
-    def test_worker_shards_do_not_overlap_per_domain(self, multi_domain: MultiDomainDataset) -> None:
+    def test_worker_shards_do_not_overlap_per_domain(self, multi_domain: MultiDataset) -> None:
         multi_domain.per_worker_init(n_workers=2, worker_id=0)
         worker_0_ranges = {k: v.copy() for k, v in multi_domain.chunk_index_range.items()}
 
@@ -129,7 +139,7 @@ class TestMultiDomain:
         for domain in multi_domain.dataset_names:
             assert set(worker_0_ranges[domain]).isdisjoint(set(worker_1_ranges[domain]))
 
-    def test_sampler_dispatches_to_requested_domain(self, multi_domain: MultiDomainDataset) -> None:
+    def test_sampler_dispatches_to_requested_domain(self, multi_domain: MultiDataset) -> None:
         sampler = CrossDatasetSampler(multi_domain)
         sampler.sample(("dataset_a", 0))
 
@@ -139,38 +149,43 @@ class TestMultiDomain:
         sampler.sample(("dataset_b", 2))
         multi_domain.data_readers["dataset_b"].get_sample.assert_called_once()
 
-    def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDomainDataset) -> None:
+    def test_mixing_native_grid_and_trajectory_datasets_raises(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].num_sequences = 2
 
         with pytest.raises(ValueError, match="same IterableDataset is unsupported"):
-            MultiDomainDataset(
+            MultiDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
+                sampler=SAMPLER_CONFIG,
             )
 
-    def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDomainDataset) -> None:
+    def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
 
         with pytest.raises(ValueError, match="Variable compatibility check failed"):
-            MultiDomainDataset(
+            MultiDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
+                sampler=SAMPLER_CONFIG,
+                check_dataset_units=True,
             )
 
-    def test_check_datasets_units_accepts_compatibility_options(self, multi_domain: MultiDomainDataset) -> None:
+    def test_check_datasets_units_accepts_compatibility_options(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
 
-        MultiDomainDataset(
+        MultiDataset(
             data_readers=multi_domain.data_readers,
             relative_date_indices=multi_domain.relative_date_indices,
+            sampler=SAMPLER_CONFIG,
+            check_dataset_units=True,
             check_variables_compatibility={"ignore_units": True},
         )
 
-    def test_check_datasets_units_raises_error_for_incompatible_units(self, multi_domain: MultiDomainDataset) -> None:
+    def test_check_datasets_units_raises_error_for_incompatible_units(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_a"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "m/s"}),
         }
@@ -183,7 +198,7 @@ class TestMultiDomain:
         ):
             multi_domain._check_datasets_units()
 
-    def test_check_datasets_units_passes_for_compatible_units(self, multi_domain: MultiDomainDataset) -> None:
+    def test_check_datasets_units_passes_for_compatible_units(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_a"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "m/s"}),
         }
@@ -194,7 +209,7 @@ class TestMultiDomain:
 
         assert multi_domain._check_datasets_units() is None
 
-    def test_check_datasets_units_skips_when_no_dataset_has_metadata(self, multi_domain: MultiDomainDataset) -> None:
+    def test_check_datasets_units_skips_when_no_dataset_has_metadata(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_a"].data.typed_variables = {}
         multi_domain.data_readers["dataset_b"].data.typed_variables = {}
 
@@ -202,15 +217,15 @@ class TestMultiDomain:
 
     def test_check_datasets_units_skips_when_only_one_dataset_has_metadata(
         self,
-        multi_domain: MultiDomainDataset,
+        multi_domain: MultiDataset,
     ) -> None:
         multi_domain.data_readers["dataset_a"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "m/s"}),
         }
         multi_domain.data_readers["dataset_b"].data.typed_variables = {}
-        assert (
-            multi_domain._check_datasets_units() is None
-        ), "Should skip units check when only one dataset has variable metadata"
+        assert multi_domain._check_datasets_units() is None, (
+            "Should skip units check when only one dataset has variable metadata"
+        )
 
     def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:
         task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
@@ -227,10 +242,11 @@ class TestMultiDomain:
         relative_date_indices = compute_relative_date_indices(task, readers)
         assert relative_date_indices == {"sg_1": [0, 2, 4, 6], "sg_2": [0, 1, 2, 3]}
 
-        dataset = MultiDomainDataset(
+        dataset = MultiDataset(
             data_readers=readers,
             relative_date_indices=relative_date_indices,
             shuffle=False,
+            sampler=SAMPLER_CONFIG,
         )
         dataset.per_worker_init(n_workers=1, worker_id=0)
         sample = next(iter(dataset))

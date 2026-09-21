@@ -20,8 +20,8 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.data.multidomain import MultiDomainDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
+from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
 from anemoi.training.utils.worker_init import worker_init_func
@@ -137,6 +137,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
+        if dataloader_config.strategy.get("sampler") is not None:
+            dataset_options["_recursive_"] = False
 
         return instantiate(
             dataloader_config.strategy,
@@ -199,8 +201,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
 
         batch_size = self.config.dataloader.batch_size[stage]
-        if isinstance(ds, MultiDomainDataset) and batch_size != 1:
-            msg = "MultiDomainDataset currently requires a batch size of one."
+        if isinstance(getattr(ds, "sampler", None), CrossDatasetSampler) and batch_size != 1:
+            msg = "Multi-domain sampling currently requires a batch size of one."
             raise ValueError(msg)
 
         extra = {}

@@ -5,7 +5,10 @@ persistent_workers: True
 fake_dataloading: False
 
 strategy:
-  _target_: anemoi.training.data.multidomain.MultiDomainDataset
+  _target_: anemoi.training.data.multidataset.MultiDataset
+  sampler:
+    _target_: anemoi.training.data.sampler.CrossDatasetSampler
+  check_dataset_units: true
 
 # ============
 # read_group_size:

@@ -18,7 +18,8 @@ from pytest_mock import MockFixture
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.data.multidomain import MultiDomainDataset
+from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
@@ -127,13 +128,15 @@ def test_persistent_workers_default_to_true_when_config_is_unvalidated() -> None
     assert loader.persistent_workers is True
 
 
-def test_multidomain_dataset_requires_batch_size_one() -> None:
+def test_cross_dataset_sampler_requires_batch_size_one() -> None:
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
     datamodule = _make_datamodule(task)
     datamodule.config.dataloader.batch_size.training = 2
+    dataset = MultiDataset.__new__(MultiDataset)
+    dataset.sampler = CrossDatasetSampler.__new__(CrossDatasetSampler)
 
     with pytest.raises(ValueError, match="requires a batch size of one"):
-        datamodule._get_dataloader(MultiDomainDataset.__new__(MultiDomainDataset), "training")
+        datamodule._get_dataloader(dataset, "training")
 
 
 @pytest.mark.parametrize(
