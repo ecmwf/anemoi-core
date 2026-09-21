@@ -72,6 +72,9 @@ class GraphPartition:
         Per-partition destination node counts.
     edge_splits : list[int]
         Per-partition edge counts (derived from dst-sorted edge structure).
+    src_splits : list[int], optional
+        Per-partition source node counts, independent of destination ownership.
+        Halo metadata uses ``dst_splits`` for source ownership when omitted.
     """
 
     num_nodes: tuple[int, int]
@@ -79,7 +82,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
-    src_splits: Optional[list[int]] = None  # optional, only used for bipartite graphs
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,

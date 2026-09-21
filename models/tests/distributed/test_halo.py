@@ -18,6 +18,8 @@ from distributed_runner import run_distributed_test
 
 from anemoi.models.distributed import halo
 from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
+from anemoi.models.distributed.shapes import GraphShardInfo
 
 GRAPH_CASES = {
     "symmetric": (
@@ -124,41 +126,51 @@ def test_build_halo_info(case: str, sharded: bool, debug: bool, monkeypatch: pyt
     original_edges = edge_index.clone()
     group = Mock(spec=dist.ProcessGroup)
     group.size.return_value = partition.num_parts
-    builders = [halo.build_halo_info]
-    if partition.src_splits is not None:
-        builders.append(halo.build_halo_info_bipartite)
-
     for rank in range(partition.num_parts):
         local_edges = edge_index.split(partition.edge_splits, dim=1)[rank].contiguous()
         original_local_edges = local_edges.clone()
         monkeypatch.setattr(dist, "get_rank", Mock(return_value=rank))
-        for build in builders:
-            gather = Mock(return_value=edge_index)
-            shard = Mock(return_value=local_edges)
-            verify = Mock()
-            monkeypatch.setattr(halo, "gather_tensor", gather)
-            monkeypatch.setattr(halo, "shard_tensor", shard)
-            monkeypatch.setattr(halo, "verify_halo_info", verify)
-            info = build(
-                partition,
-                local_edges if sharded else edge_index,
-                group,
-                edge_shard_sizes=partition.edge_splits if sharded else None,
-                debug=debug,
-            )
-            _assert_halo_info(info, partition, edge_index, rank, debug)
-            torch.testing.assert_close(edge_index, original_edges)
-            torch.testing.assert_close(local_edges, original_local_edges)
-            if sharded:
-                gather.assert_called_once_with(local_edges, 1, partition.edge_splits, group)
-                shard.assert_not_called()
-            else:
-                shard.assert_called_once_with(edge_index, 1, partition.edge_splits, group)
-                gather.assert_not_called()
-            if debug:
-                verify.assert_called_once_with(info, partition, group)
-            else:
-                verify.assert_not_called()
+        gather = Mock(return_value=edge_index)
+        shard = Mock(return_value=local_edges)
+        verify = Mock()
+        monkeypatch.setattr(halo, "gather_tensor", gather)
+        monkeypatch.setattr(halo, "shard_tensor", shard)
+        monkeypatch.setattr(halo, "verify_halo_info", verify)
+        info = halo.build_halo_info(
+            partition,
+            local_edges if sharded else edge_index,
+            group,
+            edge_shard_sizes=partition.edge_splits if sharded else None,
+            debug=debug,
+        )
+        _assert_halo_info(info, partition, edge_index, rank, debug)
+        torch.testing.assert_close(edge_index, original_edges)
+        torch.testing.assert_close(local_edges, original_local_edges)
+        if sharded:
+            gather.assert_called_once_with(local_edges, 1, partition.edge_splits, group)
+            shard.assert_not_called()
+        else:
+            shard.assert_called_once_with(edge_index, 1, partition.edge_splits, group)
+            gather.assert_not_called()
+        if debug:
+            verify.assert_called_once_with(info, partition, group)
+        else:
+            verify.assert_not_called()
+
+
+@pytest.mark.parametrize("sharded", [False, True])
+@pytest.mark.parametrize("debug", [False, True])
+def test_bipartite_builder_delegates(sharded: bool, debug: bool, monkeypatch: pytest.MonkeyPatch) -> None:
+    partition, edge_index = _make_graph("bipartite", torch.device("cpu"))
+    group = Mock(spec=dist.ProcessGroup)
+    build = Mock()
+    monkeypatch.setattr(halo, "build_halo_info", build)
+    shard_sizes = partition.edge_splits if sharded else None
+    if sharded:
+        edge_index = edge_index.split(partition.edge_splits, dim=1)[0].contiguous()
+    actual = halo.build_halo_info_bipartite(partition, edge_index, group, shard_sizes, debug)
+    assert actual is build.return_value
+    build.assert_called_once_with(partition, edge_index, group, shard_sizes, debug)
 
 
 def test_bipartite_requires_source_partition() -> None:
@@ -176,6 +188,31 @@ def test_partition_must_match_group_size(monkeypatch: pytest.MonkeyPatch) -> Non
     monkeypatch.setattr(dist, "get_rank", Mock(return_value=0))
     with pytest.raises(AssertionError, match="Partition num_parts"):
         halo.build_halo_info(partition, edge_index, group)
+
+
+def test_cache_specs_include_source_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
+    group = Mock(spec=dist.ProcessGroup)
+    group.size.return_value = 3
+    monkeypatch.setattr(dist, "get_rank", Mock(return_value=1))
+    assert halo.cache_specs(GraphShardInfo(nodes=[2, 3, 1], edges=[3, 1, 5]), group) == (3, 1, (2, 3, 1), (3, 1, 5))
+    shard_info = BipartiteGraphShardInfo(src_nodes=[2, 3, 1], dst_nodes=[3, 1, 4], edges=[3, 1, 5])
+    specs = halo.cache_specs(shard_info, group)
+    assert specs == (3, 1, (2, 3, 1), (3, 1, 4), (3, 1, 5))
+    changed = BipartiteGraphShardInfo(src_nodes=[1, 3, 2], dst_nodes=[3, 1, 4], edges=[3, 1, 5])
+    assert halo.cache_specs(changed, group) != specs
+
+
+def test_legacy_halo_info_defaults_to_shared_node_space() -> None:
+    info = halo.HaloInfo(
+        num_local_nodes=3,
+        num_halo_nodes=2,
+        send_indices=(),
+        recv_counts=(),
+        recv_global_ids=None,
+        edge_index_local=torch.empty(2, 0, dtype=torch.long),
+    )
+    assert info.num_local_src_nodes == info.local_dst_nodes == 3
+    assert info.total_src_nodes == info.total_nodes == 5
 
 
 def _test_halo_rank(
