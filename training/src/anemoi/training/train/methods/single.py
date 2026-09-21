@@ -72,4 +72,4 @@ class SingleTraining(BaseTrainingModule):
             step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        return self._aggregate_steps(step_losses, step_metrics, y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)

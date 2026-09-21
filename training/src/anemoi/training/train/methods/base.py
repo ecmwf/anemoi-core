@@ -1011,7 +1011,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     ) -> TrainingStepOutput:
         pass
 
-    def _aggregate_steps(
+    def _combine_loss_and_metrics(
         self,
         step_losses: list[torch.Tensor],
         step_metrics: list[dict[str, torch.Tensor]],
