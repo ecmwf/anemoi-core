@@ -70,6 +70,13 @@ weather forecasting.
 -  :ref:`anemoi-inference <anemoi-inference:index-page>`
 -  :ref:`anemoi-registry <anemoi-registry:index-page>`
 
+********
+ Awards
+********
+
+🏆 *Anemoi* is the winner of the `EMS Technology Achievement Award
+2025 <https://www.emetsoc.org/ems-technology-achievement-award-2025-for-anemoi/>`_.
+
 *********
  License
 *********
