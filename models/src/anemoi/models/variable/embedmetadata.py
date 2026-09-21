@@ -14,8 +14,7 @@ from anemoi.models.variable.variablevocabular import VariableVocabulary
 
 
 class EmbedMetadata(nn.Module):
-    """
-    Initialize the metadata embedding layer.
+    """Initialize the metadata embedding layer.
 
     Constructs the learnable embeddings and continuous encoders used to represent
     physical variable metadata. The provided foundation vocabulary defines the
@@ -35,9 +34,7 @@ class EmbedMetadata(nn.Module):
     def __init__(self, vocabular: VariableVocabulary, emb_dim: int) -> None:
         super().__init__()
 
-        assert isinstance(
-            vocabular, VariableVocabulary
-        ), f"expecting vocabular object of class VariableVocabulary"
+        assert isinstance(vocabular, VariableVocabulary), "expecting vocabular object of class VariableVocabulary"
 
         self.vocabular = vocabular
 
@@ -47,26 +44,19 @@ class EmbedMetadata(nn.Module):
 
         # categorical
         self.emb_param = nn.Embedding(self.num_params, emb_dim)
-        self.emb_vertical__level_types = nn.Embedding(
-            self.num_vertical_level_types, emb_dim
-        )
+        self.emb_vertical__level_types = nn.Embedding(self.num_vertical_level_types, emb_dim)
         self.emb_temporal_operator = nn.Embedding(self.num_temporal_operators, emb_dim)
 
         # continous
-        self.encode_level_types = nn.Sequential(
-            nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim)
-        )
-        self.encode_temporal_windows = nn.Sequential(
-            nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim)
-        )
+        self.encode_level_types = nn.Sequential(nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim))
+        self.encode_temporal_windows = nn.Sequential(nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim))
 
         # masks
         self.no_vertical_levels = nn.Parameter(torch.zeros(emb_dim))
         self.no_temporal_window = nn.Parameter(torch.zeros(emb_dim))
 
     def forward(self, variables: str | list[str]) -> torch.Tensor:
-        """
-        Embed metadata for the variables of the current domain.
+        """Embed metadata for the variables of the current domain.
 
         Maps the variable names of the current domain (e.g. global, stretched-grid,
         or LAM data) to their corresponding entries in the foundation variable
@@ -93,9 +83,7 @@ class EmbedMetadata(nn.Module):
         device = self.emb_param.weight.device
         # categorical
         param_ids = current_vocabular.param_ids.to(device=device)
-        temporal_operator_ids = current_vocabular.temporal_operator_ids.to(
-            device=device
-        )
+        temporal_operator_ids = current_vocabular.temporal_operator_ids.to(device=device)
         vertical_type_ids = current_vocabular.vertical_type_ids.to(device=device)
 
         # continous
@@ -135,10 +123,4 @@ class EmbedMetadata(nn.Module):
             self.no_temporal_window[None, :],
         )
 
-        return (
-            emb_param
-            + emb_vertical_type
-            + emb_temp_op
-            + emb_vertical_levels
-            + emb_temp_windows
-        )
+        return emb_param + emb_vertical_type + emb_temp_op + emb_vertical_levels + emb_temp_windows
