@@ -1,6 +1,9 @@
 dataloader:
   strategy:
-    _target_: anemoi.training.data.multidomain.MultiDomainDataset
+    _target_: anemoi.training.data.multidataset.MultiDataset
+    sampler:
+      _target_: anemoi.training.data.sampler.CrossDatasetSampler
+    check_dataset_units: true
   persistent_workers: false
   num_workers:
     training: 1

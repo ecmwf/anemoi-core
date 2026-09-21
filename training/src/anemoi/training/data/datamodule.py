@@ -136,6 +136,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
+        if dataloader_config.strategy.get("sampler") is not None:
+            dataset_options["_recursive_"] = False
 
         return instantiate(
             dataloader_config.strategy,

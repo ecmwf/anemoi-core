@@ -16,6 +16,8 @@ import numpy as np
 import torch
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.training.data.usable_indices import compute_valid_anchors
+from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.utils.time_indices import offset_time_indices
 
 if TYPE_CHECKING:
@@ -33,6 +35,14 @@ class BaseSampler:
     def __len__(self) -> int:
         """Return the number of samples assigned to the worker."""
         return len(self.dataset.chunk_index_range)
+
+    def compute_anchors(
+        self,
+        relative_date_indices: dict[str, TimeIndices],
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute synchronized anchors shared by all data readers."""
+        anchors = compute_valid_anchors(self.dataset.data_readers, relative_date_indices)
+        return anchors, np.arange(len(anchors), dtype=np.int64)
 
     def _grid_indices(self, dataset_name: str) -> slice:
         # self.dataset.shard_sizes is lazily initalised to None
@@ -92,6 +102,21 @@ class BaseSampler:
 
 class CrossDatasetSampler(BaseSampler):
     """Sample one independently indexed dataset at a time."""
+
+    def compute_anchors(
+        self,
+        relative_date_indices: dict[str, TimeIndices],
+    ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
+        """Compute independent anchors for each dataset."""
+        anchors = {
+            name: data_reader.compute_anchors(relative_date_indices[name])
+            for name, data_reader in self.dataset.data_readers.items()
+        }
+        for name, values in anchors.items():
+            if len(values) == 0:
+                msg = f"No valid anchors found for data reader '{name}': {self.dataset.data_readers[name]}"
+                raise ValueError(msg)
+        return anchors, {name: np.arange(len(values), dtype=np.int64) for name, values in anchors.items()}
 
     def __len__(self) -> int:
         """Return the number of samples assigned to the worker."""

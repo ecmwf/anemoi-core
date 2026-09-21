@@ -17,6 +17,7 @@ from functools import cached_property
 
 import numpy as np
 import torch
+from hydra.utils import instantiate
 from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
@@ -25,7 +26,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.sampler import BaseSampler
-from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -36,11 +36,7 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MultiDataset(IterableDataset):
-    """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
-
-    check_dataset_units = False
-    default_label = "multi"
-    sampler_class = BaseSampler
+    """Iterable wrapper for sampling from multiple data readers."""
 
     def __init__(
         self,
@@ -51,9 +47,11 @@ class MultiDataset(IterableDataset):
         epoch: int = 0,
         rollout: int = 1,
         fake_dataloading: bool = False,
+        sampler: Mapping[str, object] | None = None,
+        check_dataset_units: bool = False,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
-        """Initialize multi-dataset with synchronized data readers.
+        """Initialize a dataset backed by multiple data readers.
 
         Parameters
         ----------
@@ -72,12 +70,16 @@ class MultiDataset(IterableDataset):
             Rollout length represented by the loaded relative date indices, by default 1
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False
+        sampler : Mapping[str, object], optional
+            Hydra configuration for the sampling strategy, by default ``BaseSampler``
+        check_dataset_units : bool, optional
+            Check common variable metadata for compatibility, by default False
         check_variables_compatibility : Mapping[str, object], optional
             Options forwarded to ``Variable.check_compatibility`` when
-            ``check_dataset_units`` is enabled by the dataset class.
+            ``check_dataset_units`` is enabled.
         """
         self.data_readers = data_readers
-        self.label = self.default_label if label is None else label
+        self.label = "multi" if label is None else label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
@@ -87,9 +89,8 @@ class MultiDataset(IterableDataset):
             LOGGER.info("Using fake dataloading")
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
+        # with multi-sequence (TrajectoryDataset, init x step axes), which have
+        # incompatible temporal representations.
         single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
         multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
         if single_seq and multi_seq:
@@ -100,18 +101,19 @@ class MultiDataset(IterableDataset):
             )
             raise ValueError(msg)
 
+        self.sampler = BaseSampler(self) if sampler is None else instantiate(sampler, dataset=self)
         self._set_date_indices(relative_date_indices)
 
         self._lazy_init_model_and_reader_group_info()
-        if self.check_dataset_units:
+        if check_dataset_units:
             self._check_datasets_units(**dict(check_variables_compatibility or {}))
 
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
-        """Set synchronized anchors and relative date indices."""
-        # Compute valid (sequence, position) anchors and a flat index over them
-        # that the shuffle/shard logic operates on.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
+        """Set anchors and relative date indices."""
+        initializing = not hasattr(self, "valid_date_indices")
+        self.anchors, self.valid_date_indices = self.sampler.compute_anchors(relative_date_indices)
+        if initializing and isinstance(self.valid_date_indices, Mapping):
+            LOGGER.info("valid date indices: %s", self.valid_date_indices)
 
         # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
@@ -397,7 +399,7 @@ class MultiDataset(IterableDataset):
 
     def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
         """Yield samples selected by the dataset's sampler."""
-        yield from self.sampler_class(self)
+        yield from self.sampler
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

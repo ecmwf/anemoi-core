@@ -59,19 +59,20 @@ for training and supports:
 
    Users wishing to change sample selection or the format of the batch input
    should subclass the configured sampler (``BaseSampler`` or
-   ``CrossDatasetSampler``) and set it as the dataset's ``sampler_class``.
+   ``CrossDatasetSampler``) and select it in ``dataloader.strategy.sampler``.
    Override ``MultiDataset.__iter__`` only when replacing the complete sampling
    workflow.
 
 Multi-Domain
 ------------
 
-``MultiDomainDataset`` combines independent domains in one iterable dataset.
-Where ``MultiDataset`` returns synchronized data from every reader in each
-sample, multi-domain iteration returns data from one reader at a time. The
-readers may have different grids and date ranges. Mixing single-sequence
-native-grid readers with multi-sequence trajectory readers is currently
-unsupported and raises an error during initialization.
+``MultiDataset`` combines independent domains when configured with
+``CrossDatasetSampler``. The default ``BaseSampler`` returns synchronized data
+from every reader in each sample, whereas cross-dataset sampling returns data
+from one reader at a time. The readers may have different grids and date
+ranges. Mixing single-sequence native-grid readers with multi-sequence
+trajectory readers is currently unsupported and raises an error during
+initialization.
 
 Each domain is partitioned independently across distributed sample groups and
 data-loader workers. ``CrossDatasetSampler`` shuffles each domain before
@@ -88,7 +89,10 @@ The data module selects multi-domain sampling through the dataloader strategy::
 
    dataloader:
      strategy:
-       _target_: anemoi.training.data.multidomain.MultiDomainDataset
+       _target_: anemoi.training.data.multidataset.MultiDataset
+       sampler:
+         _target_: anemoi.training.data.sampler.CrossDatasetSampler
+       check_dataset_units: true
      batch_size:
        training: 1
        validation: 1
@@ -113,14 +117,6 @@ Multi-Dataset API
 -----------------
 
 .. automodule:: anemoi.training.data.multidataset
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-Multi-Domain API
-----------------
-
-.. automodule:: anemoi.training.data.multidomain
    :members:
    :no-undoc-members:
    :show-inheritance:
