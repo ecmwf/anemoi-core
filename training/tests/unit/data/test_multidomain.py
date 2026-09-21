@@ -21,7 +21,6 @@ from anemoi.training.data.sampler import CrossDatasetSampler
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
 from anemoi.transform.variables import Variable
 
-
 SAMPLER_CONFIG = {"_target_": "anemoi.training.data.sampler.CrossDatasetSampler"}
 
 
@@ -223,9 +222,9 @@ class TestMultiDomain:
             "10u": Variable.from_dict("10u", {"units": "m/s"}),
         }
         multi_domain.data_readers["dataset_b"].data.typed_variables = {}
-        assert multi_domain._check_datasets_units() is None, (
-            "Should skip units check when only one dataset has variable metadata"
-        )
+        assert (
+            multi_domain._check_datasets_units() is None
+        ), "Should skip units check when only one dataset has variable metadata"
 
     def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:
         task = TemporalDownscaler(input_timestep="6h", output_timestep="2h")
