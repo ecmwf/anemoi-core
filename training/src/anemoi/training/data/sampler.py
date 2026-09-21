@@ -29,72 +29,67 @@ LOGGER = logging.getLogger(__name__)
 class BaseSampler:
     """Sample synchronized data from all readers of a worker dataset."""
 
-    def __init__(self, dataset: "MultiDataset") -> None:
-        self.dataset = dataset
-
-    def __len__(self) -> int:
-        """Return the number of samples assigned to the worker."""
-        return len(self.dataset.chunk_index_range)
-
     def compute_anchors(
         self,
+        dataset: "MultiDataset",
         relative_date_indices: dict[str, TimeIndices],
     ) -> tuple[np.ndarray, np.ndarray]:
         """Compute synchronized anchors shared by all data readers."""
-        anchors = compute_valid_anchors(self.dataset.data_readers, relative_date_indices)
+        anchors = compute_valid_anchors(dataset.data_readers, relative_date_indices)
         return anchors, np.arange(len(anchors), dtype=np.int64)
 
-    def _grid_indices(self, dataset_name: str) -> slice:
-        # self.dataset.shard_sizes is lazily initalised to None
+    def _grid_indices(self, dataset: "MultiDataset", dataset_name: str) -> slice:
+        # dataset.shard_sizes is lazily initalised to None
         # This if statement guards against the case where shard_sizes is not set
         # (e.g. if set_comm_group_info hasn't been called yet)
-        if self.dataset.shard_sizes is not None and self.dataset.shard_sizes[dataset_name] is not None:
+        if dataset.shard_sizes is not None and dataset.shard_sizes[dataset_name] is not None:
             start, end = get_partition_range(
-                self.dataset.shard_sizes[dataset_name],
-                self.dataset.reader_group_rank,
+                dataset.shard_sizes[dataset_name],
+                dataset.reader_group_rank,
             )
             return slice(start, end)
         return slice(None)
 
-    def sample(self, index: int) -> dict[str, torch.Tensor]:
+    def sample(self, dataset: "MultiDataset", index: int) -> dict[str, torch.Tensor]:
         """Load one synchronized sample from every reader."""
-        sequence, position = (int(value) for value in self.dataset.anchors[index])
+        sequence, position = (int(value) for value in dataset.anchors[index])
         return {
             name: reader.get_sample(
                 sequence,
-                offset_time_indices(position, self.dataset.relative_date_indices[name]),
-                self._grid_indices(name),
+                offset_time_indices(position, dataset.relative_date_indices[name]),
+                self._grid_indices(dataset, name),
             )
-            for name, reader in self.dataset.data_readers.items()
+            for name, reader in dataset.data_readers.items()
         }
 
-    def _sample_indices(self) -> np.ndarray:
+    def _sample_indices(self, dataset: "MultiDataset") -> np.ndarray:
         # All data readers use the same shuffled anchor indices for synchronization.
-        if self.dataset.shuffle:
-            indices = self.dataset.rng.choice(
-                self.dataset.valid_date_indices,
-                size=len(self.dataset.valid_date_indices),
+        if dataset.shuffle:
+            indices = dataset.rng.choice(
+                dataset.valid_date_indices,
+                size=len(dataset.valid_date_indices),
                 replace=False,
-            )[self.dataset.chunk_index_range]
+            )[dataset.chunk_index_range]
         else:
-            indices = self.dataset.valid_date_indices[self.dataset.chunk_index_range]
+            indices = dataset.valid_date_indices[dataset.chunk_index_range]
 
         LOGGER.debug(
             "%s worker pid %d, worker id %d, using synchronized indices[0:10]: %s",
-            self.dataset.__class__.__name__,
+            dataset.__class__.__name__,
             os.getpid(),
-            self.dataset.worker_id,
+            dataset.worker_id,
             indices[:10],
         )
         return indices
 
-    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
+    def iter_samples(self, dataset: "MultiDataset") -> Generator[dict[str, torch.Tensor], None, None]:
+        """Yield the samples assigned to a worker dataset."""
         initial_batch = None
-        for index in self._sample_indices():
-            if not self.dataset.fake_dataloading:
-                yield self.sample(index)
+        for index in self._sample_indices(dataset):
+            if not dataset.fake_dataloading:
+                yield self.sample(dataset, index)
             elif initial_batch is None:
-                initial_batch = self.sample(index)
+                initial_batch = self.sample(dataset, index)
                 yield initial_batch
             else:
                 yield initial_batch
@@ -105,48 +100,45 @@ class CrossDatasetSampler(BaseSampler):
 
     def compute_anchors(
         self,
+        dataset: "MultiDataset",
         relative_date_indices: dict[str, TimeIndices],
     ) -> tuple[dict[str, np.ndarray], dict[str, np.ndarray]]:
         """Compute independent anchors for each dataset."""
         anchors = {
             name: data_reader.compute_anchors(relative_date_indices[name])
-            for name, data_reader in self.dataset.data_readers.items()
+            for name, data_reader in dataset.data_readers.items()
         }
         for name, values in anchors.items():
             if len(values) == 0:
-                msg = f"No valid anchors found for data reader '{name}': {self.dataset.data_readers[name]}"
+                msg = f"No valid anchors found for data reader '{name}': {dataset.data_readers[name]}"
                 raise ValueError(msg)
         return anchors, {name: np.arange(len(values), dtype=np.int64) for name, values in anchors.items()}
 
-    def __len__(self) -> int:
-        """Return the number of samples assigned to the worker."""
-        return sum(len(indices) for indices in self.dataset.chunk_index_range.values())
-
-    def sample(self, index: tuple[str, int]) -> dict[str, torch.Tensor]:
+    def sample(self, dataset: "MultiDataset", index: tuple[str, int]) -> dict[str, torch.Tensor]:
         """Load one sample from the selected dataset."""
         dataset_name, sample_index = index
-        sequence, position = (int(value) for value in self.dataset.anchors[dataset_name][sample_index])
-        time_steps = offset_time_indices(position, self.dataset.relative_date_indices[dataset_name])
+        sequence, position = (int(value) for value in dataset.anchors[dataset_name][sample_index])
+        time_steps = offset_time_indices(position, dataset.relative_date_indices[dataset_name])
         return {
-            dataset_name: self.dataset.data_readers[dataset_name].get_sample(
+            dataset_name: dataset.data_readers[dataset_name].get_sample(
                 sequence,
                 time_steps,
-                self._grid_indices(dataset_name),
+                self._grid_indices(dataset, dataset_name),
             ),
         }
 
-    def _sample_indices(self) -> list[tuple[str, int]]:
+    def _sample_indices(self, dataset: "MultiDataset") -> list[tuple[str, int]]:
         dataset_indices = {
             name: (
-                self.dataset.rng.choice(indices, size=len(indices), replace=False)[self.dataset.chunk_index_range[name]]
-                if self.dataset.shuffle
-                else indices[self.dataset.chunk_index_range[name]]
+                dataset.rng.choice(indices, size=len(indices), replace=False)[dataset.chunk_index_range[name]]
+                if dataset.shuffle
+                else indices[dataset.chunk_index_range[name]]
             )
-            for name, indices in self.dataset.valid_date_indices.items()
+            for name, indices in dataset.valid_date_indices.items()
         }
         samples = [(name, int(index)) for name, indices in dataset_indices.items() for index in indices]
-        if self.dataset.shuffle:
-            order = self.dataset.rng.choice(len(samples), size=len(samples), replace=False)
+        if dataset.shuffle:
+            order = dataset.rng.choice(len(samples), size=len(samples), replace=False)
             samples = [samples[int(index)] for index in order]
 
         LOGGER.debug(
@@ -155,12 +147,12 @@ class CrossDatasetSampler(BaseSampler):
                 "model comm group %d, group_rank %d, seed comm group id %d, using indices[0:10]: %s"
             ),
             os.getpid(),
-            self.dataset.label,
-            self.dataset.worker_id,
-            self.dataset.global_rank,
-            self.dataset.model_comm_group_id,
-            self.dataset.model_comm_group_rank,
-            self.dataset.sample_comm_group_id,
+            dataset.label,
+            dataset.worker_id,
+            dataset.global_rank,
+            dataset.model_comm_group_id,
+            dataset.model_comm_group_rank,
+            dataset.sample_comm_group_id,
             samples[:10],
         )
         return samples

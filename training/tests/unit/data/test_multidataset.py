@@ -104,7 +104,7 @@ class TestMultiDataset:
     def test_worker_shuffle_repeats_for_same_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """New workers reproduce the shuffle when the base seed and epoch match."""
         mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
-        sample = mocker.patch.object(multi_dataset.sampler, "sample", side_effect=lambda index: int(index))
+        sample = mocker.patch.object(multi_dataset.sampler, "sample", side_effect=lambda _dataset, index: int(index))
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=2, worker_id=1)
@@ -126,7 +126,7 @@ class TestMultiDataset:
         sample = mocker.patch.object(
             multi_dataset.sampler,
             "sample",
-            side_effect=lambda index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
+            side_effect=lambda _dataset, index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
         )
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
 

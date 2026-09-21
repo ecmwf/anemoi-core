@@ -14,14 +14,14 @@ import numpy as np
 from anemoi.training.data.sampler import CrossDatasetSampler
 
 
-def make_sampler(
+def make_dataset(
     valid_date_indices: dict[str, np.ndarray],
     chunk_index_range: dict[str, np.ndarray],
     *,
     shuffle: bool = True,
     seed: int = 42,
-) -> CrossDatasetSampler:
-    dataset = SimpleNamespace(
+) -> SimpleNamespace:
+    return SimpleNamespace(
         valid_date_indices=valid_date_indices,
         chunk_index_range=chunk_index_range,
         shuffle=shuffle,
@@ -33,7 +33,6 @@ def make_sampler(
         model_comm_group_rank=0,
         sample_comm_group_id=0,
     )
-    return CrossDatasetSampler(dataset)
 
 
 def test_cross_dataset_sampler_preserves_domain_order_across_sample_groups() -> None:
@@ -41,8 +40,9 @@ def test_cross_dataset_sampler_preserves_domain_order_across_sample_groups() -> 
     group_0_ranges = {"dataset_a": np.arange(0, 4), "dataset_b": np.arange(0, 2)}
     group_1_ranges = {"dataset_a": np.arange(4, 8), "dataset_b": np.arange(2, 4)}
 
-    group_0 = make_sampler(valid_date_indices, group_0_ranges)._sample_indices()
-    group_1 = make_sampler(valid_date_indices, group_1_ranges)._sample_indices()
+    sampler = CrossDatasetSampler()
+    group_0 = sampler._sample_indices(make_dataset(valid_date_indices, group_0_ranges))
+    group_1 = sampler._sample_indices(make_dataset(valid_date_indices, group_1_ranges))
 
     assert [domain for domain, _ in group_0] == [domain for domain, _ in group_1]
     for domain in valid_date_indices:
@@ -52,14 +52,14 @@ def test_cross_dataset_sampler_preserves_domain_order_across_sample_groups() -> 
 
 
 def test_cross_dataset_sampler_without_shuffle_preserves_domain_and_index_order() -> None:
-    sampler = make_sampler(
+    dataset = make_dataset(
         {"dataset_a": np.arange(4), "dataset_b": np.arange(3)},
         {"dataset_a": np.arange(1, 3), "dataset_b": np.arange(0, 2)},
         shuffle=False,
     )
+    sampler = CrossDatasetSampler()
 
-    assert len(sampler) == 4
-    assert sampler._sample_indices() == [
+    assert sampler._sample_indices(dataset) == [
         ("dataset_a", 1),
         ("dataset_a", 2),
         ("dataset_b", 0),
@@ -71,7 +71,8 @@ def test_cross_dataset_sampler_repeats_for_same_seed() -> None:
     valid_date_indices = {"dataset_a": np.arange(8), "dataset_b": np.arange(4)}
     chunk_index_range = {"dataset_a": np.arange(0, 4), "dataset_b": np.arange(0, 2)}
 
-    first = make_sampler(valid_date_indices, chunk_index_range)
-    second = make_sampler(valid_date_indices, chunk_index_range)
+    sampler = CrossDatasetSampler()
+    first = make_dataset(valid_date_indices, chunk_index_range)
+    second = make_dataset(valid_date_indices, chunk_index_range)
 
-    assert first._sample_indices() == second._sample_indices()
+    assert sampler._sample_indices(first) == sampler._sample_indices(second)
