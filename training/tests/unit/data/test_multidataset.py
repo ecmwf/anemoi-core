@@ -105,7 +105,7 @@ class TestMultiDataset:
         """New workers reproduce the shuffle when the base seed and epoch match."""
         mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
         sample = mocker.patch.object(
-            multi_dataset.strategy,
+            multi_dataset.iteration,
             "sample",
             side_effect=lambda _dataset, index: int(index),
         )
@@ -128,7 +128,7 @@ class TestMultiDataset:
         """Fake dataloading reads one valid batch and reuses its tensors."""
         multi_dataset.fake_dataloading = True
         sample = mocker.patch.object(
-            multi_dataset.strategy,
+            multi_dataset.iteration,
             "sample",
             side_effect=lambda _dataset, index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
         )

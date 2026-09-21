@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class IterationStrategy:
+class BaseIteration:
     """Sample synchronized data from all readers of a worker dataset."""
 
     def compute_anchors(
@@ -95,7 +95,7 @@ class IterationStrategy:
                 yield initial_batch
 
 
-class CrossDatasetIterationStrategy(IterationStrategy):
+class CrossDatasetIteration(BaseIteration):
     """Sample one independently indexed dataset at a time."""
 
     def compute_anchors(

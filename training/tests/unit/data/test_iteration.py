@@ -11,7 +11,7 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from anemoi.training.data.iteration_strategy import CrossDatasetIterationStrategy
+from anemoi.training.data.iteration import CrossDatasetIteration
 
 
 def make_dataset(
@@ -35,14 +35,14 @@ def make_dataset(
     )
 
 
-def test_cross_dataset_iteration_strategy_preserves_domain_order_across_sample_groups() -> None:
+def test_cross_dataset_iteration_preserves_domain_order_across_sample_groups() -> None:
     valid_date_indices = {"dataset_a": np.arange(8), "dataset_b": np.arange(4)}
     group_0_ranges = {"dataset_a": np.arange(0, 4), "dataset_b": np.arange(0, 2)}
     group_1_ranges = {"dataset_a": np.arange(4, 8), "dataset_b": np.arange(2, 4)}
 
-    strategy = CrossDatasetIterationStrategy()
-    group_0 = strategy._sample_indices(make_dataset(valid_date_indices, group_0_ranges))
-    group_1 = strategy._sample_indices(make_dataset(valid_date_indices, group_1_ranges))
+    iteration = CrossDatasetIteration()
+    group_0 = iteration._sample_indices(make_dataset(valid_date_indices, group_0_ranges))
+    group_1 = iteration._sample_indices(make_dataset(valid_date_indices, group_1_ranges))
 
     assert [domain for domain, _ in group_0] == [domain for domain, _ in group_1]
     for domain in valid_date_indices:
@@ -51,15 +51,15 @@ def test_cross_dataset_iteration_strategy_preserves_domain_order_across_sample_g
         assert group_0_indices.isdisjoint(group_1_indices)
 
 
-def test_cross_dataset_iteration_strategy_without_shuffle_preserves_domain_and_index_order() -> None:
+def test_cross_dataset_iteration_without_shuffle_preserves_domain_and_index_order() -> None:
     dataset = make_dataset(
         {"dataset_a": np.arange(4), "dataset_b": np.arange(3)},
         {"dataset_a": np.arange(1, 3), "dataset_b": np.arange(0, 2)},
         shuffle=False,
     )
-    strategy = CrossDatasetIterationStrategy()
+    iteration = CrossDatasetIteration()
 
-    assert strategy._sample_indices(dataset) == [
+    assert iteration._sample_indices(dataset) == [
         ("dataset_a", 1),
         ("dataset_a", 2),
         ("dataset_b", 0),
@@ -67,12 +67,12 @@ def test_cross_dataset_iteration_strategy_without_shuffle_preserves_domain_and_i
     ]
 
 
-def test_cross_dataset_iteration_strategy_repeats_for_same_seed() -> None:
+def test_cross_dataset_iteration_repeats_for_same_seed() -> None:
     valid_date_indices = {"dataset_a": np.arange(8), "dataset_b": np.arange(4)}
     chunk_index_range = {"dataset_a": np.arange(0, 4), "dataset_b": np.arange(0, 2)}
 
-    strategy = CrossDatasetIterationStrategy()
+    iteration = CrossDatasetIteration()
     first = make_dataset(valid_date_indices, chunk_index_range)
     second = make_dataset(valid_date_indices, chunk_index_range)
 
-    assert strategy._sample_indices(first) == strategy._sample_indices(second)
+    assert iteration._sample_indices(first) == iteration._sample_indices(second)

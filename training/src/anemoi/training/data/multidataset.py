@@ -24,7 +24,7 @@ from torch.utils.data import IterableDataset
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.iteration_strategy import IterationStrategy
+from anemoi.training.data.iteration import BaseIteration
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -46,7 +46,7 @@ class MultiDataset(IterableDataset):
         epoch: int = 0,
         rollout: int = 1,
         fake_dataloading: bool = False,
-        strategy: Mapping[str, object] | None = None,
+        iteration: Mapping[str, object] | None = None,
         check_dataset_units: bool = False,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
@@ -69,8 +69,8 @@ class MultiDataset(IterableDataset):
             Rollout length represented by the loaded relative date indices, by default 1
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False
-        strategy : Mapping[str, object], optional
-            Hydra configuration for the iteration strategy, by default ``IterationStrategy``
+        iteration : Mapping[str, object], optional
+            Hydra configuration for dataset iteration, by default ``BaseIteration``
         check_dataset_units : bool, optional
             Check common variable metadata for compatibility, by default False
         check_variables_compatibility : Mapping[str, object], optional
@@ -101,7 +101,7 @@ class MultiDataset(IterableDataset):
             )
             raise ValueError(msg)
 
-        self.strategy = IterationStrategy() if strategy is None else instantiate(strategy)
+        self.iteration = BaseIteration() if iteration is None else instantiate(iteration)
         self._set_date_indices(relative_date_indices)
 
         self._lazy_init_model_and_reader_group_info()
@@ -111,7 +111,7 @@ class MultiDataset(IterableDataset):
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set anchors and relative date indices."""
         initializing = not hasattr(self, "valid_date_indices")
-        self.anchors, self.valid_date_indices = self.strategy.compute_anchors(self, relative_date_indices)
+        self.anchors, self.valid_date_indices = self.iteration.compute_anchors(self, relative_date_indices)
         if initializing and isinstance(self.valid_date_indices, Mapping):
             LOGGER.info("valid date indices: %s", self.valid_date_indices)
 
@@ -406,7 +406,7 @@ class MultiDataset(IterableDataset):
             Dictionary mapping dataset names to their tensor samples
             Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
         """
-        yield from self.strategy(self)
+        yield from self.iteration(self)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)

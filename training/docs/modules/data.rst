@@ -58,8 +58,8 @@ for training and supports:
 .. note::
 
    Users wishing to change sample selection or the format of the batch input
-   should subclass the configured iteration strategy (``IterationStrategy`` or
-   ``CrossDatasetIterationStrategy``) and select it in ``dataloader.strategy``.
+   should subclass the configured iteration (``BaseIteration`` or
+   ``CrossDatasetIteration``) and select it in ``dataloader.iteration``.
    Override ``MultiDataset.__iter__`` only when replacing the complete sampling
    workflow.
 
@@ -67,17 +67,17 @@ Multi-Domain
 ------------
 
 ``MultiDataset`` combines independent domains when configured with
-``CrossDatasetIterationStrategy``. The default ``IterationStrategy``
+``CrossDatasetIteration``. The default ``BaseIteration``
 returns synchronized data from every reader in each sample, whereas
 cross-dataset sampling returns data from one reader at a time. The readers may
 have different grids and date ranges. Each domain is partitioned independently
 across distributed sample groups and data-loader workers.
 
-The data module selects multi-domain sampling through the iteration strategy configuration::
+The data module selects multi-domain sampling through the iteration configuration::
 
    dataloader:
-     strategy:
-       _target_: anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy
+     iteration:
+       _target_: anemoi.training.data.iteration.CrossDatasetIteration
      check_dataset_units: true
      batch_size:
        training: 1
@@ -124,10 +124,10 @@ Multi-Dataset API
    :no-undoc-members:
    :show-inheritance:
 
-Iteration Strategy API
-----------------------
+Iteration API
+-------------
 
-.. automodule:: anemoi.training.data.iteration_strategy
+.. automodule:: anemoi.training.data.iteration
    :members:
    :no-undoc-members:
    :show-inheritance:
