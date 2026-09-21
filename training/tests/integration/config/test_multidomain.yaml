@@ -1,6 +1,6 @@
 dataloader:
-  sampler:
-    _target_: anemoi.training.data.sampler.CrossDatasetSampler
+  strategy:
+    _target_: anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy
   check_dataset_units: true
   persistent_workers: false
   num_workers:

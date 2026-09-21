@@ -20,7 +20,9 @@ from anemoi.training.data.relative_time_indices import compute_relative_date_ind
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
 from anemoi.transform.variables import Variable
 
-SAMPLER_CONFIG = {"_target_": "anemoi.training.data.sampler.CrossDatasetSampler"}
+STRATEGY_CONFIG = {
+    "_target_": "anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy",
+}
 
 
 class TestMultiDomain:
@@ -58,7 +60,7 @@ class TestMultiDomain:
         return MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
-            sampler=SAMPLER_CONFIG,
+            strategy=STRATEGY_CONFIG,
             check_dataset_units=True,
         )
 
@@ -94,7 +96,7 @@ class TestMultiDomain:
             MultiDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
-                sampler=SAMPLER_CONFIG,
+                strategy=STRATEGY_CONFIG,
             )
 
     def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDataset) -> None:
@@ -106,7 +108,7 @@ class TestMultiDomain:
             MultiDataset(
                 data_readers=multi_domain.data_readers,
                 relative_date_indices=multi_domain.relative_date_indices,
-                sampler=SAMPLER_CONFIG,
+                strategy=STRATEGY_CONFIG,
                 check_dataset_units=True,
             )
 
@@ -118,7 +120,7 @@ class TestMultiDomain:
         MultiDataset(
             data_readers=multi_domain.data_readers,
             relative_date_indices=multi_domain.relative_date_indices,
-            sampler=SAMPLER_CONFIG,
+            strategy=STRATEGY_CONFIG,
             check_dataset_units=True,
             check_variables_compatibility={"ignore_units": True},
         )
@@ -142,7 +144,7 @@ class TestMultiDomain:
             data_readers=readers,
             relative_date_indices=relative_date_indices,
             shuffle=False,
-            sampler=SAMPLER_CONFIG,
+            strategy=STRATEGY_CONFIG,
         )
         dataset.per_worker_init(n_workers=1, worker_id=0)
         sample = next(iter(dataset))

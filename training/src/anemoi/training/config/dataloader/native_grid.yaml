@@ -4,7 +4,7 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
-sampler: null
+strategy: null
 check_dataset_units: false
 
 # ============

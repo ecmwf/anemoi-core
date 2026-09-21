@@ -58,8 +58,8 @@ for training and supports:
 .. note::
 
    Users wishing to change sample selection or the format of the batch input
-   should subclass the configured sampler (``BaseSampler`` or
-   ``CrossDatasetSampler``) and select it in ``dataloader.sampler``.
+   should subclass the configured iteration strategy (``IterationStrategy`` or
+   ``CrossDatasetIterationStrategy``) and select it in ``dataloader.strategy``.
    Override ``MultiDataset.__iter__`` only when replacing the complete sampling
    workflow.
 
@@ -67,17 +67,17 @@ Multi-Domain
 ------------
 
 ``MultiDataset`` combines independent domains when configured with
-``CrossDatasetSampler``. The default ``BaseSampler`` returns synchronized data
-from every reader in each sample, whereas cross-dataset sampling returns data
-from one reader at a time. The readers may have different grids and date
-ranges. Each domain is partitioned independently across distributed sample
-groups and data-loader workers.
+``CrossDatasetIterationStrategy``. The default ``IterationStrategy``
+returns synchronized data from every reader in each sample, whereas
+cross-dataset sampling returns data from one reader at a time. The readers may
+have different grids and date ranges. Each domain is partitioned independently
+across distributed sample groups and data-loader workers.
 
-The data module selects multi-domain sampling through the sampler configuration::
+The data module selects multi-domain sampling through the iteration strategy configuration::
 
    dataloader:
-     sampler:
-       _target_: anemoi.training.data.sampler.CrossDatasetSampler
+     strategy:
+       _target_: anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy
      check_dataset_units: true
      batch_size:
        training: 1
@@ -106,10 +106,10 @@ Multi-Dataset API
    :no-undoc-members:
    :show-inheritance:
 
-Sampler API
------------
+Iteration Strategy API
+----------------------
 
-.. automodule:: anemoi.training.data.sampler
+.. automodule:: anemoi.training.data.iteration_strategy
    :members:
    :no-undoc-members:
    :show-inheritance:

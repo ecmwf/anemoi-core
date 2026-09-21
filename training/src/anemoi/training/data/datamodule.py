@@ -135,8 +135,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
-        if dataloader_config.get("sampler") is not None:
-            dataset_options["sampler"] = dataloader_config.sampler
+        if dataloader_config.get("strategy") is not None:
+            dataset_options["strategy"] = dataloader_config.strategy
         if dataloader_config.get("check_dataset_units", False):
             dataset_options["check_dataset_units"] = True
 

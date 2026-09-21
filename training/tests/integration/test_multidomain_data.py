@@ -13,7 +13,7 @@ from omegaconf import DictConfig
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.data.multidataset import MultiDataset
-from anemoi.training.data.sampler import CrossDatasetSampler
+from anemoi.training.data.iteration_strategy import CrossDatasetIterationStrategy
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.utils.testing import GetTestArchive
@@ -33,7 +33,7 @@ def test_multidomain_dataloader(
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
     datamodule = AnemoiDatasetsDataModule(cfg, instantiate(cfg.task))
     assert isinstance(datamodule.ds_train, MultiDataset)
-    assert isinstance(datamodule.ds_train.sampler, CrossDatasetSampler)
+    assert isinstance(datamodule.ds_train.strategy, CrossDatasetIterationStrategy)
 
     sampled_domains = set()
     grid_sizes = {}
@@ -53,4 +53,7 @@ def test_multidomain_dataloader(
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert cfg.dataloader.sampler._target_ == "anemoi.training.data.sampler.CrossDatasetSampler"
+    assert (
+        cfg.dataloader.strategy._target_
+        == "anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy"
+    )
