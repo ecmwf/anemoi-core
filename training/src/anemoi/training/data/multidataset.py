@@ -101,7 +101,7 @@ class MultiDataset(IterableDataset):
             )
             raise ValueError(msg)
 
-        self.sampler = BaseSampler(self) if sampler is None else instantiate(sampler, dataset=self)
+        self.sampler = BaseSampler() if sampler is None else instantiate(sampler)
         self._set_date_indices(relative_date_indices)
 
         self._lazy_init_model_and_reader_group_info()
@@ -111,7 +111,7 @@ class MultiDataset(IterableDataset):
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set anchors and relative date indices."""
         initializing = not hasattr(self, "valid_date_indices")
-        self.anchors, self.valid_date_indices = self.sampler.compute_anchors(relative_date_indices)
+        self.anchors, self.valid_date_indices = self.sampler.compute_anchors(self, relative_date_indices)
         if initializing and isinstance(self.valid_date_indices, Mapping):
             LOGGER.info("valid date indices: %s", self.valid_date_indices)
 
@@ -406,7 +406,7 @@ class MultiDataset(IterableDataset):
             Dictionary mapping dataset names to their tensor samples
             Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
         """
-        yield from self.sampler
+        yield from self.sampler.iter_samples(self)
 
     def __repr__(self) -> str:
         console = Console(record=True, width=120)
