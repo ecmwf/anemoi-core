@@ -146,9 +146,6 @@ class BaseGraphModel(nn.Module):
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
-            assert (
-                len(datasets_to_decode) == 1 or self.supports_shared_encoder_decoder
-            ), "This model does not support sharing a decoder across datasets."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 

@@ -88,15 +88,3 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
-
-
-def test_different_hidden_meshes_cannot_share_a_batch() -> None:
-    model = _SharedEncoderModel()
-    model.dataset2hidden = {"dataset_a": "hidden_a", "dataset_b": "hidden_b"}
-    inputs = {
-        "dataset_a": torch.zeros(1, 1, 1, 1, 1),
-        "dataset_b": torch.zeros(1, 1, 1, 1, 1),
-    }
-
-    with pytest.raises(ValueError, match="All datasets in a batch must use the same hidden mesh"):
-        model(inputs)

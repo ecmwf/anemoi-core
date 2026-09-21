@@ -4,10 +4,8 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
-strategy:
-  _target_: anemoi.training.data.multidataset.MultiDataset
-  sampler: null
-  check_dataset_units: false
+sampler: null
+check_dataset_units: false
 
 # ============
 # read_group_size:

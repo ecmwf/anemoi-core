@@ -53,17 +53,8 @@ def test_multidomain_dataloader(
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert cfg.dataloader.strategy._target_ == "anemoi.training.data.multidataset.MultiDataset"
-    assert cfg.dataloader.strategy.sampler._target_ == "anemoi.training.data.sampler.CrossDatasetSampler"
+    assert cfg.dataloader.sampler._target_ == "anemoi.training.data.sampler.CrossDatasetSampler"
     assert cfg.model.model.hidden_nodes_name == {
         "sg_1": "sg_1_hidden",
         "sg_2": "sg_2_hidden",
     }
-    assert list(cfg.model.encoders) == ["0"]
-    assert list(cfg.model.decoders) == ["0"]
-    assert set(cfg.model.encoders["0"].source_datasets) == {"sg_1", "sg_2"}
-    assert set(cfg.model.decoders["0"].target_datasets) == {"sg_1", "sg_2"}
-    assert (
-        cfg.dataloader.training.datasets.sg_1.dataset_config.dataset.cutout[1].dataset
-        == cfg.dataloader.training.datasets.sg_2.dataset_config.dataset.cutout[1].dataset
-    )

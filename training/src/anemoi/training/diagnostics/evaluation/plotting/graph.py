@@ -104,14 +104,14 @@ def get_edge_trainable_modules(model: Any, dataset_name: str) -> dict[tuple[str,
         return {}
 
     trainable_modules = {}
-    hidden = getattr(model, "dataset2hidden", {}).get(dataset_name, model._graph_name_hidden)
+    hidden = model._graph_name_hidden
     provider_specs = (
-        ("encoder_graph_provider", dataset_name, (dataset_name, hidden)),
-        ("decoder_graph_provider", dataset_name, (hidden, dataset_name)),
-        ("processor_graph_provider", hidden, (hidden, hidden)),
+        ("encoder_graph_provider", (dataset_name, hidden)),
+        ("decoder_graph_provider", (hidden, dataset_name)),
+        ("processor_graph_provider", (hidden, hidden)),
     )
-    for provider_name, provider_key, edge_key in provider_specs:
-        provider = _resolve_edge_provider(getattr(model, provider_name, None), provider_key)
+    for provider_name, edge_key in provider_specs:
+        provider = _resolve_edge_provider(getattr(model, provider_name, None), dataset_name)
         if _has_trainable_edge_params(provider):
             trainable_modules[edge_key] = provider
     return trainable_modules

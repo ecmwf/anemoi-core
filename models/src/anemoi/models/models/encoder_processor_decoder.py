@@ -434,6 +434,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_comm_group=model_comm_group,
         )
 
+        # Latent skip connection
         if self.latent_skip:
             x_latent_proc = x_latent_proc + x_latent
 

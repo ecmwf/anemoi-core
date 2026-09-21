@@ -5,49 +5,32 @@ defaults:
   - optimization: default
   - weight_averaging: null
 
-# resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
 fork_run_id: null
-load_weights_only: False # only load model weights, do not restore optimiser states etc.
+load_weights_only: False
 update_ds_stats_on_ckpt_load:
-  states: False # rebuild state processors from current dataset when loading a checkpoint
-  tendencies: True # rebuild tendency processors from current dataset when loading a checkpoint
+  states: False
+  tendencies: True
 
-transfer_learning: False # activate to perform transfer learning
+transfer_learning: False
 
-# Options forwarded to Variable.check_compatibility when checking checkpoint vs. current
-# dataset (fine-tuning / transfer learning). Set ignore_units/ignore_processing_period to True to
-# skip those checks globally, or to a list of variable names to skip only those variables.
-# For predicted-vs-target variable checks, configure check_variables_compatibility on the
-# loss entry that defines predicted_variables / target_variables.
 check_variables_compatibility:
   ignore_units: False
   ignore_processing_period: False
 
-# run in deterministic mode ; slows down
 deterministic: False
-
-# miscellaneous
 precision: 16-mixed
-
-# gradient accumulation across K batches, K >= 1 (if K == 1 then no accumulation)
-# the effective batch size becomes num-devices * batch_size * k
 accum_grad_batches: 1
 
 num_sanity_val_steps: 6
 
-# clipp gradients, 0 : don't clip, default algorithm: norm, alternative: value
 gradient_clip:
   val: 32.
   algorithm: value
 
-# Optimizer settings
-
-# select model
 method:
   _target_: anemoi.training.train.methods.SingleTraining
 
-# select strategy
 strategy:
   _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
   num_gpus_per_model: ${system.hardware.num_gpus_per_model}
@@ -55,30 +38,14 @@ strategy:
   use_local_synchronization: True
   broadcast_buffers: False
 
-# loss functions
-
-# dynamic rescaling of the loss gradient
-# see https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
-# don't enable this by default until it's been tested and proven beneficial
 loss_gradient_scaling: False
 
-# Validation metrics calculation,
-# This may be a list, in which case all metrics will be calculated
-# and logged according to their name.
-# These metrics are calculated in the output model space, and thus
-# have undergone postprocessing.
 validation_metrics:
   datasets:
-    sg_1: # user-defined key in data
-      # loss class to initialise
+    sg_1:
       mse:
         _target_: anemoi.training.losses.MSELoss
-        # Scalers to include in loss calculation
-        # Cannot scale over the variable dimension due to possible remappings.
-        # Available scalers include:
-        # - 'loss_weights_mask': Giving imputed NaNs a zero weight in the loss function
         scalers: ["node_weights", "time_steps"]
-        # other kwargs
         ignore_nans: True
       mse_inside_lam_contribution:
         _target_: anemoi.training.losses.MSELoss
@@ -95,31 +62,9 @@ validation_metrics:
 
     sg_2: ${training.validation_metrics.datasets.sg_1}
 
-# Variable groups definition for scaling
-# The variable level scaling methods are defined under training/scalers
-# A default group is required and is appended as prefix to the metric of all variables not assigned to a group.
-# Variables are assigned to a group by their param if contained in the metadata, else by their name.
-
-# If more complex grouping is required, groups can be defined as a dictionary, such that all
-# keys must be evaluate to True.
-# .e.g. to set the variable group based on if the metadata specifies the variable is a pressure level
-# you can write the following:
-#   variable_groups:
-#     default: sfc
-#     pl:
-#        is_pressure_level: True
-# See `anemoi.transform.variables.Variable` for the available metadata.
-# Note that the former formulation of
-# :
-# variable_groups:
-#  default: sfc
-#  pl: [q, t, u, v, w, z]
-#
-# still works
-
 variable_groups:
   datasets:
-    sg_1: # user-defined key in data
+    sg_1:
       default: sfc
       pl:
         param: [q, t, u, v, w, z]
@@ -128,7 +73,7 @@ variable_groups:
 
 metrics:
   datasets:
-    sg_1: # user-defined key in data
+    sg_1:
       - z_500
       - t_850
       - u_850
@@ -136,7 +81,6 @@ metrics:
 
     sg_2: ${training.metrics.datasets.sg_1}
 
-# Set max_epochs or max_steps. Training stops at the first limit reached.
 max_epochs: null
 max_steps: 150000
 

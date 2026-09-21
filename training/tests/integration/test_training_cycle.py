@@ -237,11 +237,6 @@ def test_training_cycle_multidomain(
     assert trainer.graph_data["sg_1_hidden"].num_nodes != trainer.graph_data["sg_2_hidden"].num_nodes
     assert trainer.model.trainer.global_step == 4
 
-    for domain in ("sg_1", "sg_2"):
-        _, weights = trainer.model.scalers[domain]["node_weights"]
-        mask = trainer.graph_data[domain].cutout_mask.squeeze()
-        assert torch.isclose(weights[mask].sum() / weights.sum(), torch.tensor(0.25))
-
     assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
 
 

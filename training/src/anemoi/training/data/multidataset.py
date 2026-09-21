@@ -11,7 +11,6 @@ import datetime
 import logging
 import os
 import random
-from collections.abc import Generator
 from collections.abc import Mapping
 from functools import cached_property
 
@@ -36,14 +35,14 @@ LOGGER = logging.getLogger(__name__)
 
 
 class MultiDataset(IterableDataset):
-    """Iterable wrapper for sampling from multiple data readers."""
+    """Multi-dataset wrapper that returns synchronized samples from multiple data readers."""
 
     def __init__(
         self,
         data_readers: dict[str, BaseAnemoiReader],
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
-        label: str | None = None,
+        label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
         fake_dataloading: bool = False,
@@ -51,7 +50,7 @@ class MultiDataset(IterableDataset):
         check_dataset_units: bool = False,
         check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
-        """Initialize a dataset backed by multiple data readers.
+        """Initialize multi-dataset with synchronized data readers.
 
         Parameters
         ----------
@@ -63,7 +62,7 @@ class MultiDataset(IterableDataset):
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
-            Label for the dataset. Uses the class default when omitted.
+            label for the dataset, by default "multi"
         epoch : int, optional
             Epoch used for deterministic epoch-dependent shuffling, by default 0
         rollout : int, optional
@@ -79,7 +78,7 @@ class MultiDataset(IterableDataset):
             ``check_dataset_units`` is enabled.
         """
         self.data_readers = data_readers
-        self.label = "multi" if label is None else label
+        self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
         self.epoch = epoch
@@ -89,14 +88,15 @@ class MultiDataset(IterableDataset):
             LOGGER.info("Using fake dataloading")
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes), which have
-        # incompatible temporal representations.
+        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
+        # intersection would silently keep only sequence-0 samples and produce
+        # semantically meaningless alignment between the two encoders.
         single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
         multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
         if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
-                f"Trajectory datasets (init x step axes) in the same IterableDataset is unsupported. "
+                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
                 f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
             )
             raise ValueError(msg)
@@ -397,8 +397,15 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def __iter__(self) -> Generator[dict[str, torch.Tensor], None, None]:
-        """Yield samples selected by the dataset's sampler."""
+    def __iter__(self) -> dict[str, torch.Tensor]:
+        """Return an iterator that yields dictionaries of synchronized samples.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Dictionary mapping dataset names to their tensor samples
+            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
+        """
         yield from self.sampler
 
     def __repr__(self) -> str:

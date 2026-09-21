@@ -227,32 +227,6 @@ def test_graph_trainable_features_plot_handles_missing_dataset_key_in_provider_m
     assert edge_modules == {}
 
 
-def test_graph_trainable_features_plot_resolves_dataset_hidden_mesh():
-    class TrainableTensor:
-        trainable = object()
-
-    class TrainableProvider:
-        trainable = TrainableTensor()
-
-    class DummyModel:
-        pass
-
-    model = DummyModel()
-    model._graph_name_hidden = {"data": "data_hidden"}
-    model.dataset2hidden = {"data": "data_hidden"}
-    model.encoder_graph_provider = {"data": TrainableProvider()}
-    model.decoder_graph_provider = {"data": TrainableProvider()}
-    model.processor_graph_provider = {"data_hidden": TrainableProvider()}
-
-    edge_modules = get_edge_trainable_modules(model, dataset_name="data")
-
-    assert set(edge_modules) == {
-        ("data", "data_hidden"),
-        ("data_hidden", "data"),
-        ("data_hidden", "data_hidden"),
-    }
-
-
 # ---- Config and mocks for BasePlotAdditionalMetrics.process and task-type tests ----
 
 _PLOT_PROCESS_CONFIG = {
