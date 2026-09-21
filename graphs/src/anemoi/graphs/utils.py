@@ -108,9 +108,9 @@ def is_pyg_lib_available() -> bool:
         return False
 
     if PYG_VERSION >= "2.8":
-        return find_spec("torch_cluster") is not None
+        return find_spec("pyg_lib") is not None
 
-    return find_spec("pyg_lib") is not None
+    return find_spec("torch_cluster") is not None
 
 
 def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
