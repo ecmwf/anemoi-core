@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class BaseSampler:
+class IterationStrategy:
     """Sample synchronized data from all readers of a worker dataset."""
 
     def compute_anchors(
@@ -82,7 +82,7 @@ class BaseSampler:
         )
         return indices
 
-    def iter_samples(self, dataset: "MultiDataset") -> Generator[dict[str, torch.Tensor], None, None]:
+    def __call__(self, dataset: "MultiDataset") -> Generator[dict[str, torch.Tensor], None, None]:
         """Yield the samples assigned to a worker dataset."""
         initial_batch = None
         for index in self._sample_indices(dataset):
@@ -95,7 +95,7 @@ class BaseSampler:
                 yield initial_batch
 
 
-class CrossDatasetSampler(BaseSampler):
+class CrossDatasetIterationStrategy(IterationStrategy):
     """Sample one independently indexed dataset at a time."""
 
     def compute_anchors(

@@ -4,8 +4,8 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
-sampler:
-  _target_: anemoi.training.data.sampler.CrossDatasetSampler
+strategy:
+  _target_: anemoi.training.data.iteration_strategy.CrossDatasetIterationStrategy
 check_dataset_units: true
 
 read_group_size: ${system.hardware.num_gpus_per_model}
