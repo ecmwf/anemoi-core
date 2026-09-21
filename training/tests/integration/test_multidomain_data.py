@@ -12,8 +12,8 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
-from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.iteration import CrossDatasetIteration
+from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import convert_to_omegaconf
 from anemoi.utils.testing import GetTestArchive
@@ -53,10 +53,7 @@ def test_multidomain_dataloader(
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert (
-        cfg.dataloader.iteration._target_
-        == "anemoi.training.data.iteration.CrossDatasetIteration"
-    )
+    assert cfg.dataloader.iteration._target_ == "anemoi.training.data.iteration.CrossDatasetIteration"
     assert cfg.model.model.hidden_nodes_name == {
         "sg_1": "sg_1_hidden",
         "sg_2": "sg_2_hidden",
