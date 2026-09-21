@@ -38,10 +38,8 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
 
         # Validate that exactly one of cutoff_factor or cutoff_distance_km is provided
-        if cutoff_factor is None and cutoff_distance_km is None:
-            raise ValueError("Either cutoff_factor or cutoff_distance_km must be provided.")
-        if cutoff_factor is not None and cutoff_distance_km is not None:
-            raise ValueError("cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one.")
+        assert not (cutoff_factor is None and cutoff_distance_km is None), "Either cutoff_factor or cutoff_distance_km must be provided."
+        assert not (cutoff_factor is not None and cutoff_distance_km is not None), "cutoff_factor and cutoff_distance_km are mutually exclusive. Provide only one."
 
         if cutoff_factor is not None:
             assert isinstance(cutoff_factor, (int, float)), "Cutoff factor must be a float."
