@@ -40,7 +40,9 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
         return {}
 
     @abstractmethod
-    def _compute_edge_index_pyg(self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs) -> torch.Tensor: ...
+    def _compute_edge_index_pyg(
+        self, source_coords: torch.Tensor, target_coords: torch.Tensor, skip_flip: bool = False, **kwargs
+    ) -> torch.Tensor: ...
 
     @abstractmethod
     def _compute_adj_matrix_sklearn(

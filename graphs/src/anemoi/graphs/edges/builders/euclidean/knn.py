@@ -48,7 +48,11 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         return {"num_nearest_neighbours": self.num_nearest_neighbours}
 
     def _compute_edge_index_pyg(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int, skip_flip: bool = False
+        self,
+        source_coords: torch.Tensor,
+        target_coords: torch.Tensor,
+        num_nearest_neighbours: int,
+        skip_flip: bool = False,
     ) -> torch.Tensor:
         edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
         if not skip_flip:
