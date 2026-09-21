@@ -79,7 +79,7 @@ class KNNEdges(BaseKNNEdges):
     target_name : str
         The name of the target nodes.
     num_nearest_neighbours : int
-        Number of nearest neighbours to connect for each target node.
+        Number of nearest neighbours to connect to each target node.
     source_mask_attr_name : str | None
         The name of the source mask attribute to filter edge connections.
     target_mask_attr_name : str | None
