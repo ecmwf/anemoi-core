@@ -91,6 +91,25 @@ create a model.
 
    model_config = OmegaConf.load("transformer.yaml")
 
+Graph Transformer halo exchange
+==============================
+
+With distributed ``shard_strategy: edges``, ``GraphTransformerProcessor``
+builds one halo communication plan shared by all processor blocks. Directed
+graphs are supported: reverse edges are not required. Processor halo
+exchange currently requires ``batch_size=1``.
+
+The shared halo metadata builder also supports separate source and
+destination index spaces through optional ``GraphPartition.src_splits``.
+When omitted, source ownership uses ``dst_splits`` as for homogeneous
+processor graphs. This metadata support does not enable mapper halo
+exchange.
+
+Halo plans are cached for static graph topology. Building a plan from
+sharded edges collectively gathers the edge indices once; subsequent
+forwards reuse it. Changing connectivity without changing shard sizes
+requires rebuilding the model or explicitly invalidating its halo cache.
+
 *******************************************************
  Define statistics, data indices and supporting arrays
 *******************************************************

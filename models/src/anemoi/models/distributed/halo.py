@@ -15,8 +15,10 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 
@@ -49,8 +51,11 @@ class HaloInfo:
         :func:`build_halo_info`; ``None`` otherwise.
     edge_index_local : Tensor
         Edge index relabeled to local + halo node IDs.
-        Shape ``(2, num_local_edges)``.  Row 0 (src) uses ``[0, total_nodes)``,
-        row 1 (dst) uses ``[0, num_local_nodes)``.
+        Shape ``(2, num_local_edges)``. Row 0 uses ``[0, total_src_nodes)``
+        and row 1 uses ``[0, num_local_dst_nodes)``.
+    num_local_dst_nodes : int | None
+        Number of owned destination nodes. Defaults to ``num_local_nodes``
+        for homogeneous graphs and compatibility with existing constructors.
     """
 
     num_local_nodes: int
@@ -59,11 +64,27 @@ class HaloInfo:
     recv_counts: tuple[int, ...]
     recv_global_ids: Optional[tuple[Tensor, ...]]
     edge_index_local: Tensor
+    num_local_dst_nodes: Optional[int] = None
+
+    @property
+    def num_local_src_nodes(self) -> int:
+        """Number of owned source nodes on this rank."""
+        return self.num_local_nodes
+
+    @property
+    def total_src_nodes(self) -> int:
+        """Total number of owned and halo source nodes."""
+        return self.num_local_src_nodes + self.num_halo_nodes
 
     @property
     def total_nodes(self) -> int:
-        """Total number of nodes (local + halo) for attention size."""
-        return self.num_local_nodes + self.num_halo_nodes
+        """Total number of source nodes, retained for compatibility."""
+        return self.total_src_nodes
+
+    @property
+    def local_dst_nodes(self) -> int:
+        """Number of owned destination nodes on this rank."""
+        return self.num_local_nodes if self.num_local_dst_nodes is None else self.num_local_dst_nodes
 
     @property
     def send_counts(self) -> tuple[int, ...]:
@@ -72,15 +93,23 @@ class HaloInfo:
 
 
 def cache_specs(
-    shard_info: GraphShardInfo,
+    shard_info: GraphShardInfo | BipartiteGraphShardInfo,
     model_comm_group: ProcessGroup,
-) -> tuple[int, int, tuple[int, ...], tuple[int, ...]]:
+) -> tuple[int | tuple[int, ...], ...]:
     """Return specs that determine whether cached halo metadata can be reused."""
+    if isinstance(shard_info, BipartiteGraphShardInfo):
+        shard_specs = (
+            tuple(shard_info.src_nodes or ()),
+            tuple(shard_info.dst_nodes or ()),
+            tuple(shard_info.edges or ()),
+        )
+    else:
+        shard_specs = (tuple(shard_info.nodes or ()), tuple(shard_info.edges or ()))
+
     return (
         model_comm_group.size(),
         torch.distributed.get_rank(group=model_comm_group),
-        tuple(shard_info.nodes or ()),
-        tuple(shard_info.edges or ()),
+        *shard_specs,
     )
 
 
@@ -110,17 +139,19 @@ def build_halo_info(
     edge_shard_sizes: ShardSizes = None,
     debug: bool = False,
 ) -> HaloInfo:
-    """Build per-rank halo exchange metadata from graph partitioning.
+    """Build halo metadata for homogeneous or bipartite graphs, including directed graphs.
 
     Identifies which inner nodes need to be sent to peer ranks and which
     halo nodes need to be received, then relabels the local edge_index to
-    use contiguous local + halo node IDs.
+    use contiguous local + halo node IDs. Sends are determined from outgoing
+    edges, independently of receives; reverse edges are not required.
 
     Parameters
     ----------
     partition : GraphPartition
         Global partitioning metadata.  ``partition.num_parts`` must equal
-        the communication group size.
+        the communication group size. Source ownership uses ``src_splits``
+        when provided, otherwise ``dst_splits`` (a shared node index space).
     edge_index : Tensor
         Edge index with **global** (un-relabeled) node IDs, sorted by
         destination node.  May be either the full graph or already sharded
@@ -129,11 +160,13 @@ def build_halo_info(
         Model communication group.
     edge_shard_sizes : ShardSizes, optional
         If not ``None``, *edge_index* is already sharded for this rank
-        (contains only local edges).  If ``None``, *edge_index* is the
+        (contains only local edges) and is gathered collectively to determine
+        sends to other ranks. If ``None``, *edge_index* is the
         full (global) edge set and will be sliced using the partition.
     debug : bool, optional
         If ``True``, store ``recv_global_ids`` in the returned
-        :class:`HaloInfo` for use with :func:`verify_halo_info`.
+        :class:`HaloInfo` and collectively check send/receive agreement
+        with :func:`verify_halo_info`.
         Default ``False``.
 
     Returns
@@ -148,78 +181,58 @@ def build_halo_info(
         partition.num_parts == num_parts
     ), f"Partition num_parts ({partition.num_parts}) != comm group size ({num_parts})"
 
-    # local edges for this rank
     if edge_shard_sizes is not None:
         local_edge_index = edge_index
+        global_edge_index = gather_tensor(edge_index, 1, edge_shard_sizes, model_comm_group)
     else:
         local_edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
+        global_edge_index = edge_index
 
-    # partition range for this rank
-    dst_start, dst_end = get_partition_range(partition.dst_splits, my_rank)
-    num_local_nodes = dst_end - dst_start
+    src_splits = partition.dst_splits if partition.src_splits is None else partition.src_splits
+    src_start, src_stop = get_partition_range(src_splits, my_rank)
+    dst_start, dst_stop = get_partition_range(partition.dst_splits, my_rank)
 
-    # identify halo src nodes (outside this rank's partition range)
-    # i.e. (halo_src, dst) edges where dst is local but src is not
-    src_global = local_edge_index[0]
-    # boolean mask for edges where src is a halo node
-    is_halo_src = (src_global < dst_start) | (src_global >= dst_end)
+    # Receives depend only on remote sources of local destination edges.
+    local_src = local_edge_index[0]
+    is_remote_src = (local_src < src_start) | (local_src >= src_stop)
+    recv_nodes = local_src[is_remote_src]
+    recv_ranks = _node_id_to_partition_id(recv_nodes, src_splits)
 
-    # map halo src nodes to their owning partition
-    halo_src_global = src_global[is_halo_src]
-    halo_partition_ids = _node_id_to_partition_id(halo_src_global, partition.dst_splits)
+    # Sends require outgoing edges to remote destinations, not their reverses.
+    global_src, global_dst = global_edge_index
+    is_local_src = (global_src >= src_start) & (global_src < src_stop)
+    is_remote_dst = (global_dst < dst_start) | (global_dst >= dst_stop)
+    send_mask = is_local_src & is_remote_dst
+    send_nodes = global_src[send_mask]
+    send_ranks = _node_id_to_partition_id(global_dst[send_mask], partition.dst_splits)
 
-    # Processor graphs are symmetric; asymmetric graph connections are represented as mappers.
-    # Due to undirected graph symmetry, each (halo_src, dst) edge corresponds to a (dst, halo_src)
-    # edge in an other rank's partition, so we will receive halo_src as a halo node from that rank,
-    # and send dst as an inner node to that rank.
-    halo_dst_global = local_edge_index[1, is_halo_src]
-
-    # build per-rank send / recv info
-    send_indices_list: list[Tensor] = []
-    recv_nodes_list: list[Tensor] = []
-
-    for rank in range(num_parts):
-        rank_mask = halo_partition_ids == rank
-
-        # recv: unique halo node global IDs from this rank
-        recv_nodes = halo_src_global[rank_mask].unique(sorted=True)
-        # send: unique inner node local indices to send to this rank
-        send_nodes_global = halo_dst_global[rank_mask].unique(sorted=True)
-        send_nodes_local = send_nodes_global - dst_start
-
-        send_indices_list.append(send_nodes_local)
-        recv_nodes_list.append(recv_nodes)
-
-    recv_counts = tuple(t.size(0) for t in recv_nodes_list)
-
-    all_halo_nodes = torch.cat(recv_nodes_list)  # disjoint per rank
+    send_indices = tuple(send_nodes[send_ranks == rank].unique(sorted=True) - src_start for rank in range(num_parts))
+    recv_nodes_by_rank = tuple(recv_nodes[recv_ranks == rank].unique(sorted=True) for rank in range(num_parts))
+    recv_counts = tuple(nodes.size(0) for nodes in recv_nodes_by_rank)
+    all_halo_nodes = torch.cat(recv_nodes_by_rank)
     num_halo_nodes = all_halo_nodes.size(0)
+    num_local_src_nodes = src_stop - src_start
 
-    # relabel edge_index to local [0, num_local_nodes) + halo nodes [num_local_nodes, num_local_nodes + num_halo_nodes)
     edge_index_local = local_edge_index.clone()
-
-    # dst: global → local [0, num_local_nodes)
     edge_index_local[1] -= dst_start
-
-    # src – inner nodes: global → local [0, num_local_nodes)
-    inner_src_mask = ~is_halo_src
-    edge_index_local[0, inner_src_mask] = src_global[inner_src_mask] - dst_start
-
-    # src – halo nodes: global → [num_local_nodes, total_nodes)
+    edge_index_local[0, ~is_remote_src] = local_src[~is_remote_src] - src_start
     if num_halo_nodes > 0:
-        n_total_nodes = partition.num_nodes[0]
-        halo_relabel = torch.empty(n_total_nodes, dtype=torch.long, device=edge_index.device)
-        halo_relabel[all_halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_nodes
-        edge_index_local[0, is_halo_src] = halo_relabel[src_global[is_halo_src]]
+        halo_relabel = torch.empty(partition.num_nodes[0], dtype=torch.long, device=edge_index.device)
+        halo_relabel[all_halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_src_nodes
+        edge_index_local[0, is_remote_src] = halo_relabel[local_src[is_remote_src]]
 
-    return HaloInfo(
-        num_local_nodes=num_local_nodes,
+    halo_info = HaloInfo(
+        num_local_nodes=num_local_src_nodes,
         num_halo_nodes=num_halo_nodes,
-        send_indices=tuple(send_indices_list),
+        send_indices=send_indices,
         recv_counts=recv_counts,
-        recv_global_ids=tuple(recv_nodes_list) if debug else None,
+        recv_global_ids=recv_nodes_by_rank if debug else None,
         edge_index_local=edge_index_local,
+        num_local_dst_nodes=dst_stop - dst_start,
     )
+    if debug:
+        verify_halo_info(halo_info, partition, model_comm_group)
+    return halo_info
 
 
 def verify_halo_info(
@@ -227,7 +240,7 @@ def verify_halo_info(
     partition: GraphPartition,
     model_comm_group: ProcessGroup,
 ) -> None:
-    """Verify send/recv symmetry of halo metadata across all ranks (for debugging)
+    """Verify send/receive agreement across all ranks (for debugging).
 
     Checks that ``send(i, j) == recv(j, i)`` in terms of global node IDs,
     i.e. the set of inner nodes that rank *i* sends to rank *j* equals the
@@ -256,20 +269,29 @@ def verify_halo_info(
     ), "verify_halo_info requires recv_global_ids; rebuild HaloInfo with debug=True"
     my_rank = torch.distributed.get_rank(group=model_comm_group)
     num_parts = model_comm_group.size()
-    dst_start = get_partition_range(partition.dst_splits, my_rank)[0]
     device = halo_info.edge_index_local.device
 
     # local send indices → global node IDs
-    send_global = [idx + dst_start for idx in halo_info.send_indices]
+    if partition.src_splits is not None:
+        offset = get_partition_range(partition.src_splits, my_rank)[0]
+    else:
+        offset = get_partition_range(partition.dst_splits, my_rank)[0]
+
+    send_global = [idx + offset for idx in halo_info.send_indices]
 
     # all-to-all: each rank sends what it will send (global IDs) to each
     # peer; each rank receives what peers intend to send to it.
-    recv_from_peers = [torch.empty(halo_info.recv_counts[r], dtype=torch.long, device=device) for r in range(num_parts)]
-    torch.distributed.all_to_all(recv_from_peers, list(send_global), group=model_comm_group)
+    recv_global = torch.empty(sum(halo_info.recv_counts), dtype=torch.long, device=device)
+    torch.distributed.all_to_all_single(
+        recv_global,
+        torch.cat(send_global),
+        output_split_sizes=list(halo_info.recv_counts),
+        input_split_sizes=list(halo_info.send_counts),
+        group=model_comm_group,
+    )
+    recv_from_peers = recv_global.split(halo_info.recv_counts)
 
-    # recv_from_peers[r] now contains the global IDs that rank r will send
-    # to us.  By symmetry this must equal recv_global_ids[r] — the halo
-    # nodes we expect from rank r.  Both are sorted, so compare directly.
+    # Peers' advertised sends must match our expected receives, including their order.
     for rank in range(num_parts):
         received = recv_from_peers[rank]
         expected = halo_info.recv_global_ids[rank]

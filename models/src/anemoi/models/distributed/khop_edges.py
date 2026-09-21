@@ -67,6 +67,9 @@ class GraphPartition:
         Per-partition destination node counts.
     edge_splits : list[int]
         Per-partition edge counts (derived from dst-sorted edge structure).
+    src_splits : list[int], optional
+        Per-partition source node counts, independent of destination ownership.
+        Halo metadata uses ``dst_splits`` for source ownership when omitted.
     """
 
     num_nodes: tuple[int, int]
@@ -74,6 +77,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,
@@ -220,6 +224,7 @@ def build_graph_partition_from_shard_info(
     n_src = sum(shard_info.src_nodes) if shard_info.src_is_sharded() else x_src.size(0)
     n_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
+    src_splits = shard_info.src_nodes
 
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
@@ -233,10 +238,19 @@ def build_graph_partition_from_shard_info(
             num_parts=comm_size,
             dst_splits=dst_splits,
             edge_splits=edge_splits,
+            src_splits=src_splits,
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    return GraphPartition(
+        num_nodes=partition.num_nodes,
+        num_edges=partition.num_edges,
+        num_parts=partition.num_parts,
+        dst_splits=partition.dst_splits,
+        edge_splits=partition.edge_splits,
+        src_splits=src_splits,
+    )
 
 
 def ensure_edges_are_dst_sorted(
