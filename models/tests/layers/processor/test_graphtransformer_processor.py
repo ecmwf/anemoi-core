@@ -10,6 +10,7 @@
 from dataclasses import asdict
 from dataclasses import dataclass
 from dataclasses import field
+from unittest.mock import Mock
 
 import pytest
 import torch
@@ -197,6 +198,16 @@ class TestGraphTransformerProcessor:
                 hook.remove()
 
         assert received_halo_info == [halo_info] * graphtransformer_init.num_layers
+
+    def test_distributed_block_requires_halo_info(self, graphtransformer_processor):
+        block = graphtransformer_processor.proc[0]
+        group = Mock()
+        group.size.return_value = 2
+        x = torch.empty(0, graphtransformer_processor.num_channels, device=next(block.parameters()).device)
+        with pytest.raises(ValueError, match="requires halo_info"):
+            block._forward_edges_shard_strategy(
+                x, torch.empty(0), torch.empty(2, 0, dtype=torch.long), GraphShardInfo(), 1, group, 1, True
+            )
 
     def test_unsorted_edges_are_sorted_before_forward(
         self, graphtransformer_processor, graphtransformer_init, graph_provider

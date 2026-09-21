@@ -43,6 +43,8 @@ class GraphTransformerDecoderSchema(TransformerModelComponent):
     "Edge attributes to consider in the model component features."
     qk_norm: bool = Field(example=False)
     "Normalize the query and key vectors. Default to False."
+    use_halo_exchange: bool = Field(default=True)
+    "Exchange only required remote source nodes for edge sharding. Set False for full-source synchronization."
     initialise_data_extractor_zero: bool = Field(example=False)
     "Initialise the data extractor with zeros. Default to False."
 

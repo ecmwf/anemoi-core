@@ -19,9 +19,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.halo import build_halo_info
 from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.halo import verify_halo_info
 from anemoi.models.distributed.khop_edges import ANEMOI_DEBUG_SHARDING
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
@@ -566,8 +566,8 @@ class GraphTransformerProcessor(BaseProcessor):
         shard_info: GraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup],
-    ):
-        """Return one halo plan shared by all processor layers."""
+    ) -> Optional[HaloInfo]:
+        """Return one halo plan shared by all processor layers for a static graph."""
         if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
             return None
 
@@ -601,9 +601,6 @@ class GraphTransformerProcessor(BaseProcessor):
             shard_info.edges,
             debug=ANEMOI_DEBUG_SHARDING,
         )
-
-        if ANEMOI_DEBUG_SHARDING:
-            verify_halo_info(halo_info, partition, model_comm_group)
 
         self._cached_halo_info = halo_info
         self._cached_halo_cache_specs = cache_specs

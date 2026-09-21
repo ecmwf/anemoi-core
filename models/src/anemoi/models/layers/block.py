@@ -34,6 +34,7 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.conv import GraphConv
@@ -1104,6 +1105,11 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edges_are_dst_sorted: bool,
         halo_info: Optional[HaloInfo] = None,
     ) -> Tensor:
+        if model_is_distributed(model_comm_group) and halo_info is None:
+            raise ValueError(
+                "Distributed edge-sharded GraphTransformerProcessorBlock requires halo_info "
+                "from GraphTransformerProcessor."
+            )
         if halo_info is not None:
             x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
             edge_index_for_attention = halo_info.edge_index_local

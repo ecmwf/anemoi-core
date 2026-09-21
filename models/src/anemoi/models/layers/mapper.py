@@ -401,7 +401,6 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             )
             x = (x_src, x_dst)
 
-        if self.use_halo_exchange and model_is_distributed(model_comm_group):
             shard_partition, halo_info = self._get_or_build_cached_halo_info(
                 x,
                 edge_index,
@@ -447,7 +446,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
                 batch_size,
                 model_comm_group,
                 cond,
-                edges_are_dst_sorted=True,  # ensured by prepare_edge_sharding_wrapper
+                edges_are_dst_sorted=True,
                 **kwargs,
             ).to(dtype=out_type)
 
