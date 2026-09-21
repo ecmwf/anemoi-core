@@ -53,5 +53,4 @@ def test_multidomain_dataloader(
 def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, list[str]]) -> None:
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
-    assert cfg.dataloader.strategy._target_ == "anemoi.training.data.multidataset.MultiDataset"
-    assert cfg.dataloader.strategy.sampler._target_ == "anemoi.training.data.sampler.CrossDatasetSampler"
+    assert cfg.dataloader.sampler._target_ == "anemoi.training.data.sampler.CrossDatasetSampler"

@@ -59,7 +59,7 @@ for training and supports:
 
    Users wishing to change sample selection or the format of the batch input
    should subclass the configured sampler (``BaseSampler`` or
-   ``CrossDatasetSampler``) and select it in ``dataloader.strategy.sampler``.
+   ``CrossDatasetSampler``) and select it in ``dataloader.sampler``.
    Override ``MultiDataset.__iter__`` only when replacing the complete sampling
    workflow.
 
@@ -70,37 +70,22 @@ Multi-Domain
 ``CrossDatasetSampler``. The default ``BaseSampler`` returns synchronized data
 from every reader in each sample, whereas cross-dataset sampling returns data
 from one reader at a time. The readers may have different grids and date
-ranges. Mixing single-sequence native-grid readers with multi-sequence
-trajectory readers is currently unsupported and raises an error during
-initialization.
+ranges. Each domain is partitioned independently across distributed sample
+groups and data-loader workers.
 
-Each domain is partitioned independently across distributed sample groups and
-data-loader workers. ``CrossDatasetSampler`` shuffles each domain before
-selecting its worker partition, then combines and shuffles the selected samples.
-This samples domains in proportion to their available samples while ensuring
-that all sample communication groups process domains in the same order.
-
-Variable metadata is checked for variables shared by multiple domains when the
-dataset is created. Options from ``CheckVariablesCompatibilitySchema`` can be
-passed through the ``check_variables_compatibility`` argument to ignore selected
-metadata checks.
-
-The data module selects multi-domain sampling through the dataloader strategy::
+The data module selects multi-domain sampling through the sampler configuration::
 
    dataloader:
-     strategy:
-       _target_: anemoi.training.data.multidataset.MultiDataset
-       sampler:
-         _target_: anemoi.training.data.sampler.CrossDatasetSampler
-       check_dataset_units: true
+     sampler:
+       _target_: anemoi.training.data.sampler.CrossDatasetSampler
+     check_dataset_units: true
      batch_size:
        training: 1
        validation: 1
        test: 1
 
 A batch size of one is currently required because each sample contains one
-domain key. Model and training-loop support for batches with only one active
-domain is tracked separately from this data-loading functionality.
+domain key.
 
 API Reference
 =============
