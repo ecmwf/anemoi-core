@@ -7,11 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Regression tests for LoadingStrategy._refresh_checkpoint_processors.
+"""Regression tests for the processor-refresh step of ``apply_checkpoint_corrections``.
 
-Mirrors anemoi.training.train.tasks.base.AnemoiLightningModule
-._update_checkpoint_state_dict_for_load so that pipeline-based loading
-honours config.training.update_ds_stats_on_ckpt_load.{states,tendencies}.
+Mirrors the legacy ``_update_checkpoint_state_dict_for_load`` so that
+pipeline-based loading honours
+``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ from anemoi.training.checkpoint.base import CheckpointContext
 from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
 
 
-class _ModelWithProcessors(nn.Module):
-    """Fake top-level model wrapping pre/post processors and a body."""
+class _InnerModel(nn.Module):
+    """The AnemoiModelInterface-equivalent: processors live here, keyed without ``model.``."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -35,6 +35,20 @@ class _ModelWithProcessors(nn.Module):
         self.pre_processors_tendencies = nn.Linear(4, 4)
         self.post_processors_tendencies = nn.Linear(4, 4)
         self.body = nn.Linear(4, 4)
+
+
+class _ModelWithProcessors(nn.Module):
+    """LightningModule-shaped wrapper whose ``.model`` is the inner interface.
+
+    ``context.model`` in the real trainer is the LightningModule, so its
+    ``state_dict()`` keys carry the leading ``model.`` (e.g.
+    ``model.pre_processors.weight``) — what the checkpoint and ``load_state_dict``
+    use — while the refresh re-injects from the inner ``.model``.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.model = _InnerModel()
 
 
 def _ckpt_with_stale_processors(stale_value: float) -> dict:
@@ -72,7 +86,7 @@ def test_no_op_when_both_flags_false() -> None:
     context = _build_context(states=False, tendencies=False)
     before = {k: v.clone() for k, v in context.checkpoint_data["state_dict"].items()}
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     for key, original in before.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)
@@ -82,10 +96,10 @@ def test_states_flag_replaces_state_processor_weights() -> None:
     """states=True swaps model.pre_processors.* and model.post_processors.* in place."""
     context = _build_context(states=True, tendencies=False)
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     assert torch.equal(state_dict["model.pre_processors.weight"], model_state["pre_processors.weight"])
     assert torch.equal(state_dict["model.post_processors.bias"], model_state["post_processors.bias"])
     # Tendency processors untouched because tendencies=False
@@ -96,10 +110,10 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
     """tendencies=True swaps the *_tendencies processor entries."""
     context = _build_context(states=False, tendencies=True)
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     assert torch.equal(
         state_dict["model.pre_processors_tendencies.weight"],
         model_state["pre_processors_tendencies.weight"],
@@ -111,10 +125,10 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
 def test_both_flags_replaces_all_four_processor_groups() -> None:
     context = _build_context(states=True, tendencies=True)
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     state_dict = context.checkpoint_data["state_dict"]
-    model_state = context.model.state_dict()
+    model_state = context.model.model.state_dict()
     for short_prefix in (
         "pre_processors",
         "post_processors",
@@ -132,7 +146,7 @@ def test_body_weights_are_not_touched() -> None:
     context = _build_context(states=True, tendencies=True)
     before_body = context.checkpoint_data["state_dict"]["model.body.weight"].clone()
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     assert torch.equal(context.checkpoint_data["state_dict"]["model.body.weight"], before_body)
 
@@ -146,7 +160,7 @@ def test_missing_config_is_no_op() -> None:
     )
     before = {k: v.clone() for k, v in context.checkpoint_data["state_dict"].items()}
 
-    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+    WeightsOnlyLoader()._apply_corrections(context)
 
     for key, original in before.items():
         assert torch.equal(context.checkpoint_data["state_dict"][key], original)
@@ -157,9 +171,11 @@ async def test_full_process_call_applies_the_refresh() -> None:
     """Smoke test: the helper actually runs as part of WeightsOnlyLoader.process()."""
     context = _build_context(states=True, tendencies=True)
 
-    await WeightsOnlyLoader().process(context)
+    # strict=False keeps the smoke test tolerant of any non-processor key differences;
+    # it exercises that the refresh runs inside process() and that the resulting load
+    # leaves the model with its own (non-stale) processor weights.
+    await WeightsOnlyLoader(strict=False).process(context)
 
-    # After process() the model's own processor weights end up in the model
-    # (state_dict was rewritten then loaded back), so picking any value != 99.0 is enough.
-    loaded = context.model.state_dict()["pre_processors.weight"]
+    # The model keeps its own (non-stale) processor weights.
+    loaded = context.model.state_dict()["model.pre_processors.weight"]
     assert not torch.all(loaded == 99.0)

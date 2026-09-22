@@ -1,0 +1,268 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""Tests for RunIdSource (resume / fork by run id) and LocalSource explicit path."""
+
+import os
+from pathlib import Path
+
+import pytest
+import torch
+from omegaconf import OmegaConf
+
+from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.sources.base import CheckpointSource
+from anemoi.training.checkpoint.sources.local import LocalSource
+from anemoi.training.checkpoint.sources.run import RunIdSource
+
+
+def _config(root: Path) -> OmegaConf:
+    return OmegaConf.create({"system": {"output": {"checkpoints": {"root": str(root)}}}})
+
+
+def _write_ckpt(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"state_dict": {"layer.weight": torch.zeros(2, 2)}}, path)
+    return path
+
+
+def test_run_source_extends_checkpoint_source() -> None:
+    assert issubclass(RunIdSource, CheckpointSource)
+
+
+def test_resolve_path_resume(tmp_path: Path) -> None:
+    """Resume path is <checkpoints.root>.parent/<run_id>/last.ckpt."""
+    root = tmp_path / "job" / "checkpoints"
+    path = RunIdSource.resolve_path(_config(root), "run_A", fork=False)
+    assert path == tmp_path / "job" / "run_A" / "last.ckpt"
+
+
+def test_resolve_path_fork_uses_same_formula(tmp_path: Path) -> None:
+    """Fork resolves the parent run's checkpoint by the same formula."""
+    root = tmp_path / "job" / "checkpoints"
+    path = RunIdSource.resolve_path(_config(root), "base999", fork=True)
+    assert path == tmp_path / "job" / "base999" / "last.ckpt"
+
+
+def test_resolve_path_server2server_overrides(tmp_path: Path) -> None:
+    """Server-to-server lineage ids take precedence over run_id."""
+    root = tmp_path / "job" / "checkpoints"
+    resume = RunIdSource.resolve_path(_config(root), "local_id", fork=False, parent_run_server2server="remote_parent")
+    assert resume == tmp_path / "job" / "remote_parent" / "last.ckpt"
+    fork = RunIdSource.resolve_path(_config(root), "local_id", fork=True, fork_run_server2server="remote_fork")
+    assert fork == tmp_path / "job" / "remote_fork" / "last.ckpt"
+
+
+def test_resolve_path_missing_root_raises() -> None:
+    with pytest.raises(CheckpointConfigError):
+        RunIdSource.resolve_path(OmegaConf.create({"system": {"output": {"checkpoints": {}}}}), "run_A", fork=False)
+
+
+@pytest.mark.asyncio
+async def test_run_source_resume_loads_checkpoint(tmp_path: Path) -> None:
+    """Resume resolves the run path and loads it via LocalSource semantics."""
+    root = tmp_path / "job" / "checkpoints"
+    _write_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
+
+    context = CheckpointContext(config=_config(root))
+    result = await RunIdSource(run_id="run_A").process(context)
+
+    assert result.checkpoint_path == tmp_path / "job" / "run_A" / "last.ckpt"
+    assert result.checkpoint_data is not None
+    assert "state_dict" in result.checkpoint_data
+    assert result.metadata["lineage_resolution"] == "resume"
+
+
+@pytest.mark.asyncio
+async def test_run_source_fork_loads_parent_checkpoint(tmp_path: Path) -> None:
+    root = tmp_path / "job" / "checkpoints"
+    _write_ckpt(tmp_path / "job" / "base999" / "last.ckpt")
+
+    context = CheckpointContext(config=_config(root))
+    result = await RunIdSource(run_id="base999", fork=True).process(context)
+
+    assert result.checkpoint_path == tmp_path / "job" / "base999" / "last.ckpt"
+    assert result.metadata["lineage_resolution"] == "fork"
+
+
+@pytest.mark.asyncio
+async def test_run_source_no_run_id_raises_naming_the_key(tmp_path: Path) -> None:
+    """No run_id names the missing key instead of passing through.
+
+    The shipped preset ships ``run_id: null``, so selecting
+    ``training/checkpoint/source=run`` and forgetting the id is the most likely
+    first mistake with this source. Passing through left ``checkpoint_data``
+    unset, and the loading stage then reported a corrupted or incompatible
+    checkpoint file — for a file that was never opened. That fires on a single
+    GPU, with no distributed setup involved.
+    """
+    context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+
+    with pytest.raises(CheckpointConfigError, match="requires a run_id"):
+        await RunIdSource().process(context)
+
+
+@pytest.mark.asyncio
+async def test_run_source_missing_checkpoint_raises_on_rank_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing run checkpoint raises RuntimeError on rank 0 (default, no rank env)."""
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+    with pytest.raises(RuntimeError, match="run_missing"):
+        await RunIdSource(run_id="run_missing").process(context)
+
+
+@pytest.mark.asyncio
+async def test_run_source_missing_checkpoint_defers_on_nonzero_rank(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-rank-0 defers (warns, pass-through) rather than raising."""
+    monkeypatch.setenv("RANK", "1")
+    context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+    result = await RunIdSource(run_id="run_missing").process(context)
+    assert result.checkpoint_path is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits, so a chmod-000 file stays readable",
+)
+async def test_run_source_unreadable_checkpoint_raises_on_rank_zero(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An existing-but-unreadable checkpoint raises on rank 0, like a missing one."""
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
+    ckpt.chmod(0o000)
+    try:
+        context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+        with pytest.raises(RuntimeError, match="not readable"):
+            await RunIdSource(run_id="run_locked").process(context)
+    finally:
+        ckpt.chmod(0o644)
+
+
+@pytest.mark.asyncio
+@pytest.mark.skipif(
+    hasattr(os, "geteuid") and os.geteuid() == 0,
+    reason="root bypasses file permission bits, so a chmod-000 file stays readable",
+)
+async def test_run_source_unreadable_checkpoint_defers_on_nonzero_rank(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-rank-0 defers on an unreadable checkpoint rather than every rank raising."""
+    monkeypatch.setenv("RANK", "1")
+    ckpt = _write_ckpt(tmp_path / "job" / "run_locked" / "last.ckpt")
+    ckpt.chmod(0o000)
+    try:
+        context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+        result = await RunIdSource(run_id="run_locked").process(context)
+        assert result.checkpoint_path is None
+    finally:
+        ckpt.chmod(0o644)
+
+
+@pytest.mark.asyncio
+async def test_local_source_explicit_path_loads(tmp_path: Path) -> None:
+    """LocalSource(path=...) loads the explicit file without a context path set."""
+    ckpt = _write_ckpt(tmp_path / "explicit" / "model.ckpt")
+    context = CheckpointContext()
+    result = await LocalSource(path=ckpt).process(context)
+    assert result.checkpoint_path == ckpt
+    assert "state_dict" in result.checkpoint_data
+
+
+@pytest.mark.asyncio
+async def test_run_source_resolve_publishes_path_without_loading(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``resolve`` finds the run checkpoint, publishes its canonical path, and loads nothing.
+
+    This is the step a resume runs: ``Trainer.fit(ckpt_path=)`` performs the load.
+    """
+    for var in ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK"):
+        monkeypatch.delenv(var, raising=False)
+    root = tmp_path / "job" / "checkpoints"
+    ckpt = _write_ckpt(tmp_path / "job" / "run_A" / "last.ckpt")
+
+    def _no_load(*_args: object, **_kwargs: object) -> None:
+        msg = "resolve must not load the checkpoint"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(torch, "load", _no_load)
+
+    context = CheckpointContext(config=_config(root))
+    path = await RunIdSource(run_id="run_A").resolve(context)
+
+    assert path == ckpt.resolve()
+    assert context.checkpoint_path == path
+    assert context.checkpoint_data is None
+    assert context.metadata["lineage_resolution"] == "resume"
+
+
+@pytest.mark.asyncio
+async def test_run_source_resolve_defers_on_nonzero_rank(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A missing checkpoint on a non-zero rank resolves to None; rank 0 owns the error."""
+    monkeypatch.setenv("RANK", "1")
+    context = CheckpointContext(config=_config(tmp_path / "job" / "checkpoints"))
+
+    assert await RunIdSource(run_id="run_missing").resolve(context) is None
+    assert context.checkpoint_path is None
+
+
+@pytest.mark.parametrize("unreadable", [False, True], ids=["missing", "unreadable"])
+async def test_deferring_rank_reports_rank_zero_not_a_corrupted_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    unreadable: bool,
+) -> None:
+    """A rank that defers to rank 0 must not claim the checkpoint is corrupted.
+
+    Both deferral paths pass through with no checkpoint_data. The loading stage
+    then read that as "checkpoint data is not a dictionary ... might indicate a
+    corrupted or incompatible checkpoint file" — about a file it never opened. On
+    a 4-GPU resume that is what three of the four ranks print, burying rank 0's
+    correct message in an aggregated log.
+    """
+    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+    from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+    if unreadable and hasattr(os, "geteuid") and os.geteuid() == 0:
+        pytest.skip("root bypasses file permission bits, so a chmod-000 file stays readable")
+
+    root = tmp_path / "job" / "checkpoints"
+    context = CheckpointContext(config=_config(root), model=torch.nn.Linear(2, 2))
+    monkeypatch.setattr("anemoi.training.checkpoint.sources.run.is_rank_zero", lambda: False)
+
+    if unreadable:
+        run_dir = root.parent / "run-x"
+        run_dir.mkdir(parents=True)
+        ckpt = run_dir / "last.ckpt"
+        ckpt.write_bytes(b"weights")
+        ckpt.chmod(0o000)
+
+    try:
+        result = await RunIdSource(run_id="run-x").process(context)
+        assert result.metadata["source_deferred"] is True
+
+        with pytest.raises(CheckpointLoadError, match="rank 0"):
+            await WeightsOnlyLoader().process(result)
+    finally:
+        if unreadable:
+            ckpt.chmod(0o600)

@@ -267,7 +267,7 @@ class ComponentCatalog:
     def _get_expected_component_count(cls, component_type: str) -> int:
         """Get expected number of components for smart warnings."""
         expectations = {
-            "sources": 3,  # local, s3, http
+            "sources": 4,  # local, s3, http, run
             "loaders": 4,  # weights_only, transfer_learning, warm_start, cold_start
             "modifiers": 3,  # freeze, lora, quantize (initially)
         }

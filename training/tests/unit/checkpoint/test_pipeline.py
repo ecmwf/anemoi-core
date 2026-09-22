@@ -9,15 +9,21 @@
 
 """Tests for checkpoint pipeline orchestrator."""
 
+from __future__ import annotations
+
+import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import pytest
-from omegaconf import OmegaConf
 
 from anemoi.training.checkpoint import CheckpointContext
 from anemoi.training.checkpoint import CheckpointError
 from anemoi.training.checkpoint import CheckpointPipeline
 from anemoi.training.checkpoint import PipelineStage
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class MockStage(PipelineStage):
@@ -235,35 +241,6 @@ class TestCheckpointPipeline:
         assert result.metadata["key2"] == "value2"
         assert result.metadata["key3"] == "value3"
 
-    def test_pipeline_from_config(self) -> None:
-        """Test creating pipeline from Hydra config.
-
-        Note: We test the from_config logic for config parsing (async_execution,
-        continue_on_error) with an empty stages list. The pipeline instantiation
-        with stages is tested via direct constructor calls since test modules
-        are not installed as packages in CI environments.
-        """
-        # Test config parsing for async_execution and continue_on_error
-        config = OmegaConf.create(
-            {
-                "stages": [],
-                "async_execution": False,
-                "continue_on_error": True,
-            },
-        )
-
-        pipeline = CheckpointPipeline.from_config(config)
-
-        assert len(pipeline) == 0
-        assert pipeline.async_execution is False
-        assert pipeline.continue_on_error is True
-
-        # Test adding stages after config creation
-        pipeline.add_stage(MockStage("stage1"))
-        pipeline.add_stage(MockStage("stage2"))
-        assert len(pipeline) == 2
-        assert all(isinstance(stage, MockStage) for stage in pipeline.stages)
-
     def test_pipeline_mixed_stages(self) -> None:
         """Test pipeline with mix of instantiated stages.
 
@@ -316,3 +293,106 @@ class TestCheckpointPipeline:
 
         assert result.metadata["stage_config_stage1"] == "processed"
         assert result.metadata["stage_config_stage2"] == "processed"
+
+
+class TestComposition:
+    """Stage-composition validation: ordering/conflict violations raise at construction."""
+
+    @staticmethod
+    def _source() -> object:
+        from anemoi.training.checkpoint.sources.local import LocalSource
+
+        return LocalSource(path="model.ckpt")
+
+    @staticmethod
+    def _loader() -> object:
+        from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+        return WeightsOnlyLoader()
+
+    @staticmethod
+    def _modifier() -> object:
+        modifiers = pytest.importorskip("anemoi.training.checkpoint.modifiers.freezing")
+        return modifiers.FreezingModifierStage(submodules_to_freeze=[])
+
+    def test_loader_before_source_raises(self) -> None:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        with pytest.raises(CheckpointConfigError, match="comes after a loader"):
+            CheckpointPipeline([self._loader(), self._source()])
+
+    def test_two_loaders_raise(self) -> None:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        with pytest.raises(CheckpointConfigError, match="loading strategies"):
+            CheckpointPipeline([self._source(), self._loader(), self._loader()])
+
+    def test_modifier_before_loader_raises(self) -> None:
+        from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+
+        with pytest.raises(CheckpointConfigError, match="comes before a loader"):
+            CheckpointPipeline([self._source(), self._modifier(), self._loader()])
+
+    def test_canonical_order_constructs(self) -> None:
+        pipeline = CheckpointPipeline([self._source(), self._loader(), self._modifier()])
+        assert len(pipeline) == 3
+
+    def test_empty_pipeline_constructs(self) -> None:
+        assert len(CheckpointPipeline([])) == 0
+
+    def test_multiple_sources_warn_not_raise(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.WARNING):
+            pipeline = CheckpointPipeline([self._source(), self._source(), self._loader()])
+        assert len(pipeline) == 3
+        assert any("Multiple checkpoint sources" in record.getMessage() for record in caplog.records)
+
+
+# --- a resolve-only source is not "random weights" ---------------------------------
+
+
+def _write_checkpoint(tmp_path: Path) -> Path:
+    import torch
+
+    ckpt = tmp_path / "model.ckpt"
+    torch.save({"state_dict": {"weight": torch.zeros(2, 2), "bias": torch.zeros(2)}}, ckpt)
+    return ckpt
+
+
+@pytest.mark.asyncio
+async def test_verify_weights_loaded_accepts_a_resolve_only_source(tmp_path: Path) -> None:
+    """On a resume the source only resolves the file: the weights arrive at ``Trainer.fit(ckpt_path=)``.
+
+    The post-execution check must not mistake that for a loading failure, and the
+    health check must agree.
+    """
+    import torch
+
+    from anemoi.training.checkpoint.sources.base import ResolveOnlySource
+    from anemoi.training.checkpoint.sources.local import LocalSource
+    from anemoi.training.checkpoint.validation import validate_pipeline_health
+
+    ckpt = _write_checkpoint(tmp_path)
+    model = torch.nn.Linear(2, 2)
+    pipeline = CheckpointPipeline([ResolveOnlySource(LocalSource(path=ckpt))])
+
+    result = await pipeline.execute(CheckpointContext(model=model))
+
+    assert result.checkpoint_path == ckpt.resolve()
+    assert result.checkpoint_data is None
+    assert not getattr(model, "weights_initialized", False)
+    assert validate_pipeline_health(result) is True
+
+
+@pytest.mark.asyncio
+async def test_verify_weights_loaded_still_rejects_a_bare_source_without_loader(tmp_path: Path) -> None:
+    """Positive control: a source that loaded data with no loader to apply it is still refused."""
+    import torch
+
+    from anemoi.training.checkpoint.exceptions import CheckpointLoadError
+    from anemoi.training.checkpoint.sources.local import LocalSource
+
+    ckpt = _write_checkpoint(tmp_path)
+    pipeline = CheckpointPipeline([LocalSource(path=ckpt)])
+
+    with pytest.raises(CheckpointLoadError, match="Refusing to proceed with random weights"):
+        await pipeline.execute(CheckpointContext(model=torch.nn.Linear(2, 2)))

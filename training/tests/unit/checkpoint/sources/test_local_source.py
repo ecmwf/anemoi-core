@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import pickle
 from typing import TYPE_CHECKING
 
 import pytest
@@ -141,6 +142,68 @@ class TestLocalSourceProcess:
 
         with pytest.raises(CheckpointConfigError, match="checkpoint_path"):
             await source.process(context)
+
+    async def test_explicit_path_overrides_context_path(self, ckpt_file: Path, tmp_path: Path) -> None:
+        """``LocalSource(path=...)`` takes precedence over ``context.checkpoint_path``."""
+        other = _save_checkpoint(tmp_path / "other.ckpt", {"state_dict": {}, "epoch": 99})
+        source = LocalSource(path=str(ckpt_file))
+        context = CheckpointContext(checkpoint_path=other)
+
+        result = await source.process(context)
+
+        # The constructor path won, not the context path (which pointed at epoch 99).
+        assert result.metadata["source_path"] == str(ckpt_file)
+        assert result.checkpoint_data["epoch"] == 5
+
+    async def test_tilde_path_is_expanded(
+        self,
+        source: LocalSource,
+        simple_state_dict: dict,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A ``~`` home-relative checkpoint path is expanded before loading."""
+        monkeypatch.setenv("HOME", str(tmp_path))
+        _save_checkpoint(tmp_path / "home_model.ckpt", {"state_dict": simple_state_dict})
+        context = CheckpointContext(checkpoint_path="~/home_model.ckpt")
+
+        result = await source.process(context)
+
+        assert result.checkpoint_data is not None
+        assert "~" not in result.metadata["source_path"]
+        assert result.metadata["source_path"] == str(tmp_path / "home_model.ckpt")
+
+    async def test_symlink_path_is_resolved(self, source: LocalSource, ckpt_file: Path, tmp_path: Path) -> None:
+        """A symlinked checkpoint path is resolved to its canonical target in metadata."""
+        link = tmp_path / "link.ckpt"
+        link.symlink_to(ckpt_file)
+        context = CheckpointContext(checkpoint_path=link)
+
+        result = await source.process(context)
+
+        assert result.metadata["source_path"] == str(ckpt_file.resolve())
+
+    @pytest.mark.parametrize("exc", [RuntimeError, EOFError, ValueError, pickle.UnpicklingError])
+    async def test_torch_load_errors_wrap_as_load_error(
+        self,
+        source: LocalSource,
+        ckpt_file: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        exc: type[Exception],
+    ) -> None:
+        """Every torch.load failure mode is wrapped as CheckpointLoadError (not a raw error)."""
+        msg = "simulated torch.load failure"
+
+        def _raise(*_args: object, **_kwargs: object) -> None:
+            raise exc(msg)
+
+        monkeypatch.setattr(torch, "load", _raise)
+        context = CheckpointContext(checkpoint_path=ckpt_file)
+
+        with pytest.raises(CheckpointLoadError) as exc_info:
+            await source.process(context)
+
+        assert isinstance(exc_info.value.original_error, exc)
 
 
 class TestLocalSourceSupports:

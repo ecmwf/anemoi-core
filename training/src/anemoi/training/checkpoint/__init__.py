@@ -24,6 +24,7 @@ Key components:
 
 from .base import CheckpointContext
 from .base import PipelineStage
+from .builder import build_checkpoint_pipeline
 from .catalog import ComponentCatalog
 from .exceptions import CheckpointConfigError
 from .exceptions import CheckpointError
@@ -61,6 +62,7 @@ __all__ = [
     "ComponentCatalog",
     "PipelineStage",
     # Utilities
+    "build_checkpoint_pipeline",
     "calculate_checksum",
     "compare_state_dicts",
     "download_with_retry",

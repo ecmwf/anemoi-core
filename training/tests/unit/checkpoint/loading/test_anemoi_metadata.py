@@ -31,11 +31,12 @@ async def test_preserves_ckpt_model_name_to_index() -> None:
     name_to_index = {"temperature": 0, "wind_u": 1, "wind_v": 2}
     checkpoint_data = {
         "state_dict": {"linear.weight": torch.randn(5, 10), "linear.bias": torch.randn(5)},
-        "hyper_parameters": {"data_indices": type("obj", (), {"name_to_index": name_to_index})()},
+        # Multi-dataset shape: data_indices is dict[str, IndexCollection].
+        "hyper_parameters": {"data_indices": {"era5": type("obj", (), {"name_to_index": name_to_index})()}},
     }
 
     loader = WeightsOnlyLoader()
     context = CheckpointContext(model=model, checkpoint_data=checkpoint_data)
     result = await loader.process(context)
 
-    assert result.model._ckpt_model_name_to_index == name_to_index
+    assert result.model._ckpt_model_name_to_index == {"era5": name_to_index}
