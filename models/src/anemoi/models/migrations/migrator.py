@@ -193,10 +193,18 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
 
 
 class MissingAttribute:
-    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
+    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class.
 
-    def __init__(self, *args, **kwargs):
-        pass
+    The state passed by pickle is stored and can be accessed through the instance's dict.
+    """
+
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None: ...
+
+    def __setstate__(self, state: dict[str, Any]) -> None:
+        if "__dict__" in state:
+            self.__dict__.update(state["__dict__"])
+        else:
+            self.__dict__.update(state)
 
 
 def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
@@ -247,7 +255,7 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                     or module_name in deleted_modules
                     or wild_name in replace_attrs
                 ):
-                    LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
+                    LOGGER.debug("Missing attribute %s.%s in checkpoint. Ignoring.", module_name, global_name)
                     return MissingAttribute
                 raise e
 
