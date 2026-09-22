@@ -30,8 +30,8 @@ import torch
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)

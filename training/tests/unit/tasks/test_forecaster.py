@@ -14,7 +14,6 @@ import torch
 from batch_builders import build_batch
 from omegaconf import DictConfig
 
-from anemoi.models.data.sources.base import _Source
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster

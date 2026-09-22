@@ -7,5 +7,5 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# How a source's axes collapse into ``(nodes, features)``.
+# How a source's axes collapse into ``(nodes, features)``.
 FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"

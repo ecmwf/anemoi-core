@@ -21,7 +21,6 @@ from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import _Source
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss

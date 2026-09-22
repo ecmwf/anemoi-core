@@ -9,18 +9,19 @@
 
 
 from __future__ import annotations
-import logging
 
+import logging
 from abc import ABC
-from dataclasses import dataclass, replace
-from typing import Any
 from abc import abstractmethod
+from dataclasses import dataclass
+from dataclasses import replace
+from typing import Any
+
 import torch
 
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.spec import SourceSpec
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.data.layout import TensorLayout
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -378,4 +379,3 @@ class _Source(ABC):
             list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device
         )
         return tensor.index_select(var_dim, idx)
-

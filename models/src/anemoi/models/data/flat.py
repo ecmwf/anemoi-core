@@ -58,7 +58,7 @@ class FlatSource:
             raise ValueError(
                 f"{self.__class__.__name__} coordinates must be 2-dimensional, got {self.coordinates.ndim} dimensions."
             )
-        
+
         if self.coordinates.shape[1] != 2:
             raise ValueError(
                 f"{self.__class__.__name__} coordinates must have a shape of (nodes, 2), got {self.coordinates.shape}."

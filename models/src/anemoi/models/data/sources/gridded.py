@@ -11,21 +11,20 @@ import logging
 from collections.abc import Callable
 from collections.abc import Sequence
 
-import torch
 import einops
+import torch
 from torch.distributed import ProcessGroup
 
-from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.flat import FlatSource
+from anemoi.models.data.sources import FLATTEN_PATTERN
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
+from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.data.sources import FLATTEN_PATTERN
 
 LOGGER = logging.getLogger(__name__)
-
 
 
 class GriddedSource(_Source):
@@ -77,7 +76,9 @@ class GriddedSource(_Source):
 
     def flatten(self) -> "GriddedSource":
         """Flatten the gridded source into a flat source."""
-        assert self.layout.batch is not None, f"{self.__class__.__name__} requires to have a batch axis to be flattened."
+        assert (
+            self.layout.batch is not None
+        ), f"{self.__class__.__name__} requires to have a batch axis to be flattened."
 
         current_pattern = self.layout.normalized(self.data.ndim).pattern
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")

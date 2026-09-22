@@ -9,21 +9,20 @@
 
 
 import logging
-from anemoi.models.data.layout import TensorLayout
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import Any
-import numpy as np
 
+import numpy as np
 import torch
 from torch.distributed import ProcessGroup
 
-from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.flat import FlatSource
+from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.data.sources import FLATTEN_PATTERN
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +55,7 @@ def _fold_members(source: "TabularSource", sample: torch.Tensor) -> torch.Tensor
         raise ValueError(msg)
     return sample.flatten(ensemble_axis, grid_axis)
 
-    
+
 class TabularSource(_Source):
     """Tabular data source."""
 
@@ -123,7 +122,9 @@ class TabularSource(_Source):
         folded = [_fold_members(self, sample) for sample in self.data]
         # coordinates and timedeltas are repeated per member to line up with the folded data
         repeated_coords = [c.repeat(self.ensemble_size, 1) for c in self.coordinates]
-        repeated_timedeltas = None if self.timedeltas is None else [td.repeat(self.ensemble_size) for td in self.timedeltas]
+        repeated_timedeltas = (
+            None if self.timedeltas is None else [td.repeat(self.ensemble_size) for td in self.timedeltas]
+        )
 
         if len(folded) > 1:
             data = torch.cat(folded, dim=0)

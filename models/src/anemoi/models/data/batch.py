@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import fields
 from typing import Any
 
 import torch
@@ -24,12 +25,11 @@ from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data.sources.tabular import TabularSource
-from dataclasses import fields
-from anemoi.models.data.spec import make_spec
-from anemoi.models.data.sources.base import _Source
 from anemoi.models.data.spec import SourceSpec
+from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -56,6 +56,7 @@ def build_source(**kwargs) -> _Source:
         return TabularSource(spec=spec, **kwargs)
 
     return GriddedSource(spec=spec, **kwargs)
+
 
 @dataclass(frozen=True, slots=True)
 class Batch:
