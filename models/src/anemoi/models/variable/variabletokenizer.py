@@ -20,26 +20,18 @@ from anemoi.models.variable.variablevocabular import VariableVocabulary
 
 
 class BaseVariableTokenizer(nn.Module):
-    def __init__(
-        self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any
-    ) -> None:
+    def __init__(self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any) -> None:
 
         super().__init__()
 
-        assert isinstance(
-            emb_dim, int
-        ), f"expecting emb_dim to be int, got {type(emb_dim)}"
-        assert isinstance(
-            out_dim, int
-        ), f"expecting out_dim to be int, got {type(out_dim)}"
+        assert isinstance(emb_dim, int), f"expecting emb_dim to be int, got {type(emb_dim)}"
+        assert isinstance(out_dim, int), f"expecting out_dim to be int, got {type(out_dim)}"
 
         assert isinstance(
             vocabulary, VariableVocabulary
         ), f"vocabulary must be an object created for VariableVocabulary class, got {type(vocabulary)}"
 
-        self.emb_variables_metadata = EmbedMetadata(
-            vocabulary=vocabulary, emb_dim=emb_dim
-        )
+        self.emb_variables_metadata = EmbedMetadata(vocabulary=vocabulary, emb_dim=emb_dim)
         self.value_encoder = nn.Linear(1, emb_dim)
         self.normalize = nn.LayerNorm(emb_dim)
         self.output_projection = nn.Linear(emb_dim, out_dim)
@@ -63,27 +55,19 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
         self.num_heads = num_heads
         self.chunk_size = chunk_size
 
-        assert isinstance(
-            self.num_heads, int
-        ), f"num_heads has to be of type int, got {type(self.num_heads)}"
-        assert isinstance(
-            self.chunk_size, int
-        ), f"chunk_size has to be of type int, got {type(self.chunk_size)}"
+        assert isinstance(self.num_heads, int), f"num_heads has to be of type int, got {type(self.num_heads)}"
+        assert isinstance(self.chunk_size, int), f"chunk_size has to be of type int, got {type(self.chunk_size)}"
 
         assert (
             emb_dim % num_heads == 0
         ), f"emb_dim and num_heads needs to be divisble, got emb_dim: {emb_dim} and num_heads: {num_heads}"
 
-        self.mha = nn.MultiheadAttention(
-            embed_dim=emb_dim, num_heads=self.num_heads, batch_first=True, **kwargs
-        )
+        self.mha = nn.MultiheadAttention(embed_dim=emb_dim, num_heads=self.num_heads, batch_first=True, **kwargs)
 
         self.query = nn.Parameter(torch.empty(1, 1, emb_dim))
         nn.init.xavier_uniform_(self.query)
 
-    def _forward_chunk(
-        self, x_chunk: torch.Tensor, emb_variables: torch.Tensor
-    ) -> torch.Tensor:
+    def _forward_chunk(self, x_chunk: torch.Tensor, emb_variables: torch.Tensor) -> torch.Tensor:
         # [*, grid, vars] -> [*, grid, vars, emb]
         x_chunk = self.value_encoder(x_chunk.unsqueeze(-1))
         x_chunk = x_chunk + emb_variables
@@ -122,9 +106,7 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
         for x_chunk in x.split(self.chunk_size, dim=-2):
             if self.training:
-                out = checkpoint(
-                    self._forward_chunk, x_chunk, emb_variables, use_reentrant=False
-                )
+                out = checkpoint(self._forward_chunk, x_chunk, emb_variables, use_reentrant=False)
             else:
                 out = self._forward_chunk(
                     x_chunk,
@@ -135,8 +117,7 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
         outputs = einops.rearrange(
             outputs,
-            "(batch time ensemble grid) embedding_dim "
-            "-> (batch ensemble grid) (time embedding_dim)",
+            "(batch time ensemble grid) embedding_dim " "-> (batch ensemble grid) (time embedding_dim)",
             batch=batch,
             time=time,
             ensemble=ensemble,
@@ -147,9 +128,7 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
 
 class MeanPoolingTransform(BaseVariableTokenizer):
-    def __init__(
-        self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any
-    ) -> None:
+    def __init__(self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any) -> None:
         super().__init__(emb_dim=emb_dim, out_dim=out_dim, vocabulary=vocabulary)
 
     def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
@@ -171,9 +150,7 @@ class MeanPoolingTransform(BaseVariableTokenizer):
 
 
 class SumPoolingTransform(BaseVariableTokenizer):
-    def __init__(
-        self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any
-    ) -> None:
+    def __init__(self, emb_dim: int, out_dim: int, vocabulary: VariableVocabulary, **kwargs: Any) -> None:
         super().__init__(emb_dim=emb_dim, out_dim=out_dim, vocabulary=vocabulary)
 
     def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
