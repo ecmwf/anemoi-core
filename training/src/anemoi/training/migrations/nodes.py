@@ -208,9 +208,27 @@ class Node:
             Whether the key is an interpolation.
         """
         if not isinstance(self, NodeContainer):
-            msg = "Only NodeContainers can have interpolations."
+            msg = "is_interpolation can only be called on NodeContainers."
             raise TypeError(msg)
         return OmegaConf.is_interpolation(self.cfg, key)
+
+    def is_missing(self, key: str | int) -> bool:
+        """Whether the key is an OmegaConf missing key.
+
+        Parameters
+        ----------
+        key : str | int
+            The dot-delimited key to check.
+
+        Returns
+        -------
+        bool
+            Whether the key is an OmegaConf missing key.
+        """
+        if not isinstance(self, NodeContainer):
+            msg = "is_missing can only be called on NodeContainers."
+            raise TypeError(msg)
+        return OmegaConf.is_missing(self.cfg, key)
 
     def has_key(self, parts: str | Sequence[str | int]) -> bool:
         """Whether this node tree contains the given sequence of keys.
