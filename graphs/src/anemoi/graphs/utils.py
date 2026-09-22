@@ -53,12 +53,8 @@ torch.serialization.add_safe_globals([HeteroData, AttrType, BaseStorage, NodeSto
 
 def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
     """Load a serialized graph on the currently active distributed device."""
-    try:
-        map_location = get_distributed_device()
-    except Exception:
-        map_location = "cpu"
-
-    LOGGER.info("Loading graph data from %s", graph_filename)
+    map_location = get_distributed_device()
+    LOGGER.info("Loading graph data (%s) from %s", map_location, graph_filename)
     return torch.load(graph_filename, map_location=map_location, weights_only=True)
 
 
