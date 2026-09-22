@@ -208,9 +208,11 @@ class TabularSource(_Source):
         if not isinstance(other, TabularSource):
             msg = f"Other source must be a TabularSource; got {type(other).__name__}."
             raise TypeError(msg)
+
         if self.layout != other.layout:
             msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
             raise ValueError(msg)
+
         if len(self.data) != len(other.data):
             msg = f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
             raise ValueError(msg)

@@ -99,14 +99,11 @@ class GriddedSource(_Source):
         current_pattern = self.layout.normalized(self.data.ndim).pattern
         flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")
 
-        batch_size = self.data.shape[self.layout.axis("batch", ndim=self.data.ndim)]
-        ensemble_size = self.data.shape[self.layout.axis("ensemble", ndim=self.data.ndim)]
-
         flattened_coords = einops.repeat(
             self.coordinates,
             "grid latlon -> (batch ensemble grid) latlon",
-            batch=batch_size,
-            ensemble=ensemble_size,
+            batch=self.batch_size,
+            ensemble=self.ensemble_size,
         )
         # already on device; see Batch.to()
 
@@ -121,8 +118,8 @@ class GriddedSource(_Source):
         new_data = einops.rearrange(
             data,
             f"{FLATTEN_PATTERN} -> {self.layout.normalized(self.data.ndim).pattern}",
-            batch=self.data.shape[self.layout.batch],
-            ensemble=self.data.shape[self.layout.ensemble],
+            batch=self.batch_size,
+            ensemble=self.ensemble_size,
             time=self.data.shape[self.layout.time],
         )
 
@@ -166,6 +163,7 @@ class GriddedSource(_Source):
         coordinates = self.coordinates
         if coordinates is not None:
             coordinates = shard_tensor(coordinates, -2, sizes, group)
+
         return self.clone(
             data=shard_tensor(self.data, grid_dim, sizes, group),
             coordinates=coordinates,
