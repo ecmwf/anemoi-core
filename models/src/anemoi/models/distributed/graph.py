@@ -21,7 +21,9 @@ from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
+from anemoi.models.distributed.shapes import validate_dim
+from anemoi.models.distributed.shapes import validate_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 
 
 def ensure_sharded(
@@ -50,12 +52,16 @@ def ensure_sharded(
     tuple[Tensor, ShardSizes]
         The (possibly sharded) tensor and the shard sizes.
     """
+    validate_dim(x, dim)
     if shard_sizes is not None:
+        if model_is_distributed(model_comm_group):
+            validate_shard_sizes(shard_sizes, model_comm_group)
         my_rank = model_comm_group.rank() if model_comm_group is not None else 0
-        assert shard_sizes[my_rank] == x.shape[dim], (
-            f"Error, expected shard size {shard_sizes[my_rank]} along dimension {dim} "
-            f"for rank {my_rank}, but got {x.shape[dim]}"
-        )
+        if shard_sizes[my_rank] != x.size(dim):
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match shard_sizes[{my_rank}] "
+                f"({shard_sizes[my_rank]}), but got {x.size(dim)}"
+            )
         return x, shard_sizes
 
     # x not sharded: get sizes and shard tensor accordingly
@@ -64,7 +70,7 @@ def ensure_sharded(
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup, gather_in_backward: bool = True
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
 ) -> Tensor:
     """Shard tensor.
 
@@ -78,8 +84,9 @@ def shard_tensor(
         dimension along which to shard
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
     gather_in_backward : bool
         perform gather in backward, default True
 
@@ -88,10 +95,20 @@ def shard_tensor(
     Tensor
         Sharded tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        input_size = input_.size(dim)
+        total_size = sum(sizes)
+        if total_size != input_size:
+            raise ValueError(
+                f"sizes must sum exactly to {input_size} "
+                f"(input tensor's size at dimension {dim}), but got {total_size}"
+            )
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -104,18 +121,29 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Gathered tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        rank = mgroup.rank()
+        input_size = input_.size(dim)
+        if input_size != sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
+                f"({sizes[rank]}), but got {input_size}"
+            )
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
 
-def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
+def reduce_tensor(input_: Tensor, mgroup: ProcessGroup | None) -> Tensor:
     """Reduce tensor.
 
     Reduces tensor across ranks.
@@ -124,8 +152,9 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     ----------
     input_ : Tensor
         Input
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
@@ -139,7 +168,7 @@ def sync_tensor(
     input_: Tensor,
     dim: int,
     sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
     gather_in_fwd: bool = True,
 ) -> Tensor:
     """Sync tensor.
@@ -154,18 +183,29 @@ def sync_tensor(
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Synced tensor.
     """
+    if model_is_distributed(mgroup) and gather_in_fwd and sizes is not None:
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        rank = mgroup.rank()
+        input_size = input_.size(dim)
+        if input_size != sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
+                f"({sizes[rank]}), but got {input_size}"
+            )
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -178,14 +218,25 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
         dimension along which to gather
     sizes : ShardSizes
         Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Reduced sharded tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        input_size = input_.size(dim)
+        total_size = sum(sizes)
+        if total_size != input_size:
+            raise ValueError(
+                f"sizes must sum exactly to {input_size} "
+                f"(input tensor's size at dimension {dim}), but got {total_size}"
+            )
     return _ReduceShardParallelSection.apply(input_, dim, sizes, mgroup)
 
 
@@ -195,7 +246,7 @@ def all_to_all_transpose(
     split_sizes: ShardSizes,
     dim_concat: int,
     concat_sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
 ) -> Tensor:
     """All-to-all transpose.
 
@@ -213,14 +264,39 @@ def all_to_all_transpose(
         Dimension along which to concatenate the transposed tensors.
     concat_sizes : ShardSizes
         Shapes of the concatenated tensors.
-    mgroup : ProcessGroup
-        Model communication group.
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Transposed tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim_split)
+        validate_dim(input_, dim_concat)
+        ndim = input_.dim()
+        if dim_split % ndim == dim_concat % ndim:
+            raise ValueError(f"dim_split and dim_concat can not be the same, got {dim_split} and {dim_concat}")
+
+        validate_shard_sizes(split_sizes, mgroup)
+        validate_shard_sizes(concat_sizes, mgroup)
+        split_size = input_.size(dim_split)
+        total_split_size = sum(split_sizes)
+        if total_split_size != split_size:
+            raise ValueError(
+                f"split_sizes must sum exactly to {split_size} "
+                f"(input tensor's size at dimension {dim_split}), but got {total_split_size}"
+            )
+        rank = mgroup.rank()
+        concat_size = input_.size(dim_concat)
+        if concat_size != concat_sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim_concat} must match concat_sizes[{rank}] "
+                f"({concat_sizes[rank]}), but got {concat_size}"
+            )
+
     return _AllToAllParallelSection.apply(input_, dim_split, split_sizes, dim_concat, concat_sizes, mgroup)
 
 
