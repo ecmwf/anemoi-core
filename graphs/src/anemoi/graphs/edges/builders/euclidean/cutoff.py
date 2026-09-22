@@ -118,7 +118,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
     ) -> torch.Tensor:
         """Compute the edge index using PyG's radius-based implementation.
 
-        If the number of actual neighbours is greater than :obj:`max_num_neighbors`, 
+        If the number of actual neighbours is greater than :obj:`max_num_neighbors`,
         returned neighbours are picked randomly. (default: :obj:`32`)
 
         Parameters
@@ -156,7 +156,7 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
     ) -> torch.Tensor:
         """Compute the adjacency matrix using sklearn's radius-based implementation.
 
-        If the number of actual neighbors is greater than :obj:`max_num_neighbors`, 
+        If the number of actual neighbors is greater than :obj:`max_num_neighbors`,
         only the nearest neighbours are returned.
 
         Parameters
