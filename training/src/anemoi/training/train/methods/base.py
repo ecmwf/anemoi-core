@@ -1193,11 +1193,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch.size,
+            batch_size=batch.batch_size,
             sync_dist=True,
         )
 
-        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled, batch_size=batch.size)
+        self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled, batch_size=batch.batch_size)
 
         return train_loss
 
@@ -1231,7 +1231,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             on_step=True,
             prog_bar=True,
             logger=self.logger_enabled,
-            batch_size=batch.size,
+            batch_size=batch.batch_size,
             sync_dist=True,
         )
 
@@ -1243,7 +1243,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 on_step=False,
                 prog_bar=False,
                 logger=self.logger_enabled,
-                batch_size=batch.size,
+                batch_size=batch.batch_size,
                 sync_dist=True,
             )
 
