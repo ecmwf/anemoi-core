@@ -82,6 +82,11 @@ def get_migration_template() -> str:
             Config
                 The migrated config.
             \"""
+            config.add_summary("\n".join([
+                "Add here a summary of the changes to the config, or give context",
+                "of the changes introduced in your PR. This summary will be displayed",
+                "at the top of the users migrated config."
+            ]))
             return config
         {% endif %}
         """)
@@ -157,6 +162,11 @@ class ConfigGenerator(Command):
             type=Path,
             help="Path to the migrated config dump.",
         )
+        migration_sync.add_argument(
+            "--no-summary",
+            action="store_true",
+            help="Skip summary items at the top of the config.",
+        )
         migration_sync.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
         help_msg = "Generate a config migration script."
@@ -181,7 +191,7 @@ class ConfigGenerator(Command):
 
         if args.subcommand == "migration" and args.migration_subcommand == "sync":
             LOGGER.info("Migrating config %s in %s.", args.path, args.output)
-            self.migrate_config(args.path, args.output, args.no_color)
+            self.migrate_config(args.path, args.output, not args.no_summary, args.no_color)
             return
         if args.subcommand == "migration" and args.migration_subcommand == "create":
             LOGGER.info("Creating migration script %s.", args.name)
@@ -323,12 +333,15 @@ class ConfigGenerator(Command):
         self,
         config_path: Path,
         output: Path | None,
-        no_color: bool = False,
+        update_summary: bool,
+        no_color: bool,
     ) -> None:
         """Migrate a config dump."""
         from difflib import unified_diff
 
-        original_config, migrated_config, executed_migrations = ConfigMigrator().sync(config_path)
+        migrator = ConfigMigrator(update_summary=update_summary)
+
+        original_config, migrated_config, executed_migrations = migrator.sync(config_path)
         original_config_lines = original_config.to_yaml().split("\n")
         migrated_config_content = migrated_config.to_yaml()
         migrated_config_lines = migrated_config_content.split("\n")

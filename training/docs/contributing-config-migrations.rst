@@ -48,6 +48,11 @@ This command will create a new migration script that will look like:
         Config
             The migrated config.
         """
+        config.add_summary("\n".join([
+            "Add here a summary of the changes to the config, or give context",
+            "of the changes introduced in your PR. This summary will be displayed",
+            "at the top of the users migrated config."
+        ]))
         return config
 
 You will need to edit the ``migrate`` function. You can assume that the config object

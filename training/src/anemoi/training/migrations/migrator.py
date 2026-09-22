@@ -17,17 +17,18 @@ from copy import deepcopy
 from functools import cached_property
 from inspect import getsource
 from pathlib import Path
-from typing import TYPE_CHECKING
-from typing import Self
-from typing import TypedDict
+from typing import TYPE_CHECKING, Self, TypedDict
+
+from anemoi.utils.migrations import (
+    IncompatibleObjectError,
+    IncompleteMigrationScriptError,
+    Migration,
+    MigrationMetadata,
+    Migrator,
+)
 
 from anemoi.training import __version__
 from anemoi.training.migrations.config import Config
-from anemoi.utils.migrations import IncompatibleObjectError
-from anemoi.utils.migrations import IncompleteMigrationScriptError
-from anemoi.utils.migrations import Migration
-from anemoi.utils.migrations import MigrationMetadata
-from anemoi.utils.migrations import Migrator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -102,6 +103,7 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         self,
         migrations: Sequence[ConfigMigration] | None = None,
         obj_migration_key: str | None = None,
+        update_summary: bool = False,
     ) -> None:
         """Create the migrator object.
 
@@ -111,6 +113,8 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
             List of migration to execute. If None, get migrations from the current folder.
         obj_migration_key : str | None, default None
             The migration key to use.
+        update_summary : bool, defaut False
+            Whether to update the top yaml comment to inclued the migration summaries.
         """
         if migrations is None:
             # remove the ".migrator" at the end to get parent folder as migration package
@@ -118,6 +122,7 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
             migrations = self._migrations_from_path(ConfigMigration, MIGRATION_PATH, f"{migration_pkg}.scripts")
 
         self._migration_hash_to_name = {migration.name_hash: migration.name for migration in migrations}
+        self._update_summary = update_summary
         super().__init__(migrations, obj_migration_key or _CONFIG_MIGRATION_KEY)
 
     def _migration_state(self, obj: Config) -> list[str] | None:
@@ -156,7 +161,7 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
             * The migrated config
             * The list of executed migrations
         """
-        old_config = Config.from_path(path)
+        old_config = Config.from_path(path, self._update_summary)
         config = deepcopy(old_config)
 
         if not self.is_compatible(config):
@@ -173,6 +178,7 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
             if migration.migrate is None:
                 msg = (f"Migration {migration.name} cannot be executed. Missing migrate function.",)
                 raise IncompatibleConfigError(msg)
+            config.set_migration(migration)
             config = migration.migrate(config)
             migration_state = config[self._obj_migration_key].value
             migration_state.append(migration.name_hash)
