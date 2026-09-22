@@ -18,6 +18,12 @@ class ClsSelfAttentionPool(nn.Module):
     result. No residual, no feed-forward - just the attention call itself.
     """
 
+    # PyTorch's fused SDPA kernels (flash/efficient attention) hit a CUDA kernel
+    # launch limit around 65535 in the batch dimension - our "batch" here is really
+    # batch*time*ensemble*grid, which exceeds that at O96 resolution. Chunking keeps
+    # each call under the limit without changing the result, since rows are independent.
+    _MAX_CHUNK = 32768
+
     def __init__(self, dim, nhead):
         super().__init__()
         self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
@@ -27,5 +33,8 @@ class ClsSelfAttentionPool(nn.Module):
         # x: (batch, n_tokens, dim) -> (batch, dim)
         cls = self.cls_token.expand(x.shape[0], -1, -1)
         sequence = torch.cat([cls, x], dim=1)
-        pooled, _ = self.mha(sequence, sequence, sequence, need_weights=False)
-        return pooled[:, 0]
+        pooled_chunks = [
+            self.mha(chunk, chunk, chunk, need_weights=False)[0][:, 0]
+            for chunk in sequence.split(self._MAX_CHUNK, dim=0)
+        ]
+        return torch.cat(pooled_chunks, dim=0)
