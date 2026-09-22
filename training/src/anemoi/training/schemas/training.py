@@ -580,7 +580,7 @@ class SpectralProjectionConfigSchema(BaseModel):
 class SpectralLossSchema(BaseLossSchema):
     """Spectral loss class."""
 
-    transform: Literal["fft2d", "dct2d", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
+    transform: Literal["fft2d", "dct2d", "regular_sht", "reduced_sht", "octahedral_sht"] = Field(..., example="fft2d")
     """Type of spectral transform to use."""
     subgrid: tuple[int, int | None] | str | None = None
     """Optional slice or string to select a subgrid before the transform."""
@@ -591,7 +591,7 @@ class SpectralLossSchema(BaseLossSchema):
 
     @model_validator(mode="after")
     def check_subgrid_transform(self) -> Self:
-        if self.subgrid is not None and self.transform in ("reduced_sht", "octahedral_sht"):
+        if self.subgrid is not None and self.transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{self.transform}' transform: "
                 "spherical harmonic transforms require the full grid"
