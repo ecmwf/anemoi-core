@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from types import SimpleNamespace
 
 import einops
@@ -18,6 +19,7 @@ import torch
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -71,6 +73,46 @@ def _assert_variable_and_scalar_shapes(
     assert out.shape == (nvars,), "squash=False should return per-variable loss"
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
+
+
+@pytest.mark.parametrize("scaler_name", ["stdev_tendency", "var_tendency"])
+def test_tendency_scaler_logs_small_weights_including_data_index_zero(
+    scaler_name: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Log the actual prognostic weights, including small values at dataset index zero."""
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["forcing"], "diagnostic": ["diag"], "target": ["truth"]}),
+        {"a": 0, "forcing": 1, "truth": 2, "b": 3, "diag": 4},
+    )
+    weights = torch.tensor([0.0001234, 0.0005678, 1.0])
+    with caplog.at_level(logging.INFO, logger="anemoi.training.losses.loss"):
+        get_loss_function(
+            DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": [scaler_name]}),
+            scalers={scaler_name: (TensorDim.VARIABLE.value, weights)},
+            data_indices=data_indices,
+        )
+
+    assert caplog.messages == [
+        "Parameter a is being scaled by statistic_tendencies by 0.0001234",
+        "Parameter b is being scaled by statistic_tendencies by 0.0005678",
+    ]
+
+
+@pytest.mark.parametrize("scaler_name", ["stdev_tendency", "var_tendency"])
+def test_tendency_scaler_applies_without_data_indices(scaler_name: str) -> None:
+    """Optional variable metadata must not prevent attaching and applying a tendency scaler."""
+    loss = get_loss_function(
+        DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": [scaler_name, "grid"]}),
+        scalers={
+            scaler_name: (TensorDim.VARIABLE.value, torch.tensor([2.0, 4.0])),
+            "grid": (TensorDim.GRID.value, torch.ones(1)),
+        },
+    )
+    pred = torch.tensor([1.0, 2.0]).reshape(1, 1, 1, 1, 2)
+
+    # Mean weighted squared error: (2 * 1^2 + 4 * 2^2) / 2 = 9.
+    torch.testing.assert_close(loss(pred, torch.zeros_like(pred)), torch.tensor(9.0))
 
 
 def test_unsquashed_loss_preserves_single_variable_dimension() -> None:
@@ -725,6 +767,74 @@ def test_spectral_crps_cartesian_transform(transform: str) -> None:
     )
 
     _assert_variable_and_scalar_shapes(loss, pred, target, nvars=nvars)
+
+
+@pytest.mark.parametrize("coefficient_magnitude", [True, False])
+def test_spectral_crps_scores_the_selected_coefficient_values(
+    coefficient_magnitude: bool,
+    mocker: MockerFixture,
+) -> None:
+    pred_spec = torch.tensor(
+        [[[[[1.0 + 2.0j], [-2.0 + 1.0j]], [[-1.0 - 1.0j], [3.0 + 4.0j]], [[2.0 - 2.0j], [1.0j]]]]],
+        dtype=torch.complex128,
+    )
+    target_spec = torch.tensor(
+        [[[[[1.0 - 1.0j], [2.0 + 2.0j]]]]],
+        dtype=torch.complex128,
+    )
+    loss = SpectralCRPSLoss(
+        transform="fft2d",
+        x_dim=1,
+        y_dim=1,
+        alpha=0.7,
+        coefficient_magnitude=coefficient_magnitude,
+    )
+    mocker.patch.object(loss, "_to_spectral_flat", side_effect=[pred_spec, target_spec])
+
+    pred_for_score = torch.abs(pred_spec) if coefficient_magnitude else pred_spec
+    target_for_score = torch.abs(target_spec) if coefficient_magnitude else target_spec
+    expected = loss._kernel_crps(
+        einops.rearrange(pred_for_score, "b t e m v -> b t v m e"),
+        einops.rearrange(target_for_score, "b t 1 m v -> b t v m 1"),
+    ).sum(dim=-1)[0, 0]
+    actual = loss(
+        torch.empty(1, 1, 3, 1, 1, dtype=torch.float64),
+        torch.empty(1, 1, 1, 1, 1, dtype=torch.float64),
+        squash=False,
+    )
+
+    torch.testing.assert_close(actual, expected)
+
+
+def test_spectral_crps_coefficient_magnitude_has_finite_zero_gradient() -> None:
+    pred = torch.zeros(1, 1, 3, 4, 2, dtype=torch.float64, requires_grad=True)
+    target = torch.zeros(1, 1, 1, 4, 2, dtype=torch.float64)
+    loss = SpectralCRPSLoss(
+        transform="fft2d",
+        x_dim=2,
+        y_dim=2,
+        coefficient_magnitude=True,
+    )
+
+    score = loss(pred, target)
+    score.backward()
+
+    assert torch.isfinite(score)
+    assert pred.grad is not None
+    assert torch.isfinite(pred.grad).all()
+
+
+def test_spectral_crps_factory_sets_coefficient_magnitude() -> None:
+    loss = _make_loss(
+        "anemoi.training.losses.SpectralCRPSLoss",
+        transform="fft2d",
+        x_dim=2,
+        y_dim=2,
+        coefficient_magnitude=True,
+    )
+
+    assert isinstance(loss, SpectralCRPSLoss)
+    assert loss.coefficient_magnitude is True
 
 
 def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:

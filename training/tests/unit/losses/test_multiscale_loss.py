@@ -83,10 +83,10 @@ def loss_inputs_multiscale() -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     pred[0, 0, :, 0] = torch.tensor([1.0, 0.0])
     target = torch.zeros([tensor_shape[0], tensor_shape[1], 1, tensor_shape[3], tensor_shape[4]])
 
-    # With only one "grid point" differing by 1 in all
-    # variables, the loss should be 1.0
+    # Only one of the two variables differs by 1 at one grid point.
+    # The mean CRPS is 0.5.
 
-    loss_result = torch.tensor(1.0)
+    loss_result = torch.tensor(0.5)
     return pred, target, loss_result
 
 

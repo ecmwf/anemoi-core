@@ -1,4 +1,4 @@
-# (C) Copyright 2025- Anemoi contributors.
+# (C) Copyright 2026- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -15,4 +15,4 @@ from typing import TypeVar
 # across the codebase, improving type safety and code readability.
 # The dataset-specific configurations are represented as a dictionary where keys are the dataset names
 T = TypeVar("T")
-DatasetDict: TypeAlias = dict[Literal["datasets"], dict[str, T]]
+DatasetDict: TypeAlias = dict[Literal["datasets"], dict[str, T]] | T

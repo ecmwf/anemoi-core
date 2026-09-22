@@ -30,8 +30,10 @@ dataloader:
     max_distance_km: 300
 model:
   output_mask:
-    _target_: anemoi.training.utils.masks.Boolean1DMask
-    attribute_name: cutout_mask
+    datasets:
+      data:
+        _target_: anemoi.training.utils.masks.Boolean1DMask
+        attribute_name: cutout_mask
 system:
   input:
     dataset: ???

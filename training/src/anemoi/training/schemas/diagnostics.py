@@ -35,8 +35,8 @@ class GraphPlotFnSchema(GenericSchema):
     ``dataset_name``, ``node_attributes``, ``node_trainable_tensors``,
     ``edge_trainable_modules``. See :class:`GraphPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in graph plot options
+    ---------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
@@ -53,8 +53,8 @@ class LossPlotFnSchema(GenericSchema):
     The ``_target_`` must resolve to a callable that accepts at minimum:
     ``loss`` and ``parameter_names``. See :class:`LossPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in loss plot options
+    --------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
@@ -167,8 +167,8 @@ class BatchOutputPlotFnSchema(GenericSchema):
     ``parameters``, ``x``, ``y_true``, ``y_pred``, ``latlons``.
     See :class:`BatchOutputPlotFn` for the full contract.
 
-    Built-in options
-    ----------------
+    Built-in batch output plot options
+    ----------------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.spectrum_plot_fn``
     - ``anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn``
