@@ -8,20 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 
-import logging
 import contextlib
+import logging
 from enum import Enum
-from pathlib import Path
 from importlib.util import find_spec
+from pathlib import Path
 
 import torch
 from sklearn.neighbors import NearestNeighbors
+from torch_geometric import __version__ as PYG_VERSION
 from torch_geometric.data.hetero_data import HeteroData
 from torch_geometric.data.storage import AttrType
 from torch_geometric.data.storage import BaseStorage
 from torch_geometric.data.storage import EdgeStorage
 from torch_geometric.data.storage import NodeStorage
-from torch_geometric import __version__ as PYG_VERSION
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
