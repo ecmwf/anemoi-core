@@ -58,11 +58,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         super()._build_networks(model_config)
 
         self.noise_injector = instantiate(
-            model_config.model.noise_injector,
+            model_config.noise_injector,
             _recursive_=False,
-            num_channels=self.num_channels,
             graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.model.get("sparse_projector", {}).get("num_chunks", 1),
+            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -120,7 +119,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def _assemble_output(
         self,
         x_out: torch.Tensor,
-        x_skip: torch.Tensor,
+        x_skip: torch.Tensor | None,
         batch_size: int,
         batch_ens_size: int,
         dtype: torch.dtype,
@@ -141,11 +140,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        if x_skip is not None:
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -206,7 +206,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in dataset_names:
+        for dataset_name in x.keys():
+            if dataset_name not in self.input_datasets:
+                continue
+
             x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
                 x[dataset_name],
                 fcstep=fcstep,
@@ -234,7 +237,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             # Encoder for this dataset
-            x_data_latent, x_latent = self.encoder[dataset_name](
+            encoder_name = self.dataset2encoder[dataset_name]
+            x_data_latent, x_latent = self.encoder[encoder_name](
                 (x_data_latent, x_hidden_latent),
                 batch_size=batch_ens_size,
                 shard_info=enc_shard_info,
@@ -247,7 +251,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             dataset_latents[dataset_name] = x_latent
 
         # Combine all dataset latents
-        x_latent = sum(dataset_latents.values())
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
 
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
@@ -283,7 +287,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_latent_proc = x_latent_proc + x_latent
 
         x_out_dict = {}
-        for dataset_name in dataset_names:
+        for dataset_name in self.target_datasets:
+            x_target_latent, shard_sizes_target = self._assemble_targets(
+                x[dataset_name],
+                x_data_latent_dict.get(dataset_name, None),
+                batch_size,
+                grid_shard_sizes,
+                model_comm_group,
+                dataset_name,
+            )
+
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -296,12 +309,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_sizes_target,  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
-            x_out = self.decoder[dataset_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+            decoder_name = self.dataset2decoder[dataset_name]
+            x_out = self.decoder[decoder_name](
+                (x_latent_proc, x_target_latent),
                 batch_size=batch_ens_size,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
@@ -312,7 +326,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
-                x_skip_dict[dataset_name],
+                x_skip_dict.get(dataset_name, None),
                 batch_size,
                 batch_ens_size,
                 dtype=x[dataset_name].dtype,

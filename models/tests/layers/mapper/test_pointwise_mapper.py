@@ -24,7 +24,7 @@ from anemoi.utils.config import DotDict
 class PointWiseMapperConfig:
     in_channels_src: int = 3
     in_channels_dst: int = 2
-    hidden_dim: int = 8
+    num_channels: int = 8
     out_channels_dst: int = 5
     cpu_offload: bool = False
     gradient_checkpointing: bool = True
@@ -52,7 +52,7 @@ def test_pointwise_forward_mapper_only_embeds_source(mapper_init, pointwise_pair
     mapper = PointWiseForwardMapper(
         in_channels_src=mapper_init.in_channels_src,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=mapper_init.gradient_checkpointing,
         layer_kernels=mapper_init.layer_kernels,
@@ -68,7 +68,7 @@ def test_pointwise_forward_mapper_only_embeds_source(mapper_init, pointwise_pair
     )
 
     assert torch.equal(x_src, pointwise_pair[0])
-    assert x_hidden.shape == (num_nodes, mapper_init.hidden_dim)
+    assert x_hidden.shape == (num_nodes, mapper_init.num_channels)
     assert torch.allclose(x_hidden, mapper.emb_nodes_src(pointwise_pair[0]))
 
 
@@ -78,7 +78,7 @@ def test_pointwise_forward_mapper_shards_unsharded_input_before_embedding(
     mapper = PointWiseForwardMapper(
         in_channels_src=mapper_init.in_channels_src,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=mapper_init.gradient_checkpointing,
         layer_kernels=mapper_init.layer_kernels,
@@ -109,7 +109,7 @@ def test_pointwise_forward_mapper_shards_unsharded_input_before_embedding(
     )
 
     assert calls["ensure_sharded"] == 1
-    assert x_hidden.shape == (2, mapper_init.hidden_dim)
+    assert x_hidden.shape == (2, mapper_init.num_channels)
     assert torch.allclose(x_hidden, mapper.emb_nodes_src(pointwise_pair[0][:2]))
 
 
@@ -117,7 +117,7 @@ def test_pointwise_forward_mapper_accepts_pre_sharded_source(mapper_init, device
     mapper = PointWiseForwardMapper(
         in_channels_src=mapper_init.in_channels_src,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=mapper_init.gradient_checkpointing,
         layer_kernels=mapper_init.layer_kernels,
@@ -136,22 +136,22 @@ def test_pointwise_forward_mapper_accepts_pre_sharded_source(mapper_init, device
         keep_x_dst_sharded=True,
     )
 
-    assert x_hidden.shape == (2, mapper_init.hidden_dim)
+    assert x_hidden.shape == (2, mapper_init.num_channels)
     assert torch.allclose(x_hidden, mapper.emb_nodes_src(x_src_local))
 
 
 def test_pointwise_backward_mapper_only_applies_extractor_and_gather(mapper_init, device, monkeypatch):
     mapper = PointWiseBackwardMapper(
-        in_channels_src=mapper_init.hidden_dim,
+        in_channels_src=mapper_init.num_channels,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         out_channels_dst=mapper_init.out_channels_dst,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=mapper_init.gradient_checkpointing,
         layer_kernels=mapper_init.layer_kernels,
     ).to(device)
 
-    x_hidden = torch.randn(4, mapper_init.hidden_dim, device=device)
+    x_hidden = torch.randn(4, mapper_init.num_channels, device=device)
     x_dst = torch.randn(4, mapper_init.in_channels_dst, device=device)
     fake_group = object()
     calls = {"ensure_sharded": 0, "gather": 0}
@@ -193,16 +193,16 @@ def test_pointwise_backward_mapper_only_applies_extractor_and_gather(mapper_init
 
 def test_pointwise_backward_mapper_keeps_output_sharded_when_requested(mapper_init, device):
     mapper = PointWiseBackwardMapper(
-        in_channels_src=mapper_init.hidden_dim,
+        in_channels_src=mapper_init.num_channels,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         out_channels_dst=mapper_init.out_channels_dst,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=mapper_init.gradient_checkpointing,
         layer_kernels=mapper_init.layer_kernels,
     ).to(device)
 
-    x_hidden_local = torch.randn(2, mapper_init.hidden_dim, device=device)
+    x_hidden_local = torch.randn(2, mapper_init.num_channels, device=device)
     x_dst_full = torch.randn(4, mapper_init.in_channels_dst, device=device)
 
     # src_nodes=[2] signals x_src is already sharded with 2 nodes on this rank
@@ -223,15 +223,15 @@ def test_pointwise_mappers_honor_gradient_checkpointing_config(mapper_init, devi
     forward_mapper = PointWiseForwardMapper(
         in_channels_src=mapper_init.in_channels_src,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=False,
         layer_kernels=mapper_init.layer_kernels,
     ).to(device)
     backward_mapper = PointWiseBackwardMapper(
-        in_channels_src=mapper_init.hidden_dim,
+        in_channels_src=mapper_init.num_channels,
         in_channels_dst=mapper_init.in_channels_dst,
-        hidden_dim=mapper_init.hidden_dim,
+        num_channels=mapper_init.num_channels,
         out_channels_dst=mapper_init.out_channels_dst,
         cpu_offload=mapper_init.cpu_offload,
         gradient_checkpointing=False,
