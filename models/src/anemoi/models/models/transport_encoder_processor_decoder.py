@@ -349,8 +349,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = batch.axis_size("batch")
-        ensemble_size = batch.axis_size("ensemble")
+        batch_size = batch.batch_size
+        ensemble_size = batch.ensemble_size
 
         bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(batch)

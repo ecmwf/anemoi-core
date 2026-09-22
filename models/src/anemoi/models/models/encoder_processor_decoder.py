@@ -738,8 +738,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         dataset_names = list(batch.keys())
 
         # Extract and validate batch & ensemble sizes across datasets
-        batch_size = batch.axis_size("batch")
-        ensemble_size = batch.axis_size("ensemble")
+        batch_size = batch.batch_size
+        ensemble_size = batch.ensemble_size
 
         in_out_sharded = self._resolve_in_out_sharded(batch)
         for dataset_name in dataset_names:

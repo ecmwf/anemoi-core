@@ -153,8 +153,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         """
         dataset_names = list(batch.keys())
 
-        batch_size = batch.axis_size("batch")
-        ensemble_size = batch.axis_size("ensemble")
+        batch_size = batch.batch_size
+        ensemble_size = batch.ensemble_size
 
         batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
 

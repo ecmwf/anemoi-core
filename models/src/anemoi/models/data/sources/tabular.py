@@ -87,23 +87,41 @@ class TabularSource(_Source):
                 raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
 
     @property
-    def ndim(self) -> int:
-        return self.data[0].ndim
+    def grid_size(self) -> None:
+        """Full grid size before sharding.
+
+        In tabular sources, the concept of a full grid size does not apply, hence it returns ``None``.
+        """
+        return None
+
+    @property
+    def batch_size(self) -> int:
+        """Number of samples (batch size) in this source."""
+        return len(self.data)
+
+    @property
+    def ensemble_size(self) -> int:
+        """Number of ensemble members per sample, 1 when the layout has no ensemble axis."""
+        if self.layout.ensemble is None:
+            return 1
+
+        ensemble_size = [data.shape[self.layout.ensemble] for data in self.data]
+
+        if len(set(ensemble_size)) != 1:
+            msg = f"Inconsistent ensemble sizes across batch samples: {ensemble_size}"
+            raise ValueError(msg)
+
+        return ensemble_size[0]
 
     @property
     def device(self) -> torch.device:
+        """Device of the source's data tensor."""
         return self.data[0].device
 
     @property
     def dtype(self) -> torch.dtype:
+        """Data type of the source's data tensor."""
         return self.data[0].dtype
-
-    @property
-    def ensemble_size(self) -> int:
-        """Number of ensemble members per sample; 1 when the layout has no ensemble axis."""
-        if self.layout.ensemble is None:
-            return 1
-        return self.data[0].shape[self.layout.ensemble]
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSource":
         """Apply a function to this view, returning a new view with the same metadata."""

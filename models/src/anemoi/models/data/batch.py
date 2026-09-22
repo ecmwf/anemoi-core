@@ -82,35 +82,24 @@ class Batch:
 
     sources: dict[str, _Source]
 
-    def __post_init__(self):
-        batch_size = 0
-
-    # -- batch-level properties --------------------------------------------
-
     @property
     def spec(self) -> dict[str, SourceSpec]:
         """Per-dataset specs for this batch, without any of its data."""
         return {name: source.spec for name, source in self.sources.items()}
 
-    def axis_size(self, axis: str) -> int:
-        """Return the size of a logical axis, asserted consistent across datasets.
-
-        Replaces the old ``_get_consistent_dim``, which took a *physical* dimension
-        index and mapped it back to a name through a private positional tuple.
-        """
-        sizes = {name: source.axis_size(axis) for name, source in self.sources.items()}
-        if not sizes:
-            msg = f"Cannot determine {axis!r} size of an empty batch."
-            raise ValueError(msg)
-        if len(set(sizes.values())) != 1:
-            msg = f"Inconsistent {axis!r} sizes across datasets: {sizes}"
-            raise ValueError(msg)
-        return next(iter(sizes.values()))
-
     @property
-    def size(self) -> int:
+    def batch_size(self) -> int:
         """Number of samples (batch size) in this batch."""
-        return self.axis_size("batch")
+        batch_sizes = {name: source.batch_size for name, source in self.sources.items()}
+        if not batch_sizes:
+            msg = f"Cannot determine batch size of an empty batch."
+            raise ValueError(msg)
+
+        if len(set(batch_sizes.values())) != 1:
+            msg = f"Inconsistent batch sizes across datasets: {batch_sizes}"
+            raise ValueError(msg)
+
+        return next(iter(batch_sizes.values()))
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -155,11 +144,6 @@ class Batch:
         lines.append(")")
         return "\n".join(lines)
 
-    # -- mapping protocol ---------------------------------------------------
-    # Implemented structurally rather than by inheriting collections.abc.Mapping,
-    # whose ``__eq__`` mixin would compare batches element-wise and so raise on
-    # tensor payloads.
-
     def __getitem__(self, dataset_name: str) -> _Source:
         """Return the source for one dataset."""
         try:
@@ -192,8 +176,6 @@ class Batch:
     def items(self):  # noqa: D401 - mapping protocol
         """Return ``(name, source)`` pairs (mapping protocol)."""
         return self.sources.items()
-
-    # -- transformations ----------------------------------------------------
 
     def with_sources(self, sources: dict[str, _Source]) -> "Batch":
         """Return a new batch wrapping ``sources``."""

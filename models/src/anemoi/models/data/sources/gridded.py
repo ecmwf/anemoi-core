@@ -51,18 +51,34 @@ class GriddedSource(_Source):
 
     @property
     def device(self) -> torch.device:
-        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        """Device of the source's data tensor."""
         return self.data.device
 
     @property
     def dtype(self) -> torch.dtype:
-        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
+        """Data type of the source's data tensor."""
         return self.data.dtype
 
     @property
-    def ndim(self) -> int:
-        assert isinstance(self.data, torch.Tensor), f"{self.__class__.__name__} data must be a single tensor."
-        return self.data.ndim
+    def grid_size(self) -> int:
+        """Full grid size before sharding; ``None`` for observation datasets."""
+        return self.data.shape[self.layout.grid]
+
+    @property
+    def batch_size(self) -> int:
+        """Number of samples (batch size) in this source."""
+        if self.layout.batch is None:
+            raise ValueError(f"{self.__class__.__name__}.batch_size requires a layout with a batch axis.")
+
+        return self.data.shape[self.layout.batch]
+
+    @property
+    def ensemble_size(self) -> int:
+        """Number of ensemble members per sample, 1 when the layout has no ensemble axis."""
+        if self.layout.ensemble is None:
+            return 1
+
+        return self.data.shape[self.layout.ensemble]
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSource":
         """Apply a function to this view, returning a new view with the same metadata."""

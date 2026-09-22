@@ -166,9 +166,34 @@ class _Source(ABC):
         return self.spec.coordinates_are_static
 
     @property
+    @abstractmethod
+    def device(self) -> torch.device:
+        """Device of the source's data tensor."""
+        ...
+
+    @property
+    @abstractmethod
+    def dtype(self) -> torch.dtype:
+        """Data type of the source's data tensor."""
+        ...
+
+    @property
+    @abstractmethod
     def grid_size(self) -> int | None:
-        """Full grid size before sharding; ``None`` for observation datasets."""
-        return self.spec.grid_size
+        """Full grid size before sharding."""
+        ...
+
+    @property
+    @abstractmethod
+    def batch_size(self) -> int:
+        """Number of samples (batch size) in this source."""
+        ...
+
+    @property
+    @abstractmethod
+    def ensemble_size(self) -> int:
+        """Number of ensemble members in this source, or 1 if not applicable."""
+        ...
 
     @property
     def name_to_index(self) -> dict[str, int]:
@@ -205,25 +230,6 @@ class _Source(ABC):
                     f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
                 )
         return source
-
-    def axis_size(self, axis: str) -> int:
-        """Return the logical size of ``axis`` for this source.
-
-        Resolves what the layout does not spell out: for a tabular source the batch
-        axis is the outer list, and an axis the layout does not materialise (e.g.
-        ``ensemble`` on a source that has none) is an implicit singleton.
-        """
-        samples = self.data if isinstance(self.data, list) else [self.data]
-
-        if axis == "batch" and isinstance(self.data, list):
-            return len(self.data)
-
-        position = getattr(self.layout, axis, None)
-        if position is None:
-            return 1
-        if not samples:
-            return 0
-        return samples[0].shape[position]
 
     def contiguous(self) -> "_Source":
         """Return a new view whose underlying data tensors are contiguous."""
