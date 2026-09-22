@@ -1852,7 +1852,8 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
     assert core_model.call["args"] == (x,)
     assert core_model.call["kwargs"]["target_template"] is target_template
     assert core_model.call["kwargs"]["model_comm_group"] is forecaster.model_comm_group
-    assert core_model.call["kwargs"]["grid_shard_sizes"] is forecaster.grid_shard_sizes
+    # Shard sizes are read off the input SourceViews (replicated here -> None per dataset)
+    assert core_model.call["kwargs"]["grid_shard_sizes"] == {"data": None}
     assert core_model.call["kwargs"]["schedule_params"] == {"num_steps": 2}
     assert core_model.call["kwargs"]["sampler_params"] == {"sampler": "heun"}
     assert core_model.call["kwargs"]["marker"] == "value"

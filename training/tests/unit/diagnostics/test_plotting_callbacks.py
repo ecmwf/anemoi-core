@@ -11,6 +11,7 @@
 
 from collections.abc import Callable
 from functools import partial
+from types import MethodType
 from typing import Any
 from typing import ClassVar
 from unittest.mock import MagicMock
@@ -35,6 +36,7 @@ from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_train
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -230,6 +232,10 @@ def _make_pl_module_forecaster(
     pl_module.model_comm_group = None
     # Targets are consumed as a Batch of Sources; keep them unchanged in tests.
     pl_module.preprocess_targets = lambda batch: batch
+    # Bind the real ``_grid_shard_sizes``: it is a *method* taking a SourceView, not a
+    # per-dataset mapping. Leaving it as a plain MagicMock lets callbacks subscript it
+    # and hides a TypeError that only surfaces in a real run.
+    pl_module._grid_shard_sizes = MethodType(BaseTrainingModule._grid_shard_sizes, pl_module)
 
     # Mock data_indices: data.output.full (view-var subset), model.output.name_to_index
     # (loss/spatial parameter lookup) and data.input.todict() (diagnostic flags).
@@ -266,6 +272,7 @@ def _make_pl_module_temporal_downscaler(*, nlatlon=50) -> MagicMock:
     # Single-process gather is a no-op; targets pass through unchanged.
     pl_module.model_comm_group = None
     pl_module.preprocess_targets = lambda batch: batch
+    pl_module._grid_shard_sizes = MethodType(BaseTrainingModule._grid_shard_sizes, pl_module)
 
     # Mock data_indices
     data_indices = MagicMock()
