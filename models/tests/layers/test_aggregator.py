@@ -63,14 +63,20 @@ def test_aggregator_validates_named_source_shapes(latents: dict[str, torch.Tenso
         aggregator(torch.randn(6, 3), latents)
 
 
-def test_cross_attention_aggregator_supports_different_source_widths_and_gradients() -> None:
+@pytest.mark.parametrize("gradient_checkpointing", [False, True])
+@pytest.mark.parametrize("qk_norm", [False, True])
+def test_cross_attention_aggregator_supports_different_source_widths_and_gradients(
+    gradient_checkpointing: bool, qk_norm: bool
+) -> None:
     aggregator = CrossAttentionAggregator(
         input_channels=3,
         source_channels={"global": 4, "regional": 6},
         num_channels=8,
         num_heads=2,
         layer_kernels={},
-        gradient_checkpointing=False,
+        attn_channels=6,
+        qk_norm=qk_norm,
+        gradient_checkpointing=gradient_checkpointing,
     )
     hidden = torch.randn(7, 3, requires_grad=True)
     latents = {
@@ -85,6 +91,7 @@ def test_cross_attention_aggregator_supports_different_source_widths_and_gradien
     assert aggregator.hidden_dim == 8
     assert hidden.grad is not None
     assert all(latent.grad is not None for latent in latents.values())
+    assert all(parameter.grad is not None for parameter in aggregator.parameters())
 
 
 def test_cross_attention_aggregator_is_independent_of_mapping_order() -> None:

@@ -33,10 +33,12 @@ class BaseLatentAggregator(nn.Module, ABC):
         gradient_checkpointing: bool = False,
     ) -> None:
         super().__init__()
+
         if input_channels <= 0:
-            raise ValueError(f"input_channels must be positive, got {input_channels}.")
+            raise ValueError(f"{self.__class__.__name__}: input_channels must be positive, got {input_channels}.")
+
         if not source_channels:
-            raise ValueError("At least one latent source is required.")
+            raise ValueError(f"{self.__class__.__name__}: At least one latent source is required.")
 
         invalid_source_channels = {name: channels for name, channels in source_channels.items() if channels <= 0}
         if invalid_source_channels:
@@ -98,7 +100,7 @@ class BaseLatentAggregator(nn.Module, ABC):
 
 
 class SumAggregator(BaseLatentAggregator):
-    """Sum latents elementwise."""
+    """Sum latents element-wise."""
 
     def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
         super().__init__(input_channels=input_channels, source_channels=source_channels)
@@ -124,8 +126,21 @@ class SumAggregator(BaseLatentAggregator):
         return torch.stack(tuple(source_latents), dim=0).sum(dim=0)
 
 
-class MeanAggregator(SumAggregator):
-    """Average latents elementwise."""
+class MeanAggregator(BaseLatentAggregator):
+    """Average latents element-wise."""
+
+    def __init__(self, *, input_channels: int, source_channels: Mapping[str, int]) -> None:
+        super().__init__(input_channels=input_channels, source_channels=source_channels)
+        self._hidden_dim = next(iter(self.source_channels.values()))
+        if any(channels != self._hidden_dim for channels in self.source_channels.values()):
+            raise ValueError(
+                f"All latent sources must have the same channel dimension for {self.__class__.__name__}, "
+                f"got {self.source_channels}.",
+            )
+
+    @property
+    def hidden_dim(self) -> int:
+        return self._hidden_dim
 
     def _forward(
         self,

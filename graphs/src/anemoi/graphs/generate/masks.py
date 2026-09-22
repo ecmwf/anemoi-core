@@ -9,7 +9,6 @@
 
 
 import logging
-from importlib.util import find_spec
 
 import numpy as np
 import torch
@@ -19,15 +18,15 @@ from torch_geometric.data import HeteroData
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
+from anemoi.graphs.utils import PYG_AVAILABLE
+from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
-TORCH_CLUSTER_AVAILABLE = find_spec("torch_cluster") is not None
 
-
-class _TorchClusterAreaMaskBackend:
-    """Torch-cluster radius backend (CPU/GPU depending on distributed device)."""
+class _PYGAreaMaskBackend:
+    """PyG radius backend (CPU/GPU depending on distributed device)."""
 
     def __init__(self, device: torch.device | str):
         LOGGER.debug("Initializing %s on device %s", self.__class__.__name__, device)
@@ -67,12 +66,13 @@ class _TorchClusterAreaMaskBackend:
 
         query_vectors = latlon_rad_to_cartesian(coords_rad)
 
-        edge_index = radius(
-            x=self._ref_vectors,
-            y=query_vectors,
-            r=chord_threshold,
-            max_num_neighbors=1,
-        )
+        with current_device_context(self.device):
+            edge_index = radius(
+                x=self._ref_vectors,
+                y=query_vectors,
+                r=chord_threshold,
+                max_num_neighbors=1,
+            )
 
         mask = torch.zeros(len(query_vectors), dtype=torch.bool, device=self._ref_vectors.device)
         mask[edge_index[0]] = True
@@ -119,7 +119,7 @@ class AreaMaskBuilder:
     """Area mask builder using radius queries on unit-sphere chord distances.
 
     The public API is backend-agnostic. At runtime, a dedicated backend is selected:
-    - torch-cluster backend when available
+    - PyG backend when available
     - scipy cKDTree backend otherwise
 
     Methods
@@ -147,8 +147,8 @@ class AreaMaskBuilder:
         self.mask_attr_name = mask_attr_name
 
         self.device = get_distributed_device()
-        if TORCH_CLUSTER_AVAILABLE:
-            self._backend = _TorchClusterAreaMaskBackend(device=self.device)
+        if PYG_AVAILABLE:
+            self._backend = _PYGAreaMaskBackend(device=self.device)
         else:
             self._backend = _KDTreeAreaMaskBackend()
 

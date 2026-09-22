@@ -45,14 +45,14 @@ choose stable, descriptive names.
 
    encoders:
      global:                 # user-defined group name (appears in the state-dict)
-       datasets: [ "era5", "ifs"]  # datasets encoded by this group
+       source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
        dataset_fusing_strategy: "not_supported"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
-       datasets: [ "cerra" ]
+       source_datasets: [ "cerra" ]
        dataset_fusing_strategy: "not_supported"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
@@ -61,21 +61,21 @@ choose stable, descriptive names.
 
    decoders:
      global:
-       datasets: [ "era5" ]
-       input_target_features: [encoded_data]
+       target_datasets: [ "era5" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
-       datasets: [ "cerra" ]
-       input_target_features: [encoded_data]
+       target_datasets: [ "cerra" ]
+       target_node_features: [ "encoded_data" ]
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
          num_channels: 1024
          # ... mapper configuration
 
-``datasets``
+``{source|target}_datasets``
    The list of dataset names handled by this group. Datasets sharing a
    group share the same mapper weights.
 
@@ -92,6 +92,17 @@ choose stable, descriptive names.
 
    All datasets encoded by the same encoder group must produce latents
    with consistent shapes (see the target-feature validation below).
+
+***************************************************
+ Encoding multiple datasets with the same encoder
+***************************************************
+
+The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
+Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
+by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+
+``not_supported``
+   Indicates that multiple datasets per encoder are not currently supported.
 
 *******************
  Latent aggregator
@@ -146,21 +157,25 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
         gradient_checkpointing: true
         layer_kernels: ${model.layer_kernels}
 
-*************************
- Decoder target features
-*************************
+*********************************
+  Decoder target node features
+*********************************
 
 Each decoder group builds its input from an ordered list of
-``input_target_features``. This controls what the decoder receives in
-addition to (or instead of) the processed latent, and is the mechanism
-that replaces bespoke model subclasses such as the former autoencoder.
+``target_node_features``. These are features defined on the decoder's
+target (output) grid and supplied as inputs to the decoder. They control
+what the decoder receives in addition to the processed latent representation.
 
 .. code:: yaml
 
    decoders:
      global:
        datasets: [ "era5" ]
-       input_target_features: [ "encoded_data" ]  # default
+       target_node_features: [ "encoded_data" ]  # default
+
+.. note::
+   Here, __"target"__ refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
+   It does not refer to the targets used to compute the loss of the ML model.
 
 Valid features:
 
@@ -191,8 +206,8 @@ first batch.
 .. tip::
 
    New target features can be registered from user code with the
-   :func:`anemoi.models.models.target_features.register_target_feature`
-   decorator on a :class:`~anemoi.models.models.target_features.DecodingTargetFeature`
+   :func:`anemoi.models.layers.target_features.register_target_feature`
+   decorator on a :class:`~anemoi.models.layers.target_features.DecodingTargetFeature`
    subclass.
 
 ********************************

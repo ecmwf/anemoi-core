@@ -31,25 +31,38 @@ os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on git
 LOGGER = logging.getLogger(__name__)
 
 
-def assert_keys_exist(data: dict, schema: dict, path: str = "root") -> None:
+TASK_SPECIFIC_TIMESTEP_KEYS = {
+    "offset-forecaster": {"input_offsets", "output_offsets", "rollout_shift", "advance_map"},
+}
+
+
+def assert_keys_exist(data: dict, schema: dict, path: str = "root", skip_keys: set[str] | None = None) -> None:
     """Recursively check that the metadata dictionary conforms to the expected schema.
 
     This is a simplified schema validation that only checks for the presence of expected keys.
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
+    if skip_keys is None:
+        task = data.get("task")
+        all_task_keys = set().union(*TASK_SPECIFIC_TIMESTEP_KEYS.values())
+        skip_keys = all_task_keys - TASK_SPECIFIC_TIMESTEP_KEYS.get(task, set())
+
     for key, subschema in schema.items():
         if key == "__datasets__":
             dataset_names = data.get("dataset_names", [])
             for ds in dataset_names:
                 assert ds in data, f"{path}: dataset '{ds}' missing"
-                assert_keys_exist(data[ds], subschema, f"{path}.{ds}")
+                assert_keys_exist(data[ds], subschema, f"{path}.{ds}", skip_keys)
+            continue
+
+        if key in skip_keys:
             continue
 
         assert key in data, f"{path}: missing key '{key}'"
 
         if isinstance(subschema, dict):
             assert isinstance(data[key], dict), f"{path}.{key} should be dict"
-            assert_keys_exist(data[key], subschema, f"{path}.{key}")
+            assert_keys_exist(data[key], subschema, f"{path}.{key}", skip_keys)
 
         if subschema is list:
             assert isinstance(data[key], list), f"{path}.{key} should be list"
@@ -433,6 +446,52 @@ def test_config_validation_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],
 ) -> None:
     cfg, _ = temporal_downscaler_ensemble_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_offset_forecaster(
+    offset_forecaster_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = offset_forecaster_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_config(offset_forecaster_config: tuple[DictConfig, str]) -> None:
+    cfg, _ = offset_forecaster_config
+    BaseSchema(**cfg)
+
+
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    """Train the tendency transport path with irregular inputs and two forecast lead times."""
+    cfg, url = offset_forecaster_tendency_transport_config
+    get_test_archive(url)
+
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+
+    assert trainer.task.name == "offset-forecaster"
+    assert trainer.datamodule.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
+    assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
+    assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_offset_forecaster_tendency_transport(
+    offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = offset_forecaster_tendency_transport_config
     BaseSchema(**cfg)
 
 

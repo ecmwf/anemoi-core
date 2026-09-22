@@ -108,7 +108,6 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     with pytest.raises(_AggregationReached):
         model(inputs)
 
-    assert model._get_latent_aggregator_channels() == {"dataset_a": 4, "dataset_b": 4}
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))

@@ -21,7 +21,7 @@ jobs:
     runs-on: hpc
     timeout-minutes: ${{ inputs.timeout_minutes }}
     steps:
-      - uses: ecmwf-actions/reusable-workflows/ci-hpc-generic@v2
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
             env | grep SLURM # helps with debugging

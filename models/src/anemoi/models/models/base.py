@@ -24,12 +24,12 @@ from torch_geometric.data import HeteroData
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NamedNodesAttributes
-from anemoi.models.models.target_features import DecodingTargetFeature
-from anemoi.models.models.target_features import create_decoding_target_features
-from anemoi.models.utils.config import broadcast_config_keys
+from anemoi.models.layers.target_features import DecodingTargetFeature
+from anemoi.models.layers.target_features import create_decoding_target_features
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
 
@@ -74,12 +74,9 @@ class BaseGraphModel(nn.Module):
 
         self.latent_skip = model_config.model.model.latent_skip
 
-        trainable_parameters = broadcast_config_keys(
-            model_config.model.trainable_parameters,
-            data=self.dataset_names,
-            hidden=self._graph_name_hidden,
+        self.node_attributes = NamedNodesAttributes(
+            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
-        self.node_attributes = NamedNodesAttributes(trainable_parameters, self._build_named_node_attributes_graph())
 
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
@@ -135,7 +132,7 @@ class BaseGraphModel(nn.Module):
                 self.dataset2decoder[d] = decoder_name
 
             self.decoders_target_input[decoder_name] = create_decoding_target_features(
-                decoder_config.input_target_features, datasets_to_decode, self
+                decoder_config.target_node_features, datasets_to_decode, self
             )
 
         self.target_datasets = list(self.dataset2decoder.keys())
@@ -152,6 +149,12 @@ class BaseGraphModel(nn.Module):
             d in self.target_datasets for d in self.dataset2decoder.keys()
         ), f"Datasets {not_target_datasets} are in target_datasets but not in data_indices provided to the model. "
 
+        # Only one dataset is currently supported per encoder. Work in progress.
+        for encoder_name, datasets in self.encoder2datasets.items():
+            assert (
+                len(datasets) == 1
+            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
+
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
                 raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
@@ -159,6 +162,20 @@ class BaseGraphModel(nn.Module):
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
             target_features.validate()
+
+    def _build_latent_aggregator(self, aggregator_config: DotDict) -> None:
+        """Build the latent aggregator."""
+        latent_aggregator_channels = {
+            dataset_name: self.encoder[self.dataset2encoder[dataset_name]].hidden_dim
+            for dataset_name in self.input_datasets
+        }
+
+        self.latent_aggregator = instantiate(
+            aggregator_config,
+            _recursive_=False,
+            input_channels=self.input_dim_latent,
+            source_channels=latent_aggregator_channels,
+        )
 
     def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
         """Compute per-dataset input/output channel counts, dimensions and internal data indices."""
@@ -375,6 +392,39 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    @staticmethod
+    def _apply_spatial_preprocessor(
+        tensors: tuple[Tensor, ...],
+        dataset_name: str,
+        spatial_pre_processors: Optional[nn.ModuleDict],
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
+        """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
+        if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
+            return tensors, grid_shard_sizes
+
+        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        projected_tensors = []
+        output_grid_shard_sizes: ShardSizes = None
+        for index, tensor in enumerate(tensors):
+            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
+                tensor,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=source_grid_shard_sizes,
+            )
+            if index == 0:
+                output_grid_shard_sizes = tensor_grid_shard_sizes
+            elif tensor_grid_shard_sizes != output_grid_shard_sizes:
+                raise RuntimeError(
+                    f"Spatial preprocessor for {dataset_name!r} returned inconsistent target-grid shard sizes."
+                )
+            projected_tensors.append(projected_tensor)
+
+        if grid_shard_sizes is not None:
+            grid_shard_sizes[dataset_name] = output_grid_shard_sizes
+        return tuple(projected_tensors), grid_shard_sizes
+
     def predict_step(
         self,
         batch: dict[str, torch.Tensor],
@@ -383,6 +433,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Prediction step for the model.
@@ -404,6 +455,9 @@ class BaseGraphModel(nn.Module):
             Process group for distributed training.
         gather_out : bool
             Whether to gather output tensors across distributed processes.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding but before normalisation.
         **kwargs
             Additional arguments.
 
@@ -439,10 +493,19 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )
 
+            # Spatial preprocessing: applied after grid sharding, before normalisation.
+            for dataset_name in dataset_names:
+                (projected_tensor,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                    (x[dataset_name],),
+                    dataset_name,
+                    spatial_pre_processors,
+                    model_comm_group,
+                    grid_shard_sizes,
+                )
+                x[dataset_name] = projected_tensor
+
             for dataset_name in dataset_names:
                 x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
-
-            # Perform forward pass
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
