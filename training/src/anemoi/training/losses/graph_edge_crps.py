@@ -10,12 +10,18 @@
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.training.losses.graph_edge_score_base import BaseGraphEdgeScoreLoss
+from anemoi.training.losses.graph_edge_operations import aggregate_edge_values
+from anemoi.training.losses.graph_edge_operations import compute_edge_validity
+from anemoi.training.losses.graph_edge_operations import compute_node_validity
+from anemoi.training.losses.graph_edge_operations import edge_difference
+from anemoi.training.losses.graph_score_base import BaseGraphScoreLoss
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 
 
-class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
+class GraphEdgeCRPSLoss(BaseGraphScoreLoss):
     """Almost-fair CRPS over edge differences stored by a CSR graph."""
+
+    uses_edge_tensors: bool = True
 
     def __init__(
         self,
@@ -62,19 +68,23 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
         assert destination_index is not None
         assert edge_weights is not None
         ensemble_size = y_pred_ens.shape[2]
-        node_valid, edge_valid, valid_weight_sum = self._compute_edge_validity(
+        node_valid = compute_node_validity(
             y_pred_ens,
             y_target,
+            ignore_nans=self.ignore_nans,
+        )
+        edge_valid, valid_weight_sum = compute_edge_validity(
+            node_valid,
             source_index,
             destination_index,
             edge_weights,
         )
 
-        observed_edge = self._edge_difference(y_target, source_index, destination_index)
+        observed_edge = edge_difference(y_target, source_index, destination_index)
         observation_sum = torch.zeros_like(observed_edge)
         pair_sum = torch.zeros_like(observed_edge)
         for first in range(ensemble_size):
-            first_edge = self._edge_difference(
+            first_edge = edge_difference(
                 y_pred_ens[:, :, first],
                 source_index,
                 destination_index,
@@ -89,7 +99,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
             observation_sum = observation_sum + observation_distance
 
             for second in range(first + 1, ensemble_size):
-                second_edge = self._edge_difference(
+                second_edge = edge_difference(
                     y_pred_ens[:, :, second],
                     source_index,
                     destination_index,
@@ -104,7 +114,7 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
                 pair_sum = pair_sum + pair_distance
 
         edge_score = observation_sum / ensemble_size - self._pair_coefficient(ensemble_size) * pair_sum
-        return self._aggregate_edge_values(
+        return aggregate_edge_values(
             edge_score,
             destination_index,
             edge_weights,
@@ -112,4 +122,5 @@ class GraphEdgeCRPSLoss(BaseGraphEdgeScoreLoss):
             node_valid=node_valid,
             edge_valid=edge_valid,
             valid_weight_sum=valid_weight_sum,
+            row_normalize=self.row_normalize,
         )
