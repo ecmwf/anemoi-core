@@ -116,6 +116,30 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         max_num_neighbours: int,
         skip_flip: bool = False,
     ) -> torch.Tensor:
+        """Compute the edge index using PyG's radius-based implementation.
+
+        If the number of actual neighbours is greater than :obj:`max_num_neighbors`, 
+        returned neighbours are picked randomly. (default: :obj:`32`)
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        radius : float
+            The cut-off radius for connecting nodes.
+        max_num_neighbours : int
+            The maximum number of nearest neighbours to consider for each target node.
+        skip_flip : bool, optional
+            Whether to skip flipping the edge index. Defaults to False. This is
+            useful to avoid duplicated operations in reversed edge builders.
+
+        Returns
+        -------
+        torch.Tensor
+            The computed edge index.
+        """
         edge_index = pyg_radius(source_coords, target_coords, r=radius, max_num_neighbors=max_num_neighbours)
 
         if not skip_flip:
@@ -130,6 +154,27 @@ class BaseCutOffEdges(BaseDistanceEdgeBuilders):
         radius: float,
         max_num_neighbours: int,
     ) -> torch.Tensor:
+        """Compute the adjacency matrix using sklearn's radius-based implementation.
+
+        If the number of actual neighbors is greater than :obj:`max_num_neighbors`, 
+        only the nearest neighbours are returned.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        radius : float
+            The cut-off radius for connecting nodes.
+        max_num_neighbours : int
+            The maximum number of nearest neighbours to consider for each target node.
+
+        Returns
+        -------
+        torch.Tensor
+            The computed adjacency matrix.
+        """
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
 

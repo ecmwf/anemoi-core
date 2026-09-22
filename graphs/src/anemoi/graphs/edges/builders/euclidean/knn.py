@@ -54,6 +54,25 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         skip_flip: bool = False,
     ) -> torch.Tensor:
+        """Compute the edge index using PyG's KNN implementation.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        num_nearest_neighbours : int
+            The number of nearest neighbours to connect to each target node.
+        skip_flip : bool, optional
+            Whether to skip flipping the edge index. Defaults to False. This is
+            useful to avoid duplicated operations in reversed edge builders.
+
+        Returns
+        -------
+        torch.Tensor
+            The computed edge index.
+        """
         edge_index = knn(source_coords, target_coords, k=num_nearest_neighbours)
         if not skip_flip:
             edge_index = torch.flip(edge_index, [0])
@@ -62,6 +81,22 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
     def _compute_adj_matrix_sklearn(
         self, source_coords: torch.Tensor, target_coords: torch.Tensor, num_nearest_neighbours: int
     ) -> np.ndarray:
+        """Compute the adjacency matrix using sklearn's KNN implementation.
+
+        Parameters
+        ----------
+        source_coords : torch.Tensor
+            The coordinates of the source nodes.
+        target_coords : torch.Tensor
+            The coordinates of the target nodes.
+        num_nearest_neighbours : int
+            The number of nearest neighbours to consider for each target node.
+
+        Returns
+        -------
+        np.ndarray
+            The computed adjacency matrix.
+        """
         nearest_neighbour = NearestNeighbors(metric="euclidean", n_jobs=4)
         nearest_neighbour.fit(source_coords.cpu())
         adj_matrix = nearest_neighbour.kneighbors_graph(
