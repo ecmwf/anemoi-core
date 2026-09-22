@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from functools import cached_property
 from pathlib import Path
-from typing import Any, Self
+from typing import Any
+from typing import Self
 
 import yamlrocks
 from omegaconf import OmegaConf
