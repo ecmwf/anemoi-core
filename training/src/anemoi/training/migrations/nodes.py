@@ -31,6 +31,10 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+class SelectionError(ValueError):
+    """Exception raised when trying to select a problematic key."""
+
+
 def parents_head(key: str) -> tuple[list[str], str]:
     """Returns the parent prefix of the key, and its head."""
     parts = key.split(".")
@@ -129,7 +133,7 @@ class Node:
         """
         if not isinstance(self, NodeContainer) or not self._is_key_valid(key):
             msg = f"key {key} not in Node."
-            raise ValueError(msg)
+            raise SelectionError(msg)
 
         if self.is_interpolation(key) and not isinstance(self.cfg[key], str):
             # This allows to select items through interpolations.
@@ -223,7 +227,7 @@ class Node:
         """
         try:
             self.select(parts)
-        except (TypeError, ValueError):
+        except SelectionError:
             return False
         return True
 
@@ -249,7 +253,7 @@ class Node:
         for part in parts:
             if not isinstance(node, NodeContainer):
                 msg = f"Cannot select {part}. Not a container node."
-                raise TypeError(msg)
+                raise SelectionError(msg)
             if part not in node and create_missing:
                 node[part] = {}
             node = node[part]
