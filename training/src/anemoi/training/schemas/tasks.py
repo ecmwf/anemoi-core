@@ -60,7 +60,7 @@ class OffsetForecasterSchema(BaseModel):
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
     validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollout steps unrolled in validation. The val loss is averaged over the training rollout only."
+    "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. The val loss is averaged over the training rollout only."
 
 
 class AutoencoderTaskSchema(BaseModel):
