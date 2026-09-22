@@ -362,20 +362,8 @@ class _Source(ABC):
         """
         pass
 
-    def _time_axis_size(self) -> int:
-        """Return the logical number of time steps in this view."""
-        if self.layout.time_in_grid:
-            if self.boundaries is None:
-                msg = "Sparse view has no 'boundaries' metadata; cannot determine time size."
-                raise ValueError(msg)
-            return len(self.boundaries[0]) if self.boundaries else 0
-        if self.layout.time is None:
-            msg = f"Layout {self.layout!r} has no time axis."
-            raise ValueError(msg)
-        assert isinstance(self.data, torch.Tensor)
-        return self.data.shape[self.layout.time]
-
     def _index_vars(self, tensor: torch.Tensor, indices: Sequence[int] | torch.Tensor | slice) -> torch.Tensor:
+        """Return a new tensor indexed along the variable axis."""
         var_dim = self.layout.axis("variables", ndim=tensor.ndim)
         if isinstance(indices, slice):
             slicer: list[Any] = [slice(None)] * tensor.ndim

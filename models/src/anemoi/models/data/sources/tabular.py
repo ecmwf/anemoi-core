@@ -395,19 +395,17 @@ class TabularSource(_Source):
             A new view with the same :class:`TensorLayout` but reduced
             time extent.
         """
+        if self.boundaries is None:
+            msg = f"{self.__class__.__name__} has no 'boundaries' metadata; cannot select_time."
+            raise ValueError(msg)
+
         if isinstance(indices, slice):
-            time_size = self._time_axis_size()
+            time_size = len(self.boundaries)
             idx_list = list(range(*indices.indices(time_size)))
         elif isinstance(indices, int):
             idx_list = [int(indices)]
         else:
             idx_list = [int(i) for i in indices]
-
-        if self.boundaries is None:
-            msg = "Sparse view has no 'boundaries' metadata, cannot select_time."
-            raise ValueError(msg)
-
-        assert isinstance(self.data, list), f"{self.__class__.__name__} must wrap a list[Tensor]."
 
         new_data = []
         new_coords = []

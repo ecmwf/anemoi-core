@@ -265,8 +265,12 @@ class GriddedSource(_Source):
             A new view with the same :class:`TensorLayout` but reduced
             time extent.
         """
+        if self.layout.time is None:
+            msg = f"Layout {self.layout!r} has no time axis."
+            raise ValueError(msg)
+
         if isinstance(indices, slice):
-            time_size = self._time_axis_size()
+            time_size = self.data.shape[self.layout.time]
             idx_list = list(range(*indices.indices(time_size)))
         elif isinstance(indices, int):
             idx_list = [int(indices)]
