@@ -29,6 +29,12 @@ jobs:
             module load python3/3.12.9-01
             # Reuse the shared clone + virtualenv built by the build-env job.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
+            if [ ! -f "$WORKDIR/venv/bin/activate" ] || [ ! -d "$WORKDIR/anemoi-core" ]; then
+              set +x
+              echo "ERROR: test env $WORKDIR not found (envs of failed runs are swept after 3 days)." >&2
+              echo "Use 'Re-run all jobs' to rebuild it." >&2
+              exit 1
+            fi
             cd "$WORKDIR/anemoi-core"
             source "$WORKDIR/venv/bin/activate"
             # Inject the MLflow URL here (not via job-level env:, which does not
