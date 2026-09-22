@@ -9,6 +9,7 @@
 
 
 import logging
+from collections import defaultdict
 from itertools import chain
 from pathlib import Path
 
@@ -20,6 +21,32 @@ from torch_geometric.data import HeteroData
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _normalise_storage_caches(graph: HeteroData) -> None:
+    """Convert PyG storage caches from ``defaultdict`` to plain ``dict`` in place.
+
+    PyTorch Geometric populates ``BaseStorage._cached_attr`` as a ``collections.defaultdict(set)``
+    while a graph is being built. The strict ``weights_only=True`` unpickler used by
+    :func:`anemoi.graphs.utils.load_graph_from_file` cannot deserialize a ``defaultdict``
+    (it only allows ``SETITEMS`` on ``dict``, ``OrderedDict`` and ``Counter``), so a saved
+    graph containing one fails to load. Normalising the cache to a plain ``dict`` before
+    saving keeps the save/load round-trip working without weakening serialization safety.
+
+    Parameters
+    ----------
+    graph : HeteroData
+        The graph whose storage caches will be normalised in place.
+    """
+    stores = [
+        graph._global_store,
+        *graph._node_store_dict.values(),
+        *graph._edge_store_dict.values(),
+    ]
+    for store in stores:
+        cached_attr = store.__dict__.get("_cached_attr")
+        if isinstance(cached_attr, defaultdict):
+            store.__dict__["_cached_attr"] = dict(cached_attr)
 
 
 class GraphCreator:
@@ -139,6 +166,7 @@ class GraphCreator:
 
         if not save_path.exists() or overwrite:
             save_path.parent.mkdir(parents=True, exist_ok=True)
+            _normalise_storage_caches(graph)
             torch.save(graph, save_path)
             LOGGER.info(f"Graph saved at {save_path}.")
         else:
