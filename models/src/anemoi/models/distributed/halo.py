@@ -139,7 +139,7 @@ def build_halo_info(
     edge_shard_sizes: ShardSizes = None,
     debug: bool = False,
 ) -> HaloInfo:
-    """Build halo metadata for homogeneous or bipartite graphs, including directed graphs.
+    """Build halo metadata for homogeneous or bipartite graphs.
 
     Identifies which inner nodes need to be sent to peer ranks and which
     halo nodes need to be received, then relabels the local edge_index to
@@ -206,6 +206,7 @@ def build_halo_info(
     send_nodes = global_src[send_mask]
     send_ranks = _node_id_to_partition_id(global_dst[send_mask], partition.dst_splits)
 
+    # Get local send indices (relative to local source nodes) for each rank and global receive nodes by rank
     send_indices = tuple(send_nodes[send_ranks == rank].unique(sorted=True) - src_start for rank in range(num_parts))
     recv_nodes_by_rank = tuple(recv_nodes[recv_ranks == rank].unique(sorted=True) for rank in range(num_parts))
     recv_counts = tuple(nodes.size(0) for nodes in recv_nodes_by_rank)
@@ -213,6 +214,7 @@ def build_halo_info(
     num_halo_nodes = all_halo_nodes.size(0)
     num_local_src_nodes = src_stop - src_start
 
+    # Relabel local edge index to account for local and halo nodes
     edge_index_local = local_edge_index.clone()
     edge_index_local[1] -= dst_start
     edge_index_local[0, ~is_remote_src] = local_src[~is_remote_src] - src_start
