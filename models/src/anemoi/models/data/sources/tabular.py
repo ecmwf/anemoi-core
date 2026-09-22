@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from torch.distributed import ProcessGroup
 
+from rich.tree import Tree
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources.base import _Source
@@ -456,3 +457,39 @@ class TabularSource(_Source):
             boundaries=new_boundaries,
             shard_sizes=new_shard_sizes,
         )
+
+    def tree(self, prefix: str = "") -> Tree:
+        """Return a tree representation of the tabular source.
+        
+        Example
+        -------
+        >>> source = TabularSource(...)
+        >>> tree = source.tree()
+        >>> print(tree)
+        era5 | TabularSource[torch.float32, cuda:0]
+            Dim 0 (batch): 3
+            Dim 1 (grid): 3 time slices
+                Sample I: 42312 <- 12312 + 10000 + 20000
+                Sample II: 49394 <- 20000 + 15000 + 14394
+                Sample III: 12319 <- 5000 + 4000 + 3319
+            Dim 2 (ensemble): 1
+            Dim 3 (variables): 83
+        """
+        dims = {getattr(self.layout, name): name for name in self.layout.AXES if getattr(self.layout, name) is not None}
+
+        dtype = self.data[0].dtype
+        device = self.data[0].device
+        tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{dtype}, {device}]")
+        tree.add(f"\tDim 0 (batch): {len(self.data)}")
+        for axis in range(self.data[0].ndim):
+            name = dims[axis]
+            if name == "grid":
+                tree.add(f"\tDim {axis+1} ({name}): {len(self.boundaries)} time slices")
+                for i, sample in enumerate(self.data):
+                    time_slice_lengths = [str(s.stop - s.start) for s in self.boundaries[i]]
+                    tree.add(f"\t\tSample {i+1}: {sample[0].shape[axis]} <- {' + '.join(time_slice_lengths)}")
+            else:
+                tree.add(f"\tDim {axis+1} ({name}): {self.data[0].shape[axis]}")
+
+        return tree
+    

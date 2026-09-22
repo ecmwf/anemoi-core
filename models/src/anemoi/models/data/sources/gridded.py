@@ -24,6 +24,8 @@ from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
 
+from rich.tree import Tree
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -285,3 +287,28 @@ class GriddedSource(_Source):
         idx = torch.as_tensor(idx_list, dtype=torch.long, device=self.data.device)
         new_data = self.data.index_select(self.layout.time, idx)
         return self.clone(data=new_data)
+
+    def tree(self, prefix: str = "") -> Tree:
+        """Return a tree representation of the gridded source.
+        
+        Example
+        -------
+        >>> source = GriddedSource(...)
+        >>> tree = source.tree()
+        >>> print(tree)
+        era5 | GriddedSource[torch.float32, cuda:0]
+            Dim 0 (time): 3
+            Dim 1 (grid): 40980
+            Dim 2 (ensemble): 1
+            Dim 3 (variables): 83
+        """
+        dims = {getattr(self.layout, name): name for name in self.layout.AXES if getattr(self.layout, name) is not None}
+
+        tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{self.data.dtype}, {self.data.device}]")
+        for axis in range(self.data.ndim):
+            tree.add(f"\tDim {axis} ({dims[axis]}): {self.data.shape[axis]}")
+
+        if self.shard_sizes is not None:
+            tree.add(f"\tShard sizes: {self.shard_sizes}")
+
+        return tree

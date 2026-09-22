@@ -17,6 +17,9 @@ from dataclasses import dataclass
 from dataclasses import replace
 from typing import Any
 
+from rich.console import Console
+from rich.tree import Tree
+
 import torch
 
 from anemoi.models.data.layout import TensorLayout
@@ -373,3 +376,13 @@ class _Source(ABC):
             list(indices) if not isinstance(indices, torch.Tensor) else indices, dtype=torch.long, device=tensor.device
         )
         return tensor.index_select(var_dim, idx)
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
+
+    @abstractmethod
+    def tree(self, prefix: str = "") -> Tree:
+        ...

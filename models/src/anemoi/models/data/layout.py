@@ -169,7 +169,7 @@ class TensorLayout:
 
     def __repr__(self) -> str:
         parts = []
-        for name in ("batch", "time", "ensemble", "grid", "variables"):
+        for name in self.AXES:
             value = getattr(self, name)
             if value is not None:
                 parts.append(f"{name}={value}")

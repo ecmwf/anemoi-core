@@ -93,6 +93,7 @@ class SourceSample:
                     "vary per sample. Set coordinates_are_static=False."
                 )
                 raise ValueError(msg)
+
         elif self.boundaries is not None:
             msg = "'boundaries' is only meaningful for tabular samples (layout.time_in_grid=True)."
             raise ValueError(msg)
