@@ -21,8 +21,12 @@ class BaseICONNodeBuilder(BaseNodeBuilder):
 
     icon_node_class: type[ICONCellDataGrid] | type[ICONMultiMesh]
 
-    def __init__(self, name: str, grid_filename: str, max_level: int | None = None, min_level: int | None = None) -> None:
-        self.icon_nodes = self.icon_node_class(icon_grid_filename=grid_filename, max_level=max_level, min_level=min_level)
+    def __init__(
+        self, name: str, grid_filename: str, max_level: int | None = None, min_level: int | None = None
+    ) -> None:
+        self.icon_nodes = self.icon_node_class(
+            icon_grid_filename=grid_filename, max_level=max_level, min_level=min_level
+        )
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"icon_nodes"}
 
