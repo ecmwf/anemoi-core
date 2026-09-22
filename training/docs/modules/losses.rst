@@ -558,42 +558,15 @@ Supported transforms include:
   known ``x_dim`` and ``y_dim``.
 * ``DCT2D``: 2D Discrete Cosine Transform for regular 2D fields. This transform requires
   the optional dependency ``torch-dct``.
-* ``RegularSHT``: SHT on full longitude rings with Gaussian or equally spaced latitudes including both poles.
-  Select ``regular_sht`` and specify ``nlat``, optional ``nlon`` (defaults to ``2 * nlat``),
-  and ``latitude_grid`` (``legendre-gauss`` by default, or ``equiangular-poles``).
 * ``ReducedSHT``: Spherical harmonic transform (SHT) on ECMWF's traditional reduced Gaussian grid. This can handle the
   native grid of ERA5 such as N320.
 * ``OctahedralSHT``: Spherical harmonic transform (SHT) on the octahedral reduced Gaussian grid.
 
-For a global 1-degree grid (360 longitudes by 181 latitudes, retriebed via mars), use:
-
-.. code-block:: yaml
-
-   transform: regular_sht
-   nlat: 181
-   nlon: 360
-   latitude_grid: equiangular-poles
-   truncation: 90
-
-Here ``equiangular-poles`` includes both poles, ordered north to south:
-90, 89, ..., -89, -90 degrees for 181 rows. Longitudes increase eastward from
-0 degrees in steps of ``360 / nlon``, with no duplicate 360-degree column.
-Flatten with longitude varying fastest. The equally spaced latitude transform
-uses `Clenshaw-Curtis quadrature <https://dlmf.nist.gov/3.5.iv>`_. To resolve
-all retained spherical harmonics, it requires ``2 * truncation < nlat`` and
-``2 * truncation < nlon``. Forward/inverse roundtrips recover fields restricted
-to those harmonics; higher frequencies are removed by truncation.
-
-``RegularSHT`` and ``InverseRegularSHT`` accept the same ``nlat``, ``nlon``,
-``latitude_grid`` and ``truncation`` arguments. The inverse consumes coefficients
-with shape ``[..., l, m]`` and returns ``[..., grid_points]``; move the variable
-axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
-
 .. note::
 
-   Forward SHT wrappers expect flattened grid points:
-   ``[batch, time, ensemble, grid_points, variables]`` and return spectral coefficients with
-   shape ``[batch, time, ensemble, l, m, variables]`` where ``l = truncation + 1``.
+   SHT-based transforms expect a flattened reduced-grid ordering:
+   ``[batch, ensemble, grid_points, variables]`` and return spectral coefficients with
+   shape ``[batch, ensemble, l, m, variables]`` where ``l = truncation + 1``.
 
 .. note::
 
@@ -610,7 +583,7 @@ axis ahead of ``l, m`` when passing the forward wrapper's output to the inverse.
    that will restrict the grid to the region specified by the ``output_mask`` of LAM models.
 
    ``subgrid`` is only supported for the Cartesian transforms (``FFT2D`` / ``DCT2D``). Spherical harmonic
-   transforms (``RegularSHT`` / ``ReducedSHT`` / ``OctahedralSHT``) compute the spectra over the whole domain and reject an
+   transforms (``ReducedSHT`` / ``OctahedralSHT``) compute the spectra over the whole domain and reject an
    explicit ``subgrid``.
 
    For example, to restrict an ``FFT2D`` loss to the first 100 gridpoints (a tuple) or to the LAM output
@@ -782,7 +755,7 @@ wavenumber :math:`m`, the loss is
 
 The chosen spectral transform must provide a ``power_spectral_density``
 method, so ``PowerSpectrumLoss`` currently supports the SHT-based
-transforms (``regular_sht``, ``reduced_sht``, ``octahedral_sht``). For these,
+transforms (``reduced_sht``, ``octahedral_sht``). For these,
 :math:`l` is the total wavenumber and :math:`m` the zonal wavenumber.
 
 .. note::

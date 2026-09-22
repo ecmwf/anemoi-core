@@ -11,7 +11,6 @@
 import gc
 import logging
 from collections.abc import Callable
-from typing import Literal
 
 import numpy as np
 import torch
@@ -24,44 +23,6 @@ from torch.nn import functional as F
 from anemoi.models.layers.ring_fft import RingFFT
 
 LOGGER = logging.getLogger(__name__)
-
-LatitudeGrid = Literal["legendre-gauss", "equiangular-poles"]
-
-
-def latitude_quadrature(nlat: int, latitude_grid: LatitudeGrid) -> tuple[np.ndarray, np.ndarray]:
-    """Return north-to-south colatitudes and integration weights in cos(theta).
-
-    ``equiangular-poles`` includes both poles: theta[j] = pi * j / (nlat - 1).
-    Clenshaw-Curtis quadrature integrates polynomials through degree nlat - 1
-    on these nodes. See https://dlmf.nist.gov/3.5.iv for the quadrature rule.
-    """
-    if nlat < 1:
-        raise ValueError("nlat must be positive")
-    if latitude_grid == "legendre-gauss":
-        nodes, weights = legendre_gauss_weights(nlat)
-        return np.arccos(nodes[::-1]), weights[::-1].copy()
-    if latitude_grid == "equiangular-poles":
-        if nlat < 2:
-            raise ValueError("equiangular-poles requires at least two latitude rows")
-        intervals = nlat - 1
-        theta = np.linspace(0.0, np.pi, nlat, dtype=np.float64)
-        k = np.arange(1, intervals // 2 + 1, dtype=np.float64)
-        coefficients = 2.0 / (4.0 * k**2 - 1.0)
-        if intervals % 2 == 0:
-            coefficients[-1] *= 0.5
-        weights = (2.0 / intervals) * (1.0 - np.cos(2.0 * theta[:, None] * k) @ coefficients)
-        # The endpoint nodes have half the weight of the corresponding cosine sum.
-        weights[[0, -1]] *= 0.5
-        return theta, weights
-    raise ValueError(f"Unknown latitude_grid={latitude_grid!r}; use 'legendre-gauss' or 'equiangular-poles'")
-
-
-def _sht_quadrature(nlat: int, truncation: int, latitude_grid: LatitudeGrid) -> tuple[np.ndarray, np.ndarray]:
-    """Validate the latitude sampling and construct the shared SHT/ISHT quadrature."""
-    max_truncation = (nlat - 1) // 2 if latitude_grid == "equiangular-poles" else nlat - 1
-    if not 0 <= truncation <= max_truncation:
-        raise ValueError(f"Truncation must be between 0 and {max_truncation} for {nlat} {latitude_grid} latitudes")
-    return latitude_quadrature(nlat, latitude_grid)
 
 
 def _ring_fft_bands(lons_per_lat: list[int], graphed: bool) -> tuple[ModuleList, list[slice]]:
@@ -218,13 +179,7 @@ class SphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(
-        self,
-        lons_per_lat: list[int],
-        truncation: int,
-        use_graphed_rfft: bool = False,
-        latitude_grid: LatitudeGrid = "legendre-gauss",
-    ) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_rfft: bool = False) -> None:
         r"""Initializes SphericalHarmonicTransform.
 
         Parameters
@@ -235,8 +190,6 @@ class SphericalHarmonicTransform(Module):
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array
         use_graphed_rfft : bool, optional
             Whether to use CUDA graphs for the reduced grid rFFT. Default is False.
-        latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
-            Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
         """
 
         super().__init__()
@@ -244,7 +197,9 @@ class SphericalHarmonicTransform(Module):
         self.lons_per_lat = lons_per_lat
         self.nlat = len(self.lons_per_lat)
         self.truncation = truncation
-        theta, weight = _sht_quadrature(self.nlat, truncation, latitude_grid)
+        assert (
+            0 < self.truncation <= self.nlat
+        ), f"Truncation {self.truncation} must be between 1 and number of latitudes {self.nlat}"
         self.n_grid_points = sum(self.lons_per_lat)
 
         # Use more efficient batched rfft for regular grids
@@ -257,6 +212,10 @@ class SphericalHarmonicTransform(Module):
         else:
             self.rfft_rings = self.rfft_rings_regular
         LOGGER.info(f"SphericalHarmonicTransform: Using {self.rfft_rings.__name__} for rfft_rings")
+
+        # Compute Gaussian latitudes and quadrature weights
+        theta, weight = legendre_gauss_weights(self.nlat)
+        theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
         pct = legpoly(self.truncation, self.truncation, np.cos(theta))
@@ -377,13 +336,7 @@ class InverseSphericalHarmonicTransform(Module):
     Inspired by the SHT in Nvidia's torch-harmonics.
     """
 
-    def __init__(
-        self,
-        lons_per_lat: list[int],
-        truncation: int,
-        use_graphed_irfft: bool = False,
-        latitude_grid: LatitudeGrid = "legendre-gauss",
-    ) -> None:
+    def __init__(self, lons_per_lat: list[int], truncation: int, use_graphed_irfft: bool = False) -> None:
         r"""Initializes InverseSphericalHarmonicTransform.
 
         Parameters
@@ -394,14 +347,11 @@ class InverseSphericalHarmonicTransform(Module):
             Maximum wavenumber. truncation + 1 is used to size the Legendre polynomials array.
         use_graphed_irfft : bool, optional
             Whether to use CUDA graphs for the reduced grid irFFT. Default is False.
-        latitude_grid : {"legendre-gauss", "equiangular-poles"}, optional
-            Gaussian latitude nodes or equally spaced rows including both poles, ordered north to south.
         """
 
         super().__init__()
 
         nlat = len(lons_per_lat)
-        theta, _ = _sht_quadrature(nlat, truncation, latitude_grid)
 
         self.truncation = truncation
         self.nlat = nlat
@@ -418,6 +368,10 @@ class InverseSphericalHarmonicTransform(Module):
         else:
             self.irfft_rings = self.irfft_rings_regular
         LOGGER.info(f"InverseSphericalHarmonicTransform: Using {self.irfft_rings.__name__} for irfft_rings")
+
+        # Compute Gaussian latitudes (don't need quadrature weights for the inverse)
+        theta, _ = legendre_gauss_weights(nlat)
+        theta = np.flip(np.arccos(theta))
 
         # Precompute associated Legendre polynomials
         pct = legpoly(self.truncation, self.truncation, np.cos(theta), inverse=True)
