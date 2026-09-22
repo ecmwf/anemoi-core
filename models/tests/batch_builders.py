@@ -31,7 +31,7 @@ import torch
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import make_source
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ LOGGER = logging.getLogger(__name__)
 _SPEC_FIELDS = ("name", "variables", "layout", "statistics", "grid_size", "coordinates_are_static", "metadata")
 
 
-def build_source(**kwargs) -> _Source:
+def build_source(**kwargs) -> Source:
     """Build one source, taking the spec's fields flat alongside the payload.
 
     >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
@@ -78,7 +78,7 @@ def build_batch(
     boundaries = boundaries or {}
     static = frozenset(static_coords)
 
-    sources: dict[str, _Source] = {}
+    sources: dict[str, Source] = {}
     for name, payload in data.items():
         if name not in layouts or name not in variables:
             missing = "layout" if name not in layouts else "variables"

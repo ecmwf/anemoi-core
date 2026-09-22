@@ -66,7 +66,7 @@ if TYPE_CHECKING:
 class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
-        if isinstance(y_pred, _Source):
+        if isinstance(y_pred, Source):
             return y_pred.apply_loss(y, lambda pred, target, **_kwargs: torch.mean((pred - target) ** 2))
         return torch.mean((y_pred - y) ** 2)
 
@@ -273,7 +273,7 @@ def _assert_step_return_format(
     for pred in y_preds:
         assert isinstance(pred, dict)
         assert dataset_name in pred
-        payload = pred[dataset_name].data if isinstance(pred[dataset_name], _Source) else pred[dataset_name]
+        payload = pred[dataset_name].data if isinstance(pred[dataset_name], Source) else pred[dataset_name]
         assert isinstance(payload, torch.Tensor)
 
 
@@ -1065,11 +1065,11 @@ class _FakeImputingProcessors:
 
     def __call__(
         self,
-        view: _Source,
+        view: Source,
         in_place: bool = False,
         skip_imputation: bool = False,
         **_kwargs: Any,
-    ) -> _Source:
+    ) -> Source:
         del in_place
         if skip_imputation:
             return view
@@ -1367,7 +1367,7 @@ def _gridded_view(
     data: torch.Tensor,
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-) -> _Source:
+) -> Source:
     """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSource."""
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     return build_source(
@@ -1445,7 +1445,7 @@ def _tabular_view(
     data: list[torch.Tensor],
     variables: list[str],
     statistics: dict[str, torch.Tensor],
-) -> _Source:
+) -> Source:
     """Wrap a list of ``(grid, variables)`` tensors in a TabularSource (sparse obs)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     return build_source(
@@ -1830,7 +1830,7 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
         def __init__(self) -> None:
             self.call = None
 
-        def sample(self, *args, **kwargs) -> _Source:
+        def sample(self, *args, **kwargs) -> Source:
             self.call = {"args": args, "kwargs": kwargs}
             return kwargs["target_template"]
 
@@ -3065,18 +3065,18 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
 
     def _prepare_tensors_stub(
         self: EnsembleTraining,
-        y_pred: _Source,
-        y: _Source,
+        y_pred: Source,
+        y: Source,
         validation_mode: bool = False,
         dataset_name: str | None = None,
-    ) -> tuple[Source, _Source, slice]:
+    ) -> tuple[Source, Source, slice]:
         del self, validation_mode, dataset_name
         return y_pred, y, slice(0, 1)
 
     def _compute_loss_stub(
         self: EnsembleTraining,
-        y_pred: _Source,
-        y: _Source,
+        y_pred: Source,
+        y: Source,
         **kwargs: Any,
     ) -> torch.Tensor:
         del self, y_pred
@@ -3086,8 +3086,8 @@ def test_ensemble_compute_dataset_loss_metrics_forwards_data_full_layout(
 
     def _compute_metrics_stub(
         self: EnsembleTraining,
-        y_pred: _Source,
-        y: _Source,
+        y_pred: Source,
+        y: Source,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         del self, y_pred

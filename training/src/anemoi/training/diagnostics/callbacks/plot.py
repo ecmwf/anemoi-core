@@ -32,7 +32,7 @@ from pytorch_lightning.callbacks import Callback
 from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
-from anemoi.models.data import _Source
+from anemoi.models.data import Source
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -75,14 +75,14 @@ def _unwrap_plot_fn(plot_fn: Any) -> Any:
 
 def _allgather_view(
     pl_module: pl.LightningModule,
-    prediction: _Source,
-) -> _Source:
+    prediction: Source,
+) -> Source:
     """All-gather a per-dataset prediction :class:`Source`.
 
     Grid-shard metadata now lives on the :class:`Source`, so the view gathers
     itself given the model communication group.
     """
-    if not isinstance(prediction, _Source):
+    if not isinstance(prediction, Source):
         msg = (
             f"Prediction for dataset {prediction.name!r} is a raw {type(prediction).__name__}, "
             "not a Source. Grid-shard metadata now lives on the Batch/Source, "
@@ -649,18 +649,18 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         self,
         pl_module: pl.LightningModule,
         dataset_name: str,
-        outputs: list[dict[str, _Source]],
+        outputs: list[dict[str, Source]],
         members: int | list[int] | None = 0,
     ) -> np.ndarray:
         """Post-process and mask per-step output Sources for plotting."""
         post_processor = self.post_processors[dataset_name]
         output_indices_full = pl_module.data_indices[dataset_name].data.output.full
 
-        def _post_process(prediction: _Source) -> torch.Tensor:
+        def _post_process(prediction: Source) -> torch.Tensor:
             assert isinstance(
                 prediction,
-                _Source,
-            ), f"Expected a prediction of type _Source, got {type(prediction)}."
+                Source,
+            ), f"Expected a prediction of type Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
             processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
@@ -670,7 +670,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 return processed[self.sample_idx].unsqueeze(0)
             return processed[self.sample_idx : self.sample_idx + 1]
 
-        def _ensemble_axis(view: _Source, tensor: torch.Tensor) -> int | None:
+        def _ensemble_axis(view: Source, tensor: torch.Tensor) -> int | None:
             """Ensemble axis of the tensor, or None."""
             if not view.layout.has_axis("ensemble"):
                 return None
@@ -678,7 +678,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 return view.layout.axis("ensemble", ndim=tensor.ndim - 1) + 1
             return view.layout.axis("ensemble", ndim=tensor.ndim)
 
-        def _select_members(view: _Source) -> torch.Tensor:
+        def _select_members(view: Source) -> torch.Tensor:
             tensor = _post_process(view)
             ensemble_axis = _ensemble_axis(view, tensor)
             if ensemble_axis is None:
@@ -694,7 +694,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         )
 
     @staticmethod
-    def _align_output_metadata(view: _Source, output_indices_full: Any) -> _Source:
+    def _align_output_metadata(view: Source, output_indices_full: Any) -> Source:
         """Re-slice a prediction view's metadata to its (model-output) variables."""
         data0 = view.data[0] if isinstance(view.data, list) else view.data
         var_width = data0.shape[view.layout.variables]
@@ -749,13 +749,13 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         step_kwargs = next(iter(task.steps("validation")))
         output_indices = task.get_batch_output_indices(**step_kwargs)
 
-        def _select_member(field: torch.Tensor, view: _Source) -> torch.Tensor:
+        def _select_member(field: torch.Tensor, view: Source) -> torch.Tensor:
             """Reduce a sparse-obs sample to (grid, vars) by taking one ensemble member (index-0)."""
             if view.layout.ensemble is None:
                 return field
             return field.select(view.layout.axis("ensemble", ndim=field.ndim), 0)  # member 0
 
-        def _select_pred_members(field: torch.Tensor, view: _Source) -> torch.Tensor:
+        def _select_pred_members(field: torch.Tensor, view: Source) -> torch.Tensor:
             """Select the requested member(s) from a sparse-obs predicted ensemble."""
             if view.layout.ensemble is None:
                 return field
@@ -765,7 +765,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 field = field.index_select(axis, torch.tensor(index, device=field.device))
             return field.squeeze(axis) if field.shape[axis] == 1 else field.movedim(axis, 0)
 
-        def _field_and_coords(sub_view: _Source) -> tuple[np.ndarray, np.ndarray]:
+        def _field_and_coords(sub_view: Source) -> tuple[np.ndarray, np.ndarray]:
             field = _select_member(sub_view.data[self.sample_idx], sub_view)  # (grid, vars)
             coords = sub_view.coordinates[self.sample_idx]
             return field.detach().cpu().numpy(), np.rad2deg(coords.detach().cpu().numpy())
@@ -780,7 +780,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         target_view = target_batch[dataset_name]
         y_true, output_latlons = _field_and_coords(target_view)
 
-        def _output_field(output: Batch | _Source) -> np.ndarray:
+        def _output_field(output: Batch | Source) -> np.ndarray:
             output_view = output[dataset_name] if isinstance(output, Batch) else output
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
@@ -1034,7 +1034,7 @@ class BatchOutputPlot(BasePlotAdditionalMetrics):
         auxiliary_output = output.plot_kwargs.get("auxiliary_output")
         if auxiliary_output is None:
             return {}
-        if any(not isinstance(value, (Batch, _Source)) for value in auxiliary_output.values()):
+        if any(not isinstance(value, (Batch, Source)) for value in auxiliary_output.values()):
             msg = (
                 "auxiliary_output is a dict of raw tensors without shard metadata; "
                 "cannot all-gather. Grid-shard info now lives on the Batch/Source - "

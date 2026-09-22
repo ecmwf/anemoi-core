@@ -15,7 +15,7 @@ from typing import Optional
 import torch
 from torch import nn
 
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
@@ -123,11 +123,11 @@ class BasePreprocessor(nn.Module, ABC):
 
     def forward(
         self,
-        x: _Source,
+        x: Source,
         in_place: bool = True,
         inverse: bool = False,
         **kwargs,
-    ) -> _Source:
+    ) -> Source:
         """Process the input tensor.
 
         Parameters
@@ -181,7 +181,7 @@ class Processors(nn.Module):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
 
-    def forward(self, x: _Source, in_place: bool = True, **kwargs) -> _Source:
+    def forward(self, x: Source, in_place: bool = True, **kwargs) -> Source:
         """Process the input tensor.
 
         Parameters

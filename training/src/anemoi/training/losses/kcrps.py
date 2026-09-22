@@ -171,8 +171,8 @@ class CRPS(BaseLoss):
 
     def forward(
         self,
-        pred: "_Source",
-        target: "_Source",
+        pred: "Source",
+        target: "Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[int, ...] | None = None,

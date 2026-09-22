@@ -18,7 +18,7 @@ from batch_builders import build_batch
 from anemoi.models.data import SourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 
 
 def _gridded_layout() -> TensorLayout:
@@ -89,7 +89,7 @@ def test_batch_basic_construction_and_access() -> None:
 
     # Mapping behaviour: batch[name] returns a rich per-dataset Source.
     view = batch["a"]
-    assert isinstance(view, _Source)
+    assert isinstance(view, Source)
     assert view.data is data["a"]
     assert list(batch.keys()) == ["a"]
     assert next(iter(batch.values())).data is data["a"]

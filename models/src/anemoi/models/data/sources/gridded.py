@@ -17,7 +17,7 @@ from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources import FLATTEN_PATTERN
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
@@ -29,7 +29,7 @@ from rich.tree import Tree
 LOGGER = logging.getLogger(__name__)
 
 
-class GriddedSource(_Source):
+class GriddedSource(Source):
     """Gridded data source."""
 
     def __post_init__(self):

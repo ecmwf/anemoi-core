@@ -25,7 +25,7 @@ from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data.spec import SourceSpec
@@ -43,7 +43,7 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     return {key: value for key in keys}
 
 
-def build_source(**kwargs) -> _Source:
+def build_source(**kwargs) -> Source:
     """Build one source, taking the spec's fields flat alongside the payload.
 
     >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
@@ -80,7 +80,7 @@ class Batch:
     ``batch["era5"].layout``, ``batch["era5"].variables``.
     """
 
-    sources: dict[str, _Source]
+    sources: dict[str, Source]
 
     @property
     def spec(self) -> dict[str, SourceSpec]:
@@ -144,7 +144,7 @@ class Batch:
         lines.append(")")
         return "\n".join(lines)
 
-    def __getitem__(self, dataset_name: str) -> _Source:
+    def __getitem__(self, dataset_name: str) -> Source:
         """Return the source for one dataset."""
         try:
             return self.sources[dataset_name]
@@ -161,7 +161,7 @@ class Batch:
     def __iter__(self) -> Iterator[str]:
         return iter(self.sources)
 
-    def get(self, dataset_name: str, default: Any = None) -> _Source | Any:
+    def get(self, dataset_name: str, default: Any = None) -> Source | Any:
         """Return the source for ``dataset_name``, or ``default`` if absent."""
         return self.sources.get(dataset_name, default)
 
@@ -177,11 +177,11 @@ class Batch:
         """Return ``(name, source)`` pairs (mapping protocol)."""
         return self.sources.items()
 
-    def with_sources(self, sources: dict[str, _Source]) -> "Batch":
+    def with_sources(self, sources: dict[str, Source]) -> "Batch":
         """Return a new batch wrapping ``sources``."""
         return Batch(sources=sources)
 
-    def replace(self, source_name: str, source: _Source) -> "Batch":
+    def replace(self, source_name: str, source: Source) -> "Batch":
         """Return a new batch with one dataset replaced."""
         return Batch(sources={**self.sources, source_name: source})
 
@@ -348,7 +348,7 @@ class Batch:
         # Discover the dataset names from the first sample; assume consistent.
         first = samples[0]
 
-        sources: dict[str, _Source] = {}
+        sources: dict[str, Source] = {}
         for name, head in first.items():
             per_sample = [sample[name] for sample in samples]
 

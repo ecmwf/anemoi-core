@@ -297,8 +297,8 @@ class LossVariableMapper(BaseLossWrapper):
 
     def forward(
         self,
-        pred: "_Source",
-        target: "_Source",
+        pred: "Source",
+        target: "Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[Any, ...] | None = None,

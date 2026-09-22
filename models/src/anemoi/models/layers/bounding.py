@@ -48,7 +48,7 @@ class BaseBounding(nn.Module, ABC):
         """Apply bounding to the specified indices in the data tensor."""
         ...
 
-    def forward(self, x: "_Source") -> "_Source":
+    def forward(self, x: "Source") -> "Source":
         """Applies the bounding to the predictions.
 
         Parameters
@@ -146,7 +146,7 @@ class NormalizedReluBounding(BaseBounding):
         data[..., indices] = torch.nn.functional.relu(data[..., indices] - norm_min_val) + norm_min_val
         return data
 
-    def forward(self, x: "_Source") -> "_Source":
+    def forward(self, x: "Source") -> "Source":
         data_index = self._get_indices(x.name_to_index)
         norm_min_val = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.data.device)
         x = x.apply_func(self.bound, indices=data_index, norm_min_val=norm_min_val)

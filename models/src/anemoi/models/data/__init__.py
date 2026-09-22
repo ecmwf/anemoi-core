@@ -12,7 +12,7 @@ from .batch import Batch
 from .flat import FlatSource
 from .layout import TensorLayout
 from .sample import SourceSample
-from .sources.base import _Source
+from .sources.base import Source
 from .sources.gridded import GriddedSource
 from .sources.tabular import TabularSource
 from .spec import SourceSpec
@@ -25,6 +25,6 @@ __all__ = [
     "TensorLayout",
     "GriddedSource",
     "TabularSource",
-    "_Source",
+    "Source",
     "FlatSource",
 ]

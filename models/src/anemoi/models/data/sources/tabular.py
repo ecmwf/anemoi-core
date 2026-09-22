@@ -20,7 +20,7 @@ from torch.distributed import ProcessGroup
 from rich.tree import Tree
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
@@ -57,7 +57,7 @@ def _fold_members(source: "TabularSource", sample: torch.Tensor) -> torch.Tensor
     return sample.flatten(ensemble_axis, grid_axis)
 
 
-class TabularSource(_Source):
+class TabularSource(Source):
     """Tabular data source."""
 
     def __post_init__(self):

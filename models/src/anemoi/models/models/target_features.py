@@ -24,7 +24,7 @@ from anemoi.models.distributed.graph import shard_tensor
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
-    from anemoi.models.data.sources.base import _Source
+    from anemoi.models.data.sources.base import Source
     from anemoi.models.data_adapter import FlatSource
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.models.base import BaseGraphModel
@@ -86,7 +86,7 @@ class DecodingTargetFeature(ABC):
     @abstractmethod
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -96,7 +96,7 @@ class DecodingTargetFeature(ABC):
 
     def tensor(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -128,7 +128,7 @@ class CoordinatesFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -159,7 +159,7 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -194,7 +194,7 @@ class TargetForcingsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -228,7 +228,7 @@ class PrognosticsFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -270,7 +270,7 @@ class TrainableParametersFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -307,7 +307,7 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -349,7 +349,7 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def _compute(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,
@@ -359,7 +359,7 @@ class CompositeTargetFeature(DecodingTargetFeature):
 
     def tensor(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
         batch_size: int,

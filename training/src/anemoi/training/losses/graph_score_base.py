@@ -15,7 +15,7 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -334,7 +334,7 @@ class BaseGraphScoreLoss(BaseLoss):
         )
         return score, is_sharded
 
-    def forward(self, pred: _Source, target: _Source, squash: bool = True, **kwargs) -> torch.Tensor:
+    def forward(self, pred: Source, target: Source, squash: bool = True, **kwargs) -> torch.Tensor:
         """Evaluate the score using the source views' tensor layout."""
         return pred.apply_pairwise(target, self._evaluate_loss_tensor, squash=squash, **kwargs)
 

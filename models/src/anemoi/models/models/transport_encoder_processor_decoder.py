@@ -47,7 +47,7 @@ from anemoi.models.transport.data_helpers import map_data
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
-    from anemoi.models.data.sources.base import _Source
+    from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -125,8 +125,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: "_Source",
-        y_noised: "_Source",
+        x: "Source",
+        y_noised: "Source",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -183,7 +183,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             y_noised_features.timedeltas,
         )
 
-    def _assemble_output(self, x_out: "FlatSource", x_skip, target: "_Source", dtype: torch.dtype, dataset_name: str):
+    def _assemble_output(self, x_out: "FlatSource", x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
         del x_skip
         pred = unflatten(target, x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
@@ -205,7 +205,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _embed_noise_conditioning(self, sigma: torch.Tensor) -> torch.Tensor:
         return self.noise_cond_mlp(self.noise_embedder(sigma))
 
-    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "_Source") -> torch.Tensor:
+    def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "Source") -> torch.Tensor:
         """Repeat noise embeddings over the actual flattened nodes in a source view."""
         if not isinstance(view.data, list):
             grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
@@ -245,7 +245,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         noise_cond: torch.Tensor,
         dataset_name: str,
-        data_view: Optional["_Source"] = None,
+        data_view: Optional["Source"] = None,
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
 
@@ -1058,8 +1058,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
     def _assemble_input(
         self,
-        x: "_Source",
-        y_noised: "_Source",
+        x: "Source",
+        y_noised: "Source",
         bse: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,

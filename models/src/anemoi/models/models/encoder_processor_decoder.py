@@ -39,7 +39,7 @@ from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
-    from anemoi.models.data.sources.base import _Source
+    from anemoi.models.data.sources.base import Source
     from anemoi.models.data_adapter import FlatSource
 
 LOGGER = logging.getLogger(__name__)
@@ -319,11 +319,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_input(
         self,
-        x: "_Source",
+        x: "Source",
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, "_Source", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
+    ) -> tuple[torch.Tensor, torch.Tensor, "Source", ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
         x_flat: "FlatSource" = x.flatten()  # flatten data to (nodes, features)
@@ -365,9 +365,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _assemble_target(
         self,
-        x_input_data: "_Source",
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "_Source",
+        x_target: "Source",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -451,10 +451,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x_out: torch.Tensor,
         x_skip: torch.Tensor | None,
-        target: "_Source",
+        target: "Source",
         dtype: torch.dtype,
         dataset_name: str,
-    ) -> "_Source":
+    ) -> "Source":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
@@ -508,7 +508,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
     def _prepare_encoder_source(
         self,
-        x: "_Source",
+        x: "Source",
         *,
         dataset_name: str,
         batch_size: int,

@@ -25,7 +25,7 @@ from anemoi.training.checkpoint import validate_pipeline_health
 from anemoi.training.checkpoint.exceptions import CheckpointValidationError
 
 
-class _Source(PipelineStage):
+class Source(PipelineStage):
     """Stage whose class name contains 'Source' so the health check recognises it."""
 
     async def process(self, context: CheckpointContext) -> CheckpointContext:
@@ -229,6 +229,6 @@ class TestPipelineIntegration:
     @pytest.mark.asyncio
     async def test_health_check_passes_for_realistic_pipeline(self) -> None:
         model = nn.Linear(4, 2)
-        pipeline = CheckpointPipeline([_Source(), _LoaderMarksWeights()])
+        pipeline = CheckpointPipeline([Source(), _LoaderMarksWeights()])
         result = await pipeline.execute(CheckpointContext(model=model))
         assert validate_pipeline_health(result) is True

@@ -26,7 +26,7 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 
 if TYPE_CHECKING:
-    from anemoi.models.data.sources.base import _Source
+    from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class SourceSpec(ABC):
         batch_size: int = 1,
         device: torch.device | str | None = None,
         dtype: torch.dtype = torch.float32,
-    ) -> "_Source":
+    ) -> "Source":
         """Return a source carrying this spec and no data.
 
         The payload has the full variable axis but a zero-length grid axis, and a
@@ -154,7 +154,7 @@ class SourceSpec(ABC):
 
         Returns
         -------
-        _Source
+        Source
             A :class:`~anemoi.models.data.source.GriddedSource` or
             :class:`~anemoi.models.data.source.TabularSource` matching this
             spec's layout.

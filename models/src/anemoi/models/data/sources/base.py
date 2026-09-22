@@ -96,7 +96,7 @@ def _cached_static_coords(name, value, device, *, cache: dict, non_blocking: boo
 
 
 @dataclass(frozen=True, slots=True)
-class _Source(ABC):
+class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
     Bundles the per-dataset payload (data, coordinates, timedeltas) with
@@ -206,7 +206,7 @@ class _Source(ABC):
         """
         return self.spec.name_to_index
 
-    def clone(self, **kwargs) -> "_Source":
+    def clone(self, **kwargs) -> "Source":
         """Return a new view with replacements, sharing fields that are not replaced.
 
         To change what the spec says, replace the spec::
@@ -215,7 +215,7 @@ class _Source(ABC):
         """
         return replace(self, **kwargs)
 
-    def select(self, **kwargs) -> "_Source":
+    def select(self, **kwargs) -> "Source":
         """Return a new view restricted to the given indices along logical dimensions.
 
         Example
@@ -234,7 +234,7 @@ class _Source(ABC):
                 )
         return source
 
-    def contiguous(self) -> "_Source":
+    def contiguous(self) -> "Source":
         """Return a new view whose underlying data tensors are contiguous."""
         return self.apply_func(lambda t, **_: t.contiguous())
 
@@ -244,7 +244,7 @@ class _Source(ABC):
         *,
         non_blocking: bool = True,
         static_coord_cache: dict[str, torch.Tensor] | None = None,
-    ) -> "_Source":
+    ) -> "Source":
         """Return a copy of this source with every tensor on ``device``.
 
         Data, coordinates and timedeltas move together; consumers rely on that, since
@@ -274,7 +274,7 @@ class _Source(ABC):
             ),
         )
 
-    def pin_memory(self) -> "_Source":
+    def pin_memory(self) -> "Source":
         """Return a copy with host memory pinned. Static coordinates are left untouched.
 
         Pinning static coordinates would buy nothing: with a ``static_coord_cache``
@@ -296,22 +296,22 @@ class _Source(ABC):
         pass
 
     @abstractmethod
-    def select_time(self, indices: slice | Sequence[int] | int) -> "_Source":
+    def select_time(self, indices: slice | Sequence[int] | int) -> "Source":
         """Return a new view restricted to the given time indices."""
         pass
 
     @abstractmethod
-    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "_Source":
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "Source":
         """Return a new view restricted to the given variable indices."""
         pass
 
     @abstractmethod
-    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "_Source":
+    def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "Source":
         """Apply a function to this view, returning a new view with the same metadata."""
         pass
 
     @abstractmethod
-    def apply_pairwise(self, other: "_Source", func: Callable, **kwargs) -> torch.Tensor:
+    def apply_pairwise(self, other: "Source", func: Callable, **kwargs) -> torch.Tensor:
         """Combine this source with another through ``func``, returning a tensor.
 
         The pairwise counterpart of :meth:`apply_func`; a loss is the motivating
@@ -321,7 +321,7 @@ class _Source(ABC):
         pass
 
     @abstractmethod
-    def shard(self, group: ProcessGroup | None) -> "_Source":
+    def shard(self, group: ProcessGroup | None) -> "Source":
         """Split this source across ``group`` along its grid axis.
 
         The inverse of :meth:`allgather`, and deliberately its neighbour: shard
@@ -335,7 +335,7 @@ class _Source(ABC):
         pass
 
     @abstractmethod
-    def allgather(self, group: ProcessGroup | None) -> "_Source":
+    def allgather(self, group: ProcessGroup | None) -> "Source":
         """Allgather this view across the given process group.
 
         This is a collective operation that synchronizes all processes in
@@ -360,7 +360,7 @@ class _Source(ABC):
 
         Returns
         -------
-        _Source
+        Source
             A new view with allgathered data, or self when already full-grid.
         """
         pass

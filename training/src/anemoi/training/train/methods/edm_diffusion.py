@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data import Batch
-    from anemoi.models.data.sources.base import _Source
+    from anemoi.models.data.sources.base import Source
 
 
 class EDMDiffusionTransportObjective(TransportObjective):
@@ -75,8 +75,8 @@ class EDMDiffusionTransportObjective(TransportObjective):
 
     def compute_loss(
         self,
-        y_pred: _Source,
-        y: _Source,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,

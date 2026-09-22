@@ -23,7 +23,7 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
-from anemoi.models.data.sources.base import _Source
+from anemoi.models.data.sources.base import Source
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -48,7 +48,7 @@ class BasePlotAdapter(ABC):
         Accepts either a Source or a plain array/tensor
         whose leading axis is the time axis.
         """
-        if isinstance(data, _Source):
+        if isinstance(data, Source):
             return data.select_time(time_indices).data
         return data[time_indices, ...]
 
