@@ -11,7 +11,10 @@ import einops
 import torch
 import torch.nn as nn
 
+from anemoi.models.layers.cls_pooling import ClsSelfAttentionPool
 from anemoi.models.layers.feature_tokenizer import FeatureTokenizer
+from anemoi.models.layers.feature_tokenizer import Tokenizer
+from anemoi.models.layers.feature_tokenizer import sinusoidal_positional_encoding
 from anemoi.models.layers.set_transformer import PMA
 
 
@@ -64,3 +67,74 @@ class Embedder(nn.Module):
             grid=grid,
         )
         return torch.cat((x_vars, node_attributes_data), dim=-1)
+
+
+class HierarchicalEmbedder(nn.Module):
+    """Pools a node's raw per-variable values in two stages: first the variables at each
+    height/pressure level into one token per level, then the level tokens into one final
+    embedding - instead of pooling every variable across every level at once. Lets the model
+    treat "which physical variable" (level-independent) and "which level" (added only once
+    the per-level summary already exists) as separate concerns.
+    """
+
+    def __init__(self, feature_names, hidden_dim, d_model, nhead, mean=None, std=None):
+        super().__init__()
+        self.feature_names = feature_names
+        tokenizer = Tokenizer(feature_names)
+
+        if mean is None:
+            mean = torch.zeros(len(feature_names))
+        if std is None:
+            std = torch.ones(len(feature_names))
+        self.register_buffer("mean", mean)
+        self.register_buffer("std", std)
+
+        self.variable_embedding = nn.Embedding(tokenizer.num_variables, hidden_dim)
+        self.register_buffer("variable_idx", torch.tensor(tokenizer.variable_idx))
+
+        # group feature indices by level (0 = no-level, from parse_feature_name) - fixed at
+        # construction time from feature_names, one group becomes one stage-1 token.
+        groups: dict[float, list[int]] = {}
+        for i, level in enumerate(tokenizer.levels):
+            groups.setdefault(level, []).append(i)
+        self.level_groups = [group for _level, group in sorted(groups.items())]
+        group_levels = torch.tensor(sorted(groups.keys()), dtype=torch.float32)
+        self.register_buffer("level_pe", sinusoidal_positional_encoding(group_levels, d_model))
+
+        self.value_proj = nn.Linear(hidden_dim + 1, d_model)
+        self.stage1_pool = ClsSelfAttentionPool(d_model, nhead)
+        self.stage2_pool = ClsSelfAttentionPool(d_model, nhead)
+        self.output_dim = d_model
+
+    def forward(self, x, node_attributes_data, feature_names=None):
+        """x: (batch, time, ensemble, grid, vars) -> (batch ensemble grid, time d_model + attrs)"""
+        if feature_names is not None:
+            msg = "HierarchicalEmbedder does not support a reduced feature_names subset yet."
+            raise NotImplementedError(msg)
+
+        batch, n_time, ensemble, grid, _n_vars = x.shape
+        x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
+        n_rows = x_vars.shape[0]
+        normalized = (x_vars - self.mean) / self.std
+
+        level_tokens = []
+        for group in self.level_groups:
+            group_idx = torch.tensor(group, device=x.device)
+            values = normalized[:, group_idx].unsqueeze(-1)
+            variable_embedding = self.variable_embedding(self.variable_idx[group_idx])
+            variable_embedding = variable_embedding.unsqueeze(0).expand(n_rows, -1, -1)
+            tokens = self.value_proj(torch.cat([variable_embedding, values], dim=-1))
+            level_tokens.append(self.stage1_pool(tokens))
+
+        level_tokens = torch.stack(level_tokens, dim=1) + self.level_pe.unsqueeze(0)
+        node_embedding = self.stage2_pool(level_tokens)
+
+        node_embedding = einops.rearrange(
+            node_embedding,
+            "(batch time ensemble grid) d -> (batch ensemble grid) (time d)",
+            batch=batch,
+            time=n_time,
+            ensemble=ensemble,
+            grid=grid,
+        )
+        return torch.cat((node_embedding, node_attributes_data), dim=-1)
