@@ -4,6 +4,8 @@ defaults:
   - training_loss: single
   - optimization: default
   - weight_averaging: null
+  - _self_
+  - corrector: null
 
 # resume or fork a training from a checkpoint last.ckpt or specified in system.input.warm_start
 run_id: null
@@ -45,7 +47,7 @@ method:
   _target_: anemoi.training.train.methods.DASingleTraining
 
 # training-time corrector networks applied to predictions for the loss
-# (see anemoi.training.train.methods.corrector); null disables them
+# Select a shared preset with training/corrector=graphtransformer; null disables them.
 corrector: null
 
 # select strategy

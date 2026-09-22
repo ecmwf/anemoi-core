@@ -12,6 +12,7 @@ from pydantic import ValidationError
 
 from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import CombinedLossSchema
+from anemoi.training.schemas.training import CorrectorSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
@@ -28,6 +29,39 @@ _TIME_AGG_CFG = {
         "scalers": ["node_weights"],
     },
 }
+
+
+def test_processor_corrector_requires_processor_configuration() -> None:
+    with pytest.raises(ValidationError, match="requires a processor configuration"):
+        CorrectorSchema(type="processor", instrument_groups={})
+
+
+@pytest.mark.parametrize(
+    ("overrides", "message"),
+    [
+        ({"num_layers": 0}, "must be positive"),
+        ({"num_chunks": 0}, "must be positive"),
+        ({"num_layers": 3, "num_chunks": 2}, "divisible by num_chunks"),
+        ({"num_heads": 0}, "positive num_heads"),
+        ({"num_heads": 3}, "positive num_heads"),
+        ({"sub_graph_edge_attributes": []}, "require sub_graph_edge_attributes"),
+    ],
+)
+def test_processor_corrector_rejects_invalid_dimensions(overrides: dict, message: str) -> None:
+    processor = {
+        "_target_": "anemoi.models.layers.processor.GraphTransformerProcessor",
+        "num_layers": 2,
+        "num_chunks": 1,
+        "num_heads": 4,
+        "mlp_hidden_ratio": 2,
+        "qk_norm": False,
+        "cpu_offload": False,
+        "trainable_size": 0,
+        "sub_graph_edge_attributes": ["edge_length"],
+        **overrides,
+    }
+    with pytest.raises(ValidationError, match=message):
+        CorrectorSchema(type="processor", hidden_dim=64, processor=processor, instrument_groups={})
 
 
 def test_ddp_strategy_schema_accepts_local_synchronization() -> None:

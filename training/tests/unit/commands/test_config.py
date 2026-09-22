@@ -13,11 +13,16 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+import torch
 from hydra import compose
 from hydra import initialize_config_module
 from omegaconf import OmegaConf
+from torch_geometric.data import HeteroData
+from torch_geometric.utils import is_undirected
 
+from anemoi.graphs.create import GraphCreator
 from anemoi.training.commands.config import ConfigGenerator
+from anemoi.training.schemas.base_schema import BaseSchema
 
 
 @pytest.fixture
@@ -120,6 +125,47 @@ def test_optimizer_config_group_can_be_overridden() -> None:
         cfg = compose(config_name="config", overrides=["training/optimization/optimizer=zero"])
 
     assert cfg.training.optimization.optimizer._target_ == "torch.distributed.optim.ZeroRedundancyOptimizer"
+
+
+def test_da_corrector_example_composes_and_builds_bidirectional_edges() -> None:
+    """The shared preset composes with instrument overrides and a usable graph."""
+    with initialize_config_module(version_base=None, config_module="anemoi.training.config"):
+        cfg = compose(
+            config_name="da_corrector",
+            overrides=[
+                "system.input.dataset=/tmp/observations.zarr",
+                "system.input.graph=/tmp/corrector.pt",
+                "system.output.root=/tmp/corrector-run",
+                "training.corrector.processor.num_layers=2",
+            ],
+        )
+
+    OmegaConf.resolve(cfg)
+    corrector = BaseSchema(**cfg).training.corrector
+    assert corrector.type == "processor"
+    assert corrector.processor.num_layers == 2
+    assert {name for group in corrector.instrument_groups.values() for name in group.corrector_variables} == set(
+        cfg.data.datasets.data.corrector,
+    )
+    assert [(edge.source_name, edge.target_name) for edge in cfg.graph.edges] == [
+        ("data", "hidden"),
+        ("hidden", "hidden"),
+        ("hidden", "data"),
+        ("data", "data"),
+    ]
+
+    # Exercise the configured data edges on existing nodes without opening a dataset.
+    generator = torch.Generator().manual_seed(23)
+    graph = HeteroData()
+    graph["data"].x = torch.rand(32, 2, generator=generator)
+    edge_config = OmegaConf.to_container(cfg.graph.edges[-1], resolve=True)
+    graph = GraphCreator(OmegaConf.create({"edges": [edge_config]})).update_graph(graph)
+    edges = graph["data", "to", "data"]
+    assert is_undirected(edges.edge_index, num_nodes=32)
+    assert torch.unique(edges.edge_index, dim=1).shape[1] == edges.edge_index.shape[1]
+    for name in corrector.processor.sub_graph_edge_attributes:
+        assert edges[name].shape[0] == edges.edge_index.shape[1]
+        assert torch.isfinite(edges[name]).all()
 
 
 @pytest.mark.parametrize("config_name", ["temporal_downscaler", "temporal_downscaler_ensemble"])

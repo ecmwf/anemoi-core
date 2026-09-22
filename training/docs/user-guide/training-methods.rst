@@ -46,6 +46,114 @@ The three built-in methods are:
    processor is not supported for these methods.
 
 
+*********************************
+ DA training correctors
+*********************************
+
+``DASingleTraining`` can apply an additive per-instrument correction to
+predictions used in the loss. Correctors read the predicted instrument
+channels and observation metadata at the target time. They are training
+modules; state advancement and inference use the raw predictions. The
+output projection is initialised to zero, so training starts with no
+correction.
+
+The model first reconstructs its predictions as
+``(batch, time, ensemble, grid, variables)``. The training module then calls
+the corrector, which embeds the selected channels and metadata, flattens
+the node inputs for its processor, and restores the output shape before
+adding the correction. The corrector is owned by the training module.
+Its ``einops.rearrange`` expressions name the same axes as the model:
+``batch time ensemble grid vars -> (batch time ensemble grid) vars`` and
+the inverse. Each output time is corrected independently, so the graph
+batch size is ``batch * time * ensemble``.
+
+Set ``training.corrector.type: mlp`` for pointwise corrections, or
+``processor`` to embed the inputs and apply an Anemoi graph processor.
+Each instrument has its own processor weights. One ``StaticGraphProvider``
+per dataset supplies data-to-data edges to all its instrument correctors.
+The dataset graph must contain ``(dataset, "to", dataset)`` edges, or
+``("data", "to", "data")`` edges for a graph with a generic data node group.
+
+The ``da_corrector.yaml`` example selects a shared preset and a graph with
+bidirectional data-to-data edges:
+
+.. code:: yaml
+
+   defaults:
+     - data: zarr
+     - dataloader: native_grid
+     - diagnostics: evaluation
+     - system: example
+     - graph: multi_scale_corrector
+     - model: graphtransformer
+     - task: da_forecaster
+     - training: da_single
+     - override training/corrector: graphtransformer
+     - _self_
+
+   data:
+     datasets:
+       data:
+         corrector: [hirs_view_zenith_angle, mwt_view_zenith_angle]
+
+   training:
+     corrector:
+       instrument_groups:
+         hirs:
+           corrector_variables: [hirs_view_zenith_angle]
+           channels: null
+         mwt:
+           corrector_variables: [mwt_view_zenith_angle]
+           channels: null
+
+The shared ``training/corrector/graphtransformer.yaml`` preset defines a
+64-channel embedding, one GT layer, four attention heads, Triton attention,
+and edge sharding. It uses ``model.layer_kernels`` and applies the same
+architecture to every instrument and corrected dataset, with separate
+instrument weights. A run can override individual settings, for example
+``training.corrector.processor.num_layers=2``.
+
+The ``graph/multi_scale_corrector.yaml`` preset extends the multiscale graph
+with ``KNNEdges`` and ``ReversedKNNEdges``, both using eight neighbors on the
+data grid. Their union provides the bidirectional connectivity required by
+GT edge sharding. For multiple datasets, configure a data-to-data edge group
+for each dataset using processor correctors. All instruments within a dataset
+share that edge group.
+
+``channels: null`` selects output names prefixed with the instrument name
+and an underscore, such as ``hirs_1``. Corrector variables must also be
+listed in ``data.datasets.<dataset>.corrector``. Adapt the example's variable
+names, inherited forcing and diagnostic roles, and preprocessing settings
+to the input dataset. Supply the dataset, graph cache, and output paths:
+
+.. code:: bash
+
+   anemoi-training train --config-name da_corrector \
+     system.input.dataset=/path/to/observations.zarr \
+     system.input.graph=/path/to/corrector-graph.pt \
+     system.output.root=/path/to/run
+
+The example sets training, validation, and test batch sizes to one for
+model sharding. ``training/da_single.yaml`` leaves correctors disabled by
+default; select ``training/corrector=graphtransformer`` to enable the shared
+preset in another DA run and provide its instrument groups.
+
+For GT processors, ``shard_strategy: heads`` supports directed data-to-data
+graphs. ``shard_strategy: edges`` uses halo exchange and requires
+bidirectional connectivity when model sharding is enabled: each edge must
+have a reverse edge. The corrector validates this requirement before
+communication. Choose the graph's connectivity explicitly; reverse edges
+also need their own directional attributes.
+
+Leading prediction dimensions are treated as independent graph instances.
+Model sharding requires a single graph instance per rank (batch, output
+time, and ensemble dimensions of size one), with grid shards matching the
+graph provider's balanced node partitions. Unsharded execution supports
+multiple instances. Use ``graph_attention_backend: pyg`` for CPU execution.
+The training method checkpoints the complete corrector call; processor
+checkpointing can additionally be enabled through its configuration.
+
+
 .. _ensemble-crps-training:
 
 ******************************

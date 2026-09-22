@@ -17,12 +17,24 @@ predict an additive correction to the raw model output before the loss.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
+import einops
 import torch
 import torch.distributed as dist
+from hydra.utils import instantiate
 from torch import nn
+from torch_geometric.utils import is_undirected
 
-from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.shapes import GraphShardInfo
+from anemoi.models.distributed.utils import model_is_distributed
+
+if TYPE_CHECKING:
+    from omegaconf import DictConfig
+
+    from anemoi.models.layers.graph_provider import StaticGraphProvider
+    from anemoi.models.layers.processor import BaseProcessor
 
 LOGGER = logging.getLogger(__name__)
 
@@ -62,268 +74,76 @@ class CorrectorMLP(nn.Module):
         return self.out(self.act(self.hidden(x)))
 
 
-class CorrectorGNN(nn.Module):
-    """Graph-based corrector with spatial neighbor aggregation.
+class ProcessorCorrector(nn.Module):
+    """Embed instrument predictions and metadata, then predict an additive correction.
 
-    Uses message passing on data-to-data edges to gather spatial context
-    before computing an additive correction. This helps channels where the
-    satellite viewing geometry causes the radiation path to cross multiple
-    grid cells (e.g. high-peaking limb-sounding channels at large VZA).
-
-    Architecture per layer:
-        1. Concatenate ``[x_src, x_dst, edge_attr]`` per edge
-        2. MLP to produce edge messages
-        3. Scatter-add messages to destination nodes
-        4. Combine node state with aggregated messages via MLP + residual
-
-    The final output layer is zero-initialised so training starts with no
-    correction, identical to :class:`CorrectorMLP`.
-
-    Parameters
-    ----------
-    n_target : int
-        Number of output channels to correct.
-    n_corrector : int
-        Number of corrector input variables.
-    hidden_dim : int
-        Hidden dimension for all internal layers.
-    edge_index : torch.Tensor
-        Data-to-data edge indices, shape ``(2, num_edges)``.
-    edge_attr : torch.Tensor
-        Edge features (e.g. edge_length, edge_dirs), shape ``(num_edges, edge_dim)``.
-    num_nodes : int
-        Number of data-grid nodes (for scatter operations).
-    num_layers : int
-        Number of message-passing rounds. More layers extend the
-        spatial receptive field (1 layer ~ 1-hop neighbors).
-    n_out : int, optional
-        Width of the output head. Defaults to ``n_target``.
+    The processor receives graph tensors from the dataset's shared graph provider.
+    Its layer kernels also build the input and output projections. The output head
+    is zero-initialised so training starts with no correction.
     """
 
-    def __init__(
-        self,
-        n_target: int,
-        n_corrector: int,
-        hidden_dim: int,
-        edge_index: torch.Tensor,
-        edge_attr: torch.Tensor,
-        num_nodes: int,
-        num_layers: int = 1,
-        n_out: int | None = None,
-    ) -> None:
+    def __init__(self, n_target: int, n_corrector: int, processor: BaseProcessor) -> None:
         super().__init__()
-        self.num_nodes = num_nodes
-        self.num_layers = num_layers
-
-        # Project (y_pred, corrector_vars) -> hidden_dim per node
-        self.input_proj = nn.Linear(n_target + n_corrector, hidden_dim)
-        self.act = nn.GELU()
-
-        # Message-passing layers
-        edge_dim = edge_attr.shape[-1]
-        self.msg_mlps = nn.ModuleList()
-        self.combine_mlps = nn.ModuleList()
-        for _ in range(num_layers):
-            self.msg_mlps.append(
-                nn.Sequential(
-                    nn.Linear(2 * hidden_dim + edge_dim, hidden_dim),
-                    nn.GELU(),
-                    nn.Linear(hidden_dim, hidden_dim),
-                ),
-            )
-            self.combine_mlps.append(nn.Linear(2 * hidden_dim, hidden_dim))
-
-        # Output head (zero-initialized for no-correction start)
-        self.out = nn.Linear(hidden_dim, n_out if n_out is not None else n_target)
+        self.processor = processor
+        kernels = processor.layer_factory
+        self.input_proj = kernels.Linear(n_target + n_corrector, processor.num_channels)
+        self.act = kernels.Activation()
+        self.out = kernels.Linear(processor.num_channels, n_target)
         nn.init.zeros_(self.out.weight)
-        nn.init.zeros_(self.out.bias)
-
-        # Store graph structure as persistent buffers
-        self.register_buffer("edge_index", edge_index, persistent=True)
-        self.register_buffer("edge_attr", edge_attr, persistent=True)
-
-        # Cache of per-shard edge partitions, keyed by (node_offset, g_local, device)
-        self._local_edge_cache: dict = {}
+        if self.out.bias is not None:
+            nn.init.zeros_(self.out.bias)
 
     def forward(
         self,
         y_subset: torch.Tensor,
         corrector_vars: torch.Tensor,
         *,
+        graph_batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: torch.Tensor,
+        edge_index: torch.Tensor,
         model_comm_group: dist.ProcessGroup | None = None,
-        grid_shard_sizes: list[int] | None = None,
     ) -> torch.Tensor:
-        """Compute spatially-aware additive correction.
+        """Correct predictions in ``(batch, time, ensemble, grid, variables)`` layout.
 
-        When the grid is sharded across a model communication group, pass
-        ``model_comm_group`` and ``grid_shard_sizes`` (per-rank grid sizes).
-        Edges are partitioned by destination shard (same convention as the
-        mappers' ``shard_strategy: edges``): each rank processes only the edges
-        whose destination it owns, reading remote source-node features via
-        ``sync_tensor`` (gather in forward, all-reduce + split in backward) so
-        gradient contributions across shards are accumulated correctly.
-
-        Parameters
-        ----------
-        y_subset : torch.Tensor
-            Target output variables for this group, shape ``(..., G, n_target)``
-            where G is the number of (local) grid points.
-        corrector_vars : torch.Tensor
-            Corrector variables for this group, shape ``(..., G, n_corrector)``.
-        model_comm_group : ProcessGroup, optional
-            Model communication group when the grid dimension is sharded.
-        grid_shard_sizes : list[int], optional
-            Grid points per rank, required when ``model_comm_group`` has more than one rank.
-
-        Returns
-        -------
-        torch.Tensor
-            Additive correction, shape ``(..., G, n_target)``.
+        Each output time and ensemble member is an independent graph instance.
+        ``graph_batch_size`` is their combined batch size used by the graph provider.
         """
-        leading_shape = y_subset.shape[:-2]  # e.g. (batch,) or (batch, time, ens)
-        g_local = y_subset.shape[-2]
+        batch_size, time_size, ensemble_size, _, _ = y_subset.shape
 
+        # Assemble node inputs. Output times are corrected independently.
         x = torch.cat([y_subset, corrector_vars], dim=-1)
-        x = self.act(self.input_proj(x))  # (..., g_local, H)
+        x = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
+        x = self.act(self.input_proj(x))
 
-        # Flatten leading dims for scatter: (B, g_local, H)
-        x_flat = x.reshape(-1, g_local, x.shape[-1])
-        b, _, h = x_flat.shape
-
-        sharded = model_comm_group is not None and dist.get_world_size(model_comm_group) > 1
-        if sharded:
-            assert grid_shard_sizes is not None, (
-                "CorrectorGNN: grid_shard_sizes is required when the grid is sharded "
-                "across a model communication group."
-            )
-            rank = dist.get_rank(model_comm_group)
-            node_offset = int(sum(grid_shard_sizes[:rank]))
-            g = int(sum(grid_shard_sizes))
-            assert g_local == int(grid_shard_sizes[rank]), (
-                f"CorrectorGNN: local grid size {g_local} does not match "
-                f"grid_shard_sizes[{rank}]={grid_shard_sizes[rank]}."
-            )
-        else:
-            node_offset = 0
-            g = g_local
-
-        assert g == self.num_nodes, (
-            f"CorrectorGNN: got {g} grid points but the data-to-data graph has "
-            f"{self.num_nodes} nodes. If the grid is sharded, pass model_comm_group "
-            f"and grid_shard_sizes."
+        # Processor
+        x = self.processor(
+            x,
+            batch_size=graph_batch_size,
+            shard_info=shard_info,
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
         )
 
-        # Edges owned by this rank: destination inside the local shard.
-        # src indexes the full grid, dst is shifted to local coordinates.
-        src, dst, ea = self._local_edges(node_offset, g_local)
-        e_local = src.shape[0]
-
-        # Expand for batch: offset src by full-grid size, dst by local size
-        batch_idx = torch.arange(b, device=x_flat.device)
-        src_b = (src.unsqueeze(0) + (batch_idx * g).view(b, 1)).reshape(-1)  # (B*e_local,)
-        dst_b = (dst.unsqueeze(0) + (batch_idx * g_local).view(b, 1)).reshape(-1)  # (B*e_local,)
-        ea_b = ea.unsqueeze(0).expand(b, -1, -1).reshape(b * e_local, -1)  # (B*e_local, edge_dim)
-
-        # Flatten local nodes: (B*g_local, H)
-        x_nodes = x_flat.reshape(b * g_local, h)
-
-        for layer_idx in range(self.num_layers):
-            if sharded:
-                # Full-grid source features for this layer's messages
-                x_src_nodes = sync_tensor(
-                    x_nodes.reshape(b, g_local, h),
-                    1,
-                    grid_shard_sizes,
-                    model_comm_group,
-                ).reshape(b * g, h)
-            else:
-                x_src_nodes = x_nodes
-
-            # Build edge messages: [x_src, x_dst, edge_attr]
-            msgs = torch.cat([x_src_nodes[src_b], x_nodes[dst_b], ea_b], dim=-1)
-            msgs = self.msg_mlps[layer_idx](msgs)  # (B*e_local, H)
-
-            # Scatter-add to (local) destination nodes
-            agg = torch.zeros_like(x_nodes)
-            agg.scatter_add_(0, dst_b.unsqueeze(-1).expand_as(msgs), msgs)
-
-            # Combine self + aggregated neighbors with residual
-            x_nodes = x_nodes + self.act(self.combine_mlps[layer_idx](torch.cat([x_nodes, agg], dim=-1)))
-
-        # Output correction
-        correction = self.out(x_nodes)
-        return correction.reshape(*leading_shape, g_local, -1)
-
-    def _local_edges(self, node_offset: int, g_local: int) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        """Return edges whose destination lies in ``[node_offset, node_offset + g_local)``.
-
-        Parameters
-        ----------
-        node_offset : int
-            Offset of this rank's shard in the full grid.
-        g_local : int
-            Number of grid points owned by this rank.
-
-        Returns
-        -------
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
-            ``(src, dst_local, edge_attr)`` where ``src`` indexes the full grid
-            and ``dst_local`` is shifted into local shard coordinates. The
-            unsharded case (offset 0, full grid) returns the complete edge set.
-            Results are cached per shard layout and device.
-        """
-        device = self.edge_index.device
-        key = (node_offset, g_local, str(device))
-        cached = self._local_edge_cache.get(key)
-        if cached is None:
-            dst = self.edge_index[1]
-            mask = (dst >= node_offset) & (dst < node_offset + g_local)
-            cached = (
-                self.edge_index[0, mask],
-                dst[mask] - node_offset,
-                self.edge_attr[mask],
-            )
-            self._local_edge_cache[key] = cached
-        return cached
+        # Assemble output corrections in the model's prediction layout.
+        return einops.rearrange(
+            self.out(x),
+            "(batch time ensemble grid) vars -> batch time ensemble grid vars",
+            batch=batch_size,
+            time=time_size,
+            ensemble=ensemble_size,
+        )
 
 
 class InstrumentCorrectors(nn.Module):
-    """Per-instrument corrector networks.
+    """Per-instrument correctors with a shared data-to-data graph provider.
 
-    Holds a separate corrector network per instrument group. Each group's
-    network receives only that group's corrector variables and corrects only
-    that group's output channels.
-
-    The corrector backend is selected via ``corrector_type``:
-
-    - ``"mlp"`` (default): pointwise :class:`CorrectorMLP`.
-    - ``"gnn"``: spatially-aware :class:`CorrectorGNN` using data-to-data
-      graph edges for message passing, useful for channels affected by
-      slant-path viewing geometry.
-
-    Parameters
-    ----------
-    instrument_groups : dict[str, dict]
-        Mapping of group_name to group config. Each group config has:
-        - "corrector_variables": list[str] — corrector variable names for this group
-        - "channels": list[str] | None — explicit output channels, or None for
-          prefix matching (group_name used as prefix against output variable names)
-    all_corrector_names : list[str]
-        All corrector variable names (from data_indices), in tensor order.
-    output_name_to_index : dict[str, int]
-        Model output variable name to tensor index mapping.
-    hidden_dim : int
-        Hidden layer dimension for all group networks.
-    corrector_type : str
-        Backend type: ``"mlp"`` or ``"gnn"``.
-    edge_index : torch.Tensor | None
-        Data-to-data edge indices for GNN backend, shape ``(2, num_edges)``.
-    edge_attr : torch.Tensor | None
-        Data-to-data edge features for GNN backend, shape ``(num_edges, edge_dim)``.
-    num_nodes : int | None
-        Number of data-grid nodes for GNN backend.
-    num_gnn_layers : int
-        Number of message-passing rounds for GNN backend.
+    ``corrector_type="mlp"`` selects pointwise MLPs. ``"processor"`` builds a
+    separate processor from ``processor_config`` for each instrument, while
+    ``graph_provider`` supplies the same edges and features to all instruments.
+    Instrument groups select metadata via ``corrector_variables`` and outputs
+    via explicit ``channels`` or the group's name as a channel prefix.
     """
 
     def __init__(
@@ -333,18 +153,31 @@ class InstrumentCorrectors(nn.Module):
         output_name_to_index: dict[str, int],
         hidden_dim: int = 64,
         corrector_type: str = "mlp",
-        edge_index: torch.Tensor | None = None,
-        edge_attr: torch.Tensor | None = None,
-        num_nodes: int | None = None,
-        num_gnn_layers: int = 1,
+        processor_config: DictConfig | None = None,
+        graph_provider: StaticGraphProvider | None = None,
     ) -> None:
         super().__init__()
         self.correctors = nn.ModuleDict()
         self.corrector_type = corrector_type
 
-        if corrector_type == "gnn" and (edge_index is None or edge_attr is None or num_nodes is None):
-            msg = "CorrectorGNN requires edge_index, edge_attr, and num_nodes from data-to-data graph edges."
+        if corrector_type not in {"mlp", "processor"}:
+            msg = f"Unknown corrector type: {corrector_type!r}."
             raise ValueError(msg)
+        if corrector_type == "processor" and (processor_config is None or graph_provider is None):
+            msg = "Processor correctors require processor_config and a data-to-data graph_provider."
+            raise ValueError(msg)
+        self.graph_provider = graph_provider
+        self.num_nodes = int(graph_provider.edge_inc[1, 0]) if graph_provider is not None else None
+        self._requires_symmetric_graph = (
+            corrector_type == "processor"
+            and processor_config._target_ == "anemoi.models.layers.processor.GraphTransformerProcessor"
+            and processor_config.get("shard_strategy", "edges") == "edges"
+        )
+        self._graph_is_symmetric = (
+            is_undirected(graph_provider.edge_index_base, num_nodes=self.num_nodes)
+            if self._requires_symmetric_graph
+            else True
+        )
 
         # Map corrector variable names to their position in the corrector tensor
         corrector_name_to_pos = {name: i for i, name in enumerate(all_corrector_names)}
@@ -394,15 +227,17 @@ class InstrumentCorrectors(nn.Module):
                 torch.tensor(sorted(target_indices), dtype=torch.long),
             )
 
-            if corrector_type == "gnn":
-                self.correctors[group_name] = CorrectorGNN(
+            if corrector_type == "processor":
+                processor = instantiate(
+                    processor_config,
+                    _recursive_=False,
+                    num_channels=hidden_dim,
+                    edge_dim=graph_provider.edge_dim,
+                )
+                self.correctors[group_name] = ProcessorCorrector(
                     n_target=len(target_indices),
                     n_corrector=len(corrector_positions),
-                    hidden_dim=hidden_dim,
-                    edge_index=edge_index,
-                    edge_attr=edge_attr,
-                    num_nodes=num_nodes,
-                    num_layers=num_gnn_layers,
+                    processor=processor,
                 )
             else:
                 self.correctors[group_name] = CorrectorMLP(
@@ -412,13 +247,12 @@ class InstrumentCorrectors(nn.Module):
                 )
 
             LOGGER.info(
-                "Corrector group '%s' (type=%s): %d corrector vars -> %d output channels (hidden=%d%s)",
+                "Corrector group '%s' (type=%s): %d corrector vars -> %d output channels (hidden=%d)",
                 group_name,
                 corrector_type,
                 len(corrector_positions),
                 len(target_indices),
                 hidden_dim,
-                f", gnn_layers={num_gnn_layers}" if corrector_type == "gnn" else "",
             )
 
     def forward(
@@ -434,20 +268,37 @@ class InstrumentCorrectors(nn.Module):
         Parameters
         ----------
         y_pred : torch.Tensor
-            Raw model output, shape (..., n_output).
+            Raw model output, shape (batch, time, ensemble, grid, n_output).
         corrector_vars : torch.Tensor
-            All corrector variables, shape (..., n_corrector).
+            Corrector metadata, shape (batch, time, ensemble, grid, n_corrector).
         model_comm_group : ProcessGroup, optional
             Model communication group when the grid dimension is sharded.
-            Only used by the GNN backend (pointwise MLPs are shard-safe).
+            Only used by processor correctors (pointwise MLPs are shard-safe).
         grid_shard_sizes : list[int], optional
-            Grid points per rank, required by the GNN backend when sharded.
+            Grid points per rank, required by processor correctors when sharded.
 
         Returns
         -------
         torch.Tensor
-            Corrected output, shape (..., n_output).
+            Corrected output, shape (batch, time, ensemble, grid, n_output).
         """
+        graph_kwargs = {}
+        if self.corrector_type == "processor" and self.correctors:
+            batch_size, time_size, ensemble_size, _, _ = y_pred.shape
+            graph_batch_size = batch_size * time_size * ensemble_size
+            node_shard_sizes = self._node_shard_sizes(y_pred, graph_batch_size, model_comm_group, grid_shard_sizes)
+            edge_attr, edge_index, edge_shard_sizes = self.graph_provider.get_edges(
+                batch_size=graph_batch_size,
+                model_comm_group=model_comm_group,
+            )
+            graph_kwargs = {
+                "graph_batch_size": graph_batch_size,
+                "shard_info": GraphShardInfo(nodes=node_shard_sizes, edges=edge_shard_sizes),
+                "edge_attr": edge_attr,
+                "edge_index": edge_index,
+                "model_comm_group": model_comm_group,
+            }
+
         y_out = y_pred.clone()
         for group_name, corrector in self.correctors.items():
             corrector_idx = getattr(self, f"_corrector_idx_{group_name}")
@@ -455,14 +306,42 @@ class InstrumentCorrectors(nn.Module):
 
             group_corrector = corrector_vars[..., corrector_idx]
             y_subset = y_out[..., target_idx]
-            if isinstance(corrector, CorrectorGNN):
-                correction = corrector(
-                    y_subset,
-                    group_corrector,
-                    model_comm_group=model_comm_group,
-                    grid_shard_sizes=grid_shard_sizes,
-                )
-            else:
-                correction = corrector(y_subset, group_corrector)
+            correction = corrector(y_subset, group_corrector, **graph_kwargs)
             y_out[..., target_idx] = y_subset + correction
         return y_out
+
+    def _node_shard_sizes(
+        self,
+        y_pred: torch.Tensor,
+        graph_batch_size: int,
+        model_comm_group: dist.ProcessGroup | None,
+        grid_shard_sizes: list[int] | None,
+    ) -> list[int]:
+        """Validate node layout against the graph provider's balanced partitions.
+
+        Batch, time, and ensemble axes represent independent graph instances.
+        Model sharding requires one instance per rank, as in the main model's GT processor.
+        """
+        local_nodes = y_pred.shape[-2]
+        if model_is_distributed(model_comm_group):
+            if not self._graph_is_symmetric:
+                msg = (
+                    "GT correctors with shard_strategy='edges' require bidirectional graph connectivity "
+                    "when model sharding is enabled. Use shard_strategy='heads' for directed graphs."
+                )
+                raise ValueError(msg)
+            if graph_batch_size != 1:
+                msg = "Processor correctors require batch_size=1 (one graph instance) when model sharding is enabled."
+                raise ValueError(msg)
+            expected_sizes = get_balanced_partition_sizes(self.num_nodes, model_comm_group.size())
+            if grid_shard_sizes != expected_sizes:
+                msg = f"Processor corrector grid_shard_sizes must match graph provider partitions {expected_sizes}."
+                raise ValueError(msg)
+            expected_local_nodes = expected_sizes[model_comm_group.rank()]
+        else:
+            expected_sizes = [graph_batch_size * self.num_nodes]
+            expected_local_nodes = self.num_nodes
+        if local_nodes != expected_local_nodes:
+            msg = f"Processor corrector expected {expected_local_nodes} local grid nodes, got {local_nodes}."
+            raise ValueError(msg)
+        return expected_sizes

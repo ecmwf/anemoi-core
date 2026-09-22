@@ -19,20 +19,17 @@ Pairs with :class:`anemoi.training.tasks.da_forecaster.DAForecaster`. Extends
   before the loss (never for state advancement).
 """
 
-import logging
-
 import torch
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.training.train.methods.corrector import InstrumentCorrectors
 from anemoi.training.train.methods.single import SingleTraining
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
-
-LOGGER = logging.getLogger(__name__)
 
 
 class DASingleTraining(SingleTraining):
@@ -65,13 +62,13 @@ class DASingleTraining(SingleTraining):
 
         Reads the ``training.corrector`` config section which defines instrument
         groups (each with their own corrector variables and output channels) and
-        the corrector backend type (``"mlp"`` or ``"gnn"``). For ``type: gnn``,
+        the corrector backend type (``"mlp"`` or ``"processor"``). For ``type: processor``,
         data-to-data graph edges are extracted from the training graph.
 
         Parameters
         ----------
         graph_data : HeteroData
-            The training graph, used to resolve data-to-data edges for the GNN backend.
+            The training graph, used to build the data-to-data graph provider.
         """
         corrector_config = getattr(self.config.training, "corrector", None)
         if corrector_config is None:
@@ -79,8 +76,7 @@ class DASingleTraining(SingleTraining):
 
         hidden_dim = getattr(corrector_config, "hidden_dim", 64)
         corrector_type = getattr(corrector_config, "type", "mlp")
-        num_gnn_layers = getattr(corrector_config, "num_gnn_layers", 1)
-        edge_attribute_names = list(getattr(corrector_config, "edge_attributes", ["edge_length", "edge_dirs"]))
+        processor_config = corrector_config.get("processor")
         raw_groups = getattr(corrector_config, "instrument_groups", None)
         if raw_groups is None:
             return
@@ -107,30 +103,24 @@ class DASingleTraining(SingleTraining):
 
             output_name_to_index = self.data_indices[dataset_name].model.output.name_to_index
 
-            edge_index = None
-            edge_attr = None
-            num_nodes = None
-            if corrector_type == "gnn":
+            graph_provider = None
+            if corrector_type == "processor":
                 node_name = dataset_name if fused else DEFAULT_DATASET_NAME
                 data_data_key = (node_name, "to", node_name)
                 if data_data_key not in graph_data.edge_types:
                     msg = (
-                        f"Corrector type 'gnn' requires data-to-data edges in the graph "
+                        f"Corrector type 'processor' requires data-to-data edges in the graph "
                         f"(key {data_data_key}), but they were not found for dataset '{dataset_name}'. "
                         f"Add a data->data edge builder (e.g. KNNEdges) to your graph config."
                     )
                     raise ValueError(msg)
-                data_data_graph = graph_data[data_data_key]
-                edge_index = data_data_graph.edge_index
-                edge_attr = torch.cat([data_data_graph[attr] for attr in edge_attribute_names], dim=-1)
                 num_nodes = graph_data[node_name].num_nodes
-                LOGGER.info(
-                    "Corrector GNN for '%s': %d nodes, %d edges, %d edge features, %d layers",
-                    dataset_name,
-                    num_nodes,
-                    edge_index.shape[1],
-                    edge_attr.shape[-1],
-                    num_gnn_layers,
+                graph_provider = create_graph_provider(
+                    graph=graph_data[data_data_key],
+                    edge_attributes=processor_config.sub_graph_edge_attributes,
+                    src_size=num_nodes,
+                    dst_size=num_nodes,
+                    trainable_size=processor_config.trainable_size,
                 )
 
             self.corrector[dataset_name] = InstrumentCorrectors(
@@ -139,10 +129,8 @@ class DASingleTraining(SingleTraining):
                 output_name_to_index=output_name_to_index,
                 hidden_dim=hidden_dim,
                 corrector_type=corrector_type,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                num_nodes=num_nodes,
-                num_gnn_layers=num_gnn_layers,
+                processor_config=processor_config,
+                graph_provider=graph_provider,
             )
 
     def _apply_corrector(
@@ -156,13 +144,9 @@ class DASingleTraining(SingleTraining):
         target time. Datasets without a corrector network pass through unchanged.
 
         The corrector runs under activation checkpointing during training: the
-        per-instrument GNNs build edge-sized messages of shape
-        ``(num_edges, 2 * hidden_dim + edge_features)`` at every layer, and those
-        activations are retained for *every* forecast step of the rollout, which
-        makes them the dominant memory term at long rollouts. Recomputing them in
-        the backward pass trades one extra corrector forward per step for that
-        memory. The corrector contains no dropout or other RNG, so the recompute
-        is numerically identical.
+        instrument processors retain graph activations at every forecast step.
+        Recomputing them in the backward pass reduces memory use at long rollouts.
+        Processor-level checkpointing can be configured independently.
 
         Note: for the same reason as the encoder/decoder mapper blocks, no module
         reachable from here may be passed to ``torch.compile`` via
