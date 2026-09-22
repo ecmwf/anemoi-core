@@ -161,6 +161,9 @@ class InterpolationHandler:
             self.references[existing_ref.parts].remove(Interpolation(parts, existing_ref.exact_ref))
         del self.reverse_refs[parts]
 
+        if node.is_missing(key):
+            return
+
         if node.is_interpolation(key):
             for interpo in get_interpolations(node.value[key]):
                 if interpo.startswith("."):
