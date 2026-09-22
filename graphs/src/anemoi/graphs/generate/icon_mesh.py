@@ -76,8 +76,8 @@ class ICONMultiMesh:
     icon_grid_filename: str
     uuidOfHGrid: str
     reflvl_vertex: np.ndarray
-    max_level: int
-    min_level: int
+    max_level: int | None
+    min_level: int | None
     nodeset: NodeSet  # set of ICON grid vertices
 
     def __init__(self, icon_grid_filename: str, max_level: int | None = None, min_level: int | None = None):
