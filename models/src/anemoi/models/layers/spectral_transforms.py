@@ -11,6 +11,7 @@ import abc
 import logging
 
 import einops
+import numpy as np
 import torch
 import torch.fft
 import torch.nn.functional as F
@@ -46,8 +47,9 @@ def reduced_gaussian_lons_per_lat(grid: str) -> list[int]:
     # To generate a grid
     # anemoi-transform get-grid --source mars grid=n320,levtype=sfc,param=2t grid-n320.npz
 
-    lats = lookup(grid)["latitudes"]
-    return [int((lats == lat).sum()) for lat in sorted(set(lats))]
+    # Count the points on each distinct latitude, in order of latitude.
+    _, counts = np.unique(lookup(grid)["latitudes"], return_counts=True)
+    return counts.tolist()
 
 
 class SpectralTransform(torch.nn.Module):

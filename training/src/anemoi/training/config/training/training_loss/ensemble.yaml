@@ -5,7 +5,8 @@ datasets:
     # loss class to initialise, can be anything subclassing torch.nn.Module
     _target_: anemoi.training.losses.MultiscaleLossWrapper
     # Disk mode:   multiscale_config: {loss_matrices_path: /path, loss_matrices: ["file.npz", null]}
-    # On-the-fly:  multiscale_config: {num_scales: 4, base_num_nearest_neighbours: 16, base_sigma: 0.01570}
+    # On-the-fly:  multiscale_config: {smoothers: {smooth_100km: {num_nearest_neighbours: 128, sigma: 0.0157}, smooth_50km: {num_nearest_neighbours: 128, sigma: 0.0078}}}
+    # Spectral:    multiscale_config: {transform: reduced_sht, grid: n320, cutoffs: [79, 159, 319]}
     multiscale_config: null  # null = single scale, no smoothing
     weights: [1.0]
     per_scale_loss:
