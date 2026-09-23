@@ -40,10 +40,6 @@ class BaseLatentAggregator(nn.Module, ABC):
         if not source_channels:
             raise ValueError(f"{self.__class__.__name__}: At least one latent source is required.")
 
-        invalid_source_channels = {name: channels for name, channels in source_channels.items() if channels <= 0}
-        if invalid_source_channels:
-            raise ValueError(f"Source channels must be positive, got {invalid_source_channels}.")
-
         self.input_channels = input_channels
         self.source_channels = dict(source_channels)
         self.source_names = tuple(source_channels)
@@ -190,7 +186,6 @@ class CrossAttentionAggregator(BaseLatentAggregator):
         dropout_p: float = 0.0,
         qkv_bias: bool = False,
         qk_norm: bool = False,
-        attention_implementation: str = "scaled_dot_product_attention",
         gradient_checkpointing: bool = True,
     ) -> None:
         super().__init__(
@@ -198,9 +193,6 @@ class CrossAttentionAggregator(BaseLatentAggregator):
             source_channels=source_channels,
             gradient_checkpointing=gradient_checkpointing,
         )
-        if num_channels <= 0:
-            raise ValueError(f"num_channels must be positive, got {num_channels}.")
-
         self.num_channels = num_channels
         self.layer_factory = load_layer_kernels(layer_kernels)
         self.hidden_projection = self.layer_factory.Linear(input_channels, num_channels)
@@ -213,7 +205,7 @@ class CrossAttentionAggregator(BaseLatentAggregator):
             },
         )
         self.source_embeddings = nn.ParameterDict(
-            {source_name: nn.Parameter(torch.empty(num_channels)) for source_name in self.source_names},
+            {source_name: nn.Parameter(0.02 * torch.randn(num_channels)) for source_name in self.source_names},
         )
         self.attention = PointwiseMultiHeadCrossAttention(
             num_heads=num_heads,
@@ -223,10 +215,7 @@ class CrossAttentionAggregator(BaseLatentAggregator):
             qkv_bias=qkv_bias,
             qk_norm=qk_norm,
             dropout_p=dropout_p,
-            attention_implementation=attention_implementation,
         )
-        for source_embedding in self.source_embeddings.values():
-            nn.init.normal_(source_embedding, std=0.02)
 
     @property
     def hidden_dim(self) -> int:
@@ -241,10 +230,9 @@ class CrossAttentionAggregator(BaseLatentAggregator):
         projected_latents = tuple(
             self.source_projections[name](latent) for name, latent in zip(source_names, source_latents, strict=True)
         )
-        source_latents = self.source_norm(torch.stack(projected_latents, dim=-2))
-        source_embeddings = torch.stack([self.source_embeddings[name] for name in source_names])
-        keys = source_latents + source_embeddings
+        values = self.source_norm(torch.stack(projected_latents, dim=-2))
+        keys = values + torch.stack([self.source_embeddings[name] for name in source_names])
         residual = self.hidden_projection(hidden_latent)
         query = self.hidden_norm(residual)
-        update = self.attention(query, keys, source_latents)
+        update = self.attention(query, keys, values)
         return residual + update

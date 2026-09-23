@@ -37,16 +37,3 @@ def test_aggregator_schema(config: dict, schema_type: type) -> None:
     parsed = TypeAdapter(AggregatorSchema).validate_python(config)
 
     assert isinstance(parsed, schema_type)
-
-
-def test_cross_attention_aggregator_schema_defaults() -> None:
-    parsed = TypeAdapter(AggregatorSchema).validate_python(
-        {
-            "_target_": "anemoi.models.layers.aggregator.CrossAttentionAggregator",
-            "num_channels": 64,
-            "num_heads": 4,
-        },
-    )
-
-    assert parsed.attention_implementation == "scaled_dot_product_attention"
-    assert parsed.gradient_checkpointing is True

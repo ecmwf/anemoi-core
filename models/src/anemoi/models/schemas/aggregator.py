@@ -38,9 +38,6 @@ class CrossAttentionAggregatorSchema(BaseModel):
     dropout_p: NonNegativeFloat = Field(default=0.0, le=1.0)
     qkv_bias: bool = False
     qk_norm: bool = False
-    attention_implementation: Literal["scaled_dot_product_attention", "flash_attention"] = (
-        "scaled_dot_product_attention"
-    )
     gradient_checkpointing: bool = True
 
 

@@ -18,7 +18,6 @@ import torch.nn as nn
 from hypothesis import given
 from hypothesis import settings
 
-import anemoi.models.layers.attention as attention_module
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
@@ -47,19 +46,6 @@ def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(
     attention.eval()
     # The first node has source weights (3/4, 1/4); the second has (1/2, 1/2).
     torch.testing.assert_close(attention(query, key, value), torch.tensor([[1.5, 1.0], [3.0, 4.0]]))
-
-
-@pytest.mark.parametrize("configured_backend", ["scaled_dot_product_attention", "flash_attention"])
-def test_pointwise_cross_attention_inference_backend_override(monkeypatch, layer_kernels, configured_backend):
-    monkeypatch.setattr(attention_module, "ATTENTION_BACKEND", "scaled_dot_product_attention")
-    attention = PointwiseMultiHeadCrossAttention(
-        num_heads=1, embed_dim=2, layer_kernels=layer_kernels, attention_implementation=configured_backend
-    )
-
-    output = attention(torch.ones(3, 2), torch.ones(3, 2, 2), torch.ones(3, 2, 2))
-
-    assert output.shape == (3, 2)
-    assert torch.isfinite(output).all()
 
 
 @given(

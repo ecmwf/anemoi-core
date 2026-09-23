@@ -153,7 +153,6 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
         dropout_p: 0.0
         qkv_bias: false
         qk_norm: false
-        attention_implementation: scaled_dot_product_attention
         gradient_checkpointing: true
         layer_kernels: ${model.layer_kernels}
 

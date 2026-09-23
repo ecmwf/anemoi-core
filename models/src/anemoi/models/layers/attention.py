@@ -462,9 +462,6 @@ class FlashAttentionWrapper(nn.Module):
         softcap: Optional[float] = None,
         alibi_slopes: torch.Tensor = None,
     ):
-        if dropout_p > 0 and (self.use_flash_attn_v3 or self.use_flash_attn_v4):
-            raise NotImplementedError("Attention dropout is not supported by Flash Attention v3 or v4.")
-
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
@@ -523,39 +520,12 @@ class FlashAttentionWrapper(nn.Module):
         return out
 
 
-def resolve_attention_implementation(attention_implementation: str) -> str:
-    """Resolve an attention implementation against the inference-time override."""
-    if not ATTENTION_BACKEND or ATTENTION_BACKEND == attention_implementation:
-        return attention_implementation
-
-    LOGGER.info(
-        "'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' environment variable has been set. "
-        "Overwriting attention backend from '%s' to '%s'",
-        attention_implementation,
-        ATTENTION_BACKEND,
-    )
-    return ATTENTION_BACKEND
-
-
-def load_attention_implementation(
-    attention_implementation: str,
-    *,
-    use_rotary_embeddings: bool = False,
-    head_dim: Optional[int] = None,
-) -> nn.Module:
-    """Instantiate an attention backend by name."""
-    if attention_implementation == "scaled_dot_product_attention":
-        return SDPAAttentionWrapper()
-    if attention_implementation == "flash_attention":
-        return FlashAttentionWrapper(use_rotary_embeddings=use_rotary_embeddings, head_dim=head_dim)
-    raise ValueError(
-        f"Unsupported attention implementation '{attention_implementation}'. "
-        "Expected one of: flash_attention, scaled_dot_product_attention.",
-    )
-
-
 class PointwiseMultiHeadCrossAttention(nn.Module):
-    """Attend over source tokens independently at each hidden node."""
+    """Attend over source tokens independently at each hidden node.
+
+    Each node has one query and only a handful of source tokens, so the
+    attention weights are worked out directly with two small products.
+    """
 
     def __init__(
         self,
@@ -566,19 +536,9 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
         qkv_bias: bool = False,
         qk_norm: bool = False,
         dropout_p: float = 0.0,
-        attention_implementation: str = "scaled_dot_product_attention",
     ) -> None:
         super().__init__()
-        if num_heads <= 0:
-            raise ValueError(f"num_heads must be positive, got {num_heads}.")
-        if embed_dim <= 0:
-            raise ValueError(f"embed_dim must be positive, got {embed_dim}.")
-        if not 0.0 <= dropout_p <= 1.0:
-            raise ValueError(f"dropout_p must be between 0 and 1, got {dropout_p}.")
-
         self.attn_channels = embed_dim if attn_channels is None else attn_channels
-        if self.attn_channels <= 0:
-            raise ValueError(f"attn_channels must be positive, got {self.attn_channels}.")
         if self.attn_channels % num_heads != 0:
             raise ValueError(
                 f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads}).",
@@ -588,8 +548,6 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
         self.head_dim = self.attn_channels // num_heads
         self.dropout_p = dropout_p
         self.qk_norm = qk_norm
-        self.attention_implementation = attention_implementation
-        self._attention_backend_applied = False
 
         linear = layer_kernels.Linear
         self.lin_q = linear(embed_dim, self.attn_channels, bias=qkv_bias)
@@ -601,50 +559,22 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
             self.q_norm = layer_kernels.QueryNorm(self.head_dim)
             self.k_norm = layer_kernels.KeyNorm(self.head_dim)
 
-        self.set_attention_function()
-
-    def set_attention_function(self) -> None:
-        """Set the configured attention backend."""
-        attention_implementation = resolve_attention_implementation(self.attention_implementation)
-        backend_changed = attention_implementation != self.attention_implementation
-        self.attention_implementation = attention_implementation
-
-        if backend_changed or not hasattr(self, "attention"):
-            self.attention = load_attention_implementation(attention_implementation, head_dim=self.head_dim)
-
     def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
         """Apply cross-attention over source tokens at each hidden node."""
-        query = self.lin_q(query)
-        key = self.lin_k(key)
-        value = self.lin_v(value)
-        query = einops.rearrange(query, "grid (heads vars) -> grid heads 1 vars", heads=self.num_heads)
+        query = einops.rearrange(self.lin_q(query), "grid (heads vars) -> grid heads vars", heads=self.num_heads)
         key, value = (
-            einops.rearrange(
-                tensor,
-                "grid sources (heads vars) -> grid heads sources vars",
-                heads=self.num_heads,
-            )
-            for tensor in (key, value)
+            einops.rearrange(tensor, "grid sources (heads vars) -> grid heads sources vars", heads=self.num_heads)
+            for tensor in (self.lin_k(key), self.lin_v(value))
         )
 
         if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        if ATTENTION_BACKEND and not self._attention_backend_applied:
-            self.set_attention_function()
-            self._attention_backend_applied = True
-
-        output = self.attention(
-            query,
-            key,
-            value,
-            batch_size=query.shape[0],
-            causal=False,
-            dropout_p=self.dropout_p if self.training else 0.0,
-        )
-        output = einops.rearrange(output, "grid heads 1 vars -> grid (heads vars)")
-        return self.projection(output)
+        scores = torch.einsum("ghv,ghsv->ghs", query, key) / math.sqrt(self.head_dim)
+        weights = nn.functional.dropout(scores.softmax(dim=-1), p=self.dropout_p, training=self.training)
+        output = torch.einsum("ghs,ghsv->ghv", weights, value)
+        return self.projection(einops.rearrange(output, "grid heads vars -> grid (heads vars)"))
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):

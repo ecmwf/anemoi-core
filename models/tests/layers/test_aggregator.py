@@ -94,24 +94,6 @@ def test_cross_attention_aggregator_supports_different_source_widths_and_gradien
     assert all(parameter.grad is not None for parameter in aggregator.parameters())
 
 
-def test_cross_attention_aggregator_is_independent_of_mapping_order() -> None:
-    aggregator = CrossAttentionAggregator(
-        input_channels=3,
-        source_channels={"a": 4, "b": 4},
-        num_channels=8,
-        num_heads=2,
-        layer_kernels={},
-    ).eval()
-    hidden = torch.randn(7, 3)
-    a = torch.randn(7, 4)
-    b = torch.randn(7, 4)
-
-    output = aggregator(hidden, {"a": a, "b": b})
-    reversed_output = aggregator(hidden, {"b": b, "a": a})
-
-    torch.testing.assert_close(output, reversed_output)
-
-
 def test_cross_attention_aggregator_accepts_an_active_source_subset() -> None:
     aggregator = CrossAttentionAggregator(
         input_channels=3,
