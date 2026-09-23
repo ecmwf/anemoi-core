@@ -25,8 +25,8 @@ from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.spec import make_spec
 
@@ -92,7 +92,7 @@ class Batch:
         """Number of samples (batch size) in this batch."""
         batch_sizes = {name: source.batch_size for name, source in self.sources.items()}
         if not batch_sizes:
-            msg = f"Cannot determine batch size of an empty batch."
+            msg = "Cannot determine batch size of an empty batch."
             raise ValueError(msg)
 
         if len(set(batch_sizes.values())) != 1:

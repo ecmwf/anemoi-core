@@ -57,7 +57,7 @@ Per dataset, in `input`:
 | `data` | yes | `torch.Tensor` | ? | model dtype | No need to add a dummy batch dimension.  |
 | `latitudes`   | yes | `torch.Tensor` | `(grid, )` | **degrees** | Omit for a fixed grid and the model falls back to its graph nodes. Required for moving grids and tabular. |
 | `longitudes`  | yes | `torch.Tensor` | `(grid, )` | **degrees** | Must match `latitudes` in shape. |
-| `variables`   | yes | `list[str]`  | `(variables, ) | 
+| `variables`   | yes | `list[str]`  | `(variables, ) |
 | `layout`      | yes | `tuple[str, ...]` | — | — | Axis names in order. Defaults below. |
 | `timedeltas`  | **tabular only** | array-like | `(grid, )` | **seconds** | Per-point time offset. |
 | `boundaries`  | **tabular only** | `list[(int, int)]` | one per time slot | — | `(start, stop)` into the grid axis. A tabular dataset without them raises. |
@@ -70,7 +70,7 @@ Per dataset, in `target_forcings`:
 | `data`        | yes | `torch.Tensor` | see below | model dtype | This data represent input data to the model, forcing variables defined in the target grid and timestamp.  |
 | `latitudes`   | yes | `torch.Tensor` | `(grid, )` | **degrees** | Omit for a fixed grid and the model falls back to its graph nodes. Required for moving grids and tabular. |
 | `longitudes`  | yes | `torch.Tensor` | `(grid, )` | **degrees** | Must match `latitudes` in shape. |
-| `variables`   | yes | `list[str]`  | `(variables, ) | 
+| `variables`   | yes | `list[str]`  | `(variables, ) |
 | `layout`      | yes | `tuple[str, ...]` | — | — | Axis names in order. Defaults below. |
 | `timedeltas`  | **tabular only** | array-like | `(grid, )` | **seconds** | Per-point time offset. |
 | `boundaries`  | **tabular only** | `list[(int, int)]` | one per time slot | — | `(start, stop)` into the grid axis. A tabular dataset without them raises. |
@@ -82,7 +82,7 @@ Per dataset, in `target_template`:
 |---|---|---|---|---|---|
 | `latitudes`   | yes | `torch.Tensor` | `(grid, )` | **degrees** | Required for moving grids and tabular. |
 | `longitudes`  | yes | `torch.Tensor` | `(grid, )` | **degrees** | Must match `latitudes` in shape. |
-| `variables`   | yes | `list[str]`  | `(variables, ) | 
+| `variables`   | yes | `list[str]`  | `(variables, ) |
 | `layout`      | yes | `tuple[str, ...]` | — | — | Axis names in order. Defaults below. |
 | `timedeltas`  | **tabular only** | array-like | `(grid, )` | **seconds** | Per-point time offset. |
 | `boundaries`  | **tabular only** | `list[(int, int)]` | one per time slot | — | `(start, stop)` into the grid axis. A tabular dataset without them raises. |
@@ -101,7 +101,7 @@ The ensemble and batch axis are **NOT mandatory** for gridded data.
 
 - One payload for **every** name in `model.target_datasets`. A missing one raises a
   `ValueError` naming it. Extra names are ignored.
-- `data` is **NOT SUPPORTED**. 
+- `data` is **NOT SUPPORTED**.
 - The target's coordinates, `boundaries`, `timedeltas` and time length become the
   **output's** geometry and time extent. This is the mechanism for decoding onto a grid
   that differs from the input.
@@ -120,12 +120,12 @@ Same key table as the input payload; same units and layout rules.
 
 ## The returned payload (`target_template` + new_data)
 
-Keys are `model.target_datasets` — the decoded datasets, **not** the input dataset names. 
+Keys are `model.target_datasets` — the decoded datasets, **not** the input dataset names.
 
 | Key | Type | Units | Notes |
 |---|---|---|---|
 | `data` | `torch.Tensor` | model dtype | Batch axis already removed. |
-| `variables` | `list[str]` | — | Variables | 
+| `variables` | `list[str]` | — | Variables |
 | `layout` | `tuple[str, ...]` | — | Axis names, no `batch`. |
 | `latitudes`, `longitudes` | `torch.Tensor` | **degrees** | Converted back from radians. Present when the batch carried coordinates. |
 | `timedeltas` | `torch.Tensor` | seconds | Only for tabular data. |
@@ -212,7 +212,7 @@ surface in two places:
 
 ## Open questions for the team
 - numpy or torch? `data`/
-`latitudes`/`longitudes`/`timedeltas` 
+`latitudes`/`longitudes`/`timedeltas`
 - What about the statistics?
 - The checkpoint carries `is_static_grid`, `is_tabular`, `grid_size`, `data_indices`,
   `variable_types`, `shapes` and `timesteps` under `metadata_inference[<dataset>]`, but

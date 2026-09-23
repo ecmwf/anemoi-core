@@ -13,6 +13,7 @@ from collections.abc import Sequence
 
 import einops
 import torch
+from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
@@ -23,8 +24,6 @@ from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
-
-from rich.tree import Tree
 
 LOGGER = logging.getLogger(__name__)
 
@@ -55,6 +54,7 @@ class GriddedSource(Source):
                     f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
                     f"but {len(self.variables)} names."
                 )
+
     @property
     def device(self) -> torch.device:
         """Device of the source's data tensor."""
@@ -294,7 +294,7 @@ class GriddedSource(Source):
 
     def tree(self, prefix: str = "") -> Tree:
         """Return a tree representation of the gridded source.
-        
+
         Example
         -------
         >>> source = GriddedSource(...)

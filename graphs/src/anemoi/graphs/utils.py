@@ -15,10 +15,10 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
 from importlib.util import find_spec
-from packaging import version
 
 import numpy as np
 import torch
+from packaging import version
 from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric import __version__ as PYG_VERSION

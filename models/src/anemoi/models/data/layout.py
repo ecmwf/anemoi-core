@@ -148,7 +148,7 @@ class TensorLayout:
 
         Raises
         ------
-        :class:`ValueError` 
+        :class:`ValueError`
             if the requested axis is not defined for this layout (e.g.
             ``time`` on a ``time_in_grid=True`` layout).
         """

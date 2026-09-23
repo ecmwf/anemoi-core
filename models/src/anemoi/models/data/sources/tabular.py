@@ -15,9 +15,9 @@ from typing import Any
 
 import numpy as np
 import torch
+from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
-from rich.tree import Tree
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources.base import Source
@@ -472,7 +472,7 @@ class TabularSource(Source):
 
     def tree(self, prefix: str = "") -> Tree:
         """Return a tree representation of the tabular source.
-        
+
         Example
         -------
         >>> source = TabularSource(...)
@@ -504,4 +504,3 @@ class TabularSource(Source):
                 tree.add(f"\tDim {axis+1} ({name}): {self.data[0].shape[axis]}")
 
         return tree
-    

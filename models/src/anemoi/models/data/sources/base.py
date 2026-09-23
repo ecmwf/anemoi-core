@@ -17,10 +17,9 @@ from dataclasses import dataclass
 from dataclasses import replace
 from typing import Any
 
+import torch
 from rich.console import Console
 from rich.tree import Tree
-
-import torch
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.spec import SourceSpec
@@ -369,5 +368,4 @@ class Source(ABC):
         return capture.get()
 
     @abstractmethod
-    def tree(self, prefix: str = "") -> Tree:
-        ...
+    def tree(self, prefix: str = "") -> Tree: ...
