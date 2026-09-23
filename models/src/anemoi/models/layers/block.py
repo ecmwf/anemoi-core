@@ -413,13 +413,13 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         out_channels : int
             Number of output channels.
         num_chunks : int
-            Number of chunks
+            Number of chunks.
         mlp_extra_layers : int, optional
-            Extra layers in MLP, by default 0
+            Extra layers in MLP, by default 0.
         update_src_nodes : bool, optional
-            Update src if src and dst nodes are given, by default True
+            Update src if src and dst nodes are given, by default True.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear".
         kwargs : dict
             Additional arguments for the base class.
         """
@@ -1114,7 +1114,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
             edge_index_for_attention = halo_info.edge_index_local
             # attention_size: local nodes (dst) attend to local + halo nodes (src)
-            attention_size = (halo_info.total_src_nodes, halo_info.local_dst_nodes)
+            attention_size = (halo_info.total_src_nodes, halo_info.num_local_dst_nodes)
         else:
             x_plus_halo = x
             edge_index_for_attention = edge_index

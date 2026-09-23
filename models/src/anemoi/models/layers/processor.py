@@ -539,7 +539,6 @@ class GraphTransformerProcessor(BaseProcessor):
         self.shard_strategy = shard_strategy
         self._cached_halo_info = None
         self._cached_halo_cache_specs = None
-        self._cached_halo_partition = None
 
         self.build_layers(
             GraphTransformerProcessorBlock,
@@ -567,7 +566,11 @@ class GraphTransformerProcessor(BaseProcessor):
         batch_size: int,
         model_comm_group: Optional[ProcessGroup],
     ) -> Optional[HaloInfo]:
-        """Return one halo plan shared by all processor layers for a static graph."""
+        """Return one halo plan shared by all processor layers.
+
+        The plan is kept for as long as the shard sizes stay the same, so the
+        processor graph must not change between calls.
+        """
         if self.shard_strategy != "edges" or not model_is_distributed(model_comm_group):
             return None
 
@@ -575,13 +578,17 @@ class GraphTransformerProcessor(BaseProcessor):
             raise ValueError(
                 "GraphTransformerProcessor halo exchange requires batch_size=1 when model sharding is enabled."
             )
+        if not shard_info.nodes_are_sharded():
+            raise ValueError(
+                "GraphTransformerProcessor halo exchange requires sharded nodes when model sharding is enabled."
+            )
+        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
 
         cache_specs = halo_cache_specs(shard_info, model_comm_group)
         if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
             return self._cached_halo_info
 
         LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
 
         bipartite_shard_info = BipartiteGraphShardInfo(
             src_nodes=shard_info.nodes,
@@ -604,7 +611,6 @@ class GraphTransformerProcessor(BaseProcessor):
 
         self._cached_halo_info = halo_info
         self._cached_halo_cache_specs = cache_specs
-        self._cached_halo_partition = partition
         return halo_info
 
     def forward(
