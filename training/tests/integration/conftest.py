@@ -241,14 +241,24 @@ def multidatasets_config(
 
 @pytest.fixture
 def multidomain_config(
-    multidatasets_config: tuple[DictConfig, list[str]],
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
 ) -> tuple[DictConfig, list[str]]:
-    cfg, urls = multidatasets_config
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_multidomain"):
+        template = compose(config_name="multidomain")
+
     use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_multidomain.yaml")
-    cfg = OmegaConf.merge(cfg, use_case_modifications)
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(use_case_modifications.system.input.forcing_dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+    use_case_modifications.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
     OmegaConf.resolve(cfg)
     assert isinstance(cfg, DictConfig)
-    return cfg, urls
+    return cfg, [url_dataset, url_forcing_dataset]
 
 
 @pytest.fixture

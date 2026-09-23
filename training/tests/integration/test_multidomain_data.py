@@ -43,10 +43,10 @@ def test_multidomain_dataloader(
         sampled_domains.add(domain)
         grid_sizes[domain] = batch[domain].shape[-2]
         assert grid_sizes[domain] == datamodule.ds_train.data_readers[domain].grid_size
-        if sampled_domains == {"era5", "cerra"}:
+        if sampled_domains == {"sg_1", "sg_2"}:
             break
 
-    assert sampled_domains == {"era5", "cerra"}
+    assert sampled_domains == {"sg_1", "sg_2"}
     assert len(set(grid_sizes.values())) == 2
 
 
@@ -54,3 +54,7 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
     cfg, _ = multidomain_config
     cfg = convert_to_omegaconf(BaseSchema(**cfg))
     assert cfg.dataloader.iteration._target_ == "anemoi.training.data.iteration.CrossDatasetIteration"
+    assert cfg.model.model.hidden_nodes_name == {
+        "sg_1": "sg_1_hidden",
+        "sg_2": "sg_2_hidden",
+    }

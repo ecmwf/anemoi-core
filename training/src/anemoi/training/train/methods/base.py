@@ -847,6 +847,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y:
+                continue
             if dataset_name not in y_pred:
                 err_msg = (
                     f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "
@@ -946,7 +948,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = {}
         self.grid_shard_slice = {}
 
-        for dataset_name in self.dataset_names:
+        for dataset_name in batch:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
                 self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
                 start, end = get_partition_range(
