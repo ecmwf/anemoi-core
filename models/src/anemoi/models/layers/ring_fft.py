@@ -37,6 +37,9 @@ class RingFFT(Module):
         self.modes = max(lengths) // 2 + 1
         by_length = defaultdict(list)
         offsets = np.cumsum([0, *lengths])
+        # Build groups of rings of the same length
+        # by_length maps ring length to list of ring indices of that length
+        # groups is a tuple of (length, number of rings of that length) tuples
         for ring, n in enumerate(lengths):
             by_length[n].append(ring)
         self.groups = tuple((n, len(rings)) for n, rings in sorted(by_length.items()))
