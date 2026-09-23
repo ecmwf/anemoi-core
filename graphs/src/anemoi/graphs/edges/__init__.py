@@ -7,15 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .builders.cutoff import CutOffEdges
-from .builders.cutoff import ReversedCutOffEdges
+from .builders.euclidean.cutoff import CutOffEdges
+from .builders.euclidean.cutoff import ReversedCutOffEdges
+from .builders.euclidean.knn import KNNEdges
+from .builders.euclidean.knn import MutualKNNEdges
+from .builders.euclidean.knn import ReversedKNNEdges
 from .builders.healpix import HEALPixMultiScaleEdges
 from .builders.icon import ICONTopologicalDecoderEdges
 from .builders.icon import ICONTopologicalEncoderEdges
 from .builders.icon import ICONTopologicalProcessorEdges
-from .builders.knn import KNNEdges
-from .builders.knn import MutualKNNEdges
-from .builders.knn import ReversedKNNEdges
 from .builders.multi_scale import MultiScaleEdges
 
 __all__ = [
