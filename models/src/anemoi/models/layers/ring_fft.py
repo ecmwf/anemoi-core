@@ -120,6 +120,7 @@ class _RingRFFT(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: Tensor, fft: RingFFT) -> Tensor:
         ctx.fft = fft
+        # Rearrange input so rings of the same length are contiguous, and points are ordered by length of the ring they are on
         packed = x.index_select(-1, fft.grid_order)
         return fft._unpack_spectrum(fft._rfft_groups(packed) / fft.mode_lengths)
 
