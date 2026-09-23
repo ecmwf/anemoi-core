@@ -17,18 +17,17 @@ from copy import deepcopy
 from functools import cached_property
 from inspect import getsource
 from pathlib import Path
-from typing import TYPE_CHECKING, Self, TypedDict
-
-from anemoi.utils.migrations import (
-    IncompatibleObjectError,
-    IncompleteMigrationScriptError,
-    Migration,
-    MigrationMetadata,
-    Migrator,
-)
+from typing import TYPE_CHECKING
+from typing import Self
+from typing import TypedDict
 
 from anemoi.training import __version__
 from anemoi.training.migrations.config import Config
+from anemoi.utils.migrations import IncompatibleObjectError
+from anemoi.utils.migrations import IncompleteMigrationScriptError
+from anemoi.utils.migrations import Migration
+from anemoi.utils.migrations import MigrationMetadata
+from anemoi.utils.migrations import Migrator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -39,6 +38,8 @@ MIGRATION_PATH = Path(__file__).parent / "scripts"
 _CONFIG_MIGRATION_KEY = "migration_state"
 
 LOGGER = logging.getLogger(__name__)
+
+MIGRATOR_VERSION = "1.0.0"
 
 
 class IncompatibleConfigError(IncompatibleObjectError):
