@@ -38,10 +38,12 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import reduce_shard_tensor
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.halo import HaloInfo
 
 from ._distributed_runner import _run_distributed_test
 from .distributed_test_utils import shard_sizes_from_pattern
@@ -1272,3 +1274,53 @@ def test_all_to_all_transpose_inverts_gradients_with_explicit_shard_sizes(
         split_shard_sizes=split_shard_sizes,
         concat_shard_sizes=concat_shard_sizes,
     )
+
+
+@pytest.mark.parametrize(
+    ("field", "num_entries", "expected_message"),
+    [
+        pytest.param(
+            "send_indices",
+            1,
+            "send_indices must contain 2 entries, but got 1",
+            id="too-few-send-indices",
+        ),
+        pytest.param(
+            "send_indices",
+            3,
+            "send_indices must contain 2 entries, but got 3",
+            id="too-many-send-indices",
+        ),
+        pytest.param(
+            "recv_counts",
+            1,
+            "recv_counts must contain 2 entries, but got 1",
+            id="too-few-recv-counts",
+        ),
+        pytest.param(
+            "recv_counts",
+            3,
+            "recv_counts must contain 2 entries, but got 3",
+            id="too-many-recv-counts",
+        ),
+    ],
+)
+def test_halo_exchange_peer_count_errors(field: str, num_entries: int, expected_message: str) -> None:
+    empty_indices = torch.empty(0, dtype=torch.long)
+    send_indices = (empty_indices,) * (num_entries if field == "send_indices" else 2)
+    recv_counts = (0,) * (num_entries if field == "recv_counts" else 2)
+    halo_info = HaloInfo(
+        num_local_src_nodes=2,
+        num_local_dst_nodes=2,
+        num_halo_nodes=0,
+        send_indices=send_indices,
+        recv_counts=recv_counts,
+        edge_index_local=torch.empty((2, 0), dtype=torch.long),
+    )
+
+    with patch(
+        "anemoi.models.distributed.graph._HaloExchangeParallelSection.apply",
+        side_effect=AssertionError("invalid metadata reached autograd dispatch"),
+    ):
+        with pytest.raises(ValueError, match=expected_message):
+            halo_exchange(torch.empty((2, 3)), halo_info, _TestProcessGroup(size=2))
