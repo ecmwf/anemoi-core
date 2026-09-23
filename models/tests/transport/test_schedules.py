@@ -7,9 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import math
+
 import pytest
 import torch
 
+from anemoi.models.transport.paths import karras_sigma_from_unit_time
 from anemoi.models.transport.schedules import KarrasSigmaTrainingDistribution
 from anemoi.models.transport.schedules import PiecewiseSigmaSchedule
 from anemoi.models.transport.schedules import UniformTimeTrainingDistribution
@@ -42,25 +45,34 @@ def test_piecewise_sigma_schedule_has_one_transition_and_terminal_zero() -> None
         sigma_transition=10.0,
         num_steps=8,
         num_steps_high=5,
-        num_steps_low=3,
     ).get_schedule(dtype_compute=torch.float64)
 
     assert schedule.shape == (9,)
-    assert schedule[-1].item() == 0.0
+    torch.testing.assert_close(schedule[[0, 5, -2, -1]], torch.tensor([100.0, 10.0, 0.02, 0.0], dtype=torch.float64))
     assert torch.count_nonzero(torch.isclose(schedule, torch.tensor(10.0, dtype=schedule.dtype))).item() == 1
-    assert torch.all(schedule[:-1] > 0)
-    assert torch.all(schedule[1:] <= schedule[:-1])
+    assert torch.all(schedule[1:] < schedule[:-1])
 
 
-def test_piecewise_sigma_schedule_supports_one_solver_step() -> None:
+def test_piecewise_sigma_schedule_uses_requested_segment_types() -> None:
     schedule = PiecewiseSigmaSchedule(
         sigma_max=100.0,
         sigma_min=0.02,
         sigma_transition=10.0,
-        num_steps=1,
-    ).get_schedule()
+        num_steps=8,
+        num_steps_high=3,
+        high_schedule_type="karras",
+        low_schedule_type="exponential",
+        rho_high=3.0,
+    ).get_schedule(dtype_compute=torch.float64)
 
-    torch.testing.assert_close(schedule, torch.tensor([100.0, 0.0], dtype=torch.float64))
+    high = karras_sigma_from_unit_time(
+        torch.linspace(0.0, 1.0, 4, dtype=torch.float64),
+        sigma_max=100.0,
+        sigma_min=10.0,
+        rho=3.0,
+    )
+    low = torch.logspace(1.0, math.log10(0.02), 5, dtype=torch.float64)
+    torch.testing.assert_close(schedule[:-1], torch.cat((high, low[1:])))
 
 
 @pytest.mark.parametrize(
@@ -68,11 +80,13 @@ def test_piecewise_sigma_schedule_supports_one_solver_step() -> None:
     [
         ({"sigma_transition": 0.02}, "sigma_transition"),
         ({"sigma_transition": 100.0}, "sigma_transition"),
-        ({"num_steps_high": 1, "num_steps_low": 1}, "must equal"),
+        ({"num_steps_high": 0}, "num_steps_high"),
+        ({"num_steps_high": 7}, "num_steps_high"),
         ({"high_schedule_type": "linear"}, "Unsupported"),
     ],
 )
 def test_piecewise_sigma_schedule_validates_configuration(kwargs: dict[str, object], match: str) -> None:
+    kwargs = {"sigma_transition": 10.0, "num_steps_high": 4} | kwargs
     with pytest.raises(ValueError, match=match):
         PiecewiseSigmaSchedule(sigma_max=100.0, sigma_min=0.02, num_steps=8, **kwargs)
 

@@ -205,9 +205,10 @@ class ExponentialSigmaSchedule(SigmaSchedule):
 class PiecewiseSigmaSchedule(SigmaSchedule):
     """Two-segment EDM schedule with a denser low-noise region.
 
-    ``num_steps_high`` and ``num_steps_low`` split the complete solver budget,
-    including the terminal denoising step. The two positive segments meet once at
-    ``sigma_transition``; :class:`SigmaSchedule` appends the terminal exact zero.
+    The first ``num_steps_high`` solver steps go from ``sigma_max`` down to
+    ``sigma_transition``. The remaining ``num_steps - num_steps_high`` steps go on
+    down to ``sigma_min`` and include the terminal step to zero, so at least two
+    steps must be left for them. :class:`SigmaSchedule` appends the terminal zero.
     """
 
     def __init__(
@@ -215,37 +216,31 @@ class PiecewiseSigmaSchedule(SigmaSchedule):
         sigma_max: float,
         sigma_min: float,
         num_steps: int,
-        sigma_transition: float = 10.0,
+        sigma_transition: float,
+        num_steps_high: int,
         high_schedule_type: str = "exponential",
         low_schedule_type: str = "karras",
-        num_steps_high: int | None = None,
-        num_steps_low: int | None = None,
         rho: float = 7.0,
         rho_high: float | None = None,
         rho_low: float | None = None,
     ) -> None:
         super().__init__(sigma_max=sigma_max, sigma_min=sigma_min, num_steps=num_steps)
-        if not self.sigma_min < sigma_transition < self.sigma_max:
+        self.sigma_transition = float(sigma_transition)
+        if not self.sigma_min < self.sigma_transition < self.sigma_max:
             raise ValueError("sigma_transition must be strictly between sigma_min and sigma_max.")
         if high_schedule_type not in {"exponential", "karras"}:
             raise ValueError(f"Unsupported high_schedule_type: {high_schedule_type!r}.")
         if low_schedule_type not in {"exponential", "karras"}:
             raise ValueError(f"Unsupported low_schedule_type: {low_schedule_type!r}.")
 
-        if self.num_steps == 1:
-            if num_steps_high not in {None, 1} or num_steps_low not in {None, 0}:
-                raise ValueError("A one-step piecewise schedule requires num_steps_high=1 and num_steps_low=0.")
-            self.num_steps_high, self.num_steps_low = 1, 0
-        else:
-            default_low = self.num_steps // 2
-            self.num_steps_high = self.num_steps - default_low if num_steps_high is None else int(num_steps_high)
-            self.num_steps_low = default_low if num_steps_low is None else int(num_steps_low)
-            if self.num_steps_high < 1 or self.num_steps_low < 1:
-                raise ValueError("num_steps_high and num_steps_low must both be at least 1.")
-            if self.num_steps_high + self.num_steps_low != self.num_steps:
-                raise ValueError("num_steps_high + num_steps_low must equal num_steps.")
+        self.num_steps_high = int(num_steps_high)
+        self.num_steps_low = self.num_steps - self.num_steps_high
+        if self.num_steps_high < 1 or self.num_steps_low < 2:
+            raise ValueError(
+                f"num_steps_high must be between 1 and num_steps - 2 ({self.num_steps - 2}); "
+                f"got {self.num_steps_high}.",
+            )
 
-        self.sigma_transition = float(sigma_transition)
         self.high_schedule_type = high_schedule_type
         self.low_schedule_type = low_schedule_type
         self.rho_high = float(rho if rho_high is None else rho_high)
@@ -261,8 +256,6 @@ class PiecewiseSigmaSchedule(SigmaSchedule):
         device: torch.device | None,
         dtype_compute: torch.dtype,
     ) -> torch.Tensor:
-        if num_points == 1:
-            return torch.tensor([sigma_start], device=device, dtype=dtype_compute)
         unit_time = torch.linspace(0.0, 1.0, num_points, device=device, dtype=dtype_compute)
         if schedule_type == "exponential":
             return exponential_sigma_from_unit_time(unit_time, sigma_max=sigma_start, sigma_min=sigma_end)
@@ -273,8 +266,6 @@ class PiecewiseSigmaSchedule(SigmaSchedule):
         device: torch.device = None,
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
-        if self.num_steps == 1:
-            return torch.tensor([self.sigma_max], device=device, dtype=dtype_compute)
         high = self._build_segment(
             self.high_schedule_type,
             self.sigma_max,

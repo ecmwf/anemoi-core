@@ -493,3 +493,26 @@ These defaults can be overridden at inference time with
 For stochastic interpolants, use the same structure with
 ``sampling_schedule.schedule_type: unit_time`` and a vector-field sampler
 such as ``heun`` or ``euler``.
+
+EDM sigma schedules are ``karras``, ``linear``, ``cosine``,
+``exponential`` and ``piecewise``. The experimental ``piecewise``
+schedule spends a fixed number of steps descending from ``sigma_max``
+to ``sigma_transition`` and the rest refining from there down to
+``sigma_min``, which puts more of the step budget at low noise:
+
+.. code:: yaml
+
+   sampling_schedule:
+     schedule_type: piecewise
+     sigma_max: 1000.0
+     sigma_min: 0.02
+     sigma_transition: 10.0
+     num_steps: 30
+     num_steps_high: 8          # sigma_max -> sigma_transition
+     high_schedule_type: exponential
+     low_schedule_type: karras  # exponential or karras
+     rho: 7.0                   # rho_high / rho_low override it per segment
+
+The low-noise segment gets ``num_steps - num_steps_high`` steps,
+including the final step to zero, so ``num_steps_high`` must be between
+1 and ``num_steps - 2``.
