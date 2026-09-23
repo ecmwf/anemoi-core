@@ -14,6 +14,7 @@ from anemoi.training.schemas.training import BaseDDPStrategySchema
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import MultiscaleConfigDiskSchema
 from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
+from anemoi.training.schemas.training import MultiscaleConfigSpectralSchema
 from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
@@ -129,6 +130,41 @@ def test_multiscale_config_on_the_fly_requires_num_scales_or_smoothers() -> None
 def test_multiscale_config_on_the_fly_requires_base_parameters_with_num_scales() -> None:
     with pytest.raises(ValidationError, match=r"base_num_nearest_neighbours.*base_sigma"):
         MultiscaleConfigOnTheFlySchema(num_scales=4)
+
+
+def test_multiscale_config_spectral_valid() -> None:
+    MultiscaleConfigSpectralSchema(transform="octahedral_sht", nlat=640, cutoffs=[79, 159, 319])
+    MultiscaleConfigSpectralSchema(transform="reduced_sht", grid="n320", cutoffs=[159])
+    MultiscaleConfigSpectralSchema(transform="regular_sht", nlat=640, cutoffs=[159])
+    MultiscaleConfigSpectralSchema(transform="dct2d", x_dim=1000, y_dim=800, cutoffs=[0.0625, 0.125])
+    MultiscaleConfigSpectralSchema(transform="fft2d", x_dim=1000, y_dim=800, cutoffs=[0.25])
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        {"transform": "octahedral_sht", "grid": "n320", "cutoffs": [79]},
+        {"transform": "reduced_sht", "nlat": 640, "cutoffs": [79]},
+        {"transform": "dct2d", "x_dim": 1000, "cutoffs": [0.125]},
+        {"transform": "fft2d", "x_dim": 1000, "y_dim": 800, "nlat": 640, "cutoffs": [0.125]},
+        {"transform": "octahedral_sht", "nlat": 640, "cutoffs": [79.5]},
+        {"transform": "octahedral_sht", "nlat": 640, "cutoffs": [159, 79]},
+        {"transform": "octahedral_sht", "nlat": 640, "cutoffs": []},
+    ],
+)
+def test_multiscale_config_spectral_rejects_invalid(config: dict) -> None:
+    with pytest.raises(ValidationError):
+        MultiscaleConfigSpectralSchema(**config)
+
+
+def test_multiscale_loss_spectral_mode_valid() -> None:
+    schema = MultiScaleLossSchema(
+        **{
+            **_MULTISCALE_BASE,
+            "multiscale_config": {"transform": "octahedral_sht", "nlat": 640, "cutoffs": [319]},
+        },
+    )
+    assert isinstance(schema.multiscale_config, MultiscaleConfigSpectralSchema)
 
 
 def test_multiscale_loss_disk_mode_valid() -> None:

@@ -28,6 +28,8 @@ from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
+from anemoi.training.losses.spectral_scales import SpectralScales
+from anemoi.training.losses.spectral_scales import build_spectral_scales
 
 LOGGER = logging.getLogger(__name__)
 
@@ -61,7 +63,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         weights : list[float]
             Per-scale loss weights
         multiscale_config : object | None
-            Configuration for the smoothing matrices.  Accepts two forms:
+            Configuration for the loss scales.  Accepts three forms:
 
             - **File mode** provide ``loss_matrices`` (list of filenames) and
               optionally ``loss_matrices_path`` (directory prefix)::
@@ -83,14 +85,42 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                   base_sigma: 0.1
                   scale_factor: 2
 
+            - **Spectral mode** provide a ``transform``, its grid and strictly
+              increasing ``cutoffs``. Each scale keeps what lies at or below its
+              cutoff; a full-resolution scale is added last. Grid points are
+              ordered as for the spectral losses: ring by ring for the spherical
+              harmonic transforms, ``(y x)`` for the rectangular ones.
+
+              - ``octahedral_sht`` / ``regular_sht`` with ``nlat``, or
+                ``reduced_sht`` with ``grid`` (e.g. ``n320``): cutoffs are
+                integer truncations::
+
+                    multiscale_config:
+                      transform: octahedral_sht
+                      nlat: 640
+                      cutoffs: [79, 159, 319]   # four scales with the full resolution
+
+              - ``dct2d`` or ``fft2d`` with ``x_dim`` and ``y_dim``, for
+                limited-area grids: cutoffs are frequencies in cycles per grid
+                spacing (0.125 keeps wavelengths of 8 grid spacings and longer).
+                ``dct2d`` suits non-periodic domains, ``fft2d`` treats the domain
+                as periodic::
+
+                    multiscale_config:
+                      transform: dct2d
+                      x_dim: 1000
+                      y_dim: 800
+                      cutoffs: [0.03125, 0.0625, 0.125]
+
         graph_data : HeteroData | None
             Main graph; required for on-the-fly mode to copy data-node positions.
         data_node_name : str
             Node type in *graph_data* that holds the data-grid coordinates.
         autocast : bool
-            Whether to use automatic mixed precision for the projections.
+            Whether to use automatic mixed precision for the smoothing matrices.
+            Spectral scales always run in float32.
         sparse_projector_num_chunks : int
-            Default number of chunks for multiscale smoothing.
+            Default number of chunks for smoothing with matrices.
             ``1`` means processing all fields in one go.
         ignore_nans : bool
             Passed to :class:`BaseLoss`; ignored by the wrapper itself.
@@ -114,12 +144,13 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                 cfg.setdefault("loss_matrices_path", loss_matrices_path)
             multiscale_config = cfg
 
-        self.smoothing_matrices = self._load_smoothing_matrices(
+        self.spectral_scales: SpectralScales | None = None
+        self.smoothers = self._load_smoothers(
             multiscale_config,
             graph_data,
             data_node_name,
         )
-        self.num_scales = len(self.smoothing_matrices)
+        self.num_scales = len(self.smoothers)
         assert (
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
@@ -137,16 +168,17 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         """MultiscaleLossWrapper is a leaf: it performs substantive computation."""
         yield self
 
-    def _load_smoothing_matrices(
+    def _load_smoothers(
         self,
         multiscale_config: object | None,
         graph_data: HeteroData | None,
         data_node_name: str,
-    ) -> list[ProjectionGraphProvider | None]:
-        """Load smoothing matrices for multi-scale loss computation.
+    ) -> list[ProjectionGraphProvider | float | None]:
+        """Build one smoother per loss scale, coarsest first; None means full resolution.
 
-        Dispatches to file mode when *multiscale_config* contains a
-        ``loss_matrices`` key, otherwise to on-the-fly graph mode.
+        Dispatches to spectral mode when *multiscale_config* contains a
+        ``transform`` key, to file mode when it contains a ``loss_matrices``
+        key, otherwise to on-the-fly graph mode.
         """
         if multiscale_config is None:
             LOGGER.info("No multiscale_config specified, using single scale without smoothing")
@@ -159,6 +191,9 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             if OmegaConf.is_config(multiscale_config)
             else dict(multiscale_config)
         )
+
+        if "transform" in cfg:
+            return self._build_spectral_smoothers(cfg)
 
         if "loss_matrices" in cfg:
             from anemoi.training.schemas.training import MultiscaleConfigOnTheFlySchema
@@ -177,6 +212,19 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
         assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
         return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
+
+    def _build_spectral_smoothers(self, multiscale_config: dict) -> list[float | None]:
+        """Set up the shared spectral transforms and return the cutoffs, coarsest first."""
+        grid_kwargs = dict(multiscale_config)
+        transform = grid_kwargs.pop("transform")
+        cutoffs = list(grid_kwargs.pop("cutoffs"))
+        if not cutoffs or cutoffs != sorted(set(cutoffs)):
+            msg = f"multiscale_config 'cutoffs' must be strictly increasing, got {cutoffs}."
+            raise ValueError(msg)
+
+        self.spectral_scales = build_spectral_scales(transform, cutoffs, **grid_kwargs)
+        LOGGER.info("Loss smoothing (%s): cutoffs %s", transform, cutoffs)
+        return [*cutoffs, None]  # full-resolution scale last — no smoothing
 
     def _build_graph_smoothing_matrices(
         self,
@@ -301,20 +349,37 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             channel_shard_sizes_y,
         )
 
-    def _smooth_for_loss(self, x: torch.Tensor, y: torch.Tensor, i: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply smoothing matrix to predictions and targets for loss computation."""
-        if self.smoothing_matrices[i] is not None:
-            projection_matrix = self.smoothing_matrices[i].get_edges(device=x.device)
-            x = self.projector(
-                x,
-                projection_matrix,
-                num_chunks=self.sparse_projector_num_chunks,
+    def _smooth_for_loss(
+        self,
+        x: torch.Tensor,
+        y: torch.Tensor,
+        smoother: ProjectionGraphProvider | float | None,
+        x_coeffs: torch.Tensor | None = None,
+        y_coeffs: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Smooth predictions and targets to one loss scale.
+
+        In spectral mode a scale is given by its cutoff and is built from the
+        coefficients ``x_coeffs`` and ``y_coeffs`` of the shared analysis.
+        """
+        if smoother is None:
+            return x, y
+        if self.spectral_scales is not None:
+            return (
+                self.spectral_scales.synthesise(x_coeffs, smoother),
+                self.spectral_scales.synthesise(y_coeffs, smoother),
             )
-            y = self.projector(
-                y,
-                projection_matrix,
-                num_chunks=self.sparse_projector_num_chunks,
-            )
+        projection_matrix = smoother.get_edges(device=x.device)
+        x = self.projector(
+            x,
+            projection_matrix,
+            num_chunks=self.sparse_projector_num_chunks,
+        )
+        y = self.projector(
+            y,
+            projection_matrix,
+            num_chunks=self.sparse_projector_num_chunks,
+        )
         return x, y
 
     def forward(
@@ -351,22 +416,28 @@ class MultiscaleLossWrapper(BaseLossWrapper):
             y_pred_ens_for_smooth = y_pred_ens
             y_for_smooth = y
 
+        pred_coeffs = y_coeffs = None
+        if self.spectral_scales is not None:
+            # One forward transform per tensor serves every spectral scale.
+            pred_coeffs = self.spectral_scales.analyse(y_pred_ens_for_smooth)
+            y_coeffs = self.spectral_scales.analyse(y_for_smooth)
+
         weighted_losses = []
         prev_y_pred_ens = None
         prev_y = None
-        for i, (weight, provider) in enumerate(zip(self.weights, self.smoothing_matrices, strict=True)):
+        for i, (weight, smoother) in enumerate(zip(self.weights, self.smoothers, strict=True)):
             if LOGGER.isEnabledFor(logging.DEBUG):
-                LOGGER.debug(
-                    "Loss: %s %s",
-                    i,
-                    provider.projection_matrix.shape if provider is not None else None,
-                )
+                # A spectral scale shows its cutoff; None is the full resolution.
+                scale = smoother.projection_matrix.shape if isinstance(smoother, ProjectionGraphProvider) else smoother
+                LOGGER.debug("Loss: %s %s", i, scale)
 
             # smooth the predictions and the truth for loss computation
             y_pred_ens_tmp, y_tmp = self._smooth_for_loss(
                 y_pred_ens_for_smooth,
                 y_for_smooth,
-                i,
+                smoother,
+                pred_coeffs,
+                y_coeffs,
             )
 
             if is_model_sharded:
