@@ -571,8 +571,8 @@ Supported transforms include:
 .. note::
 
    ``ReducedSHT`` and ``OctahedralSHT`` both perform a spherical harmonic transform on a reduced Gaussian grid.
-   By default, a naive Fourier transform is performed in the meridional direction which is very inefficient when
-   executed on GPUs. Therefore an optimised version using graphs is provided, which can be switched on by setting
+   By default, longitude rings of equal length are transformed together using batched PyTorch FFTs
+   and explicit backward formulas. Optional CUDA graphs can be enabled by setting
    ``use_graphed_rfft=True`` in the section of the config file corresponding to your spectral loss. This can provide
    significant speedups, but may not be supported on all devices and can have higher memory usage.
 
