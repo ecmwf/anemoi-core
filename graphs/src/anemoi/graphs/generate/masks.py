@@ -20,7 +20,7 @@ from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import pyg_available
+from anemoi.graphs.utils import is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ class AreaMaskBuilder:
         self.mask_attr_name = mask_attr_name
 
         self.device = get_distributed_device()
-        if pyg_available():
+        if is_pyg_lib_available():
             self._backend = _PYGAreaMaskBackend(device=self.device)
         else:
             self._backend = _KDTreeAreaMaskBackend()

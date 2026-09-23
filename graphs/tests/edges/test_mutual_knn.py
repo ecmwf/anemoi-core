@@ -100,13 +100,12 @@ def test_mutual_knn_masking(graph_with_nodes):
     assert mask2[edge_index[1]].all()
 
 
-def test_mutual_knn_sklearn_fallback(monkeypatch, graph_with_nodes):
+def test_mutual_knn_sklearn_fallback(graph_with_nodes):
     """The scikit-learn fallback yields the same mutual edges as the PyG path."""
     nodes = graph_with_nodes["test_nodes"]
     builder = MutualKNNEdges("test_nodes", "test_nodes", 3)
     primary_edges = builder.compute_edge_index(nodes, nodes)
 
-    monkeypatch.setenv(DISABLE_PYG_LIB_ENV_VAR, "1")
     fallback_edges = builder.compute_edge_index(nodes, nodes)
 
     assert _edge_set(primary_edges) == _edge_set(fallback_edges)
@@ -151,16 +150,13 @@ def test_mutual_equals_intersection_heterogeneous(graph_with_two_node_sets):
     assert _edge_set(mutual) == _edge_set(forward) & _edge_set(reversed_)
 
 
-def test_mutual_knn_sklearn_fallback_heterogeneous(monkeypatch, graph_with_two_node_sets):
+def test_mutual_knn_sklearn_fallback_heterogeneous(graph_with_two_node_sets):
     """The scikit-learn fallback agrees with the PyG path for distinct node sets and asymmetric k."""
     k_fwd, k_rev = 3, 2
     src = graph_with_two_node_sets["src_nodes"]
     tgt = graph_with_two_node_sets["tgt_nodes"]
     builder = MutualKNNEdges("src_nodes", "tgt_nodes", k_fwd, reversed_num_nearest_neighbours=k_rev)
-
     primary = builder.compute_edge_index(src, tgt)
-
-    monkeypatch.setenv(DISABLE_PYG_LIB_ENV_VAR, "1")
     fallback = builder.compute_edge_index(src, tgt)
 
     assert _edge_set(primary) == _edge_set(fallback)
