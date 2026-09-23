@@ -11,8 +11,10 @@ import contextlib
 
 import numpy as np
 import torch
+from scipy.sparse import coo_matrix
 
 from anemoi.graphs.utils import concat_edges
+from anemoi.graphs.utils import crop_to_max_num_neighbours
 from anemoi.graphs.utils import current_device_context
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import get_edge_attributes
@@ -20,6 +22,7 @@ from anemoi.graphs.utils import intersect_edges
 
 
 def test_concat_edges():
+    """Test the concat_edges utility function."""
     edge_indices1 = torch.tensor([[0, 1, 2, 3], [-1, -2, -3, -4]], dtype=torch.int64)
     edge_indices2 = torch.tensor(np.array([[0, 4], [-1, -5]]), dtype=torch.int64)
     no_edges = torch.tensor([[], []], dtype=torch.int64)
@@ -34,6 +37,7 @@ def test_concat_edges():
 
 
 def test_intersect_edges():
+    """Test the dtype, shape, and correctness of the intersect_edges utility function."""
     edge_indices1 = torch.tensor([[0, 1, 2, 3], [4, 5, 6, 7]], dtype=torch.int64)
     edge_indices2 = torch.tensor([[1, 3, 5], [5, 7, 9]], dtype=torch.int64)
     no_edges = torch.tensor([[], []], dtype=torch.int64)
@@ -54,7 +58,35 @@ def test_intersect_edges():
     assert intersect_edges(no_overlap1, no_overlap2).shape == (2, 0)
 
 
+def test_crop_to_max_num_neighbours_no_op_when_under_limit():
+    """Test that crop_to_max_num_neighbours returns the original matrix when under the limit."""
+    rows = np.array([0, 0, 1])
+    cols = np.array([0, 1, 0])
+    data = np.array([1.0, 2.0, 3.0])
+    adjmat = coo_matrix((data, (rows, cols)), shape=(2, 2))
+
+    result = crop_to_max_num_neighbours(adjmat, max_num_neighbours=2)
+
+    assert result is adjmat
+
+
+def test_crop_to_max_num_neighbours_keeps_closest_neighbours():
+    """Test that crop_to_max_num_neighbours keeps only the closest neighbours when exceeding the limit."""
+    # Node 0 has 3 neighbours with distances 3, 1, 2 -> only the two closest (cols 1, 2) should remain.
+    rows = np.array([0, 0, 0, 1])
+    cols = np.array([0, 1, 2, 0])
+    data = np.array([3.0, 1.0, 2.0, 5.0])
+    adjmat = coo_matrix((data, (rows, cols)), shape=(2, 3))
+
+    result = crop_to_max_num_neighbours(adjmat, max_num_neighbours=2)
+
+    result_edges = set(zip(result.row.tolist(), result.col.tolist()))
+    assert result_edges == {(0, 1), (0, 2), (1, 0)}
+    assert result.shape == adjmat.shape
+
+
 def test_get_edge_attributes():
+    """Test the get_edge_attributes utility function."""
     mock_config = {
         "nodes": "mock_nodes_config",
         "edges": [
@@ -80,17 +112,24 @@ def test_get_edge_attributes():
     assert edge_attrs == {}
 
 
-def test_get_distributed_device(monkeypatch):
+def test_get_distributed_device_gpu(monkeypatch):
+    """Test that get_distributed_device returns the correct CUDA device when available."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 4)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda x: None)
 
     monkeypatch.setenv("SLURM_LOCALID", "2")
     assert get_distributed_device() == torch.device("cuda:2")
 
+
+def test_get_distributed_device_cpu(monkeypatch):
+    """Test that get_distributed_device returns the CPU device when CUDA is not available."""
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
     assert get_distributed_device() == torch.device("cpu")
 
 
 def test_current_device_context():
+    """Test the current_device_context utility function."""
     with current_device_context("cpu"):
         pass
     assert isinstance(current_device_context("cpu"), contextlib.nullcontext)
