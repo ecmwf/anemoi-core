@@ -270,12 +270,13 @@ def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_c
 def test_training_cycle_ensemble_spectral_multiscale(
     ensemble_spectral_multiscale_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = ensemble_spectral_multiscale_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_ensemble_spectral_multiscale(
