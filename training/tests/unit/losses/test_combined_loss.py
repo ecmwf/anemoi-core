@@ -145,9 +145,7 @@ def test_combined_loss_forwards_graph_context_to_nested_multiscale_loss() -> Non
                             "_target_": "anemoi.training.losses.MultiscaleLossWrapper",
                             "weights": [1.0],
                             "multiscale_config": {
-                                "num_scales": 1,
-                                "base_num_nearest_neighbours": 1,
-                                "base_sigma": 1.0,
+                                "smoothers": {"smooth": {"num_nearest_neighbours": 1, "sigma": 1.0}},
                             },
                             "per_scale_loss": {"_target_": "anemoi.training.losses.MSELoss"},
                         },

@@ -265,6 +265,26 @@ def test_config_validation_ensemble_graph_multiscale(ensemble_graph_multiscale_c
     BaseSchema(**cfg)
 
 
+@skip_if_offline
+@pytest.mark.slow
+def test_training_cycle_ensemble_spectral_multiscale(
+    ensemble_spectral_multiscale_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+) -> None:
+    cfg, url = ensemble_spectral_multiscale_config
+    get_test_archive(url)
+    trainer = AnemoiTrainer(cfg)
+    trainer.train()
+    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+
+
+def test_config_validation_ensemble_spectral_multiscale(
+    ensemble_spectral_multiscale_config: tuple[DictConfig, str],
+) -> None:
+    cfg, _ = ensemble_spectral_multiscale_config
+    BaseSchema(**cfg)
+
+
 def test_config_validation_ensemble_truncated_connection(
     ensemble_truncated_connection_config: tuple[DictConfig, str],
 ) -> None:

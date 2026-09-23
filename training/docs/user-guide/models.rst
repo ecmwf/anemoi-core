@@ -207,10 +207,10 @@ functions such as the ``CRPS`` loss to provide scale-aware model
 training.
 
 The wrapper is configured via a single ``multiscale_config`` key that
-supports two modes.
+supports three modes.
 
-**On-the-fly mode** — build smoothing graphs at startup from a
-geometric progression of KNN smoothers:
+**On-the-fly mode** — build one KNN smoothing graph per scale at
+startup. Each smoother is listed explicitly, from coarsest to finest:
 
 .. code:: yaml
 
@@ -221,10 +221,16 @@ geometric progression of KNN smoothers:
            _target_: anemoi.training.losses.MultiscaleLossWrapper
            weights: [0.5, 0.25, 0.15, 0.1]
            multiscale_config:
-             num_scales: 3          # builds 3 smoothed + 1 full-res = 4 scales
-             base_num_nearest_neighbours: 4
-             base_sigma: 0.1
-             scale_factor: 2
+             smoothers:             # 3 smoothed + 1 full-res = 4 scales
+               smooth_100km:
+                 num_nearest_neighbours: 128
+                 sigma: 0.0157      # angular distance; times 6371 km
+               smooth_50km:
+                 num_nearest_neighbours: 128
+                 sigma: 0.0078
+               smooth_25km:
+                 num_nearest_neighbours: 128
+                 sigma: 0.0039
            per_scale_loss:
              _target_: anemoi.training.losses.CRPS
              alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
@@ -252,10 +258,25 @@ geometric progression of KNN smoothers:
              alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
+**Spectral mode** — split the fields into wavenumber bands with a
+spectral transform. The cutoffs are given coarsest first and the full
+resolution is added as the final scale:
+
+.. code:: yaml
+
+   multiscale_config:
+     transform: reduced_sht   # also octahedral_sht, regular_sht, dct2d, fft2d
+     grid: n320
+     cutoffs: [79, 159, 319]  # 3 bands + 1 full-res = 4 scales
+
+See :ref:`multiscale-loss-functions` for the options of each transform.
+
 The loss at each scale is computed on the *residual* between successive
 smoothing levels, so that each scale captures the energy in its
-frequency band. Scales must be ordered coarsest-first; the final
-``null`` entry always applies no smoothing (full resolution).
+frequency band. In every mode scales are ordered coarsest-first, and the
+last scale applies no smoothing (full resolution). The wrapper checks the
+order when it is built; if an unusual order is intended, set
+``check_scale_order: False``.
 
 The number of entries in ``weights`` must equal the total number of
 scales (smoothed + full-res).

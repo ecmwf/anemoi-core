@@ -233,15 +233,18 @@ so coarser scales capture large-scale errors and finer scales capture
 small-scale structure.
 
 The number of weights must equal the number of smoothing levels. A final
-``null`` entry in ``loss_matrices`` (or the implicit full-resolution
-scale appended when using on-the-fly generation) represents the
-unsmoothed field. The examples use equal weights so that no scale is preferred;
-these can be tuned for a specific application.
+``null`` entry in ``loss_matrices`` (or the full-resolution scale added
+automatically in on-the-fly and spectral modes) represents the unsmoothed
+field. The examples use equal weights for all scales; these can
+be tuned for a specific application.
 
 All smoothing configuration is provided through the single
-``multiscale_config`` key, which supports two modes:
+``multiscale_config`` key, which supports three modes.
 
-On-the-fly mode (builds smoothing matrices from the graph at runtime):
+On-the-fly mode (builds a KNN smoothing matrix per scale from the graph at
+runtime). For an N320 grid, the following
+values provide a possible starting point and should be refined for the forecast
+grid and application:
 
 .. code:: yaml
 
@@ -249,39 +252,26 @@ On-the-fly mode (builds smoothing matrices from the graph at runtime):
       datasets:
          your_dataset_name:
             _target_: anemoi.training.losses.MultiscaleLossWrapper
-            weights: [1.0, 1.0, 1.0, 1.0]   # num_scales + 1 entries
+            weights: [1.0, 1.0, 1.0, 1.0]   # one per smoother + 1 for the full resolution
             multiscale_config:
-               num_scales: 3                   # 3 smoothed + 1 full-res appended automatically
-               base_num_nearest_neighbours: 4
-               base_sigma: 0.1
-               scale_factor: 2                 # neighbours and sigma double each level
+               # Define smoothers from coarsest to finest. The wrapper appends the
+               # unsmoothed field as the final scale.
+               smoothers:
+                  smooth_100km:
+                     num_nearest_neighbours: 128
+                     sigma: 0.0157
+                  smooth_50km:
+                     num_nearest_neighbours: 128
+                     sigma: 0.0078
+                  smooth_25km:
+                     num_nearest_neighbours: 128
+                     sigma: 0.0039
             per_scale_loss:
                _target_: anemoi.training.losses.CRPS
                scalers: [pressure_level, general_variable, nan_mask_weights, node_weights, time_steps]
                ignore_nans: False
                no_autocast: True
                alpha: 0.95
-
-For direct control over each graph-based smoother, replace the compact
-geometric-progression settings with an explicit ``smoothers`` mapping. For an
-N320 grid, the following values provide a possible starting point and should be
-refined for the forecast grid and application:
-
-.. code:: yaml
-
-   multiscale_config:
-      # Define smoothers from finest to coarsest. The wrapper evaluates them
-      # in reverse order and appends the unsmoothed field as the final scale.
-      smoothers:
-         smooth_25km:
-            num_nearest_neighbours: 128
-            sigma: 0.0039
-         smooth_50km:
-            num_nearest_neighbours: 128
-            sigma: 0.0078
-         smooth_100km:
-            num_nearest_neighbours: 128
-            sigma: 0.0157
 
 Here, ``sigma`` is an angular distance: ``sigma * 6371 km``. It gives the
 approximate physical scale.
@@ -327,6 +317,48 @@ File-based mode (load precomputed ``.npz`` matrices from disk):
                ignore_nans: False
                no_autocast: True
                alpha: 1.0
+
+Spectral mode (splits the fields into wavenumber bands with a spectral
+transform instead of a smoothing matrix). Each scale keeps what lies at or
+below its cutoff, and the full resolution is added as the final scale. The
+fields are transformed once, and each scale is built back from those
+coefficients:
+
+.. code:: yaml
+
+   multiscale_config:
+      transform: reduced_sht   # or octahedral_sht / regular_sht with nlat
+      grid: n320
+      cutoffs: [79, 159, 319]  # coarsest first; weights need 4 entries
+
+For the spherical harmonic transforms (``octahedral_sht`` and
+``regular_sht`` with ``nlat``, ``reduced_sht`` with ``grid``, where only
+``n320`` is currently supported) the cutoffs are integer truncations, and grid
+points are ordered ring by ring as for the spectral losses.
+
+For limited-area grids, ``dct2d`` and ``fft2d`` take ``x_dim`` and ``y_dim``,
+with grid points ordered as ``(y x)``. Their cutoffs are frequencies in cycles
+per grid spacing, so ``0.125`` keeps wavelengths of 8 grid spacings and longer.
+``dct2d`` allows for non-periodic domains; ``fft2d`` treats the domain as periodic.
+
+.. code:: yaml
+
+   multiscale_config:
+      transform: dct2d
+      x_dim: 1000
+      y_dim: 800
+      cutoffs: [0.03125, 0.0625, 0.125]
+
+In every mode the scales run from coarsest to finest. The wrapper checks this
+when it is built: spectral scales by their cutoffs, smoothing matrices by their
+mean effective number of neighbours per point, which grows as a smoother gets
+wider. If a scale is coarser than the one before it, the run stops with an
+error. When such an order is intended, turn the check off:
+
+.. code:: yaml
+
+   _target_: anemoi.training.losses.MultiscaleLossWrapper
+   check_scale_order: False
 
 .. note::
 
