@@ -169,15 +169,31 @@ def test_build_halo_info(case: str, sharded: bool, debug: bool, monkeypatch: pyt
 def test_partition_must_match_group_size(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts + 1, 0)
-    with pytest.raises(AssertionError, match="Partition num_parts"):
+    shard = Mock(side_effect=AssertionError("partition mismatch reached graph sharding"))
+    request = Mock(side_effect=AssertionError("partition mismatch reached communication"))
+    monkeypatch.setattr(halo, "shard_tensor", shard)
+    monkeypatch.setattr(halo, "_request_send_nodes", request)
+
+    with pytest.raises(ValueError, match=r"Partition num_parts \(3\) != comm group size \(4\)"):
         halo.build_halo_info(partition, edge_index, group)
+
+    shard.assert_not_called()
+    request.assert_not_called()
 
 
 def test_requires_sharded_source_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
     partition, edge_index = _make_graph("directed")
     group = _mock_group(monkeypatch, partition.num_parts, 0)
-    with pytest.raises(AssertionError, match="sharded source nodes"):
+    shard = Mock(side_effect=AssertionError("missing source ownership reached graph sharding"))
+    request = Mock(side_effect=AssertionError("missing source ownership reached communication"))
+    monkeypatch.setattr(halo, "shard_tensor", shard)
+    monkeypatch.setattr(halo, "_request_send_nodes", request)
+
+    with pytest.raises(ValueError, match=r"sharded source nodes \(partition.src_splits is None\)"):
         halo.build_halo_info(replace(partition, src_splits=None), edge_index, group)
+
+    shard.assert_not_called()
+    request.assert_not_called()
 
 
 def test_debug_rejects_edges_to_other_ranks_nodes(monkeypatch: pytest.MonkeyPatch) -> None:
