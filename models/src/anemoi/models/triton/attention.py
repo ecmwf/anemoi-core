@@ -638,7 +638,10 @@ def _attn_bwd_dkdv(
 
     # load K and V: they stay in SRAM throughout the inner loop.
     k = desc_k.load([fixed_offset, 0])
-    k *= sm_scale * RCP_LN2
+    # Match forward: scale the FP32 dot product, not the low-precision keys.
+    # Rounding K before the dot changes the logits relative to the saved max;
+    # exp2 amplifies that mismatch dramatically for sharp attention.
+    qk_scale = tl.full((), sm_scale, tl.float32) * RCP_LN2
     v = desc_v.load([fixed_offset, 0])
     if UNEVEN_CTX and tail_case:
         # mask out-of-bounds k and v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED/BLOCK_ITER
@@ -665,8 +668,8 @@ def _attn_bwd_dkdv(
         # Over a window around the position of the K and V blocks
         lo = tl.maximum(0, start_fixed - WINDOW)
         hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
-        kv_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
-        kv_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
+        kv_lower_bound = offs_fixed[:, None] - WINDOW
+        kv_upper_bound = offs_fixed[:, None] + WINDOW
 
         # align lo and hi to nearest BLOCK_ITER
         lo = (lo // BLOCK_ITER) * BLOCK_ITER
@@ -728,7 +731,7 @@ def _attn_bwd_dkdv(
         # normalised softmax probability.  Keeping m_max and inv_l separate
         # (rather than the combined M = m + log2(l) used on the main branch)
         # avoids fp precision loss when m and log2(l) differ greatly.
-        pT = tl.math.exp2(qkT - m[None, :]) * inv_l[None, :]
+        pT = tl.math.exp2(qkT * qk_scale - m[None, :]) * inv_l[None, :]
 
         do = desc_do.load([iter_offset, 0])
         if UNEVEN_CTX and tail_iter_block:
@@ -815,11 +818,10 @@ def _attn_bwd_dq(
     Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
     """
 
-    # LN2: tl.constexpr = 0.6931471824645996  # = ln(2)
-    LN2: tl.constexpr = 0.6931471805599453  # = ln(2)
     RCP_LN2: tl.constexpr = (
-        1.4426950408889634  # = 1/ln(2), used to merge with sm_scale to make calculating exponent faster by using exp2() later
+        1.44269504  # = 1/ln(2), matching the forward and dK/dV kernels
     )
+    qk_scale = tl.full((), sm_scale, tl.float32) * RCP_LN2
 
     # ***** 1) determine which section of the gradients this program is responsible for *****
 
@@ -928,8 +930,8 @@ def _attn_bwd_dq(
     if WINDOW >= 0:
         lo = tl.maximum(0, start_fixed - WINDOW)
         hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
-        q_lower_bound: tl.constexpr = offs_fixed[:, None] - WINDOW
-        q_upper_bound: tl.constexpr = offs_fixed[:, None] + WINDOW
+        q_lower_bound = offs_fixed[:, None] - WINDOW
+        q_upper_bound = offs_fixed[:, None] + WINDOW
 
         # align lo and hi to nearest BLOCK_ITER
         lo = (lo // BLOCK_ITER) * BLOCK_ITER
@@ -961,7 +963,6 @@ def _attn_bwd_dq(
         tail_iter_block = (curr_iter + BLOCK_ITER) > N_CTX
 
         kT = desc_k.load([iter_offset, 0]).T
-        kT *= sm_scale * RCP_LN2
         vT = desc_v.load([iter_offset, 0]).T
         if UNEVEN_CTX and tail_iter_block:
             # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_CTX is not divisible by BLOCK_FIXED
@@ -986,7 +987,8 @@ def _attn_bwd_dq(
 
         # Apply exponent after masking, then multiply by inv_l for the
         # normalised softmax probability (see _attn_bwd_dkdv for rationale).
-        p = tl.math.exp2(qk - m) * inv_l[:, None]
+        # Reconstruct probabilities with the same FP32 scaling as forward.
+        p = tl.math.exp2(qk * qk_scale - m) * inv_l[:, None]
         # Compute dP and dS.
         # NOTE: dp - Di still suffers from cancellation when the softmax is
         # very sharp (v[j*] ≈ out[i]) because both are O(1) scalars and their
@@ -998,7 +1000,7 @@ def _attn_bwd_dq(
         dp = tl.dot(do, vT).to(tl.float32)
         ds = p * (dp - Di[:, None])
         # Compute dQ.
-        # NOTE: We need to de-scale dq in the end, because kT was pre-scaled.
+        # K is unscaled; apply the softmax chain-rule scale in the epilogue.
         ds = ds.to(dtype)
         dq += tl.dot(ds, tl.trans(kT))
 
@@ -1007,7 +1009,7 @@ def _attn_bwd_dq(
 
     # ***** 6) store gradient dQ *****
 
-    dq *= LN2
+    dq *= sm_scale
     # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
     if UNEVEN_CTX and tail_fixed_block:
         dq_ptrs = dq_ptr + off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :]

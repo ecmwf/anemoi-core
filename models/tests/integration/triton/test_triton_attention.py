@@ -64,6 +64,48 @@ def attention_ref(
 
 
 @pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal,window", [(False, -1), (True, -1), (False, 16)])
+def test_triton_attention_sharp_softmax_dv(dtype, causal, window):
+    """Backward must recover unit probability for a dominant key at large logits.
+
+    Pre-scaling low-precision K in backward changes its logits relative to the
+    forward's saved row max, causing large dV errors even when O is correct.
+    A loss on one query isolates this from cancellation in the dQ/dK formula.
+    """
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
+    torch.manual_seed(42)
+    shape = (1, 1, 97, 64)
+    row = 48
+    q = torch.randn(shape, device="cuda", dtype=dtype) * 8
+    k = torch.randn_like(q) * 8
+    k[0, 0, row] = q[0, 0, row] * 4
+    v = torch.randn_like(q)
+    q, k, v = (x.requires_grad_() for x in (q, k, v))
+    do = torch.zeros_like(q)
+    do[0, 0, row] = torch.randn_like(do[0, 0, row])
+    scale = 1 / math.sqrt(shape[-1])
+
+    scores = (k.detach()[0, 0].double() @ q.detach()[0, 0, row].double()) * scale
+    positions = torch.arange(shape[2], device=q.device)
+    if causal:
+        scores.masked_fill_(positions > row, -torch.inf)
+    if window >= 0:
+        scores.masked_fill_((positions - row).abs() > window, -torch.inf)
+    p = scores.softmax(-1)
+    assert p[row] > 1 - 1e-12, "Test must exercise a saturated softmax"
+    expected_dv = p[:, None] * do[0, 0, row].double()
+    expected_out = p @ v.detach()[0, 0].double()
+
+    out = TritonAttention.apply(q, k, v, causal, window, scale)
+    dv = torch.autograd.grad(out, v, do)[0]
+    torch.testing.assert_close(out[0, 0, row].double(), expected_out, atol=1e-3, rtol=1e-2)
+    torch.testing.assert_close(dv[0, 0].double(), expected_dv, atol=1e-3, rtol=1e-2)
+
+
+@pytest.mark.gpu
 def test_triton_attention_deterministic():
     """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
 
