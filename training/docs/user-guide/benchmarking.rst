@@ -850,7 +850,7 @@ The benchmarking tests can also be run locally.
 
    cd anemoi-core
    pip install -e training[tests]
-   pytest -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
+   pytest -o tmp_path_retention_policy=all -s -vvv -v training/tests/integration/ --slow --multigpu -k "test_benchmark_training_cycle"
 
 The server location is read from a file
 "~/.config/anemoi/anemoi-benchmark.yaml". The expected format is
@@ -859,7 +859,41 @@ The server location is read from a file
 
    user: ...
    hostname: ...
-   path: ...
+   path: ...   # base directory on the remote host
+
+The base ``path`` is used as the parent directory for the different
+kinds of integration tests: results land under ``<path>/<kind>``, where
+``kind`` is chosen by each test (currently ``benchmarks`` for the
+performance benchmarks in ``test_benchmark.py`` and ``accuracy`` for the
+loss-curve regression check in ``test_accuracy.py``). For example, with
+
+.. code:: yaml
+
+   user: myuser
+   hostname: myhost.example.com
+   path: /path/to/benchmark/results
+
+results will be written to
+``/path/to/benchmark/results/benchmarks/<test_case>/``
+and
+``/path/to/benchmark/results/accuracy/<test_case>/``
+respectively.
+
+If you need to override the location for a specific kind (for example to
+point one of them at a different tree), add a ``paths`` mapping which
+takes precedence over ``<path>/<kind>``:
+
+.. code:: yaml
+
+   user: myuser
+   hostname: myhost.example.com
+   path: /path/to/benchmark/results
+   paths:
+     benchmarks: /path/to/benchmark/results/benchmarks
+     accuracy:   /path/to/benchmark/results/accuracy
+
+The resolution is performed by ``get_benchmark_store(kind)`` in
+``src/anemoi/training/diagnostics/benchmark_server.py``.
 
 Alternatively you can edit the code in
 ``tests/integration/test_benchmark.py`` to pass a local folder. The

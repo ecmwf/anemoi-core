@@ -1,0 +1,10 @@
+---
+defaults:
+  - multi
+  - _self_
+
+method:
+  _target_: anemoi.training.train.methods.TransportTraining
+transport:
+  prediction_mode: state
+  objective: edm_diffusion

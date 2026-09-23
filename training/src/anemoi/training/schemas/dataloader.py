@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -20,7 +20,7 @@ from pydantic import PositiveInt
 from pydantic import RootModel
 from pydantic import computed_field
 
-from anemoi.training.schemas.schema_utils import DatasetDict
+from anemoi.models.schemas.schema_utils import DatasetDict
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -70,6 +70,12 @@ class DatasetConfigSchema(PydanticBaseModel):
     "Optional list of variables to select from the dataset."
     statistics: str | Path | None = Field(default=None)
     "Optional path to custom statistics file."
+    step_start: NonNegativeInt | None = Field(default=None)
+    "First forecast step to include, in hours (inclusive). Selects ForecastStepDataset when set."
+    step_end: PositiveInt | None = Field(default=None)
+    "Last forecast step to include, in hours (inclusive). Selects ForecastStepDataset when set."
+    step_frequency: PositiveInt | None = Field(default=None)
+    "Stride between selected forecast steps, in hours. Selects ForecastStepDataset when set."
 
     # Note this should be extended in the future to have a full schema for the keys
     # supported by open_dataset and be moved to anemoi-datasets.
@@ -86,13 +92,18 @@ class NativeDatasetSchema(BaseModel):
     "Ending datetime [inclusive] for sample of the dataset."
 
 
-class TrajectorySchema(PydanticBaseModel):
-    """Trajectory configuration schema."""
+class TrajectorySamplingSchema(PydanticBaseModel):
+    """Trajectory anchor sampling configuration."""
 
-    start: datetime.datetime = Field(example="2020-02-05T12:00:00")
-    "Starting datetime for the trajectory."
-    length: PositiveInt = Field(example=12)
-    "Length of the trajectory in number of time steps."
+    stride: int | None = Field(default=None)
+    "Stride between anchor positions. None = window size (non-overlapping); 1 = every position."
+
+
+class TrajectorySchema(PydanticBaseModel):
+    """Trajectory (forecast) reader configuration for 5-D trajectory zarr datasets."""
+
+    sampling: TrajectorySamplingSchema | None = Field(default=None)
+    "Anchor sampling config. stride=None → non-overlapping; stride=1 → all; stride=N → step N."
 
 
 class TrajectoryDatasetSchema(NativeDatasetSchema):
@@ -119,6 +130,10 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
+    persistent_workers: bool = Field(default=True)
+    "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
+    fake_dataloading: bool = Field(default=False)
+    "Load one real sample per worker and reuse it for subsequent accesses."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet
@@ -131,9 +146,9 @@ class DataLoaderSchema(PydanticBaseModel):
     "Validation DatasetSchema."
     test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
     "Test DatasetSchema."
-    validation_rollout: NonNegativeInt = Field(example=1)
-    "Number of rollouts to use for validation, must be equal or greater than rollout expected by callbacks."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."
+    trajectory_sampling: TrajectorySamplingSchema | None = Field(default=None)
+    "Default trajectory anchor sampling used across all splits. stride=None → non-overlapping; stride=N → step N."
     multiprocessing_context: str | None = Field(default=None, examples=[None, "spawn", "fork", "forkserver"])
     "Multiprocessing context to use for workers. If None, the default context will be used"

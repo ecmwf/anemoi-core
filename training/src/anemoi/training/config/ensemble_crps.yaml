@@ -5,6 +5,7 @@ defaults:
 - system: example
 - graph: encoder_decoder_only
 - model: transformer_ens
+- task: forecaster
 - training: ensemble
 - _self_
 
@@ -20,6 +21,7 @@ config_validation: True
 diagnostics:
   plot:
     callbacks: []
+
 system:
   input:
     graph: graph_anemoi_new_${data.resolution}.pt

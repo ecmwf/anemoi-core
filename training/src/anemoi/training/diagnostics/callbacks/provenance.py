@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -12,7 +12,6 @@ import logging
 
 import pytorch_lightning as pl
 import torch
-from omegaconf import OmegaConf
 from pytorch_lightning.callbacks import Callback
 
 LOGGER = logging.getLogger(__name__)
@@ -21,17 +20,8 @@ LOGGER = logging.getLogger(__name__)
 class ParentUUIDCallback(Callback):
     """A callback that retrieves the parent UUID for a model, if it is a child model."""
 
-    def __init__(self, config: OmegaConf) -> None:
-        """Initialise the ParentUUIDCallback callback.
-
-        Parameters
-        ----------
-        config : OmegaConf
-            Config object
-
-        """
+    def __init__(self) -> None:
         super().__init__()
-        self.config = config
 
     def on_load_checkpoint(
         self,

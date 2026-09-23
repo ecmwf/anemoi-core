@@ -1,3 +1,13 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+import inspect
 from pathlib import Path
 
 import omegaconf
@@ -171,3 +181,19 @@ def test_mlflow_schema_backward_compatibility() -> None:
 
     assert schema.target_ == "anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger"
     assert schema.save_dir is None
+
+
+def test_mlflow_schema_covers_logger_init_params() -> None:
+    """Assert every BaseAnemoiMLflowLogger __init__ param has a field in MlflowSchema.
+
+    run_id and fork_run_id are excluded because they are injected at runtime
+    by get_mlflow_logger, not read from the config schema.
+    """
+    # Parameters injected at runtime rather than sourced from config
+    runtime_params = {"self", "run_id", "fork_run_id"}
+
+    logger_params = set(inspect.signature(AnemoiMLflowLogger.__init__).parameters) - runtime_params
+    schema_fields = set(MlflowSchema.model_fields)
+
+    missing = logger_params - schema_fields
+    assert not missing, f"MlflowSchema is missing fields for logger params: {missing}"

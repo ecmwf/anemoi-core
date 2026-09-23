@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -10,6 +10,7 @@
 
 import logging
 from abc import abstractmethod
+from collections.abc import Sequence
 
 import numpy as np
 import pytorch_lightning as pl
@@ -25,6 +26,8 @@ from anemoi.training.distributed.groups import create_reader_process_groups
 from anemoi.training.distributed.groups import get_my_ensemble_comm_group
 from anemoi.training.distributed.groups import get_my_model_comm_group
 from anemoi.training.distributed.groups import get_my_reader_group
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
 LOGGER = logging.getLogger(__name__)
@@ -33,31 +36,29 @@ LOGGER = logging.getLogger(__name__)
 def register_gradient_scaling_hooks(
     model: torch.nn.Module,
     model_comm_group_size: float,
-    skip_grad_scaling: list[str] | None = None,
+    skip_grad_scaling: Sequence[str] | None = None,
 ) -> None:
-    """Register parameter hooks for gradient reduction.
+    """Register parameter hooks to compensate DDP averaging over sharded inputs.
 
-    Here, we rescale parameters that only see a subset of the input on each rank
-    -> these are still divided by the total number of GPUs in DDP as if each rank would see a full set of inputs
-    note: the trainable parameters are added before the split across GPUs and are therefore not rescaled.
+    DDP averages gradients over all ranks, including ranks that contribute only
+    part of a model or ensemble. Scale these partial gradients by the corresponding
+    communication group size so that DDP sums their contributions.
 
     Parameters
     ----------
     model : torch.nn.Module
         The model to register hooks on.
     model_comm_group_size : float
-        The size of the model communication group for scaling.
-    skip_grad_scaling : list[str] | None
-        List of parameter name patterns to skip gradient scaling.
-        Defaults to ["trainable", "no_gradscaling"].
+        Gradient scaling factor: the model communication group size or, for an
+        additional ensemble registration, the ensemble communication subgroup size.
+    skip_grad_scaling : Sequence[str] | None
+        Parameter name patterns to exclude. If None, scale every parameter
+        requiring gradients.
     """
-    if skip_grad_scaling is None:
-        skip_grad_scaling = ["trainable", "no_gradscaling"]
-
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if any(skip_name in name for skip_name in skip_grad_scaling):
+        if skip_grad_scaling is not None and any(skip_name in name for skip_name in skip_grad_scaling):
             continue
         param.register_hook(lambda grad: grad * float(model_comm_group_size))
 
@@ -65,7 +66,7 @@ def register_gradient_scaling_hooks(
 def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
     """Seed the random number generators for the rank."""
     base_seed = get_base_seed()
-    initial_seed = base_seed * (model_comm_group_id + 1)
+    initial_seed = derive_seed(base_seed, SeedContext.MODEL, model_comm_group_id)
     rnd_seed = pl.seed_everything(initial_seed)  # note: workers are seeded independently in dataloader
     np_rng = np.random.default_rng(rnd_seed)
     sanity_rnd = (torch.rand(1)[0], np_rng.random())
@@ -86,7 +87,14 @@ def seed_rnd(model_comm_group_id: int, global_rank: int) -> None:
 class BaseDDPStrategy(DDPStrategy):
     """Base DDP strategy with common functionality for group communication strategies."""
 
-    def __init__(self, num_gpus_per_model: int, read_group_size: int, **kwargs: dict) -> None:
+    def __init__(
+        self,
+        num_gpus_per_model: int,
+        read_group_size: int,
+        use_local_synchronization: bool = True,
+        broadcast_buffers: bool = False,
+        **kwargs: dict,
+    ) -> None:
         """Initialise the distributed strategy.
 
         Parameters
@@ -95,13 +103,18 @@ class BaseDDPStrategy(DDPStrategy):
             Number of GPUs per model to shard over.
         read_group_size : int
             Number of GPUs per reader group.
+        use_local_synchronization : bool, optional
+            Use synchronization local to the group when creating process groups.
+        broadcast_buffers : bool, optional
+            Whether to broadcast module buffers at the start of each iteration. Defaults to False.
         **kwargs : dict
             Additional keyword arguments.
         """
-        super().__init__(**kwargs)
+        super().__init__(**kwargs, broadcast_buffers=broadcast_buffers)
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
-        self.shard_shapes: dict | None = None
+        self.use_local_synchronization = use_local_synchronization
+        self.shard_sizes: dict | None = None
 
     @abstractmethod
     def _setup_communication_groups(self) -> int:
@@ -119,7 +132,7 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
-        self.shard_shapes = self._setup_shard_shapes(trainer)
+        self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
     def configure_ddp(self) -> None:
@@ -127,8 +140,8 @@ class BaseDDPStrategy(DDPStrategy):
         self.register_parameter_hooks()
         super().configure_ddp()
 
-    def _setup_shard_shapes(self, trainer: pl.Trainer) -> dict:
-        """Set up shard shapes for the dataloader.
+    def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
+        """Set up shard sizes for the dataloader.
 
         Parameters
         ----------
@@ -138,15 +151,22 @@ class BaseDDPStrategy(DDPStrategy):
         Returns
         -------
         dict
-            A dictionary containing the shard shapes for each dataset.
+            A dictionary containing the shard sizes for each dataset.
         """
-        shard_shapes = trainer.model.module.shard_shapes
-        assert shard_shapes is not None, "Shard shapes should be set after setup"
-        return shard_shapes
+        # For training, the model is wrapped in DDP and the LightningModule is accessible via trainer.model.module
+        # For evaluation, the model is not wrapped in DDP and the LightningModule is accessible via trainer.model
+        model = getattr(trainer.model, "module", trainer.model)
+        shard_sizes = model.shard_sizes
+        assert shard_sizes is not None, "Shard shapes should be set after setup"
+        return shard_sizes
 
     def register_parameter_hooks(self) -> None:
         """Register parameter hooks for gradient reduction."""
-        register_gradient_scaling_hooks(self.model, self.model_comm_group_size)
+        register_gradient_scaling_hooks(
+            self.model,
+            self.model_comm_group_size,
+            skip_grad_scaling=("trainable", "no_gradscaling"),
+        )
 
 
 class DDPGroupStrategy(BaseDDPStrategy):
@@ -172,8 +192,14 @@ class DDPGroupStrategy(BaseDDPStrategy):
             model_comm_group_rank=model_layout.model_comm_group_rank,
             global_rank=self.global_rank,
         )
-        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
-        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_groups = create_model_process_groups(
+            model_layout.model_comm_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
+        reader_groups = create_reader_process_groups(
+            reader_layout.reader_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
@@ -241,7 +267,7 @@ class DDPGroupStrategy(BaseDDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
-            self.shard_shapes,
+            self.shard_sizes,
         )
 
         return dataloader
@@ -250,7 +276,14 @@ class DDPGroupStrategy(BaseDDPStrategy):
 class DDPEnsGroupStrategy(BaseDDPStrategy):
     """Distributed Data Parallel strategy with group communication for ensembles."""
 
-    def __init__(self, num_gpus_per_model: int, num_gpus_per_ensemble: int, read_group_size: int, **kwargs) -> None:
+    def __init__(
+        self,
+        num_gpus_per_model: int,
+        num_gpus_per_ensemble: int,
+        read_group_size: int,
+        use_local_synchronization: bool = True,
+        **kwargs,
+    ) -> None:
         """Initialize the distributed strategy.
 
         Parameters
@@ -259,12 +292,25 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             Number of GPUs per model to shard over.
         read_group_size : int
             Number of GPUs per reader group.
+        use_local_synchronization : bool, optional
+            Use synchronization local to the group when creating process groups.
         **kwargs : dict
             Additional keyword arguments.
 
         """
-        super().__init__(num_gpus_per_model=num_gpus_per_model, read_group_size=read_group_size, **kwargs)
+        super().__init__(
+            num_gpus_per_model=num_gpus_per_model,
+            read_group_size=read_group_size,
+            use_local_synchronization=use_local_synchronization,
+            **kwargs,
+        )
         self.ens_comm_group_size = num_gpus_per_ensemble
+
+    def register_parameter_hooks(self) -> None:
+        """Compensate DDP averaging across model and ensemble shards."""
+        super().register_parameter_hooks()
+        # We need to compensate for ensemble sharding because every parameter sees only local ensemble members
+        register_gradient_scaling_hooks(self.model, self.ens_comm_subgroup_size)
 
     def _setup_communication_groups(self) -> int:
         """Set up model, reader, and ensemble communication groups.
@@ -286,8 +332,14 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_group_rank=model_layout.model_comm_group_rank,
             global_rank=self.global_rank,
         )
-        model_comm_groups = create_model_process_groups(model_layout.model_comm_group_ranks)
-        reader_groups = create_reader_process_groups(reader_layout.reader_group_ranks)
+        model_comm_groups = create_model_process_groups(
+            model_layout.model_comm_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
+        reader_groups = create_reader_process_groups(
+            reader_layout.reader_group_ranks,
+            use_local_synchronization=self.use_local_synchronization,
+        )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
 
@@ -331,7 +383,11 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_group_size=self.model_comm_group_size,
             model_comm_group_rank=model_layout.model_comm_group_rank,
         )
-        ensemble_groups = create_ensemble_process_groups(ensemble_layout)
+        self.ens_comm_subgroup_size = ensemble_layout.ens_comm_subgroup_size
+        ensemble_groups = create_ensemble_process_groups(
+            ensemble_layout,
+            use_local_synchronization=self.use_local_synchronization,
+        )
 
         self.model.set_ens_comm_group(
             ensemble_groups.ens_comm_group,
@@ -406,7 +462,7 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
             model_comm_num_groups,
             reader_group_rank,
             self.read_group_size,
-            self.shard_shapes,
+            self.shard_sizes,
         )
 
         dataloader.dataset.set_ens_comm_group_info(

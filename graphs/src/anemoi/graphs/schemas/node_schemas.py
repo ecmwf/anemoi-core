@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2025 ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -28,7 +28,7 @@ class AnemoiDatasetNodeSchema(BaseModel):
         ..., alias="_target_"
     )
     "Nodes from Anemoi dataset class implementation from anemoi.graphs.nodes."
-    dataset: str | list | dict  # TODO(Helen): Discuss schema with Baudouin
+    dataset: str | list | dict | None  # TODO(Helen): Discuss schema with Baudouin
     "The dataset containing the nodes."
 
 
@@ -106,11 +106,17 @@ class IcosahedralandHealPixNodeSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.nodes.TriNodes",
         "anemoi.graphs.nodes.HexNodes",
-        "anemoi.graphs.nodes.HEALPixNodes",
     ] = Field(..., alias="_target_")
-    "Icohedral and HEAL Pix nodes class implementations from anemoi.graphs.nodes."
+    "Icosahedral nodes class implementations from anemoi.graphs.nodes."
     resolution: PositiveInt
     "Refinement level of the mesh."
+
+
+class HealPixNodeSchema(IcosahedralandHealPixNodeSchema):
+    target_: Literal["anemoi.graphs.nodes.HEALPixNodes",] = Field(..., alias="_target_")
+    "HEALPix nodes class implementation from anemoi.graphs.nodes."
+    nest_ordering: bool = True
+    "Whether to use HEALPix NESTED pixel ordering. If False, RING ordering is used, which is isolatitude and sorted north to south. Defaults to True."
 
 
 class LimitedAreaIcosahedralandHealPixNodeSchema(BaseModel):
@@ -153,6 +159,7 @@ NodeBuilderSchemas = Annotated[
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
     | IcosahedralandHealPixNodeSchema
+    | HealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema
     | StretchedIcosahdralNodeSchema,
     Field(discriminator="target_"),

@@ -45,9 +45,16 @@ the dataset configuration.
 .. literalinclude:: ../yaml/attributes_planar_area_weights.yaml
    :language: yaml
 
+The tessellation only defines the cells of interior nodes, so a node on
+the edge of the domain takes the area of its nearest interior node, and
+a node set that cannot be tessellated at all (fewer than three nodes, or
+a collinear one) gets uniform weights.
+
 This method can be extended to ``MaskedPlanarAreaWeights``, which
 computes planar area weights but restricts the computation to a masked
-region by setting the weights outside the mask to zero.
+region by setting the weights outside the mask to zero. The masked nodes
+are tessellated on their own, so the cells at the edge of the mask are
+not influenced by the nodes outside it.
 
 This is useful for comparing the performance of a limited area model
 (LAM) with that of a stretched model, since the masking occurs before

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -13,7 +13,6 @@ from dataclasses import field
 
 import pytest
 import torch
-from torch import nn
 from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import create_graph_provider
@@ -30,19 +29,18 @@ class ConcreteBaseMapper(BaseMapper):
         # Simple dummy processor
         self.proc = torch.nn.Identity()
 
-    def pre_process(self, x, shard_shapes, model_comm_group=None, x_src_is_sharded=False, x_dst_is_sharded=False):
-        shapes_src, shapes_dst = shard_shapes
+    def pre_process(self, x):
         x_src, x_dst = x
-        return x_src, x_dst, shapes_src, shapes_dst
+        return x_src, x_dst
 
     def post_process(self, x_dst, **kwargs):
         return x_dst
 
-    def forward(self, x, batch_size, shard_shapes, graph_provider, model_comm_group=None, **kwargs):
+    def forward(self, x, batch_size, shard_info, graph_provider, model_comm_group=None, **kwargs):
         """Simple forward implementation for testing."""
-        x_src, x_dst, shapes_src, shapes_dst = self.pre_process(x, shard_shapes, model_comm_group)
+        x_src, x_dst = self.pre_process(x)
         # Simple identity operation
-        result = self.post_process(x_dst, shapes_dst=shapes_dst)
+        result = self.post_process(x_dst)
         return result
 
 
@@ -115,24 +113,18 @@ class TestBaseMapper:
         assert mapper.in_channels_dst == mapper_init.in_channels_dst
         assert mapper.hidden_dim == mapper_init.hidden_dim
         assert mapper.out_channels_dst == mapper_init.out_channels_dst
-        assert isinstance(mapper.activation, nn.Module)
 
     def test_pre_process(self, mapper, pair_tensor):
         x = pair_tensor
-        shard_shapes = [list(x[0].shape), list(x[1].shape)]
 
-        x_src, x_dst, shapes_src, shapes_dst = mapper.pre_process(x, shard_shapes)
+        x_src, x_dst = mapper.pre_process(x)
         assert torch.equal(x_src, x[0])
         assert torch.equal(x_dst, x[1])
-        assert shapes_src == shard_shapes[0]
-        assert shapes_dst == shard_shapes[1]
 
     def test_post_process(self, mapper, pair_tensor):
         x_dst = pair_tensor[1]
-        shapes_dst = [list(x_dst.shape)]
 
         result = mapper.post_process(
             x_dst,
-            shapes_dst=shapes_dst,
         )
         assert torch.equal(result, x_dst)

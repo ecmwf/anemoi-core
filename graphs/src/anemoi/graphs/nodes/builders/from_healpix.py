@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,7 +14,7 @@ import numpy as np
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.generate.masks import KNNAreaMaskBuilder
+from anemoi.graphs.generate.masks import AreaMaskBuilder
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
@@ -29,6 +29,9 @@ class HEALPixNodes(BaseNodeBuilder):
     ----------
     resolution : int
         The resolution of the grid.
+    nest_ordering : bool, optional
+        If true, assume NEST pixel ordering, else RING ordering
+        See: https://healpy.readthedocs.io/en/latest/generated/healpy.pixelfunc.ang2pix.html
 
     Methods
     -------
@@ -42,9 +45,10 @@ class HEALPixNodes(BaseNodeBuilder):
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, resolution: int, name: str) -> None:
+    def __init__(self, resolution: int, name: str, nest_ordering: bool = True) -> None:
         """Initialize the HEALPixNodes builder."""
         self.resolution = resolution
+        self.nest_ordering = nest_ordering
         super().__init__(name)
         self.hidden_attributes = BaseNodeBuilder.hidden_attributes | {"resolution"}
 
@@ -65,7 +69,7 @@ class HEALPixNodes(BaseNodeBuilder):
         LOGGER.info(f"Creating HEALPix nodes with resolution {spatial_res_degrees:.2} deg.")
 
         npix = hp.nside2npix(2**self.resolution)
-        hpxlon, hpxlat = hp.pix2ang(2**self.resolution, range(npix), nest=True, lonlat=True)
+        hpxlon, hpxlat = hp.pix2ang(2**self.resolution, range(npix), nest=self.nest_ordering, lonlat=True)
 
         return self.reshape_coords(hpxlat, hpxlon)
 
@@ -82,7 +86,7 @@ class LimitedAreaHEALPixNodes(HEALPixNodes):
         margin_radius_km: float = 100.0,
     ) -> None:
         super().__init__(resolution, name)
-        self.area_mask_builder = KNNAreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
+        self.area_mask_builder = AreaMaskBuilder(reference_node_name, margin_radius_km, mask_attr_name)
 
     def register_nodes(self, graph: HeteroData) -> None:
         self.area_mask_builder.fit(graph)

@@ -1,10 +1,19 @@
+# (C) Copyright 2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
 import numpy as np
 import pytest
 
-from anemoi.training.diagnostics.focus_area import BoundingBoxSpatialMask
-from anemoi.training.diagnostics.focus_area import NodeAttributeSpatialMask
-from anemoi.training.diagnostics.focus_area import NoOpSpatialMask
-from anemoi.training.diagnostics.focus_area import build_spatial_mask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import BoundingBoxSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import NodeAttributeSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import NoOpSpatialMask
+from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 
 _rng = np.random.default_rng()
 

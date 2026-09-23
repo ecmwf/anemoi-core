@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -18,8 +18,10 @@ import torch
 import torchinfo
 from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from anemoi.training.utils.checkpoint import check_classes
+from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
 from anemoi.utils.checkpoints import save_metadata
 
 LOGGER = logging.getLogger(__name__)
@@ -43,6 +45,12 @@ class AnemoiCheckpoint(ModelCheckpoint):
         self._model_metadata = None
         self._tracker_metadata = None
         self._tracker_name = None
+
+        # when checkpointing by time, round to
+        # the nearest N steps
+        # This reduces broadcasts by a factor
+        # of self._time_check_every_n_steps
+        self._time_check_every_n_steps = 50
 
     @staticmethod
     def _torch_drop_down(trainer: pl.Trainer) -> torch.nn.Module:
@@ -70,6 +78,23 @@ class AnemoiCheckpoint(ModelCheckpoint):
         }
 
         return self._model_metadata
+
+    def on_train_batch_end(
+        self,
+        trainer: "pl.Trainer",
+        pl_module: "pl.LightningModule",
+        outputs: STEP_OUTPUT,
+        batch: any,
+        batch_idx: int,
+    ) -> None:
+        # when using time-based checkpointing there is a broadcast each iteration
+        # This can get quite expensive when sharding to a large number of GPUs
+        # per model
+        # To minimise the cost, we round the time interval up to the next N steps
+        # This reduces broadcasts by a factor of N
+        if self._train_time_interval is not None and trainer.global_step % self._time_check_every_n_steps != 0:
+            return
+        super().on_train_batch_end(trainer, pl_module, outputs, batch, batch_idx)
 
     def _adjust_epoch_progress(self, trainer: pl.Trainer) -> None:
         """Adjust the epoch progress when saving a mid-epoch checkpoint.
@@ -139,7 +164,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
     def on_train_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check that model's metadata does not contain Pydantic schemas references."""
-        del pl_module
+        super().on_train_start(trainer, pl_module)
 
         if trainer.is_global_zero:
             model = self._torch_drop_down(trainer)
@@ -180,6 +205,7 @@ class AnemoiCheckpoint(ModelCheckpoint):
 
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
+            clear_imputer_runtime_state(model)
             torch.save(model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)

@@ -1,5 +1,8 @@
 prefetch_factor: 2
 pin_memory: True
+# Automatically set to False when the rollout changes between epochs.
+persistent_workers: True
+fake_dataloading: False
 
 # ============
 # read_group_size:
@@ -59,8 +62,6 @@ training:
       start: 1985
       end: 2020
       trajectory: null
-
-validation_rollout: 1 # number of rollouts to use for validation
 
 # Multi-dataset validation with same datasets, different time period
 validation:

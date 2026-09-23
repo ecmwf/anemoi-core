@@ -1,0 +1,173 @@
+# (C) Copyright 2025-2026 Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+#
+# Various tests of the Anemoi components using a sample data set.
+#
+# This script is not part of a productive ML workflow, but is
+# used for CI/CD!
+import os
+from functools import reduce
+from operator import getitem
+
+import matplotlib as mpl
+import pytest
+import torch
+from hydra import compose
+from hydra import initialize
+from omegaconf import DictConfig
+from typeguard import typechecked
+
+from anemoi.training.schemas.base_schema import BaseSchema
+from anemoi.training.testing import GetTmpPath
+from anemoi.training.train.train import AnemoiTrainer
+from anemoi.utils.testing import GetTestArchive
+from anemoi.utils.testing import GetTestData
+from anemoi.utils.testing import skip_if_offline
+
+os.environ["ANEMOI_BASE_SEED"] = "42"
+mpl.use("agg")
+
+
+@pytest.fixture
+@typechecked
+def aicon_config_with_tmp_dir(get_tmp_path: GetTmpPath, get_test_archive: GetTestArchive) -> DictConfig:
+    """Get AICON config with temporary output paths."""
+    with initialize(version_base=None, config_path="./"):
+        config = compose(config_name="test_cicd_aicon_04_icon-dream_medium")
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(config.system.input.dataset)
+    tmp_dir_forcing_dataset, url_forcing_dataset = get_tmp_path(config.system.input.forcing_dataset)
+    config.system.input.dataset = str(tmp_dir_dataset)
+    config.system.input.forcing_dataset = str(tmp_dir_forcing_dataset)
+
+    get_test_archive(url_dataset)
+    get_test_archive(url_forcing_dataset)
+
+    return config
+
+
+@pytest.fixture
+@typechecked
+def aicon_config_with_grid(aicon_config_with_tmp_dir: DictConfig, get_test_data: GetTestData) -> DictConfig:
+    """Temporarily download the ICON grid specified in the config.
+
+    Downloading the grid is required as the AICON grid is currently required as a netCDF file.
+    """
+    aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.data.node_builder.grid_filename,
+    )
+    aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename = get_test_data(
+        aicon_config_with_tmp_dir.graph.nodes.hidden.node_builder.grid_filename,
+    )
+    return aicon_config_with_tmp_dir
+
+
+@pytest.fixture
+@typechecked
+def trained_aicon(aicon_config_with_grid: DictConfig) -> tuple[AnemoiTrainer, float, float, int]:
+    """Train AICON and return testable objects."""
+    trainer = AnemoiTrainer(aicon_config_with_grid)
+    initial_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
+    trainer.train()
+    final_sum = float(torch.tensor(list(map(torch.sum, trainer.model.parameters()))).sum())
+    nhidden_mesh_edges = trainer.model.model.graph_data["hidden", "to", "hidden"]["edge_index"].shape[
+        1
+    ]  # no. of hidden mesh edges
+    return trainer, initial_sum, final_sum, nhidden_mesh_edges
+
+
+@typechecked
+def assert_metadatakeys(metadata: dict, *metadata_keys: tuple[str, ...]) -> None:
+    """Assert the presence of all `metadata_keys` in `metadata`.
+
+    A metadata key is a tuple that describes a path within the `metadata` dict of dicts.
+    E.g., if `metadata_keys[0] = ("a", "b", "c")`, this test will verify the existence of `metadata["a"]["b"]["c"]`.
+    """
+    errors = []
+    for keys in metadata_keys:
+        try:
+            reduce(getitem, keys, metadata)
+        except KeyError:
+            keys = "".join(f"[{k!r}]" for k in keys)
+            errors.append("missing metadata" + keys)
+    if errors:
+        raise KeyError("\n".join(errors))
+
+
+@skip_if_offline
+@typechecked
+def test_config_validation_aicon(aicon_config_with_tmp_dir: DictConfig) -> None:
+    BaseSchema(**aicon_config_with_tmp_dir)
+
+
+@pytest.mark.slow
+@typechecked
+def test_aicon_metadata(aicon_config_with_grid: DictConfig) -> None:
+    """Test for presence of metadata required for inference.
+
+    The objective of this test is to monitor changes to the metadata structure and ensure compatibility.
+    Please update the path to each datum accordingly whenever a revision to the metadata structure is implemented.
+    """
+    trainer = AnemoiTrainer(aicon_config_with_grid)
+
+    dataset_name = "data"
+    assert_metadatakeys(
+        trainer.metadata,
+        ("metadata_inference", dataset_name, "timesteps", "timestep"),
+        ("config", "graph", "nodes", "data", "node_builder", "max_level"),
+        ("config", "graph", "nodes", "hidden", "node_builder", "max_level"),
+        ("config", "training", "precision"),
+        ("data_indices", dataset_name, "data", "input", "diagnostic"),
+        ("data_indices", dataset_name, "data", "input", "full"),
+        ("data_indices", dataset_name, "data", "output", "full"),
+        ("data_indices", dataset_name, "model", "input", "forcing"),
+        ("data_indices", dataset_name, "model", "input", "full"),
+        ("data_indices", dataset_name, "model", "input", "prognostic"),
+        ("data_indices", dataset_name, "model", "output", "full"),
+        ("dataset", dataset_name, "shape"),
+    )
+
+    assert torch.is_tensor(trainer.graph_data[dataset_name].x), "data coordinates not present"
+
+    # Assert heterogeneity of num_chunks setting.
+    assert (
+        aicon_config_with_grid.model.encoders["0"].mapper.num_chunks
+        != aicon_config_with_grid.model.decoders["0"].mapper.num_chunks
+    )
+
+    # Monitor path and setting of num_chunks
+    assert (
+        trainer.model.model.model.encoder["0"].proc.num_chunks
+        == aicon_config_with_grid.model.encoders["0"].mapper.num_chunks
+    )
+    assert (
+        trainer.model.model.model.decoder["0"].proc.num_chunks
+        == aicon_config_with_grid.model.decoders["0"].mapper.num_chunks
+    )
+
+
+@pytest.mark.slow
+@typechecked
+def test_aicon_training(trained_aicon: tuple) -> None:
+    _, initial_sum, final_sum, nhidden_mesh_edges = trained_aicon
+    assert initial_sum != final_sum
+
+    # calculate number of multi-mesh edges for global ICON grid RnBm
+    n = 3
+    m = 4  # max_level_multimesh
+    nedges_hidden_total = 0
+    for k in range(m):
+        # no. of mesh edges for level k:
+        nedges_hidden_total += 30 * n**2 * 4**k
+    nedges_hidden_total *= 2  # bidirectional edges
+    assert nhidden_mesh_edges == nedges_hidden_total
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v", "-s", "-k", "test_aicon_metadata"])

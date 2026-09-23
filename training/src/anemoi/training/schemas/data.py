@@ -1,4 +1,4 @@
-# (C) Copyright 2024- ECMWF.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -14,6 +14,7 @@ from pydantic import BaseModel as PydanticBaseModel
 from pydantic import Field
 
 from anemoi.models.schemas.data_processor import PreprocessorSchema  # noqa: TC002
+from anemoi.models.schemas.spatial_processors import SpatialProcessorSchema  # noqa: TC002
 
 
 class DatasetDataSchema(PydanticBaseModel):
@@ -33,34 +34,19 @@ class DatasetDataSchema(PydanticBaseModel):
     processors: dict[str, PreprocessorSchema]
     "Layers of model performing computation on latent space. \
         Processors including imputers and normalizers are applied in order of definition. (single dataset mode)"
+    spatial_processor: SpatialProcessorSchema | None = Field(default=None)
+    (
+        "Spatial preprocessor applied to this dataset before normalization "
+        "(e.g. CrossGridProjector for downscaling). May change the grid dimension."
+    )
 
 
 class DataSchema(PydanticBaseModel):
-    """A class used to represent the overall configuration of the dataset(s).
-
-    Attributes
-    ----------
-    format : str
-        The format of the data.
-    resolution : str
-        The resolution of the data.
-    frequency : str
-        The frequency of the data.
-    timestep : str
-        The timestep of the data.
-    datasets : dict[str, DatasetDataSchema] | None
-        "Dictionary mapping dataset names to their configurations."
-    num_features : int, optional
-        The number of features in the forecast state. To be set in the code.
-    """
+    """A class used to represent the overall configuration of the dataset(s)."""
 
     format: str = Field(example=None)
     "Format of the data."
-    frequency: str = Field(example=None)
-    "Time frequency requested from the dataset."
-    timestep: str = Field(example=None)
-    "Time step of model (must be multiple of frequency)."
+    frequency: str | None = Field(default=None)
+    "Time frequency requested from the dataset. Must be null when using trajectory (forecast) datasets."
     datasets: dict[str, DatasetDataSchema] | None = None
     "Dictionary mapping dataset names to their configurations."
-    num_features: int | None
-    "Number of features in the forecast state. To be set in the code."

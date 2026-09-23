@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -35,7 +35,7 @@ class NormaliserMixin:
             statistics = torch.amin(values), torch.amax(values)
 
         elif self.norm == "unit-std":
-            std = torch.std(values)
+            std = torch.std(values, correction=0)  # use the population std
             if std == 0:
                 LOGGER.warning(f"Std. dev. of the {self.__class__.__name__} values is 0. Normalisation is skipped.")
                 return (1,)

@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -28,8 +28,13 @@ class ICONTopologicalProcessorEdges(BaseEdgeBuilder):
     from ICON grid vertices.
     """
 
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
+        )
+
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
-        """Compute the edge indices for the KNN method.
+        """Compute the edge indices for the ICON topological processor edges.
 
         Parameters
         ----------
@@ -65,6 +70,11 @@ class BaseICONEdgeBuilder(BaseEdgeBuilder):
         multi_mesh = graph[nodes_names[self.vertex_index[1]]]["_icon_nodes"]
         assert isinstance(multi_mesh, ICONMultiMesh), f"{self.__class__.__name__}: target nodes must be ICONMultiMesh"
         return cell_grid, multi_mesh
+
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
+        )
 
     def compute_edge_index(self, cell_grid: ICONCellDataGrid, multi_mesh: ICONMultiMesh) -> torch.Tensor:
         edge_vertices = cell_grid.get_grid2mesh_edges(multi_mesh)

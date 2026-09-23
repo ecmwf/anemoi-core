@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -28,9 +28,9 @@ class MSELoss(FunctionalLoss):
         Parameters
         ----------
         pred : torch.Tensor
-            Prediction tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Prediction tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
         target : torch.Tensor
-            Target tensor, shape (bs, ensemble, lat*lon, n_outputs)
+            Target tensor, shape (bs, ensemble, n_outputs, lat*lon, n_outputs)
 
         Returns
         -------

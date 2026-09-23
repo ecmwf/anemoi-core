@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import importlib.util
 import io
 import logging
 import os
@@ -15,12 +16,17 @@ import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
+from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.normalization import ConditionalLayerNorm
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.utils.compile import _get_compile_entry
 from anemoi.models.utils.compile import _meets_library_versions_for_compile
 from anemoi.models.utils.compile import mark_for_compilation
+
+HAS_ANEMOI_TRAINING = False
+if importlib.util.find_spec("anemoi.training") is not None:
+    HAS_ANEMOI_TRAINING = True
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,21 +56,29 @@ def layer_kernel_compile_config() -> None:
 
 
 def graphtransformer_ens_compile_config() -> None:
-    return OmegaConf.create(
+    modules_to_compile = [
         {
-            "compile": [
-                {
-                    "module": "anemoi.models.layers.conv.GraphTransformerConv",
+            "module": "anemoi.models.layers.conv.GraphTransformerConv",
+        },
+        {
+            "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
+            "options": {
+                "dynamic": False,
+            },
+        },
+    ]
+    if HAS_ANEMOI_TRAINING:
+        modules_to_compile.append(
+            {
+                "module": "anemoi.training.losses.CRPS",
+                "options": {
+                    "dynamic": False,
+                    "fullgraph": True,
+                    "mode": "max-autotune",
                 },
-                {
-                    "module": "anemoi.models.layers.normalization.ConditionalLayerNorm",
-                    "options": {
-                        "dynamic": False,
-                    },
-                },
-            ],
-        }
-    )
+            }
+        )
+    return OmegaConf.create({"compile": modules_to_compile})
 
 
 def test_compile_config_no_match() -> None:
@@ -89,6 +103,54 @@ def test_compile_config_match() -> None:
     result = _get_compile_entry(model, cfg.compile)
 
     assert type(result) is DictConfig
+
+
+def test_compile_uses_training_specific_hook(mocker) -> None:
+    """Selected modules can control which part of their calculation is compiled."""
+    mocker.patch(
+        "anemoi.models.utils.compile._meets_library_versions_for_compile",
+        return_value=True,
+    )
+    cfg = OmegaConf.create(
+        {
+            "compile": [
+                {
+                    "module": "torch.nn.Linear",
+                    "options": {"dynamic": False},
+                },
+            ],
+        },
+    )
+    layer = torch.nn.Linear(2, 2)
+    unselected_layer = torch.nn.ReLU()
+    model = torch.nn.Sequential(layer, unselected_layer)
+    compile_for_training = mocker.Mock()
+    unselected_compile_for_training = mocker.Mock()
+    layer.compile_for_training = compile_for_training
+    unselected_layer.compile_for_training = unselected_compile_for_training
+    compile_forward = mocker.patch.object(layer, "compile")
+
+    mark_for_compilation(model, cfg.compile)
+
+    compile_for_training.assert_called_once_with(dynamic=False)
+    unselected_compile_for_training.assert_not_called()
+    compile_forward.assert_not_called()
+
+
+def test_compile_uses_standard_module_compile_without_hook(mocker) -> None:
+    """Selected modules without a specialised hook compile their forward call."""
+    mocker.patch(
+        "anemoi.models.utils.compile._meets_library_versions_for_compile",
+        return_value=True,
+    )
+    cfg = layer_kernel_compile_config()
+    layer = torch.nn.Linear(2, 2)
+    model = torch.nn.Sequential(layer)
+    compile_forward = mocker.patch.object(layer, "compile")
+
+    mark_for_compilation(model, cfg.compile)
+
+    compile_forward.assert_called_once_with()
 
 
 def test_compile() -> None:
@@ -138,10 +200,10 @@ def test_compile_layer_kernel() -> None:
     mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[2])
 
-    result = mhsa.forward(x, shapes, batch_size)
-    result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
+    result = mhsa.forward(x, shard_info, batch_size)
+    result_compiled = mhsa_compiled.forward(x, shard_info, batch_size)
 
     # check the result of the compiled function matches the uncompiled result
     assert torch.allclose(result, result_compiled)
@@ -195,9 +257,9 @@ def test_compile_load_checkpoint() -> None:
     mhsa_compiled = mark_for_compilation(mhsa, cfg.compile)
 
     x = torch.randn(batch_size * 2, embed_dim, requires_grad=True)
-    shapes = [list(x.shape)]
+    shard_info = GraphShardInfo(nodes=[2])
 
-    result_compiled = mhsa_compiled.forward(x, shapes, batch_size)
+    result_compiled = mhsa_compiled.forward(x, shard_info, batch_size)
 
     torch.save(mhsa_compiled, "compiled.pt")
 
@@ -213,5 +275,5 @@ def test_compile_load_checkpoint() -> None:
     )
     new_mhsa.load_state_dict(checkpoint.state_dict(), assign=False)
 
-    result = new_mhsa.forward(x, shapes, batch_size)
+    result = new_mhsa.forward(x, shard_info, batch_size)
     assert torch.allclose(result, result_compiled)

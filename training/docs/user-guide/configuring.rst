@@ -25,7 +25,8 @@ settings at the top as follows:
    - system: example
    - graph: multi_scale
    - model: gnn
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 These are group configs for each section. The options after the defaults
@@ -41,6 +42,12 @@ which implements:
    - hardware: example
    - input: example
    - output: example
+
+Config files are resolved in decreasing priority order: a path supplied via
+``--config-path`` always takes precedence, followed by the current working
+directory, and finally the packaged defaults shipped with ``anemoi-training``.
+A file or group override found in a higher-priority location shadows any
+matching file in a lower-priority location.
 
 *****************************
  YAML-based config overrides
@@ -103,41 +110,6 @@ Use:
 Do not use the previous ``dataset``/``name`` nesting. Configuration
 validation now enforces the new layout.
 
-*********************************
- Multistep Input and Output
-*********************************
-
-Anemoi uses ``multistep_input`` and ``multistep_output`` to control how many time
-steps the model injests as input and predicts in a single forward pass.
-
--  ``multistep_input``: number of past timesteps provided as model input. When set to 1, only `t_{0}` is used.
--  ``multistep_output``: number of future timesteps predicted per forward pass.
-
-Set ``multistep_output`` greater than 1 to enable multi-output prediction. This
-reduces the number of forward passes needed to cover a rollout horizon.
-
-Example:
-
-.. code:: yaml
-
-   training:
-      multistep_input: 3
-      multistep_output: 2
-      rollout:
-         start: 1
-         max: 4
-
-Rollout behavior:
-
--  When time indices are inferred, the dataloader uses
-   ``multistep_input + rollout * multistep_output`` to determine how many timesteps
-   to load.
--  If ``multistep_output`` is greater than ``multistep_input``, only the most recent
-   ``multistep_input`` outputs are fed into the next rollout step.
-
-Notes:
-
--  Autoencoders require ``multistep_input == multistep_output``.
 
 Example Config File
 ===================
@@ -167,7 +139,8 @@ match the dataset you provide.
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
    config_validation: True
@@ -182,10 +155,6 @@ match the dataset you provide.
       input:
          dataset: datset-n320-2019-2021-6h.zarr
          graph: first_graph_n320.pt
-
-   training:
-      lr:
-         rate: 1e-3
 
 When we save this `example.yaml` file, we can run the training with this
 config using:
@@ -209,13 +178,13 @@ or override individual config entries such as
 
 .. code:: bash
 
-   anemoi-training train diagnostics.plot.enabled=False
+   anemoi-training train system.hardware.num_gpus_per_node=1
 
 or combine everything together
 
 .. code:: bash
 
-   anemoi-training train --config-name=debug.yaml model=transformer diagnostics.plot.enabled=False
+   anemoi-training train --config-name=debug.yaml model=transformer system.hardware.num_gpus_per_node=1
 
 .. _config-validation:
 
@@ -230,6 +199,15 @@ run using the following command:
 
    anemoi-training config validate --config-name debug.yaml
 
+By default the config is looked up on the search path described above (the
+current working directory and the packaged defaults). To validate a config
+that lives somewhere else without changing directory, point ``--config-path``
+at its directory, exactly as for ``anemoi-training train``:
+
+.. code:: bash
+
+   anemoi-training config validate --config-path /path/to/configs --config-name debug.yaml
+
 This will check that the configuration is valid and that all the
 required fields are present. If your config is correctly defined then
 the command will show an output similar to:
@@ -237,9 +215,8 @@ the command will show an output similar to:
 .. code:: bash
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    cfg = BaseSchema(**cfg)
    2025-01-28 09:37:23 INFO Config files validated.
 
@@ -264,9 +241,8 @@ values:
    2025-02-16 17:48:38 INFO Validating configs.
    2025-02-16 17:48:38 WARNING Note that this command is not taking into account if your config has
    set the config_validation flag to false.So this command will validate the config regardless of the flag.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    2025-02-16 17:48:39 WARNING Environment variable EXP_NAME not found, masking with default
    2025-02-16 17:48:39 WARNING Environment variable RUN_NAME not found, masking with default
    2025-02-16 17:48:39 WARNING Environment variable SLURM_GPUS_PER_NODE not found, masking with 0
@@ -286,7 +262,8 @@ correctly indented (in this case the `diagnostics.log` field):
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -308,9 +285,8 @@ the following error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now: [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now: [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    diagnostics.log
     Input should be a valid dictionary or instance of LoggingSchema [type=model_type, input_value=None, input_type=NoneType]
@@ -338,7 +314,8 @@ typos that might still need to be fixed manually:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -364,9 +341,8 @@ error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    diagnostics.log.mlflow.offline
    Field required [type=missing, input_value={'enabled': True, 'authen...onfig'], 'ofline': True}, input_type=DictConfig]
@@ -399,7 +375,8 @@ let's say we have a config with a union of schemas like the following:
    - system: example
    - graph: multi_scale
    - model: transformer # Change from default group
-   - training: default
+   - task: forecaster
+   - training: single
    - _self_
 
 
@@ -430,9 +407,8 @@ with the following error:
 .. code:: python
 
    2025-01-28 09:37:23 INFO Validating configs.
-   2025-01-28 09:37:23 INFO Prepending Anemoi Home (/home_path/.config/anemoi/training/config) to the search path.
-   2025-01-28 09:37:23 INFO Prepending current user directory (/repos_path/config_anemoi_core) to the search path.
-   2025-01-28 09:37:23 INFO Search path is now:  [provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-home-searchpath-plugin, path=/home_path/.config/anemoi/training/config, provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands]
+   2025-01-28 09:37:23 INFO Appending current working directory (/repos_path/config_anemoi_core) to the search path.
+   2025-01-28 09:37:23 INFO Search path is now:  [provider=hydra, path=pkg://hydra.conf, provider=main, path=/repos_path/anemoi-core/training/src/anemoi/training/commands, provider=anemoi-cwd-searchpath-plugin, path=/repos_path/config_anemoi_core, provider=anemoi-package-searchpath-plugin, path=pkg://anemoi.training/config]
    pydantic_core._pydantic_core.ValidationError: 1 validation error for BaseSchema
    2025-01-28 10:14:49 ERROR
    💣 14 validation error for BaseSchema

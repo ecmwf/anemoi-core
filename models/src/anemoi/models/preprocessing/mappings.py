@@ -1,4 +1,4 @@
-# (C) Copyright 2024 Anemoi contributors.
+# (C) Copyright 2024-2026 Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -155,8 +155,21 @@ def power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one
     return x.pow_(lambd)
 
 
-def inverse_power_transform(x, lambd=0.33, tangent_linear_above_one=False):
-    """Inverse power transform with optional inverse tangent-linear branch above 1."""
+def inverse_power_transform(x, lambd=0.33, clip_negative=False, tangent_linear_above_one=False):
+    """Inverse power transform with optional inverse tangent-linear branch above 1.
+
+    Parameters
+    ----------
+    x : torch.Tensor
+        Input tensor
+    lambd : float
+        Exponent for the power transform. Default is 0.33.
+    clip_negative : bool, optional
+        Accepted for symmetry with power_transform but not used in the inverse
+        since the output is already clamped to non-negative values. Default is False.
+    tangent_linear_above_one : bool, optional
+        Whether to use the inverse tangent-linear extension above 1. Default is False.
+    """
     assert lambd > 0, f"For inverse power transform, parameter lambd {lambd} must satisfy lambd > 0."
     if tangent_linear_above_one:
         lin_branch = x.clone().sub_(1.0 - lambd).div_(lambd)

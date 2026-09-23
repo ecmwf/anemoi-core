@@ -2,7 +2,7 @@ dataset: ???
 graph: ???
 # To load the graph from a file, you need to provide a path here like: /path/to/your/graph.pt
 # If no such file exists, the graph will be created from the config.
+loss_matrices_path: null
 truncation: null
 truncation_inv: null
-loss_matrices_path: null
 warm_start: null

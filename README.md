@@ -10,14 +10,14 @@
 </p>
 <p align="center">
   <!-- Individual package releases -->
-  <a href="https://github.com/ecmwf/anemoi-training/releases">
-    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-training?color=orange&label=Training%20Release" alt="Anemoi Training Release">
+  <a href="https://github.com/ecmwf/anemoi-core/releases">
+    <img src="https://img.shields.io/pypi/v/anemoi-training?color=orange&label=Training%20Release" alt="Anemoi Training Release">
   </a>
-  <a href="https://github.com/ecmwf/anemoi-models/releases">
-    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-models?color=orange&label=Models%20Release" alt="Anemoi Models Release">
+  <a href="https://github.com/ecmwf/anemoi-core/releases">
+    <img src="https://img.shields.io/pypi/v/anemoi--models?color=orange&label=Models%20Release" alt="Anemoi Models Release">
   </a>
-  <a href="https://github.com/ecmwf/anemoi-graphs/releases">
-    <img src="https://img.shields.io/github/v/release/ecmwf/anemoi-graphs?color=orange&label=Graphs%20Release" alt="Anemoi Graphs Release">
+  <a href="https://github.com/ecmwf/anemoi-core/releases">
+    <img src="https://img.shields.io/pypi/v/anemoi-graphs?color=orange&label=Graphs%20Release" alt="Anemoi Graphs Release">
   </a>
 </p>
 <p align="center">

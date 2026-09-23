@@ -68,12 +68,17 @@ The package currently includes the following model architectures:
    base architecture
 -  **AnemoiEnsModelEncProcDec**: The CRPS-optimized ensemble version
    that injects noise in the processor, e.g. AIFS-CRPS
--  **AnemoiModelEncProcDecMultiOutInterpolator**: A specialized architecture for
-   time interpolation
 
 All models support flexible layer kernel configuration, allowing for
 customization of linear and normalization layers in different parts of
 the model.
+
+They also support **multiple datasets** in a single model: the
+configuration declares named groups of encoders and decoders, the
+per-dataset latents are merged by a latent aggregator before the
+processor, and each decoder reconstructs its datasets from a
+configurable set of target features. See :ref:`usage-multi-dataset` for
+details.
 
 ********
  Layers

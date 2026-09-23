@@ -100,7 +100,6 @@ data:
   resolution: mrl${data.refinement}
   refinement: 3
   frequency: 6h
-  timestep: 6h
   datasets:
     data:
       forcing:
@@ -143,12 +142,13 @@ data:
             - "sin_local_time"
             std: []
 
-  num_features: null
   format: zarr
 
 model:
   output_mask:
-    _target_: anemoi.training.utils.masks.NoOutputMask
+    datasets:
+      data:
+        _target_: anemoi.training.utils.masks.NoOutputMask
   cpu_offload: False
 
   model:
@@ -160,7 +160,8 @@ model:
   num_channels: 5 # reduced for CI/CD test. original value 512
   processor:
     _target_: anemoi.models.layers.processor.GNNProcessor
-    trainable_size: ${model.trainable_parameters.hidden2hidden}
+    num_channels: ${model.num_channels}
+    trainable_size: ${model.edge_trainable_parameters.hidden2hidden}
     sub_graph_edge_attributes: ${model.attributes.edges}
     num_layers: 2
     num_chunks: 2
@@ -169,81 +170,107 @@ model:
     layer_kernels:
       Activation:
         _target_: torch.nn.GELU
-  encoder:
-    _target_: anemoi.models.layers.mapper.GNNForwardMapper
-    trainable_size: ${model.trainable_parameters.data2hidden}
-    sub_graph_edge_attributes: ${model.attributes.edges}
-    num_chunks: 1
-    mlp_extra_layers: 0
-    cpu_offload: ${model.cpu_offload}
-    layer_kernels:
-      Activation:
-        _target_: torch.nn.GELU
-  decoder:
-    _target_: anemoi.models.layers.mapper.GNNBackwardMapper
-    trainable_size: ${model.trainable_parameters.hidden2data}
-    sub_graph_edge_attributes: ${model.attributes.edges}
-    num_chunks: 3
-    mlp_extra_layers: 0
-    cpu_offload: ${model.cpu_offload}
-    layer_kernels:
-      Activation:
-        _target_: torch.nn.GELU
+  encoders:
+    "0":
+      source_datasets: [ "data" ]
+      dataset_fusing_strategy: "not_supported"
+      mapper:
+        _target_: anemoi.models.layers.mapper.GNNForwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: ${model.edge_trainable_parameters.data2hidden}
+        sub_graph_edge_attributes: ${model.attributes.edges}
+        num_chunks: 1
+        mlp_extra_layers: 0
+        cpu_offload: ${model.cpu_offload}
+        layer_kernels:
+          Activation:
+            _target_: torch.nn.GELU
+  decoders:
+    "0":
+      target_datasets: [ "data" ]
+      target_node_features: [ "encoded_data" ]
+      mapper:
+        _target_: anemoi.models.layers.mapper.GNNBackwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: ${model.edge_trainable_parameters.hidden2data}
+        sub_graph_edge_attributes: ${model.attributes.edges}
+        num_chunks: 3
+        mlp_extra_layers: 0
+        cpu_offload: ${model.cpu_offload}
+        layer_kernels:
+          Activation:
+            _target_: torch.nn.GELU
+  latent_aggregator:
+    _target_: anemoi.models.layers.aggregator.SumAggregator
   residual:
-    _target_: anemoi.models.layers.residual.SkipConnection
+    datasets:
+      data:
+        _target_: anemoi.models.layers.residual.SkipConnection
   attributes:
     edges:
     - edge_length
     - edge_dirs
     nodes: []
-  trainable_parameters:
+  node_trainable_parameters:
     data: 8
     hidden: 8
+  edge_trainable_parameters:
     data2hidden: 8
     hidden2data: 8
     hidden2hidden: 8
   bounding:
-    - _target_: anemoi.models.layers.bounding.ReluBounding
-      variables: []
+    datasets:
+      data:
+        - _target_: anemoi.models.layers.bounding.ReluBounding
+          variables: []
+
+task:
+  _target_: anemoi.training.tasks.Forecaster
+  multistep_input: 2
+  multistep_output: 1
+  timestep: 6h
+  rollout:
+    start: 1
+    epoch_increment: 1
+    maximum: 1
+  validation_rollout: 1
 
 training:
   run_id: null
   fork_run_id: null
   transfer_learning: False # activate to perform transfer learning
-  model_task: anemoi.training.train.tasks.GraphForecaster
+  method:
+    _target_: anemoi.training.train.methods.SingleTraining
   submodules_to_freeze: []
   num_sanity_val_steps: 2
   load_weights_only: False
   deterministic: false
   precision: 16-mixed
-  multistep_input: 2
-  multistep_output: 1
   accum_grad_batches: 1
   gradient_clip:
     val: 32.0
     algorithm: value
-  swa:
-    enabled: false
-    lr: 0.0001
-  optimizer:
-    _target_: torch.optim.AdamW # or anemoi.training.optimizers.AdEMAMix.AdEMAMix
-    betas: [0.9, 0.95]
+  weight_averaging: null
+  optimization:
+    lr: 6.25e-05
+    optimizer:
+      _target_: torch.optim.AdamW
+      betas: [0.9, 0.95]
+    lr_scheduler:
+      _target_: timm.scheduler.CosineLRScheduler
+      lr_min: 3.0e-7
+      t_initial: 300000
+      warmup_t: 1000
+      t_in_epochs: false
+    pl_lr_scheduler:
+      interval: step
   # select strategy
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
   loss_gradient_scaling: False
-  rollout:
-    start: 1
-    epoch_increment: 1
-    max: 1
   max_epochs: 1
-  lr:
-    rate: 6.25e-05
-    iterations: 300000
-    min: 3.0e-07
-    warmup: 1000
   scalers:
     datasets:
       data:
@@ -433,4 +460,3 @@ dataloader:
     training: 2
     validation: 2
     test: 1
-  validation_rollout: 1
