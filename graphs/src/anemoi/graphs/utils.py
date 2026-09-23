@@ -18,6 +18,7 @@ from importlib.util import find_spec
 
 import numpy as np
 import torch
+from packaging import version
 from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric import __version__ as PYG_VERSION
@@ -29,7 +30,7 @@ LOGGER = logging.getLogger(__name__)
 FORCE_CPU_ENV_VAR = "ANEMOI_GRAPHS_FORCE_CPU"
 DISABLE_PYG_LIB_ENV_VAR = "ANEMOI_GRAPHS_DISABLE_PYG_LIB"
 
-if PYG_VERSION >= "2.8":
+if version.parse(PYG_VERSION) >= version.parse("2.8"):
     PYG_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
 Installing 'pyg-lib' can significantly improve performance for graph creation.
 You can install it using:
@@ -107,7 +108,7 @@ def is_pyg_lib_available() -> bool:
     if os.environ.get(DISABLE_PYG_LIB_ENV_VAR):
         return False
 
-    if PYG_VERSION >= "2.8":
+    if version.parse(PYG_VERSION) >= version.parse("2.8"):
         return find_spec("pyg_lib") is not None
 
     return find_spec("torch_cluster") is not None
