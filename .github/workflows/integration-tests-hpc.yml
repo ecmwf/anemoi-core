@@ -91,7 +91,7 @@ jobs:
         #SBATCH --cpus-per-task=32
         #SBATCH --gpus-per-node=2
         #SBATCH --time=1:00:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --mem=120GB
     secrets: inherit
 
@@ -105,7 +105,7 @@ jobs:
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
         #SBATCH --time=01:00:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
@@ -121,7 +121,7 @@ jobs:
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
         #SBATCH --time=00:30:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
