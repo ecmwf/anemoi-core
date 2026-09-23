@@ -99,9 +99,10 @@ _MULTISCALE_BASE = {
 }
 
 _ON_THE_FLY_MULTISCALE_CONFIG = {
-    "num_scales": 4,
-    "base_num_nearest_neighbours": 16,
-    "base_sigma": 0.01570,
+    "smoothers": {
+        "smooth_100km": {"num_nearest_neighbours": 128, "sigma": 0.0157},
+        "smooth_50km": {"num_nearest_neighbours": 128, "sigma": 0.0078},
+    },
 }
 
 
@@ -118,18 +119,10 @@ def test_multiscale_config_on_the_fly_valid() -> None:
     MultiscaleConfigOnTheFlySchema(**_ON_THE_FLY_MULTISCALE_CONFIG)
 
 
-def test_multiscale_config_on_the_fly_smoothers_valid() -> None:
-    MultiscaleConfigOnTheFlySchema(smoothers={"smooth_2x": {"num_nearest_neighbours": 16, "sigma": 0.01570}})
-
-
-def test_multiscale_config_on_the_fly_requires_num_scales_or_smoothers() -> None:
+@pytest.mark.parametrize("config", [{}, {"smoothers": {}}])
+def test_multiscale_config_on_the_fly_requires_smoothers(config: dict) -> None:
     with pytest.raises(ValidationError):
-        MultiscaleConfigOnTheFlySchema()
-
-
-def test_multiscale_config_on_the_fly_requires_base_parameters_with_num_scales() -> None:
-    with pytest.raises(ValidationError, match=r"base_num_nearest_neighbours.*base_sigma"):
-        MultiscaleConfigOnTheFlySchema(num_scales=4)
+        MultiscaleConfigOnTheFlySchema(**config)
 
 
 def test_multiscale_config_spectral_valid() -> None:
@@ -148,7 +141,6 @@ def test_multiscale_config_spectral_valid() -> None:
         {"transform": "dct2d", "x_dim": 1000, "cutoffs": [0.125]},
         {"transform": "fft2d", "x_dim": 1000, "y_dim": 800, "nlat": 640, "cutoffs": [0.125]},
         {"transform": "octahedral_sht", "nlat": 640, "cutoffs": [79.5]},
-        {"transform": "octahedral_sht", "nlat": 640, "cutoffs": [159, 79]},
         {"transform": "octahedral_sht", "nlat": 640, "cutoffs": []},
     ],
 )
@@ -192,12 +184,12 @@ def test_multiscale_loss_sparse_projector_num_chunks_defaults_to_one() -> None:
 
 
 def test_multiscale_loss_mixed_mode_rejected() -> None:
-    """loss_matrices (disk) and num_scales (on-the-fly) must not coexist in multiscale_config."""
+    """loss_matrices (disk) and smoothers (on-the-fly) must not coexist in multiscale_config."""
     with pytest.raises(ValidationError):
         MultiScaleLossSchema(
             **{
                 **_MULTISCALE_BASE,
-                "multiscale_config": {"loss_matrices": [None], "num_scales": 4},
+                "multiscale_config": {"loss_matrices": [None], **_ON_THE_FLY_MULTISCALE_CONFIG},
             },
         )
 
@@ -273,7 +265,7 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
                 "losses": [
                     {
                         **_MULTISCALE_BASE,
-                        "multiscale_config": {"loss_matrices": [None], "num_scales": 4},
+                        "multiscale_config": {"loss_matrices": [None], **_ON_THE_FLY_MULTISCALE_CONFIG},
                     },
                 ],
             },

@@ -159,7 +159,7 @@ def test_multi_scale(
 
     mocker.patch(
         "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
-        return_value=[None, smoothing_provider],
+        return_value=[smoothing_provider, None],
     )
 
     multiscale_loss = MultiscaleLossWrapper(
@@ -488,10 +488,150 @@ def test_multiscale_spectral_bands_sum_to_input(config: dict) -> None:
     torch.testing.assert_close(torch.stack(capturing_loss.targets).sum(dim=0), target)
 
 
-def test_multiscale_spectral_cutoffs_must_increase() -> None:
-    with pytest.raises(ValueError, match="strictly increasing"):
-        MultiscaleLossWrapper(
+def _provider(num_nodes: int, src: torch.Tensor, dst: torch.Tensor, weights: torch.Tensor) -> ProjectionGraphProvider:
+    """Smoother whose row ``dst[i]`` has weight ``weights[i]`` on node ``src[i]``."""
+    graph = HeteroData()
+    graph["data"].num_nodes = num_nodes
+    graph[("data", "to", "data")].edge_index = torch.stack([src, dst])
+    graph[("data", "to", "data")].edge_weight = weights
+    return ProjectionGraphProvider(
+        graph=graph,
+        edges_name=("data", "to", "data"),
+        edge_weight_attribute="edge_weight",
+        row_normalize=False,
+    )
+
+
+def _ring_provider(num_nodes: int, width: int) -> ProjectionGraphProvider:
+    """Smoother that averages each node with the next ``width - 1`` nodes around a ring."""
+    src = torch.arange(num_nodes).repeat_interleave(width)
+    dst = (src + torch.arange(width).repeat(num_nodes)) % num_nodes
+    return _provider(num_nodes, src, dst, torch.full((num_nodes * width,), 1.0 / width))
+
+
+@pytest.mark.parametrize("check_scale_order", [True, False])
+def test_multiscale_scale_order_check_for_matrices(mocker: MockerFixture, check_scale_order: bool) -> None:
+    wide, narrow = _ring_provider(8, 4), _ring_provider(8, 2)
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
+        return_value=[narrow, wide, None],
+    )
+
+    def build() -> MultiscaleLossWrapper:
+        return MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0] * 3, check_scale_order=check_scale_order)
+
+    if check_scale_order:
+        with pytest.raises(ValueError, match=r"scale 1 \(4.0 effective neighbours\).*check_scale_order: False"):
+            build()
+    else:
+        build()
+
+
+def test_multiscale_scale_order_check_accepts_coarsest_first(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
+        return_value=[_ring_provider(8, 4), _ring_provider(8, 2), None],
+    )
+    MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0] * 3)
+
+
+def test_multiscale_scale_order_check_counts_effective_neighbours(mocker: MockerFixture) -> None:
+    # Row 0 has weights 2 and 2 (not normalised): 4^2 / 8 = 2 effective neighbours.
+    # Row 1 has weights 3 and 1: 4^2 / 10 = 1.6. Row 2 has no weights and is left out,
+    # so the mean is 1.8.
+    uneven = _provider(3, torch.tensor([0, 1, 1, 2]), torch.tensor([0, 0, 1, 1]), torch.tensor([2.0, 2.0, 3.0, 1.0]))
+    identity = _provider(3, torch.arange(3), torch.arange(3), torch.ones(3))
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
+        return_value=[identity, uneven, None],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"scale 1 \(1.8 effective neighbours\) is coarser than scale 0 \(1.0 effective",
+    ):
+        MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0] * 3)
+
+
+def test_multiscale_scale_order_check_requires_full_resolution_last(mocker: MockerFixture) -> None:
+    mocker.patch(
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
+        return_value=[None, _ring_provider(8, 2)],
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"scale 1 \(2.0 effective neighbours\) is coarser than scale 0 \(full resolution\)",
+    ):
+        MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0] * 2)
+
+
+@pytest.mark.parametrize("check_scale_order", [True, False])
+def test_multiscale_scale_order_check_for_spectral_cutoffs(check_scale_order: bool) -> None:
+    def build() -> MultiscaleLossWrapper:
+        return MultiscaleLossWrapper(
             per_scale_loss=MSELoss(),
             weights=[1.0, 1.0, 1.0],
             multiscale_config={**_SPECTRAL_CONFIG, "cutoffs": [7, 3]},
+            check_scale_order=check_scale_order,
         )
+
+    if check_scale_order:
+        with pytest.raises(ValueError, match=r"scale 1 \(cutoff 3\) is coarser than scale 0 \(cutoff 7\)"):
+            build()
+    else:
+        assert build().smoothers == [7, 3, None]
+
+
+def _sphere_graph() -> HeteroData:
+    """Graph with 96 data nodes on 12 latitudes of 8 points each."""
+    graph = HeteroData()
+    lat = torch.linspace(-1.2, 1.2, 12).repeat_interleave(8)
+    lon = torch.linspace(0, 2 * torch.pi, 9)[:-1].repeat(12)
+    graph["data"].x = torch.stack([lat, lon], dim=-1)
+    graph["data"].num_nodes = graph["data"].x.shape[0]
+    return graph
+
+
+@pytest.mark.parametrize("coarsest_first", [True, False])
+def test_multiscale_scale_order_check_tells_sigmas_apart(coarsest_first: bool) -> None:
+    # Same number of neighbours at both scales; only the width of the weights differs.
+    sigmas = [0.4, 0.1] if coarsest_first else [0.1, 0.4]
+
+    def build() -> MultiscaleLossWrapper:
+        return MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0, 1.0, 1.0],
+            multiscale_config={
+                "smoothers": {f"sigma_{sigma}": {"num_nearest_neighbours": 16, "sigma": sigma} for sigma in sigmas},
+            },
+            graph_data=_sphere_graph(),
+            data_node_name="data",
+        )
+
+    if coarsest_first:
+        build()
+    else:
+        with pytest.raises(ValueError, match=r"scale 1 \(.* effective neighbours\) is coarser than scale 0"):
+            build()
+
+
+def test_multiscale_graph_smoothers_keep_their_order() -> None:
+    graph = _sphere_graph()
+
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=MSELoss(),
+        weights=[1.0, 1.0, 1.0],
+        multiscale_config={
+            "smoothers": {
+                "coarse": {"num_nearest_neighbours": 16, "sigma": 0.5},
+                "fine": {"num_nearest_neighbours": 4, "sigma": 0.1},
+            },
+        },
+        graph_data=graph,
+        data_node_name="data",
+    )
+
+    coarse, fine, full = multiscale_loss.smoothers
+    assert full is None
+    assert coarse.projection_matrix.values().numel() > fine.projection_matrix.values().numel()

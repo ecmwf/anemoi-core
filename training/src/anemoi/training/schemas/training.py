@@ -409,29 +409,9 @@ class MultiscaleConfigOnTheFlySchema(BaseModel):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    num_scales: int | None = None
-    base_num_nearest_neighbours: int | None = None
-    base_sigma: float | None = None
-    scale_factor: int | None = None
-    smoothers: dict[str, dict] | None = None
-
-    @model_validator(mode="after")
-    def check_num_scales_or_smoothers(self) -> Self:
-        if self.smoothers is not None:
-            return self
-
-        if self.num_scales is None:
-            msg = "MultiscaleConfigOnTheFlySchema requires either 'num_scales' or 'smoothers'."
-            raise ValueError(msg)
-
-        missing = [name for name in ("base_num_nearest_neighbours", "base_sigma") if getattr(self, name) is None]
-        if missing:
-            msg = (
-                "MultiscaleConfigOnTheFlySchema with 'num_scales' requires "
-                f"{', '.join(repr(name) for name in missing)}."
-            )
-            raise ValueError(msg)
-        return self
+    smoothers: dict[str, dict] = Field(min_length=1)
+    """KNN smoothers from coarsest to finest, each with ``num_nearest_neighbours`` and ``sigma``. The full resolution
+    is added last."""
 
 
 class MultiscaleConfigSpectralSchema(BaseModel):
@@ -441,8 +421,8 @@ class MultiscaleConfigSpectralSchema(BaseModel):
 
     transform: Literal["octahedral_sht", "reduced_sht", "regular_sht", "fft2d", "dct2d"]
     cutoffs: list[PositiveInt | PositiveFloat] = Field(min_length=1)
-    """Strictly increasing cutoffs, one per scale; a full-resolution scale is added last. Integer truncations for
-    the spherical harmonic transforms, frequencies in cycles per grid spacing for ``fft2d`` and ``dct2d``."""
+    """Increasing cutoffs, one per scale; a full-resolution scale is added last. Integer truncations for the
+    spherical harmonic transforms, frequencies in cycles per grid spacing for ``fft2d`` and ``dct2d``."""
     nlat: PositiveInt | None = None
     "Number of latitudes, for ``octahedral_sht`` and ``regular_sht``."
     grid: str | None = None
@@ -470,9 +450,6 @@ class MultiscaleConfigSpectralSchema(BaseModel):
             raise ValueError(msg)
         if self.transform.endswith("_sht") and not all(isinstance(cutoff, int) for cutoff in self.cutoffs):
             msg = f"MultiscaleConfigSpectralSchema cutoffs for '{self.transform}' must be integers, got {self.cutoffs}."
-            raise ValueError(msg)
-        if self.cutoffs != sorted(set(self.cutoffs)):
-            msg = f"MultiscaleConfigSpectralSchema 'cutoffs' must be strictly increasing, got {self.cutoffs}."
             raise ValueError(msg)
         return self
 
@@ -524,6 +501,8 @@ class MultiScaleLossSchema(BaseModel):
         MultiscaleConfigDiskSchema | MultiscaleConfigOnTheFlySchema | MultiscaleConfigSpectralSchema | None
     ) = None
     sparse_projector_num_chunks: PositiveInt = 1
+    check_scale_order: bool = True
+    "Check that the scales run from coarsest to finest. Turn off only when an unusual order is intended."
     # Deprecated: pass inside multiscale_config instead.
     loss_matrices_path: str | None = None
     loss_matrices: list[str | None] | None = None

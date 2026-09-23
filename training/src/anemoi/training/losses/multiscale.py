@@ -9,6 +9,7 @@
 
 
 import logging
+import math
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -17,7 +18,6 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.builders import _expand_smoother_config
 from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
@@ -49,6 +49,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         data_node_name: str = DEFAULT_DATASET_NAME,
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
+        check_scale_order: bool = True,
         ignore_nans: bool = False,
         # Deprecated: pass loss_matrices_path / loss_matrices inside multiscale_config instead.
         loss_matrices_path: Path | str | None = None,
@@ -75,15 +76,18 @@ class MultiscaleLossWrapper(BaseLossWrapper):
                     - filter_4x.npz
                     - null            # full resolution
 
-            - **On-the-fly mode** provide a compact geometric-progression spec
-              or an explicit ``smoothers`` mapping (passed to
-              ``_expand_smoother_config``)::
+            - **On-the-fly mode** provide a ``smoothers`` mapping with one KNN
+              smoother per scale, coarsest first. The full resolution is added
+              last::
 
                 multiscale_config:
-                  num_scales: 3
-                  base_num_nearest_neighbours: 4
-                  base_sigma: 0.1
-                  scale_factor: 2
+                  smoothers:
+                    smooth_100km:
+                      num_nearest_neighbours: 128
+                      sigma: 0.0157
+                    smooth_50km:
+                      num_nearest_neighbours: 128
+                      sigma: 0.0078
 
             - **Spectral mode** provide a ``transform``, its grid and strictly
               increasing ``cutoffs``. Each scale keeps what lies at or below its
@@ -122,6 +126,10 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         sparse_projector_num_chunks : int
             Default number of chunks for smoothing with matrices.
             ``1`` means processing all fields in one go.
+        check_scale_order : bool
+            Whether to check that the scales run from coarsest to finest
+            (see ``_check_scale_order``). Turn off only when an unusual order
+            is intended.
         ignore_nans : bool
             Passed to :class:`BaseLoss`; ignored by the wrapper itself.
         loss_matrices_path : Path | str | None
@@ -154,6 +162,8 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         assert (
             len(weights) == self.num_scales
         ), f"Number of weights ({len(weights)}) must match number of scales ({self.num_scales})"
+        if check_scale_order:
+            self._check_scale_order()
         self.weights = weights
         self.supports_sharding = True
         self.mloss = None
@@ -213,13 +223,57 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         assert graph_data is not None, "graph_data must be provided for on-the-fly multiscale_config."
         return self._build_graph_smoothing_matrices(cfg, graph_data, data_node_name)
 
+    def _check_scale_order(self) -> None:
+        """Check that the scales run from coarsest to finest.
+
+        Spectral scales are compared by their cutoffs. Smoothing matrices are
+        compared by their mean effective number of neighbours per point,
+        (sum of weights)^2 / (sum of squared weights), which grows as a smoother
+        gets wider. The full-resolution scale is the finest of all. A scale that
+        is coarser than the one before it is taken as a sign of a wrong order.
+        """
+        descriptions = []
+        resolutions = []  # larger means finer
+        for smoother in self.smoothers:
+            if smoother is None:
+                descriptions.append("full resolution")
+                resolutions.append(math.inf)
+            elif isinstance(smoother, ProjectionGraphProvider):
+                matrix = smoother.projection_matrix
+                lengths = matrix.crow_indices().diff()
+                weights = matrix.values().double()
+                total = torch.segment_reduce(weights, "sum", lengths=lengths, unsafe=True, initial=0)
+                squares = torch.segment_reduce(weights**2, "sum", lengths=lengths, unsafe=True, initial=0)
+                has_weights = squares > 0
+                neighbours = (total[has_weights] ** 2 / squares[has_weights]).mean().item()
+                descriptions.append(f"{neighbours:.1f} effective neighbours")
+                resolutions.append(1 / neighbours)
+            else:
+                descriptions.append(f"cutoff {smoother}")
+                resolutions.append(smoother)
+
+        wrong = [i for i in range(1, len(resolutions)) if resolutions[i] < resolutions[i - 1]]
+        if wrong:
+            msg = (
+                "The multiscale loss scales should run from coarsest to finest, but "
+                + ", ".join(
+                    f"scale {i} ({descriptions[i]}) is coarser than scale {i - 1} ({descriptions[i - 1]})"
+                    for i in wrong
+                )
+                + ". Scales in order: "
+                + "; ".join(descriptions)
+                + ". If this order is intended, set 'check_scale_order: False' on the MultiscaleLossWrapper."
+            )
+            LOGGER.error(msg)
+            raise ValueError(msg)
+
     def _build_spectral_smoothers(self, multiscale_config: dict) -> list[float | None]:
         """Set up the shared spectral transforms and return the cutoffs, coarsest first."""
         grid_kwargs = dict(multiscale_config)
         transform = grid_kwargs.pop("transform")
         cutoffs = list(grid_kwargs.pop("cutoffs"))
-        if not cutoffs or cutoffs != sorted(set(cutoffs)):
-            msg = f"multiscale_config 'cutoffs' must be strictly increasing, got {cutoffs}."
+        if not cutoffs:
+            msg = "multiscale_config 'cutoffs' must not be empty."
             raise ValueError(msg)
 
         self.spectral_scales = build_spectral_scales(transform, cutoffs, **grid_kwargs)
@@ -228,19 +282,18 @@ class MultiscaleLossWrapper(BaseLossWrapper):
 
     def _build_graph_smoothing_matrices(
         self,
-        multiscale_config: object,
+        multiscale_config: dict,
         graph_data: HeteroData,
         data_node_name: str,
     ) -> list[ProjectionGraphProvider | None]:
-        """Build one projection provider per smoother scale from config."""
-        smoothers = _expand_smoother_config(multiscale_config)
-        assert smoothers, "multiscale_config must define smoothers (explicit or via num_scales)."
+        """Build one projection provider per smoother, in the order given (coarsest first)."""
+        smoothers = multiscale_config.get("smoothers")
+        assert smoothers, "multiscale_config must define 'smoothers'."
 
         smoothing_matrices: list[ProjectionGraphProvider | None] = []
         edge_name = (data_node_name, "to", data_node_name)
 
-        # Reverse order: coarsest scale first (highest smoothing)
-        for smoother_name, smoother_cfg in reversed(list(smoothers.items())):
+        for smoother_name, smoother_cfg in smoothers.items():
             subgraph = build_smoother_subgraph(graph_data, data_node_name, smoother_cfg)
             src_node_weight_attribute = (
                 smoother_cfg.get("src_node_weight_attribute") if isinstance(smoother_cfg, dict) else None
