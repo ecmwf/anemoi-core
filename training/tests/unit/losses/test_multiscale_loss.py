@@ -15,11 +15,13 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.spectral_transforms import octahedral_lons_per_lat
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
+from anemoi.training.losses.spectral_scales import build_spectral_scales
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -156,7 +158,7 @@ def test_multi_scale(
     )
 
     mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
         return_value=[None, smoothing_provider],
     )
 
@@ -378,8 +380,118 @@ def test_deepcopy_multiscale_loss_does_not_raise(mocker: MockerFixture) -> None:
         row_normalize=False,
     )
     mocker.patch(
-        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothing_matrices",
+        "anemoi.training.losses.multiscale.MultiscaleLossWrapper._load_smoothers",
         return_value=[provider],
     )
     loss = MultiscaleLossWrapper(per_scale_loss=MSELoss(), weights=[1.0])
     copy.deepcopy(loss)  # must not raise NotImplementedError on CSR tensors
+
+
+class CapturingLoss(BaseLoss):
+    def __init__(self) -> None:
+        super().__init__()
+        self.preds: list[torch.Tensor] = []
+        self.targets: list[torch.Tensor] = []
+
+    def forward(self, pred: torch.Tensor, target: torch.Tensor, squash: bool = True, **kwargs: object) -> torch.Tensor:
+        del squash, kwargs
+        self.preds.append(pred)
+        self.targets.append(target)
+        return pred.new_tensor(0.0)
+
+
+# An octahedral grid small enough that every ring resolves the zonal wavenumbers
+# used below, so the transforms are exact up to rounding.
+_SPECTRAL_NLAT = 16
+_SPECTRAL_CONFIG = {"transform": "octahedral_sht", "nlat": _SPECTRAL_NLAT, "cutoffs": [3, 7]}
+_PLANAR_X_DIM, _PLANAR_Y_DIM = 16, 8
+
+
+def test_spherical_harmonic_scales_are_nested_projections() -> None:
+    scales = build_spectral_scales("octahedral_sht", [3, 7], nlat=_SPECTRAL_NLAT)
+    coarse_only = build_spectral_scales("octahedral_sht", [3], nlat=_SPECTRAL_NLAT)
+    x = torch.randn(2, 1, 3, sum(octahedral_lons_per_lat(_SPECTRAL_NLAT)), 4)
+
+    coarse = scales.synthesise(scales.analyse(x), 3)
+    fine = scales.synthesise(scales.analyse(x), 7)
+
+    assert coarse.shape == x.shape
+    assert not torch.allclose(coarse, x)
+    # The coarse scale from the shared analysis matches an analysis at its own truncation.
+    torch.testing.assert_close(coarse, coarse_only.synthesise(coarse_only.analyse(x), 3))
+    torch.testing.assert_close(scales.synthesise(scales.analyse(coarse), 3), coarse)
+    torch.testing.assert_close(scales.synthesise(scales.analyse(fine), 3), coarse)
+
+
+def test_spherical_harmonic_scales_need_integer_cutoffs() -> None:
+    with pytest.raises(ValueError, match="integer"):
+        build_spectral_scales("octahedral_sht", [3.5], nlat=_SPECTRAL_NLAT)
+
+
+@pytest.mark.parametrize("transform", ["fft2d", "dct2d"])
+def test_planar_scales_keep_only_low_frequencies(transform: str) -> None:
+    y = torch.arange(_PLANAR_Y_DIM, dtype=torch.float32)[:, None]
+    x = torch.arange(_PLANAR_X_DIM, dtype=torch.float32)[None, :]
+    if transform == "fft2d":
+        # One wave across x (frequency 1/16) and four across y (frequency 1/2).
+        low = torch.cos(2 * torch.pi * x / _PLANAR_X_DIM).expand(_PLANAR_Y_DIM, -1)
+        high = torch.cos(2 * torch.pi * 4 * y / _PLANAR_Y_DIM).expand(-1, _PLANAR_X_DIM)
+    else:
+        # Cosine 1 along x (frequency 1/32) and cosine 6 along y (frequency 3/8).
+        low = torch.cos(torch.pi * (x + 0.5) / _PLANAR_X_DIM).expand(_PLANAR_Y_DIM, -1)
+        high = torch.cos(torch.pi * 6 * (y + 0.5) / _PLANAR_Y_DIM).expand(-1, _PLANAR_X_DIM)
+    as_field = lambda f: f.reshape(1, 1, 1, -1, 1)  # noqa: E731
+    scales = build_spectral_scales(transform, [0.1, 0.25], x_dim=_PLANAR_X_DIM, y_dim=_PLANAR_Y_DIM)
+
+    coarse = scales.synthesise(scales.analyse(as_field(low + high)), 0.1)
+
+    torch.testing.assert_close(coarse, as_field(low), atol=1e-5, rtol=0)
+
+
+@pytest.mark.parametrize(
+    "config",
+    [
+        pytest.param(_SPECTRAL_CONFIG, id="octahedral_sht"),
+        pytest.param(
+            {"transform": "fft2d", "x_dim": _PLANAR_X_DIM, "y_dim": _PLANAR_Y_DIM, "cutoffs": [0.1, 0.25]},
+            id="fft2d",
+        ),
+        pytest.param(
+            {"transform": "dct2d", "x_dim": _PLANAR_X_DIM, "y_dim": _PLANAR_Y_DIM, "cutoffs": [0.1, 0.25]},
+            id="dct2d",
+        ),
+    ],
+)
+def test_multiscale_spectral_bands_sum_to_input(config: dict) -> None:
+    capturing_loss = CapturingLoss()
+    multiscale_loss = MultiscaleLossWrapper(
+        per_scale_loss=capturing_loss,
+        weights=[1.0, 1.0, 1.0],
+        multiscale_config=config,
+    )
+    assert multiscale_loss.smoothers == [*config["cutoffs"], None]
+    # The transforms are submodules, so they follow the loss onto the GPU.
+    assert any(module is multiscale_loss.spectral_scales for module in multiscale_loss.modules())
+
+    if config["transform"] == "octahedral_sht":
+        grid_size = sum(octahedral_lons_per_lat(_SPECTRAL_NLAT))
+    else:
+        grid_size = _PLANAR_X_DIM * _PLANAR_Y_DIM
+    pred = torch.randn(1, 1, 2, grid_size, 3)
+    target = torch.randn(1, 1, 1, grid_size, 3)
+    multiscale_loss(pred, target)
+
+    scales = multiscale_loss.spectral_scales
+    coarsest = config["cutoffs"][0]
+    torch.testing.assert_close(capturing_loss.preds[0], scales.synthesise(scales.analyse(pred), coarsest))
+    torch.testing.assert_close(torch.stack(capturing_loss.preds).sum(dim=0), pred)
+    torch.testing.assert_close(torch.stack(capturing_loss.targets).sum(dim=0), target)
+
+
+def test_multiscale_spectral_cutoffs_must_increase() -> None:
+    with pytest.raises(ValueError, match="strictly increasing"):
+        MultiscaleLossWrapper(
+            per_scale_loss=MSELoss(),
+            weights=[1.0, 1.0, 1.0],
+            multiscale_config={**_SPECTRAL_CONFIG, "cutoffs": [7, 3]},
+        )
