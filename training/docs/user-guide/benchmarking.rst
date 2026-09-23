@@ -2,6 +2,27 @@
  Benchmarking
 ##############
 
+*************************************
+ Synthetic datasets with broken dates
+*************************************
+
+For synthetic native-grid benchmarks with unusable date metadata, set
+``dataloader.ignore_dataset_dates: true``. This opt-in mode ignores the
+configured training, validation and test ``start``/``end`` bounds and
+computes sample positions from the data shape rather than the dates array.
+It does not modify the source dataset or repair its calendar metadata.
+
+Only a single native-grid dataset at its native frequency is supported;
+frequency resampling and trajectory datasets are rejected. Omit the
+requested frequency or set it to the dataset's native frequency. Unlike
+``fake_dataloading``, this option still reads real samples by index.
+
+.. warning::
+
+   Training, validation and test splits may use the same timesteps.
+   This mode is only for synthetic performance benchmarks, never
+   scientific training or evaluation. It is disabled by default.
+
 ***************************************
  High-level idea of the AnemoiProfiler
 ***************************************

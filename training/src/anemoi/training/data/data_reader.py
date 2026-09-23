@@ -21,6 +21,7 @@ from rich.tree import Tree
 from anemoi.datasets import open_dataset
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.utils.dates import frequency_to_timedelta
 
 LOGGER = logging.getLogger(__name__)
 
@@ -93,19 +94,45 @@ class BaseAnemoiReader:
     per initialisation (base date), with the forecast step as the position.
     """
 
+    ignore_dates: bool = False
+
     def __init__(
         self,
         dataset: str | dict | None = None,
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
+        ignore_dates: bool = False,
     ):
         """Initialize Anemoi data reader."""
         source = dataset_config if dataset_config is not None else dataset
         if source is None:
             msg = "Either dataset or dataset_config must be provided."
             raise ValueError(msg)
-        self.data = open_dataset(_normalize_dataset_config(source), start=start, end=end)
+        source = _normalize_dataset_config(source)
+        self.ignore_dates = ignore_dates
+        if ignore_dates:
+            if isinstance(source, dict) and not isinstance(source["dataset"], str):
+                msg = "ignore_dataset_dates only supports a single native-grid dataset, not combined datasets."
+                raise ValueError(msg)
+            requested_frequency = source.pop("frequency", None) if isinstance(source, dict) else None
+            LOGGER.warning(
+                "Ignoring dataset dates for synthetic benchmarking: start=%s and end=%s are not applied. "
+                "Samples use timestep indices; training, validation and test periods may overlap. "
+                "This mode must not be used for scientific training or evaluation.",
+                start,
+                end,
+            )
+            self.data = open_dataset(source)
+            if requested_frequency is not None and frequency_to_timedelta(requested_frequency) != self.data.frequency:
+                msg = (
+                    "ignore_dataset_dates requires the dataset's native frequency "
+                    f"({self.data.frequency}); requested {requested_frequency}. "
+                    "Frequency resampling depends on calendar dates."
+                )
+                raise ValueError(msg)
+        else:
+            self.data = open_dataset(source, start=start, end=end)
         #: Sampling config used by :meth:`compute_anchors`.
         #: ``{"stride": 1}`` keeps every valid position;
         #: ``{"stride": None}`` uses stride = window size (non-overlapping).
@@ -122,6 +149,8 @@ class BaseAnemoiReader:
 
     def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
         """Return the number of positions in ``sequence``."""
+        if self.ignore_dates:
+            return self.data.shape[0]
         return len(self.data.dates)
 
     @property
@@ -329,9 +358,16 @@ class NativeGridDataset(BaseAnemoiReader):
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
         sampling: dict | None = None,
+        ignore_dates: bool = False,
     ) -> None:
-        """Initialize NativeGridDataset."""
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        """Initialize NativeGridDataset, optionally bypassing dates for synthetic benchmarks."""
+        super().__init__(
+            dataset=dataset,
+            dataset_config=dataset_config,
+            start=start,
+            end=end,
+            ignore_dates=ignore_dates,
+        )
         if sampling is not None:
             self.default_sampling = sampling
 
@@ -450,15 +486,18 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
+def create_dataset(dataset_config: dict, *, ignore_dates: bool = False, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create a data reader based on the dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
     trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
 
     if trajectory_config is not None:
+        if ignore_dates:
+            msg = "ignore_dataset_dates is only supported for native-grid datasets, not trajectory datasets."
+            raise ValueError(msg)
         sampling = trajectory_config.get("sampling") if isinstance(trajectory_config, dict) else None
         LOGGER.info("Creating TrajectoryDataset...")
         return TrajectoryDataset(**dataset_config, sampling=_as_dict(sampling))
 
     LOGGER.info("Creating NativeGridDataset...")
-    return NativeGridDataset(**dataset_config)
+    return NativeGridDataset(**dataset_config, ignore_dates=ignore_dates)
