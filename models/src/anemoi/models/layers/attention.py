@@ -520,12 +520,53 @@ class FlashAttentionWrapper(nn.Module):
         return out
 
 
-class PointwiseMultiHeadCrossAttention(nn.Module):
-    """Attend over source tokens independently at each hidden node.
+class MultiHeadCrossAttention(MultiHeadSelfAttention):
+    """Multi Head Cross Attention Pytorch Layer."""
 
-    Each node has one query and only a handful of source tokens, so the
-    attention weights are worked out directly with two small products.
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def forward(
+        self,
+        x: PairTensor,
+        shard_info: BipartiteGraphShardInfo,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> Tensor:
+        query = self.lin_q(x[1])
+        key = self.lin_k(x[0])
+        value = self.lin_v(x[0])
+
+        shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
+
+        return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
+
+
+def get_alibi_slopes(num_heads: int) -> Tensor:
+    """Calculates linearly decreasing slopes for alibi attention.
+
+    Parameters
+    ----------
+    num_heads : int
+        Number of attention heads.
+
+    Returns
+    -------
+    Tensor
+        aLiBi slopes.
     """
+    n = 2 ** math.floor(math.log2(num_heads))
+    slope_0 = 2 ** (-8 / n)
+    alibi_slopes = torch.pow(slope_0, torch.arange(1, 1 + n))
+    if n < num_heads:
+        slope_hat_0 = 2 ** (-4 / n)
+        alibi_slopes_hat = torch.pow(slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2))
+        alibi_slopes = torch.cat([alibi_slopes, alibi_slopes_hat])
+    return alibi_slopes
+
+
+class PointwiseMultiHeadCrossAttention(nn.Module):
+    """Attend over source tokens independently at each hidden node."""
 
     def __init__(
         self,
@@ -571,52 +612,10 @@ class PointwiseMultiHeadCrossAttention(nn.Module):
             query = self.q_norm(query)
             key = self.k_norm(key)
 
-        scores = torch.einsum("ghv,ghsv->ghs", query, key) / math.sqrt(self.head_dim)
+        # Score each source against the node's query: (g,h,s,v) @ (g,h,v,1) -> (g,h,s)
+        scores = (key @ query.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.head_dim)
+        # Turn the scores into weights over the sources that sum to 1 at each node and head.
         weights = nn.functional.dropout(scores.softmax(dim=-1), p=self.dropout_p, training=self.training)
-        output = torch.einsum("ghs,ghsv->ghv", weights, value)
+        # Weighted average of the source values: (g,h,1,s) @ (g,h,s,v) -> (g,h,v)
+        output = (weights.unsqueeze(-2) @ value).squeeze(-2)
         return self.projection(einops.rearrange(output, "grid heads vars -> grid (heads vars)"))
-
-
-class MultiHeadCrossAttention(MultiHeadSelfAttention):
-    """Multi Head Cross Attention Pytorch Layer."""
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def forward(
-        self,
-        x: PairTensor,
-        shard_info: BipartiteGraphShardInfo,
-        batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> Tensor:
-        query = self.lin_q(x[1])
-        key = self.lin_k(x[0])
-        value = self.lin_v(x[0])
-
-        shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
-
-        return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
-
-
-def get_alibi_slopes(num_heads: int) -> Tensor:
-    """Calculates linearly decreasing slopes for alibi attention.
-
-    Parameters
-    ----------
-    num_heads : int
-        Number of attention heads.
-
-    Returns
-    -------
-    Tensor
-        aLiBi slopes.
-    """
-    n = 2 ** math.floor(math.log2(num_heads))
-    slope_0 = 2 ** (-8 / n)
-    alibi_slopes = torch.pow(slope_0, torch.arange(1, 1 + n))
-    if n < num_heads:
-        slope_hat_0 = 2 ** (-4 / n)
-        alibi_slopes_hat = torch.pow(slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2))
-        alibi_slopes = torch.cat([alibi_slopes, alibi_slopes_hat])
-    return alibi_slopes
