@@ -9,6 +9,7 @@
 
 import datetime
 
+import pytest
 import torch
 from omegaconf import DictConfig
 
@@ -75,6 +76,38 @@ def test_da_forecaster_metric_names() -> None:
     assert task.get_metric_name(rollout_step=0, is_da=True) == "_dacycle0"
     assert task.get_metric_name(rollout_step=1, is_da=True) == "_dacycle1"
     assert task.get_metric_name(rollout_step=2, is_da=False) == "_rstep0"
+
+
+def test_da_grad_cycles_defaults_to_da_cycles() -> None:
+    task = DAForecaster(multistep_input=1, multistep_output=1, timestep="6h", da_cycles=4)
+    assert task.da_grad_cycles == 4
+    assert all(task.step_requires_grad(**step) for step in task.steps("training"))
+
+
+@pytest.mark.parametrize(
+    ("da_grad_cycles", "expected"),
+    [
+        (0, [False, False, False, True, True]),
+        (1, [False, False, True, True, True]),
+        (3, [True, True, True, True, True]),
+    ],
+)
+def test_step_requires_grad_keeps_trailing_da_cycles(da_grad_cycles: int, expected: list[bool]) -> None:
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=3,
+        da_grad_cycles=da_grad_cycles,
+    )
+    assert [task.step_requires_grad(**step) for step in task.steps("training")] == expected
+
+
+@pytest.mark.parametrize("da_grad_cycles", [-1, 4])
+def test_da_grad_cycles_out_of_range_raises(da_grad_cycles: int) -> None:
+    with pytest.raises(ValueError, match="da_grad_cycles"):
+        DAForecaster(multistep_input=1, multistep_output=1, timestep="6h", da_cycles=3, da_grad_cycles=da_grad_cycles)
 
 
 # ── DA blend ──────────────────────────────────────────────────────────────

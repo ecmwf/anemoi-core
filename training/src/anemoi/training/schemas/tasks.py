@@ -71,6 +71,11 @@ class DAForecasterSchema(BaseModel):
         "Use the pre-observation-copy model background as the residual base during DA-fed steps, so the "
         "additive skip connection stays smooth instead of stamping sparse observations into the output."
     )
+    da_grad_cycles: NonNegativeInt | None = Field(default=None, example=[None, 1, 0])
+    (
+        "Number of trailing DA cycles that backpropagate; earlier cycles run under no_grad as a spin-up. "
+        "Defaults to da_cycles (all)."
+    )
 
 
 class AutoencoderTaskSchema(BaseModel):
