@@ -26,8 +26,7 @@ from torch.utils.data import default_collate
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.sources.base import Source
-from anemoi.models.data.sources.gridded import GriddedSource
-from anemoi.models.data.sources.tabular import TabularSource
+from anemoi.models.data.sources import make_source
 from anemoi.models.data.spec import SourceSpec
 from anemoi.models.data.spec import make_spec
 
@@ -51,11 +50,7 @@ def build_source(**kwargs) -> Source:
     spec_fields = [f.name for f in fields(SourceSpec)]
     spec_kwargs = {key: kwargs.pop(key) for key in spec_fields if key in kwargs}
     spec = make_spec(**spec_kwargs)
-
-    if spec.layout.time_in_grid:
-        return TabularSource(spec=spec, **kwargs)
-
-    return GriddedSource(spec=spec, **kwargs)
+    return make_source(spec=spec, **kwargs)
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +81,11 @@ class Batch:
     def spec(self) -> dict[str, SourceSpec]:
         """Per-dataset specs for this batch, without any of its data."""
         return {name: source.spec for name, source in self.sources.items()}
+
+    def empty(self) -> "Batch":
+        """Return the same batch with no data, but coordinates preserved and boundaries preserved."""
+        empty_sources = {name: source.empty() for name, source in self.sources.items()}
+        return Batch(sources=empty_sources)
 
     @property
     def batch_size(self) -> int:
@@ -345,7 +345,7 @@ class Batch:
             msg = "Cannot collate an empty list of samples."
             raise ValueError(msg)
 
-        # Discover the dataset names from the first sample; assume consistent.
+        # Discover the dataset names from the first sample
         first = samples[0]
 
         sources: dict[str, Source] = {}
@@ -354,20 +354,15 @@ class Batch:
 
             if head.is_tabular:
                 data: Any = [s.data for s in per_sample]
-                coordinates = None if head.coordinates is None else [s.coordinates for s in per_sample]
-                timedeltas = None if head.timedeltas is None else [s.timedeltas for s in per_sample]
+                coordinates = [s.coordinates for s in per_sample]
+                timedeltas = [s.timedeltas for s in per_sample]
                 boundaries = [s.boundaries for s in per_sample]
-                shard_sizes = None if head.shard_sizes is None else [s.shard_sizes for s in per_sample]
+                shard_sizes = [s.shard_sizes for s in per_sample]
                 layout = head.layout
             else:
                 data = default_collate([s.data for s in per_sample])
-                if head.coordinates is None:
-                    coordinates = None
-                elif head.coordinates_are_static:
-                    coordinates = head.coordinates
-                else:
-                    coordinates = default_collate([s.coordinates for s in per_sample])
-                timedeltas = None if head.timedeltas is None else default_collate([s.timedeltas for s in per_sample])
+                coordinates = head.coordinates
+                timedeltas = None
                 boundaries = None
                 shard_sizes = head.shard_sizes
                 layout = head.layout.with_batch_dim()

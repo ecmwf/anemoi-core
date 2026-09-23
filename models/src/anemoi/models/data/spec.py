@@ -18,15 +18,11 @@ from dataclasses import dataclass
 from dataclasses import field
 from dataclasses import replace
 from functools import cached_property
-from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
 
 from anemoi.models.data.layout import TensorLayout
-
-if TYPE_CHECKING:
-    from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -128,78 +124,30 @@ class SourceSpec(ABC):
         """Return a new spec with replacements, sharing fields that are not replaced."""
         return replace(self, **kwargs)
 
-    def empty(
-        self,
-        *,
-        batch_size: int = 1,
-        device: torch.device | str | None = None,
-        dtype: torch.dtype = torch.float32,
-    ) -> "Source":
-        """Return a source carrying this spec and no data.
-
-        The payload has the full variable axis but a zero-length grid axis, and a
-        size of one along ``time`` and ``ensemble``. This is the "batch without the
-        data" form: enough for a consumer to read variables, layout and statistics
-        off a source it is being asked to produce, without materializing it.
-
-        Parameters
-        ----------
-        batch_size : int, optional
-            Size of the batch axis (for tabular sources, the number of per-sample
-            tensors), by default 1.
-        device : torch.device or str, optional
-            Device for the empty tensors, by default the current default device.
-        dtype : torch.dtype, optional
-            Dtype for the empty tensors, by default ``torch.float32``.
-
-        Returns
-        -------
-        Source
-            A :class:`~anemoi.models.data.source.GriddedSource` or
-            :class:`~anemoi.models.data.source.TabularSource` matching this
-            spec's layout.
-        """
-        # Local import: views.py imports this module, so importing it at module
-        # scope would be circular.
-        from anemoi.models.data.sources import make_source
-
-        layout = self.layout.normalized(self.layout.ndim)
-        sizes = {"batch": batch_size, "time": 1, "ensemble": 1, "grid": 0, "variables": self.n_variables}
-        shape = [0] * layout.ndim
-        for axis_name in layout.dims:
-            shape[getattr(layout, axis_name)] = sizes[axis_name]
-
-        if self.is_tabular:
-            data = [torch.empty(shape, dtype=dtype, device=device) for _ in range(batch_size)]
-            coordinates = [torch.empty((0, 2), dtype=dtype, device=device) for _ in range(batch_size)]
-            boundaries = [() for _ in range(batch_size)]
-        else:
-            data = torch.empty(shape, dtype=dtype, device=device)
-            coordinates = torch.empty((0, 2), dtype=dtype, device=device)
-            boundaries = None
-
-        return make_source(spec=self, data=data, coordinates=coordinates, boundaries=boundaries)
-
 
 class GriddedSpec(SourceSpec):
+    """Specification for a gridded data source."""
 
     @property
     def is_tabular(self) -> bool:
         return False
 
     def select_variables(self, indices: list[int]) -> "SourceSpec":
+        """Return a new spec restricted to the given variable indices."""
         new_variables = [self.variables[i] for i in indices]
         new_statistics = {key: value[fancy_variable_index(indices)] for key, value in self.statistics.items()}
         return self.clone(variables=new_variables, statistics=new_statistics)
 
 
 class TabularSpec(SourceSpec):
+    """Specification for a tabular data source."""
 
     @property
     def is_tabular(self) -> bool:
         return True
 
     def select_variables(self, indices: list[int]) -> "SourceSpec":
+        """Return a new spec restricted to the given variable indices."""
         new_variables = [self.variables[i] for i in indices]
         new_statistics = {key: value[fancy_variable_index(indices)] for key, value in self.statistics.items()}
         return self.clone(variables=new_variables, statistics=new_statistics)

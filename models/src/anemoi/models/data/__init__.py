@@ -12,11 +12,10 @@ from .batch import Batch
 from .flat import FlatSource
 from .layout import TensorLayout
 from .sample import SourceSample
-from .sources.base import Source
-from .sources.gridded import GriddedSource
-from .sources.tabular import TabularSource
+from .sources import Source
+from .sources import GriddedSource
+from .sources import TabularSource
 from .spec import SourceSpec
-from .spec import make_spec
 
 __all__ = [
     "Batch",

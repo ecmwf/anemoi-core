@@ -47,10 +47,14 @@ class GriddedSource(Source):
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
 
-        if isinstance(self.data, list):
-            msg = f"{self.__class__.__name__} data must be a single tensor, not a list."
-            raise TypeError(msg)
-
+        if self.data is not None:
+            # If data is provided, check that the number of channels matches the number of variable names.
+            num_channels = self.data.shape[self.layout.variables]
+            if num_channels != len(self.variables):
+                raise ValueError(
+                    f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
+                    f"but {len(self.variables)} names."
+                )
     @property
     def device(self) -> torch.device:
         """Device of the source's data tensor."""

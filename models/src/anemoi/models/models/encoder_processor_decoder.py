@@ -707,7 +707,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     def forward(
         self,
         batch: Batch,
-        target: Batch,
+        target_forcings: Batch,
+        target_template: Batch,
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -722,7 +723,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
             views (``flatten(view).shard_sizes``).
-        target : Batch
+        target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.
@@ -842,7 +843,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 self._assemble_target(
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name, None),
-                    target[dataset_name],
+                    target_forcings[dataset_name],
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
@@ -895,22 +896,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name, None),
-                target[dataset_name],
+                target_forcings[dataset_name],
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
 
-        # Preserve the reconstructed output metadata rather than the decoder
-        # conditioning metadata carried by target.
-        output = target
+        # The reconstructed output metadata should match the decoded metadata.
         for dataset_name in x_out_dict.keys():
-            do_coords_match = target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
+            do_coords_match = target_template[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
             assert (
                 do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
             ), "Target and output coordinates must match."
-            output = output.replace(dataset_name, x_out_dict[dataset_name])
 
-        return output
+        return Batch(x_out_dict)
 
     def _latent_key(self, encoder_name: str, dataset_name: str) -> str:
         """Key under which one encoded latent is handed to the latent aggregator.

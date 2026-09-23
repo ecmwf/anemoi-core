@@ -107,8 +107,8 @@ class Source(ABC):
     """
 
     spec: SourceSpec
-    data: torch.Tensor | list[torch.Tensor]
-    coordinates: torch.Tensor | list[torch.Tensor] | None = None
+    data: torch.Tensor | list[torch.Tensor] | None
+    coordinates: torch.Tensor | list[torch.Tensor] = None
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     boundaries: list[tuple[slice, ...]] | None = None
     shard_sizes: ShardSizes | list[ShardSizes] = None
@@ -123,25 +123,6 @@ class Source(ABC):
         if self.coordinates is None:
             msg = f"{self.__class__.__name__} {self.name!r} requires coordinates."
             raise ValueError(msg)
-
-        samples = self.data if isinstance(self.data, list) else [self.data]
-
-        for sample in samples:
-            layout = self.layout.normalized(sample.ndim)
-            n_channels = sample.shape[layout.variables]
-            # A zero-width variables axis is a *template*: a payload that carries the
-            # spec's shape but none of its channels, used to describe a source that is
-            # still to be produced (see AnemoiTransportModelEncProcDec target
-            # templates). Names then describe what the template is for, so they are
-            # not required to match the absent channels.
-            if n_channels != 0 and n_channels != len(self.variables):
-                raise ValueError(
-                    f"{self.__class__.__name__} {self.name!r} has {n_channels} variable channels "
-                    f"but {len(self.variables)} names."
-                )
-
-        if samples and any(sample.dtype != samples[0].dtype for sample in samples):
-            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample.")
 
     @property
     def name(self) -> str:
@@ -237,6 +218,10 @@ class Source(ABC):
     def contiguous(self) -> "Source":
         """Return a new view whose underlying data tensors are contiguous."""
         return self.apply_func(lambda t, **_: t.contiguous())
+
+    def empty(self) -> "Source":
+        """Return a new view with no data."""
+        return self.clone(data=None)
 
     def to(
         self,

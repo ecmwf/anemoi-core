@@ -523,7 +523,7 @@ class ObservationDataReader(BaseAnemoiReader):
     @property
     def layout(self) -> TensorLayout:
         """Return the tabular per-sample layout."""
-        return TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+        return TensorLayout(grid=0, variables=1, time_in_grid=True)
 
     @property
     def is_static_grid(self) -> bool:
@@ -595,9 +595,7 @@ class ObservationDataReader(BaseAnemoiReader):
         data = torch.from_numpy(np.asarray(x.data, dtype=np.float32))
         latitudes = np.deg2rad(np.asarray(x.latitudes, dtype=np.float32))
         longitudes = np.deg2rad(np.asarray(x.longitudes, dtype=np.float32))
-        coordinates = torch.from_numpy(
-            np.stack([latitudes, longitudes], axis=-1),
-        )
+        coordinates = torch.from_numpy(np.stack([latitudes, longitudes], axis=-1))
         timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
         boundaries = list(x.boundaries)
         data, coordinates, timedeltas, boundaries, shard_sizes = _to_local_window_shard_data(
@@ -610,7 +608,7 @@ class ObservationDataReader(BaseAnemoiReader):
         )
 
         return SourceSample(
-            data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
+            data=data,
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,

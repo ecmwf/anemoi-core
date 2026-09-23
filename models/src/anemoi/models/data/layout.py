@@ -145,8 +145,12 @@ class TensorLayout:
         """Return the physical dim index for logical axis ``name``.
 
         Negative indices are normalised against ``ndim`` when provided.
-        Raises :class:`ValueError` if the requested axis is not defined for
-        this layout (e.g. ``time`` on a ``time_in_grid=True`` layout).
+
+        Raises
+        ------
+        :class:`ValueError` 
+            if the requested axis is not defined for this layout (e.g.
+            ``time`` on a ``time_in_grid=True`` layout).
         """
         pos = getattr(self, name, None)
         if pos is None:

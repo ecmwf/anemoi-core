@@ -79,13 +79,25 @@ class TabularSource(Source):
             msg = f"{self.__class__.__name__} requires a layout with time_in_grid=True; got {self.layout!r}."
             raise ValueError(msg)
 
-        if not isinstance(self.data, list):
+        if isinstance(self.data, torch.Tensor | np.ndarray):
             msg = f"{self.__class__.__name__} data must be a list of tensors, not a single tensor."
             raise TypeError(msg)
 
-        for sample, sample_coords in zip(self.data, self.coordinates, strict=True):
-            if tuple(sample_coords.shape) != (sample.shape[self.layout.grid], 2):
-                raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
+        if self.data is not None:
+            layout = self.layout.normalized(self.layout.ndim)
+            for sample, sample_coords in zip(self.data, self.coordinates, strict=True):
+                if tuple(sample_coords.shape) != (sample.shape[self.layout.grid], 2):
+                    raise ValueError(f"Source {self.name!r} requires one latitude/longitude pair per node.")
+
+                num_channels = sample.shape[layout.variables]
+                if num_channels != len(self.variables):
+                    raise ValueError(
+                        f"{self.__class__.__name__} {self.name!r} has {num_channels} variable channels "
+                        f"but {len(self.variables)} names."
+                    )
+
+        if self.data and any(sample.dtype != self.data[0].dtype for sample in self.data):
+            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires the same dtype for every sample.")
 
     @property
     def grid_size(self) -> None:
