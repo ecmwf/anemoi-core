@@ -29,6 +29,9 @@ import torch
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.batch import TensorLayout
 from anemoi.training.data.data_reader import ObservationDataReader
+from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.schemas.dataloader import DatasetConfigSchema
+from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
 
 _DATASET_NAME = "npp_atms"
 
@@ -45,6 +48,28 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     assert sample.data.shape == (1, 5, 5)
     assert sample.variables == dataset.variables
     assert sample.statistics is dataset.statistics
+
+
+def test_factory_handles_validated_observation_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    dataset = _make_obs_reader(_make_obs_payload()).data
+    dataset.dates = np.array(["2020-01-01T00", "2020-01-01T12", "2020-01-02T00"], dtype="datetime64[h]")
+    monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
+    config = TrajectoryDatasetSchema(
+        dataset_config=DatasetConfigSchema(
+            dataset="test-observations",
+            frequency="12h",
+            window="(-3h,+0h]",
+        ),
+        start="2020-01-01T00:00:00",
+        end="2020-01-01T12:00:00",
+        max_rows_per_window=3,
+    )
+
+    reader = create_dataset(config)
+
+    assert isinstance(reader, ObservationDataReader)
+    assert reader.max_rows_per_window == 3
+    np.testing.assert_array_equal(reader.dates, dataset.dates[:2])
 
 
 def test_batch_collate_and_to() -> None:
@@ -91,9 +116,12 @@ def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
     dataset = MagicMock()
     dataset.__getitem__.return_value = payload
     dataset.variables = [f"variable_{i}" for i in range(payload.data.shape[1])]
+    dataset.name_to_index = {name: i for i, name in enumerate(dataset.variables)}
     dataset.statistics = {"mean": np.zeros(payload.data.shape[1], dtype=np.float32)}
     reader = ObservationDataReader.__new__(ObservationDataReader)
     reader.data = dataset
+    reader.row_filters = {}
+    reader.max_rows_per_window = None
     reader.reader_group_rank = 0
     reader.reader_group_size = 1
     return reader
@@ -157,6 +185,21 @@ def test_get_sample_returns_unified_contract() -> None:
     assert list(sample.boundaries) == list(payload.boundaries)
     assert sample.shard_sizes == [[3], [3]]
     assert all(isinstance(s, slice) for s in sample.boundaries)
+
+
+def test_get_sample_filters_and_limits_each_window() -> None:
+    payload = _make_obs_payload(n=12, v=3, n_times=2)
+    payload.data[:, 1] = np.tile([1, 2, 3], 4)
+    reader = _make_obs_reader(payload)
+    reader.row_filters = {"variable_1": [1, 3]}
+    reader.max_rows_per_window = 3
+
+    sample = reader.get_sample(slice(0, 2))
+
+    assert sample.data.shape == (6, 3)
+    assert list(sample.boundaries) == [slice(0, 3), slice(3, 6)]
+    assert sample.shard_sizes == [[3], [3]]
+    assert set(sample.data[:, 1].tolist()) <= {1.0, 3.0}
 
 
 def test_observation_reader_is_not_static_grid() -> None:

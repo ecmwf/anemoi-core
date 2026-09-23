@@ -90,6 +90,10 @@ class NativeDatasetSchema(BaseModel):
     "Starting datetime for sample of the dataset."
     end: str | int | None = Field(default=None)
     "Ending datetime [inclusive] for sample of the dataset."
+    row_filters: dict[str, list[int | float]] | None = Field(default=None)
+    "Observation-row values to retain, keyed by variable name."
+    max_rows_per_window: PositiveInt | None = Field(default=None)
+    "Maximum observation rows retained in each time window."
 
 
 class TrajectorySamplingSchema(PydanticBaseModel):

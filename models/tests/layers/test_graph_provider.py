@@ -236,6 +236,12 @@ class _FixedEdgeBuilder:
         return torch.tensor([[0, 1, 2, 0], [0, 0, 1, 1]])
 
 
+class _Int32EdgeBuilder(_FixedEdgeBuilder):
+    @staticmethod
+    def compute_edge_index_from_coords(source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        return _FixedEdgeBuilder.compute_edge_index_from_coords(source_coords, target_coords).to(torch.int32)
+
+
 def _dynamic_provider(attribute) -> DynamicGraphProvider:
     provider = DynamicGraphProvider.__new__(DynamicGraphProvider)
     torch.nn.Module.__init__(provider)
@@ -263,6 +269,19 @@ def test_dynamic_graph_provider_routes_source_timedeltas() -> None:
         edge_attr.squeeze(-1),
         torch.tensor([-1.0, 0.0, 2.0, -1.0], device=edge_attr.device),
     )
+
+
+def test_dynamic_graph_provider_converts_edge_indices_to_long() -> None:
+    provider = _dynamic_provider(Timedeltas(node_axis="source", scale_seconds=3600.0))
+    provider.edge_builder = _Int32EdgeBuilder()
+
+    _, edge_index = provider.build_graph(
+        torch.tensor([[0.0, 0.0], [0.1, 0.1], [0.2, 0.2]]),
+        torch.tensor([[0.0, 0.0], [0.3, 0.3]]),
+        src_timedeltas=torch.tensor([-3600.0, 0.0, 7200.0]),
+    )
+
+    assert edge_index.dtype == torch.long
 
 
 def test_dynamic_graph_provider_routes_target_timedeltas() -> None:

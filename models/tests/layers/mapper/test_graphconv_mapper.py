@@ -67,7 +67,7 @@ class TestGNNBaseMapper:
     def graph_provider(self, fake_graph, device):
         provider = create_graph_provider(
             graph=fake_graph[("nodes", "to", "nodes")],
-            edge_attributes=["edge_attr1", "edge_attr2"],
+            edge_attribute_names=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_SRC_NODES,
             dst_size=self.NUM_DST_NODES,
             trainable_size=6,
@@ -246,9 +246,9 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
             f"x_src.shape ({x_src.shape}) != torch.Size"
             f"([self.NUM_SRC_NODES, in_channels_src]) ({torch.Size([self.NUM_SRC_NODES, mapper_init.in_channels_src])})"
         )
-        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.in_channels_dst]), (
+        assert x_dst.shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels]), (
             f"x_dst.shape ({x_dst.shape}) != torch.Size"
-            f"([self.NUM_DST_NODES, in_channels_dst]) ({torch.Size([self.NUM_DST_NODES, mapper_init.in_channels_dst])})"
+            f"([self.NUM_DST_NODES, num_channels]) ({torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])})"
         )
 
     def test_post_process(self, mapper, mapper_init):
@@ -273,7 +273,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         device = next(mapper.parameters()).device
         x = (
             torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
-            torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
 
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
@@ -306,7 +306,7 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
         shard_info = BipartiteGraphShardInfo(src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=None)
         x = (
             torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
-            torch.rand(self.NUM_DST_NODES, mapper_init.num_channels, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
         )
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size, shard_edges=False)
         called = {}

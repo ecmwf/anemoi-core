@@ -1051,6 +1051,12 @@ class GNNBackwardMapper(GNNBaseMapper):
 
         self.offload_layers(cpu_offload)
 
+        self.emb_nodes_dst = (
+            nn.Identity()
+            if in_channels_dst == num_channels
+            else self.layer_factory.Linear(in_channels_dst, num_channels)
+        )
+
         self.node_data_extractor = MLP(
             in_features=self.hidden_dim,
             hidden_dim=mlp_hidden_dim,
@@ -1064,7 +1070,7 @@ class GNNBackwardMapper(GNNBaseMapper):
 
     def pre_process(self, x):
         x_src, x_dst = x
-        return x_src, x_dst
+        return x_src, self.emb_nodes_dst(x_dst)
 
     def post_process(self, x_dst):
         return self.node_data_extractor(x_dst)

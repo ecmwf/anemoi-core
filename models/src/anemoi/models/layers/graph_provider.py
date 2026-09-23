@@ -501,7 +501,7 @@ class DynamicGraphProvider(BaseGraphProvider):
         target_cartesian = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
 
         edge_index = self.edge_builder.compute_edge_index_from_coords(source_cartesian, target_cartesian)
-        edge_index = edge_index.to(source_cartesian.device)
+        edge_index = edge_index.to(device=source_cartesian.device, dtype=torch.long)
 
         source_nodes = NodeStorage()
         source_nodes.x = src_coords

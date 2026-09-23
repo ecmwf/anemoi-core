@@ -17,6 +17,7 @@ import numpy as np
 import torch
 from einops import rearrange
 from omegaconf import DictConfig
+from pydantic import BaseModel as PydanticBaseModel
 from rich.console import Console
 from rich.tree import Tree
 
@@ -32,8 +33,10 @@ from anemoi.utils.dates import frequency_to_seconds
 LOGGER = logging.getLogger(__name__)
 
 
-def _as_dict(value: str | dict | DictConfig) -> str | dict:
-    """Convert DictConfig payloads to plain dicts."""
+def _as_dict(value: str | dict | DictConfig | PydanticBaseModel) -> str | dict:
+    """Convert configuration objects to plain dictionaries."""
+    if isinstance(value, PydanticBaseModel):
+        return value.model_dump(exclude_none=True)
     return dict(value) if isinstance(value, DictConfig) else value
 
 
@@ -103,7 +106,7 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
         msg = "Missing required 'dataset_config' in dataset reader configuration."
         raise ValueError(msg)
 
-    normalized["dataset_config"] = base_dataset_config
+    normalized["dataset_config"] = _normalize_dataset_config(base_dataset_config)
     return normalized
 
 
@@ -520,10 +523,47 @@ class ObservationDataReader(BaseAnemoiReader):
     :attr:`Batch.metadata` rather than being moved to device.
     """
 
+    def __init__(
+        self,
+        dataset: str | dict | None = None,
+        dataset_config: str | dict | None = None,
+        start: datetime.datetime | int | None = None,
+        end: datetime.datetime | int | None = None,
+        row_filters: dict[str, list[int | float]] | None = None,
+        max_rows_per_window: int | None = None,
+    ) -> None:
+        """Initialize an observation reader with optional deterministic row selection."""
+        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
+        self.row_filters = row_filters or {}
+        self.max_rows_per_window = max_rows_per_window
+        self._dates = self.data.dates
+
+        if end is not None and not isinstance(end, int):
+            end_datetime = np.datetime64(end)
+            dates_in_range = self._dates <= end_datetime
+            if not np.all(dates_in_range):
+                LOGGER.warning(
+                    "Observation dataset returned %d dates after requested end %s; ignoring them.",
+                    np.count_nonzero(~dates_in_range),
+                    end,
+                )
+                self._dates = self._dates[dates_in_range]
+
+        unknown_variables = set(self.row_filters) - set(self.name_to_index)
+        if unknown_variables:
+            names = ", ".join(sorted(unknown_variables))
+            msg = f"Observation row filters reference unknown variables: {names}"
+            raise ValueError(msg)
+
     @property
     def layout(self) -> TensorLayout:
         """Return the tabular per-sample layout."""
         return TensorLayout(grid=0, variables=1, time_in_grid=True)
+
+    @property
+    def dates(self) -> np.ndarray:
+        """Return observation dates bounded by the configured end date."""
+        return self._dates
 
     @property
     def is_static_grid(self) -> bool:
@@ -592,12 +632,44 @@ class ObservationDataReader(BaseAnemoiReader):
 
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
-        data = torch.from_numpy(np.asarray(x.data, dtype=np.float32))
-        latitudes = np.deg2rad(np.asarray(x.latitudes, dtype=np.float32))
-        longitudes = np.deg2rad(np.asarray(x.longitudes, dtype=np.float32))
-        coordinates = torch.from_numpy(np.stack([latitudes, longitudes], axis=-1))
-        timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
+        values = np.asarray(x.data, dtype=np.float32)
+        latitudes = np.asarray(x.latitudes, dtype=np.float32)
+        longitudes = np.asarray(x.longitudes, dtype=np.float32)
+        timedeltas_array = np.asarray(x.timedeltas, dtype=np.float32)
         boundaries = list(x.boundaries)
+
+        if self.row_filters or self.max_rows_per_window is not None:
+            selected_parts = []
+            selected_boundaries = []
+            offset = 0
+            for boundary in boundaries:
+                indices = np.arange(boundary.start, boundary.stop)
+                if self.row_filters:
+                    keep = np.ones(indices.size, dtype=bool)
+                    for variable, accepted_values in self.row_filters.items():
+                        keep &= np.isin(values[indices, self.name_to_index[variable]], accepted_values)
+                    indices = indices[keep]
+                if self.max_rows_per_window is not None and indices.size > self.max_rows_per_window:
+                    positions = np.arange(self.max_rows_per_window) * indices.size // self.max_rows_per_window
+                    indices = indices[positions]
+                selected_parts.append(indices)
+                selected_boundaries.append(slice(offset, offset + indices.size))
+                offset += indices.size
+
+            selected = np.concatenate(selected_parts) if selected_parts else np.empty(0, dtype=np.int64)
+            values = values[selected]
+            latitudes = latitudes[selected]
+            longitudes = longitudes[selected]
+            timedeltas_array = timedeltas_array[selected]
+            boundaries = selected_boundaries
+
+        data = torch.from_numpy(values)
+        latitudes = np.deg2rad(latitudes)
+        longitudes = np.deg2rad(longitudes)
+        coordinates = torch.from_numpy(
+            np.stack([latitudes, longitudes], axis=-1),
+        )
+        timedeltas = torch.from_numpy(timedeltas_array)
         data, coordinates, timedeltas, boundaries, shard_sizes = _to_local_window_shard_data(
             data,
             coordinates,
@@ -668,6 +740,8 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     dataset_config = _normalize_reader_config(dataset_config)
 
     trajectory_config = dataset_config.pop("trajectory", {})
+    row_filters = dataset_config.pop("row_filters", None)
+    max_rows_per_window = dataset_config.pop("max_rows_per_window", None)
     if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
         LOGGER.info("Creating a TrajectoryDataset...")
         return TrajectoryDataset(
@@ -678,7 +752,15 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
 
     if "window" in dataset_config["dataset_config"] and "frequency" in dataset_config["dataset_config"]:
         LOGGER.info("Creating ObservationDataReader...")
-        return ObservationDataReader(**dataset_config)
+        return ObservationDataReader(
+            **dataset_config,
+            row_filters=row_filters,
+            max_rows_per_window=max_rows_per_window,
+        )
+
+    if row_filters is not None or max_rows_per_window is not None:
+        msg = "row_filters and max_rows_per_window are supported only for observation datasets."
+        raise ValueError(msg)
 
     LOGGER.info("Creating a GriddedDataReader...")
     return GriddedDataReader(**dataset_config)
