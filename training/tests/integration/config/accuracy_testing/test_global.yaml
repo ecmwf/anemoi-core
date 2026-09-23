@@ -29,7 +29,7 @@ graph:
   nodes:
     hidden:
       node_builder:
-        resolution: 5 # o96 grid has a resolution of 6, can be set to 5 for faster tests
+        resolution: 4 # o96 grid has a resolution of 6, can be set to 5 for faster tests
 
 dataloader:
   limit_batches:
