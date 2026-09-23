@@ -29,8 +29,8 @@ class ConcatAggregatorSchema(BaseModel):
     target_: Literal["anemoi.models.layers.aggregator.ConcatAggregator"] = Field(..., alias="_target_")
 
 
-class CrossAttentionAggregatorSchema(BaseModel):
-    target_: Literal["anemoi.models.layers.aggregator.CrossAttentionAggregator"] = Field(..., alias="_target_")
+class PointwiseCrossAttentionAggregatorSchema(BaseModel):
+    target_: Literal["anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator"] = Field(..., alias="_target_")
     num_channels: PositiveInt
     num_heads: PositiveInt
     layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
@@ -42,6 +42,6 @@ class CrossAttentionAggregatorSchema(BaseModel):
 
 
 AggregatorSchema = Annotated[
-    SumAggregatorSchema | MeanAggregatorSchema | ConcatAggregatorSchema | CrossAttentionAggregatorSchema,
+    SumAggregatorSchema | MeanAggregatorSchema | ConcatAggregatorSchema | PointwiseCrossAttentionAggregatorSchema,
     Field(discriminator="target_"),
 ]

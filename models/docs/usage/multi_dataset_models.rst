@@ -135,7 +135,7 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    the order of the mapping passed to the model. Every configured dataset
    must be active because omitting one would change the output width.
 
-``CrossAttentionAggregator``
+``PointwiseCrossAttentionAggregator``
    Pointwise cross-attention over the active dataset latents. The
    initial hidden-node attributes provide the query and residual, while
    each dataset latent is projected to ``num_channels`` and used as a
@@ -146,7 +146,7 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    .. code:: yaml
 
       latent_aggregator:
-        _target_: anemoi.models.layers.aggregator.CrossAttentionAggregator
+        _target_: anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator
         num_channels: ${model.num_channels}
         num_heads: 16
         attn_channels: null

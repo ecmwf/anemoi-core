@@ -12,7 +12,7 @@ import torch
 from omegaconf import OmegaConf
 from torch import nn
 
-from anemoi.models.layers.aggregator import CrossAttentionAggregator
+from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 
 
@@ -94,7 +94,7 @@ def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
     model = _SharedEncoderModel()
     aggregator_config = OmegaConf.create(
         {
-            "_target_": "anemoi.models.layers.aggregator.CrossAttentionAggregator",
+            "_target_": "anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator",
             "num_channels": 8,
             "num_heads": 2,
             "layer_kernels": {
@@ -105,7 +105,7 @@ def test_build_latent_aggregator_passes_layer_kernels_to_aggregator() -> None:
 
     model._build_latent_aggregator(aggregator_config)
 
-    assert isinstance(model.latent_aggregator, CrossAttentionAggregator)
+    assert isinstance(model.latent_aggregator, PointwiseCrossAttentionAggregator)
     assert model.latent_aggregator.input_channels == 4
     assert model.latent_aggregator.source_channels == {"dataset_a": 4, "dataset_b": 4}
     assert model.latent_aggregator.hidden_projection.bias is None

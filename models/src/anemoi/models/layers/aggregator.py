@@ -171,7 +171,7 @@ class ConcatAggregator(BaseLatentAggregator):
         return torch.cat(tuple(source_latents), dim=-1)
 
 
-class CrossAttentionAggregator(BaseLatentAggregator):
+class PointwiseCrossAttentionAggregator(BaseLatentAggregator):
     """Fuse dataset latents with pointwise cross-attention over sources."""
 
     def __init__(

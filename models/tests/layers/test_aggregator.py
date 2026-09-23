@@ -11,8 +11,8 @@ import pytest
 import torch
 
 from anemoi.models.layers.aggregator import ConcatAggregator
-from anemoi.models.layers.aggregator import CrossAttentionAggregator
 from anemoi.models.layers.aggregator import MeanAggregator
+from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.layers.aggregator import SumAggregator
 
 
@@ -65,10 +65,10 @@ def test_aggregator_validates_named_source_shapes(latents: dict[str, torch.Tenso
 
 @pytest.mark.parametrize("gradient_checkpointing", [False, True])
 @pytest.mark.parametrize("qk_norm", [False, True])
-def test_cross_attention_aggregator_supports_different_source_widths_and_gradients(
+def test_pointwise_cross_attention_aggregator_supports_different_source_widths_and_gradients(
     gradient_checkpointing: bool, qk_norm: bool
 ) -> None:
-    aggregator = CrossAttentionAggregator(
+    aggregator = PointwiseCrossAttentionAggregator(
         input_channels=3,
         source_channels={"global": 4, "regional": 6},
         num_channels=8,
@@ -94,8 +94,8 @@ def test_cross_attention_aggregator_supports_different_source_widths_and_gradien
     assert all(parameter.grad is not None for parameter in aggregator.parameters())
 
 
-def test_cross_attention_aggregator_accepts_an_active_source_subset() -> None:
-    aggregator = CrossAttentionAggregator(
+def test_pointwise_cross_attention_aggregator_accepts_an_active_source_subset() -> None:
+    aggregator = PointwiseCrossAttentionAggregator(
         input_channels=3,
         source_channels={"a": 4, "b": 6},
         num_channels=8,
@@ -108,8 +108,8 @@ def test_cross_attention_aggregator_accepts_an_active_source_subset() -> None:
     assert output.shape == (7, 8)
 
 
-def test_cross_attention_aggregator_is_shard_local() -> None:
-    aggregator = CrossAttentionAggregator(
+def test_pointwise_cross_attention_aggregator_is_shard_local() -> None:
+    aggregator = PointwiseCrossAttentionAggregator(
         input_channels=3,
         source_channels={"a": 4, "b": 4},
         num_channels=8,
@@ -130,9 +130,9 @@ def test_cross_attention_aggregator_is_shard_local() -> None:
     torch.testing.assert_close(full_output, sharded_output)
 
 
-def test_cross_attention_aggregator_validates_attention_width() -> None:
+def test_pointwise_cross_attention_aggregator_validates_attention_width() -> None:
     with pytest.raises(ValueError, match="must be divisible by number of heads"):
-        CrossAttentionAggregator(
+        PointwiseCrossAttentionAggregator(
             input_channels=3,
             source_channels={"a": 4},
             num_channels=8,
