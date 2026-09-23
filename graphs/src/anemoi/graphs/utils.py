@@ -15,9 +15,11 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
 from importlib.util import find_spec
-
-import torch
 from packaging import version
+
+import numpy as np
+import torch
+from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric import __version__ as PYG_VERSION
 
@@ -29,7 +31,6 @@ FORCE_CPU_ENV_VAR = "ANEMOI_GRAPHS_FORCE_CPU"
 DISABLE_PYG_LIB_ENV_VAR = "ANEMOI_GRAPHS_DISABLE_PYG_LIB"
 
 if version.parse(PYG_VERSION) >= version.parse("2.8"):
-    PYG_BACKEND_MODULE = "pyg_lib"
     PYG_INSTRUCTIONS = r"""The 'pyg-lib' library is not installed.
 Installing 'pyg-lib' can significantly improve performance for graph creation.
 You can install it using:
@@ -39,7 +40,6 @@ You can install it using:
 so if you are using PyG 2.8 or later, please install `pyg-lib` instead of `torch-cluster`.
 """
 else:
-    PYG_BACKEND_MODULE = "torch_cluster"
     PYG_INSTRUCTIONS = r"""The 'torch-cluster' library is not installed.
 Installing 'torch-cluster' can significantly improve performance for graph creation.
 You can install it using:
@@ -100,20 +100,18 @@ def cuda_device_of(device: torch.device | str | None) -> Iterator[None]:
         yield
 
 
-def pyg_available() -> bool:
-    """Whether the PyG accelerated neighbour-search kernels should be used.
+def is_pyg_lib_available() -> bool:
+    """Whether the pyg-lib accelerated neighbour-search kernels should be used.
 
-    The backend is pyg-lib from PyG 2.8 onwards and torch-cluster before that; see
-    ``PYG_BACKEND_MODULE``. Set ANEMOI_GRAPHS_DISABLE_PYG_LIB=1 to fall back to the
-    scikit-learn/scipy implementations.
-
-    Resolved on every call rather than at import time so that the environment variable
-    keeps working, and so that tests can toggle it.
+    Set ANEMOI_GRAPHS_DISABLE_PYG_LIB=1 to fall back to the scikit-learn implementation.
     """
     if os.environ.get(DISABLE_PYG_LIB_ENV_VAR):
         return False
 
-    return find_spec(PYG_BACKEND_MODULE) is not None
+    if version.parse(PYG_VERSION) >= version.parse("2.8"):
+        return find_spec("pyg_lib") is not None
+
+    return find_spec("torch_cluster") is not None
 
 
 def current_device_context(device: torch.device | str) -> contextlib.AbstractContextManager:
@@ -181,6 +179,43 @@ def get_grid_reference_distance(
     nearest_neighbours = get_nearest_neighbour(points, mask)
     dists, _ = nearest_neighbours.kneighbors(points, n_neighbors=2, return_distance=True)
     return dists[dists > 0].max()
+
+
+def crop_to_max_num_neighbours(adjmat, max_num_neighbours: int) -> coo_matrix:
+    """Remove neighbors exceeding the maximum allowed limit."""
+    nodes_to_drop = np.maximum(np.bincount(adjmat.row) - max_num_neighbours, 0)
+    if (num_nodes_to_drop := nodes_to_drop.sum()) == 0:
+        return adjmat
+
+    LOGGER.info(
+        "Removing %d neighbours because they exceed the maximum allowed number of neighbours (%d) for each target node.",
+        num_nodes_to_drop,
+        max_num_neighbours,
+    )
+
+    # Vectorized approach: sort edges by (row, distance) to group by node
+    # no repeated O(nnz) scans in a loop
+    sort_idx = np.lexsort((adjmat.data, adjmat.row))
+    sorted_rows = adjmat.row[sort_idx]
+
+    # Find where each row starts and ends
+    row_changes = np.concatenate(([0], np.where(np.diff(sorted_rows) != 0)[0] + 1, [len(sorted_rows)]))
+
+    # Compute rank of each edge within its row
+    edge_rank_in_row = np.zeros(len(sorted_rows), dtype=int)
+    for i in range(len(row_changes) - 1):
+        start, end = row_changes[i], row_changes[i + 1]
+        edge_rank_in_row[start:end] = np.arange(end - start)
+
+    # Keep edges where rank < max_num_neighbours (smallest distances are first due to sorting)
+    mask_sorted = edge_rank_in_row < max_num_neighbours
+
+    # Map back to original order
+    mask = np.zeros(adjmat.nnz, dtype=bool)
+    mask[sort_idx] = mask_sorted
+
+    # Define the new sparse matrix
+    return coo_matrix((adjmat.data[mask], (adjmat.row[mask], adjmat.col[mask])), shape=adjmat.shape)
 
 
 def concat_edges(edge_indices1: torch.Tensor, edge_indices2: torch.Tensor) -> torch.Tensor:
