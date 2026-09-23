@@ -163,11 +163,11 @@ class TestGraphTransformerProcessor:
         edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
         shard_info = GraphShardInfo(nodes=[self.NUM_NODES], edges=[self.NUM_EDGES])
         halo_info = HaloInfo(
-            num_local_nodes=self.NUM_NODES,
+            num_local_src_nodes=self.NUM_NODES,
+            num_local_dst_nodes=self.NUM_NODES,
             num_halo_nodes=0,
             send_indices=(),
             recv_counts=(),
-            recv_global_ids=None,
             edge_index_local=edge_index,
         )
         monkeypatch.setattr(
@@ -207,6 +207,16 @@ class TestGraphTransformerProcessor:
         with pytest.raises(ValueError, match="requires halo_info"):
             block._forward_edges_shard_strategy(
                 x, torch.empty(0), torch.empty(2, 0, dtype=torch.long), GraphShardInfo(), 1, group, 1, True
+            )
+
+    def test_distributed_halo_requires_sharded_nodes(self, graphtransformer_processor, graph_provider):
+        _, edge_index, _ = graph_provider.get_edges(batch_size=1)
+        x = torch.empty(self.NUM_NODES, graphtransformer_processor.num_channels, device=edge_index.device)
+        group = Mock()
+        group.size.return_value = 2
+        with pytest.raises(ValueError, match="sharded nodes"):
+            graphtransformer_processor._get_or_build_cached_halo_info(
+                x, edge_index, GraphShardInfo(nodes=None, edges=[self.NUM_EDGES, 0]), 1, group
             )
 
     def test_unsorted_edges_are_sorted_before_forward(

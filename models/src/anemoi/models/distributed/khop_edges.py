@@ -10,6 +10,7 @@
 
 import os
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -69,7 +70,8 @@ class GraphPartition:
         Per-partition edge counts (derived from dst-sorted edge structure).
     src_splits : list[int], optional
         Per-partition source node counts, independent of destination ownership.
-        Halo metadata uses ``dst_splits`` for source ownership when omitted.
+        ``None`` when the source nodes are not sharded. Building halo metadata
+        requires it.
     """
 
     num_nodes: tuple[int, int]
@@ -243,14 +245,7 @@ def build_graph_partition_from_shard_info(
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
     partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
-    return GraphPartition(
-        num_nodes=partition.num_nodes,
-        num_edges=partition.num_edges,
-        num_parts=partition.num_parts,
-        dst_splits=partition.dst_splits,
-        edge_splits=partition.edge_splits,
-        src_splits=src_splits,
-    )
+    return replace(partition, src_splits=src_splits)
 
 
 def ensure_edges_are_dst_sorted(
