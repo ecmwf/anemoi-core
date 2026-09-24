@@ -21,7 +21,7 @@ migrations = here / "migrations"
 def test_sync_migration_one_migration(tmp_path: Path, get_migrator: Callable[[Iterable[Path]], ConfigMigrator]) -> None:
     config_path = tmp_path / "config.yaml"
     original_content = dedent("""\
-    migration_state: null
+    migration_state: []
     """)
     config_path.write_text(original_content)
 
@@ -31,7 +31,8 @@ def test_sync_migration_one_migration(tmp_path: Path, get_migrator: Callable[[It
     assert len(executed_migrations) == 1
     assert original_config.to_yaml() == original_content
     assert migrated_config.to_yaml() == dedent("""\
-    migration_state: abaf11ba
+    migration_state:
+    - abaf11ba
     a: test
     """)
 
@@ -39,7 +40,7 @@ def test_sync_migration_one_migration(tmp_path: Path, get_migrator: Callable[[It
 def test_sync_migrations(tmp_path: Path, get_migrator: Callable[[Iterable[Path]], ConfigMigrator]) -> None:
     config_path = tmp_path / "config.yaml"
     original_content = dedent("""\
-    migration_state: null
+    migration_state: []
     """)
     config_path.write_text(original_content)
 
@@ -56,6 +57,10 @@ def test_sync_migrations(tmp_path: Path, get_migrator: Callable[[Iterable[Path]]
     assert len(executed_migrations) == 4
     assert original_config.to_yaml() == original_content
     assert migrated_config.to_yaml() == dedent("""\
-    migration_state: ff5a1427
+    migration_state:
+    - abaf11ba
+    - cfb9ddf1
+    - 66e999d9
+    - ff5a1427
     c: test
     """)

@@ -225,7 +225,7 @@ class SchemaCommonMixin:
 class BaseSchema(SchemaCommonMixin, BaseModel):
     """Top-level schema for the training configuration."""
 
-    migration_state: str | None = None
+    migration_state: list[str] | None = None
     """Migration state of the config. If None, no migration were applied."""
     data: DataSchema
     """Data configuration."""
