@@ -20,6 +20,7 @@ from pytorch_lightning.callbacks.model_checkpoint import ModelCheckpoint
 from pytorch_lightning.utilities import rank_zero_only
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
+from anemoi.training.diagnostics.callbacks.weight_averaging import averaged_weights
 from anemoi.training.utils.checkpoint import check_classes
 from anemoi.training.utils.checkpoint import clear_imputer_runtime_state
 from anemoi.utils.checkpoints import save_metadata
@@ -206,7 +207,10 @@ class AnemoiCheckpoint(ModelCheckpoint):
             inference_checkpoint_filepath = self._get_inference_checkpoint_filepath(lightning_checkpoint_filepath)
 
             clear_imputer_runtime_state(model)
-            torch.save(model, inference_checkpoint_filepath)
+            # This is needed to save the averaged weights when the
+            # WeightAveraging callback is used.
+            with averaged_weights(trainer):
+                torch.save(model, inference_checkpoint_filepath)
 
             save_metadata(inference_checkpoint_filepath, metadata, supporting_arrays=supporting_arrays)
 
