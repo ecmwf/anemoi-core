@@ -10,5 +10,7 @@ rollout:
   # maximum rollout to use
   maximum: 1
 
-# number of rollout steps to use for validation, or null to use the training rollout
+# set validation rollout length if more rollout is required in validation than
+# training, or set to null to follow the training rollout. Values below the
+# training rollout have no effect: validation always unrolls the training rollout.
 validation_rollout: null

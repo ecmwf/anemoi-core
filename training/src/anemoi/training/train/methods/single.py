@@ -13,15 +13,14 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
     from anemoi.models.data import Batch
+    from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,10 +34,7 @@ class SingleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        dtype = batch[list(batch.keys())[0]].dtype
-        loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
+        step_losses, step_metrics, y_preds = [], [], []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self.preprocess_inputs(x)
@@ -65,7 +61,6 @@ class SingleTraining(BaseTrainingModule):
                 y,
                 **task_kwargs,
                 validation_mode=validation_mode,
-                num_task_steps=len(task_steps),
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
@@ -82,9 +77,8 @@ class SingleTraining(BaseTrainingModule):
                     output_mask=self.output_mask,
                 )
 
-            loss = loss + loss_next
-            metrics.update(metrics_next)
+            step_losses.append(loss_next)
+            step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(task_steps)
-        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)

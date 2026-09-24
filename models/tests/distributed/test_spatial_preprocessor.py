@@ -12,11 +12,11 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from distributed_runner import run_distributed_test
 from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.preprocessing.cross_grid_projector import CrossGridProjector
+from tests.distributed._distributed_runner import _run_distributed_test
 
 
 def _test_cross_grid_projector_returns_target_shards_rank(
@@ -73,7 +73,7 @@ def test_cross_grid_projector_returns_target_shards(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_cross_grid_projector_returns_target_shards_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -140,7 +140,7 @@ def test_cross_grid_projector_fewer_vars_than_ranks(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_cross_grid_projector_fewer_vars_than_ranks_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -204,11 +204,23 @@ def _test_cross_grid_projector_gradients_rank(
     projector = _build_overlapping_projector(source_grid_size, target_grid_size)
 
     generator = torch.Generator().manual_seed(0)
-    full = torch.randn(batch, time, ensemble, source_grid_size, variables, generator=generator, dtype=torch.float64).to(
-        device
-    )
+    full = torch.randn(
+        batch,
+        time,
+        ensemble,
+        source_grid_size,
+        variables,
+        generator=generator,
+        dtype=torch.float64,
+    ).to(device)
     grad_weights = torch.randn(
-        batch, time, ensemble, target_grid_size, variables, generator=generator, dtype=torch.float64
+        batch,
+        time,
+        ensemble,
+        target_grid_size,
+        variables,
+        generator=generator,
+        dtype=torch.float64,
     ).to(device)
 
     reference_input = full.clone().requires_grad_(True)
@@ -236,9 +248,17 @@ def _test_cross_grid_projector_gradients_rank(
     expected_grad = torch.split(reference_input.grad, source_grid_shard_sizes, dim=-2)[rank]
 
     torch.testing.assert_close(
-        local_output.detach(), expected_output, rtol=_GRADIENT_TOLERANCE, atol=_GRADIENT_TOLERANCE
+        local_output.detach(),
+        expected_output,
+        rtol=_GRADIENT_TOLERANCE,
+        atol=_GRADIENT_TOLERANCE,
     )
-    torch.testing.assert_close(local_input.grad, expected_grad, rtol=_GRADIENT_TOLERANCE, atol=_GRADIENT_TOLERANCE)
+    torch.testing.assert_close(
+        local_input.grad,
+        expected_grad,
+        rtol=_GRADIENT_TOLERANCE,
+        atol=_GRADIENT_TOLERANCE,
+    )
 
 
 @pytest.mark.distributed
@@ -248,7 +268,7 @@ def test_cross_grid_projector_gradients_match_replicated(
     distributed_backend: str,
     distributed_world_size: int,
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_cross_grid_projector_gradients_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,

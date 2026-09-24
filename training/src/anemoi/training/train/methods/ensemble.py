@@ -19,7 +19,6 @@ from anemoi.models.data import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -29,6 +28,7 @@ if TYPE_CHECKING:
 
     from anemoi.models.data.layout import TensorLayout
     from anemoi.models.data.sources import Source
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -257,19 +257,16 @@ class EnsembleTraining(BaseTrainingModule):
 
     def forward(
         self,
-        x: Batch | dict[str, torch.Tensor],
+        x: Batch,
         rollout_step: int | None = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
-
-        Accepts either a :class:`Batch` (preferred) or a legacy
-        ``dict[str, Tensor]``; the dict path is a transitional shim until
-        ``_step`` is migrated to construct a :class:`Batch` end-to-end.
         """
+        assert isinstance(x, Batch), f"EnsembleTraining.forward expects a Batch, got {type(x).__name__}"
         if rollout_step is not None:
             kwargs["fcstep"] = rollout_step
         else:
@@ -287,11 +284,7 @@ class EnsembleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        first_payload = next(iter(batch.values())).data
-        dtype = first_payload[0].dtype if isinstance(first_payload, list) else first_payload.dtype
-        loss = torch.zeros(1, dtype=dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
+        step_losses, step_metrics, y_preds = [], [], []
 
         x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         x = self._expand_ens_dim(x)
@@ -318,7 +311,6 @@ class EnsembleTraining(BaseTrainingModule):
                 y,
                 **task_step_kwargs,
                 validation_mode=validation_mode,
-                num_task_steps=len(task_steps),
                 pred_layout=IndexSpace.MODEL_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
                 use_reentrant=False,
@@ -335,9 +327,8 @@ class EnsembleTraining(BaseTrainingModule):
                     output_mask=self.output_mask,
                 )
 
-            loss = loss + loss_next
-            metrics.update(metrics_next)
+            step_losses.append(loss_next)
+            step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(task_steps)
-        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)

@@ -39,6 +39,7 @@ from anemoi.training.losses.scaler_tensor import grad_scaler
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
+from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import BaseMask
@@ -65,7 +66,6 @@ if TYPE_CHECKING:
     from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
     from anemoi.training.schemas.base_schema import BaseSchema
     from anemoi.training.tasks.base import BaseTask
-    from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
 
@@ -868,7 +868,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y_pred: Batch,
         y: Batch,
         validation_mode: bool = False,
-        num_task_steps: int = 1,
         **kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, Source]]:
         """Compute loss and metrics for the given predictions and targets.
@@ -881,10 +880,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Target values
         validation_mode : bool, optional
             Whether to compute validation metrics
-        num_task_steps : int, optional
-            Number of task steps the caller will iterate over. When greater than one, the
-            per-dataset loss keys are suffixed with the rollout step so that steps do not
-            overwrite each other; with a single step the unsuffixed key is emitted.
         **kwargs
             Additional arguments to pass to loss computation
 
@@ -895,8 +890,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
         assert isinstance(y, Batch), "y must be a dict keyed by dataset name"
-        step = kwargs.get("rollout_step") if num_task_steps > 1 else None
-        loss_suffix = "" if step is None else f"/{step + 1}"
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
@@ -919,9 +912,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 total_loss = dataset_loss if total_loss is None else total_loss + dataset_loss
 
                 if validation_mode:
-                    loss_obj = self.loss[dataset_name]
-                    loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
-                    metrics_next[f"{dataset_name}_{loss_name}_loss{loss_suffix}"] = dataset_loss
+                    metrics_next[self._dataset_loss_metric_name(dataset_name)] = dataset_loss
 
             # Prefix dataset name to metric keys
             for metric_name, metric_value in dataset_metrics.items():
@@ -975,6 +966,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         aligned = self._align_view_to_layout(view, layout, dataset_name)
         return self.model.post_processors[dataset_name](aligned, in_place=False)
 
+    def _dataset_loss_metric_name(self, dataset_name: str) -> str:
+        """Metric key under which the validation loss of ``dataset_name`` is logged."""
+        loss_obj = self.loss[dataset_name]
+        loss_name = getattr(loss_obj, "name", loss_obj.__class__.__name__.lower())
+        return f"{dataset_name}_{loss_name}_loss"
+
     def on_after_batch_transfer(self, batch: Batch, _: int) -> Batch:
         """Assemble batch after transfer to GPU by gathering the batch shards if needed.
 
@@ -1026,6 +1023,30 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         pass
+
+    def _combine_loss_and_metrics(
+        self,
+        step_losses: list[torch.Tensor],
+        step_metrics: list[dict[str, torch.Tensor]],
+        predictions: list[dict[str, torch.Tensor]],
+    ) -> TrainingStepOutput:
+        """Average all losses over the training rollout; keep the per-step metrics of every unrolled step.
+
+        Validation may unroll more steps than training. The total loss and the per-dataset
+        losses only cover the first ``task.num_steps`` steps, so ``val_*_loss`` is directly
+        comparable to ``train_*_loss``. Validation metrics are reported for every step.
+        """
+        num_loss_steps = self.task.num_steps
+        loss = sum(step_losses[:num_loss_steps]) / num_loss_steps
+        loss_names = {self._dataset_loss_metric_name(name) for name in self.target_dataset_names}
+        metrics: dict[str, torch.Tensor] = {}
+        for i, metrics_next in enumerate(step_metrics):
+            for name, value in metrics_next.items():
+                if name not in loss_names:
+                    metrics[name] = value
+                elif i < num_loss_steps:
+                    metrics[name] = metrics.get(name, 0.0) + value / num_loss_steps
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=predictions)
 
     def allgather_batch(self, batch: torch.Tensor) -> torch.Tensor:
         """Allgather the shards of a grid-sharded tensor across the reader group.

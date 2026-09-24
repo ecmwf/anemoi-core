@@ -19,11 +19,13 @@ functionality to use both Weights & Biases and Tensorboard.
 
 **Callbacks**
 
-The callbacks can also be used to evaluate forecasts over longer
-rollouts beyond the forecast time that the model is trained on. The
-number of rollout steps for verification (or forecast iteration steps)
-is set using ``config.dataloader.validation_rollout =
-*num_of_rollout_steps*``.
+Forecasts can be evaluated over longer rollouts than the model is
+currently trained on by setting ``config.task.validation_rollout =
+*num_of_rollout_steps*``. The validation losses (``val_*_loss``) are
+always averaged over the current training rollout, so they stay
+comparable to the training loss, while the validation metrics are
+logged for every validation rollout step (``val_.../1`` …
+``val_.../N``).
 
 Callbacks are configured in the config file under the
 ``config.diagnostics`` key.
@@ -36,10 +38,8 @@ callback, any other kwarg is passed to the callback's constructor.
 .. code:: yaml
 
    callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.evaluation.RolloutEval
-      rollout:
-      - ${dataloader.validation_rollout}
-      frequency: 20
+      - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
+        every_n_batches: 20
 
 Plotting callbacks are configured in a similar way, but they are
 specified underneath the ``config.diagnostics.plot.callbacks`` key.
@@ -501,11 +501,6 @@ Below is the documentation for the default callbacks provided, but it is
 also possible for users to add callbacks using the same structure:
 
 .. automodule:: anemoi.training.diagnostics.callbacks.checkpoint
-   :members:
-   :no-undoc-members:
-   :show-inheritance:
-
-.. automodule:: anemoi.training.diagnostics.callbacks.evaluation
    :members:
    :no-undoc-members:
    :show-inheritance:
