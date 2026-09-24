@@ -69,6 +69,52 @@ class Embedder(nn.Module):
         return torch.cat((x_vars, node_attributes_data), dim=-1)
 
 
+class DeepSetEmbedder(nn.Module):
+    """Turns a node's raw per-variable values into a single vector via Deep Sets pooling
+    (Zaheer et al. 2017): each variable is tokenized and transformed independently (phi), then
+    aggregated by mean - no cross-variable interaction during pooling, unlike attention-based
+    pooling. Supports a reduced feature_names subset naturally, since phi doesn't depend on the
+    total variable count and mean needs no padding/masking for a smaller set.
+    """
+
+    def __init__(self, feature_names, dim, d_model, mean=None, std=None):
+        super().__init__()
+        self.feature_tokenizer = FeatureTokenizer(feature_names, dim, mean=mean, std=std)
+        self.phi = nn.Sequential(
+            nn.Linear(2 + 3 * dim, d_model),
+            nn.SiLU(),
+            nn.Linear(d_model, d_model),
+        )
+        # rho is residual - same pattern as ClsSelfAttentionPool's residual - since the mean
+        # alone gives the gradient no direct path back to phi's output.
+        self.rho = nn.Sequential(
+            nn.Linear(d_model, d_model),
+            nn.SiLU(),
+            nn.Linear(d_model, d_model),
+        )
+        self.output_dim = d_model
+
+    def forward(self, x, node_attributes_data, feature_names=None):
+        """x: (batch, time, ensemble, grid, vars) -> (batch ensemble grid, time d_model + attrs)"""
+        batch, n_time, ensemble, grid, _n_vars = x.shape
+        x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
+        # no frame_idx (deliberate, as in HierarchicalEmbedder): held constant so it carries no
+        # information, rather than modifying FeatureTokenizer to drop the column outright.
+        frame_idx = torch.zeros(x_vars.shape[0], device=x.device)
+        encodings = self.feature_tokenizer(x_vars, frame_idx, feature_names=feature_names)
+        agg = self.phi(encodings).mean(dim=1)
+        node_embedding = agg + self.rho(agg)
+        node_embedding = einops.rearrange(
+            node_embedding,
+            "(batch time ensemble grid) d -> (batch ensemble grid) (time d)",
+            batch=batch,
+            time=n_time,
+            ensemble=ensemble,
+            grid=grid,
+        )
+        return torch.cat((node_embedding, node_attributes_data), dim=-1)
+
+
 class HierarchicalEmbedder(nn.Module):
     """Pools a node's raw per-variable values in two stages: first the variables at each
     height/pressure level into one token per level, then the level tokens into one final
