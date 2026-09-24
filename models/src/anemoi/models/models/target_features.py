@@ -89,6 +89,7 @@ class DecodingTargetFeature(ABC):
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target: "FlatSource",
+        target_spec: "Source",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -98,7 +99,8 @@ class DecodingTargetFeature(ABC):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -108,7 +110,15 @@ class DecodingTargetFeature(ABC):
         assert (
             dataset_name is not None
         ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
-        out = self._compute(x_input_data, x_encoded_data, x_target, batch_size=batch_size, dataset_name=dataset_name)
+
+        out = self._compute(
+            x_input_data,
+            x_encoded_data,
+            x_target,
+            target_spec,
+            batch_size=batch_size,
+            dataset_name=dataset_name
+        )
 
         if self.needs_sharding and grid_shard_sizes is not None:
             out = shard_tensor(out, 0, grid_shard_sizes, model_comm_group)
@@ -130,11 +140,12 @@ class CoordinatesFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
-        return torch.cat([torch.sin(x_target.coordinates), torch.cos(x_target.coordinates)], dim=-1)
+        return torch.cat([torch.sin(target_spec.coordinates), torch.cos(target_spec.coordinates)], dim=-1)
 
 
 @register_target_feature("forcings")
@@ -161,7 +172,8 @@ class InputForcingsFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -196,14 +208,16 @@ class TargetForcingsFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
-        assert x_target.data.shape[-1] == self.dim, (
-            f"Expected flattened target forcing width {self.dim}, " f"but got {x_target.data.shape[-1]}."
+        x_target_forcing = x_target.flatten()
+        assert x_target_forcing.data.shape[-1] == self.dim, (
+            f"Expected flattened target forcing width {self.dim}, " f"but got {x_target_forcing.data.shape[-1]}."
         )
-        return x_target.data
+        return x_target_forcing.data
 
 
 @register_target_feature("prognostics")
@@ -230,7 +244,8 @@ class PrognosticsFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -272,7 +287,8 @@ class TrainableParametersFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -309,7 +325,8 @@ class EncodedDataFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -351,7 +368,8 @@ class CompositeTargetFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         dataset_name: str,
     ) -> Tensor:
@@ -361,7 +379,8 @@ class CompositeTargetFeature(DecodingTargetFeature):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "FlatSource",
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -372,9 +391,10 @@ class CompositeTargetFeature(DecodingTargetFeature):
                 x_input_data,
                 x_encoded_data,
                 x_target,
-                batch_size,
-                grid_shard_sizes,
-                model_comm_group,
+                target_spec,
+                batch_size=batch_size,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
             )
             for feature in self.features

@@ -178,6 +178,11 @@ class Source(ABC):
         """Number of ensemble members in this source, or 1 if not applicable."""
         ...
 
+    @abstractmethod
+    def empty(self) -> "Source":
+        """Return a new view with no data."""
+        ...
+
     @property
     def name_to_index(self) -> dict[str, int]:
         """Mapping from variable name to index along the variables axis.
@@ -213,14 +218,6 @@ class Source(ABC):
                     f"Unsupported dimension for selection: {dim!r}. Supported dimensions are 'time' and 'variables'."
                 )
         return source
-
-    def contiguous(self) -> "Source":
-        """Return a new view whose underlying data tensors are contiguous."""
-        return self.apply_func(lambda t, **_: t.contiguous())
-
-    def empty(self) -> "Source":
-        """Return a new view with no data."""
-        return self.clone(data=None)
 
     def to(
         self,

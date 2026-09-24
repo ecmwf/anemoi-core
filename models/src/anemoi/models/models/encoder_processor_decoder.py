@@ -367,7 +367,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
-        x_target: "Source",
+        x_target_forcing: "Source",
+        target_spec: "Source",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -384,8 +385,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Input data view used by decoder features derived from model inputs.
         x_encoded_data : Tensor or None
             Encoder-updated source features, when requested by the decoder configuration.
-        x_target : Source
-            Target-side data and coordinates used by decoder target features.
+        x_target_forcing : Source
+            Target-side forcing data and coordinates used by decoder target features.
+        target_spec : Source
+            Target-side specification data and coordinates used by decoder target features.
         batch_size : int
             Flattened batch size used to assemble target features.
         grid_shard_sizes : DatasetShardSizes or None, optional
@@ -409,23 +412,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Timedeltas for the target nodes, or None if the dataset does not have timedeltas (gridded).
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-
-        x_target_flat: "FlatSource" = x_target.flatten()
-        grid_shard_sizes = x_target_flat.shard_sizes
+        
+        flat_target_spec: "FlatSource" = target_spec.flatten()
 
         target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
-        x_target_latent = target_features.tensor(
+        x_target_node_features = target_features.tensor(
             x_input_data,
             x_encoded_data,
-            x_target_flat,
+            x_target_forcing,
+            flat_target_spec,
             batch_size=batch_size,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
         )
 
-        target_coords = x_target_flat.coordinates
-        target_timedeltas = x_target_flat.timedeltas
+        target_coords = flat_target_spec.coordinates
+        target_timedeltas = flat_target_spec.timedeltas
+        grid_shard_sizes = flat_target_spec.shard_sizes
         if grid_shard_sizes is not None:
             target_coords = gather_tensor(target_coords, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
             if target_timedeltas is not None:
@@ -435,17 +439,23 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Fail fast with a clear message if the decoder destination features do not line up with the
         # target nodes. Only valid when unsharded (under sharding the composite gathers
-        # target_coords to full size while x_target_latent stays local).
+        # target_coords to full size while x_target_node_features stays local).
         if grid_shard_sizes is None:
-            assert x_target_latent.shape[0] == target_coords.shape[0], (
-                f"Decoder x_dst rows ({x_target_latent.shape[0]}) != target node count "
+            assert x_target_node_features.shape[0] == target_coords.shape[0], (
+                f"Decoder x_dst rows ({x_target_node_features.shape[0]}) != target node count "
                 f"({target_coords.shape[0]}) for dataset '{dataset_name}'. This usually means an "
                 f"'encoded_data' target feature is used for a dataset whose input and target node "
                 f"sets differ (e.g. tabular observations); use ['coordinates', 'target_forcings'] "
                 f"instead."
             )
 
-        return target_coords, x_target_latent, grid_shard_sizes, x_target.flatten().batch_sizes, target_timedeltas
+        return (
+            target_coords,
+            x_target_node_features,
+            grid_shard_sizes,
+            x_target_forcing.flatten().batch_sizes,
+            target_timedeltas
+        )
 
     def _assemble_output(
         self,
@@ -838,12 +848,16 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in self.target_datasets:
+        for dataset_name, target_dataset_template in target_template.items():
+            if dataset_name not in self.target_datasets:
+                continue
+
             target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
                 self._assemble_target(
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name, None),
-                    target_forcings[dataset_name],
+                    target_forcings.get(dataset_name, None),
+                    target_dataset_template,
                     batch_size=batch_size,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,

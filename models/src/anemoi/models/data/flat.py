@@ -43,7 +43,7 @@ class FlatSource:
         ``(nodes,)`` per-node time offsets, for sources that carry them.
     """
 
-    data: torch.Tensor
+    data: torch.Tensor | None
     coordinates: torch.Tensor
     device: torch.device | None
     shard_sizes: ShardSizes
@@ -51,7 +51,7 @@ class FlatSource:
     timedeltas: torch.Tensor | None = None
 
     def __post_init__(self):
-        if self.data.ndim != 2:
+        if self.data is not None and self.data.ndim != 2:
             raise ValueError(f"{self.__class__} data must be 2-dimensional, got {self.data.ndim} dimensions.")
 
         if self.coordinates.ndim != 2:
@@ -64,15 +64,20 @@ class FlatSource:
                 f"{self.__class__.__name__} coordinates must have a shape of (nodes, 2), got {self.coordinates.shape}."
             )
 
-        if not (self.data.device == self.coordinates.device == self.device):
+        if self.data is not None and self.data.device != self.device:
             raise ValueError(
-                f"{self.__class__.__name__} data, coordinates, and device must match, got {self.data.device}, {self.coordinates.device}, and {self.device}."
+                f"{self.__class__.__name__} data must be on the same device as the source, got {self.data.device} and {self.device}."
+            )
+
+        if self.coordinates.device != self.device:
+            raise ValueError(
+                f"{self.__class__.__name__} coordinates must be on the same device as the source, got {self.coordinates.device} and {self.device}."
             )
 
     def to(self, device: torch.device) -> "FlatSource":
         """Return a copy of this view with all tensors moved to the given device."""
         return FlatSource(
-            data=self.data.to(device),
+            data=None if self.data is None else self.data.to(device),
             coordinates=self.coordinates.to(device),
             timedeltas=None if self.timedeltas is None else self.timedeltas.to(device),
             device=device,

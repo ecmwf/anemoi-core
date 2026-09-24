@@ -10,6 +10,7 @@
 import logging
 from collections.abc import Callable
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import einops
 import torch
@@ -86,6 +87,25 @@ class GriddedSource(Source):
 
         return self.data.shape[self.layout.ensemble]
 
+    def empty(self) -> "EmptyGriddedSource":
+        """Return a copy with ``data`` dropped, keeping shape metadata that ``data`` would otherwise supply.
+
+        ``EmptyGriddedSource`` reads ``device``, ``dtype``, ``grid_size``, ``batch_size``
+        and ``ensemble_size`` from values captured here, since none of them can be
+        derived from a ``None`` tensor.
+        """
+        return EmptyGriddedSource(
+            spec=self.spec,
+            data=None,
+            coordinates=self.coordinates,
+            shard_sizes=self.shard_sizes,
+            _device=self.device,
+            _dtype=self.dtype,
+            _grid_size=self.grid_size,
+            _batch_size=self.batch_size,
+            _ensemble_size=self.ensemble_size,
+        )
+
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "GriddedSource":
         """Apply a function to this view, returning a new view with the same metadata."""
         new_data = func(
@@ -102,8 +122,11 @@ class GriddedSource(Source):
             self.layout.batch is not None
         ), f"{self.__class__.__name__} requires to have a batch axis to be flattened."
 
-        current_pattern = self.layout.normalized(self.data.ndim).pattern
-        flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")
+        if self.data is not None:
+            current_pattern = self.layout.normalized(self.data.ndim).pattern
+            flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")
+        else:
+            flattened_data = None
 
         flattened_coords = einops.repeat(
             self.coordinates,
@@ -117,7 +140,7 @@ class GriddedSource(Source):
             data=flattened_data,
             coordinates=flattened_coords,
             shard_sizes=self.shard_sizes,
-            device=self.data.device,
+            device=self.device,
         )
 
     def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":
@@ -316,3 +339,45 @@ class GriddedSource(Source):
             tree.add(f"\tShard sizes: {self.shard_sizes}")
 
         return tree
+
+
+@dataclass(frozen=True)
+class EmptyGriddedSource(GriddedSource):
+    """A :class:`GriddedSource` with no data, produced by :meth:`GriddedSource.empty`.
+
+    ``device``, ``dtype``, ``grid_size``, ``batch_size`` and ``ensemble_size`` are
+    normally read off ``self.data``; with ``data=None`` that is no longer possible,
+    so this subclass carries them as explicit fields instead and overrides the
+    properties to return them.
+    """
+
+    _device: torch.device = None
+    _dtype: torch.dtype = None
+    _grid_size: int | None = None
+    _batch_size: int = 0
+    _ensemble_size: int = 1
+
+    @property
+    def device(self) -> torch.device:
+        """Device the source lived on before its data was dropped."""
+        return self._device
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Data type the source had before its data was dropped."""
+        return self._dtype
+
+    @property
+    def grid_size(self) -> int | None:
+        """Full grid size before sharding, captured before data was dropped."""
+        return self._grid_size
+
+    @property
+    def batch_size(self) -> int:
+        """Number of samples (batch size), captured before data was dropped."""
+        return self._batch_size
+
+    @property
+    def ensemble_size(self) -> int:
+        """Number of ensemble members, captured before data was dropped."""
+        return self._ensemble_size

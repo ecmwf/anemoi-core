@@ -11,6 +11,7 @@
 import logging
 from collections.abc import Callable
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -135,6 +136,26 @@ class TabularSource(Source):
     def dtype(self) -> torch.dtype:
         """Data type of the source's data tensor."""
         return self.data[0].dtype
+
+    def empty(self) -> "EmptyTabularSource":
+        """Return a copy with ``data`` dropped, keeping shape metadata that ``data`` would otherwise supply.
+
+        ``EmptyTabularSource`` reads ``device``, ``dtype``, ``batch_size`` and
+        ``ensemble_size`` from values captured here, since none of them can be
+        derived from an empty data list.
+        """
+        return EmptyTabularSource(
+            data=None,
+            spec=self.spec,
+            coordinates=self.coordinates,
+            timedeltas=self.timedeltas,
+            boundaries=self.boundaries,
+            shard_sizes=self.shard_sizes,
+            _device=self.device,
+            _dtype=self.dtype,
+            _batch_size=self.batch_size,
+            _ensemble_size=self.ensemble_size,
+        )
 
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSource":
         """Apply a function to this view, returning a new view with the same metadata."""
@@ -504,3 +525,77 @@ class TabularSource(Source):
                 tree.add(f"\tDim {axis+1} ({name}): {self.data[0].shape[axis]}")
 
         return tree
+
+
+@dataclass(frozen=True)
+class EmptyTabularSource(TabularSource):
+    """A :class:`TabularSource` with no data."""
+
+    _device: torch.device = None
+    _dtype: torch.dtype = None
+    _batch_size: int = 0
+    _ensemble_size: int = 1
+
+    @property
+    def device(self) -> torch.device:
+        """Device the source lived on before its data was dropped."""
+        return self._device
+
+    @property
+    def dtype(self) -> torch.dtype:
+        """Data type the source had before its data was dropped."""
+        return self._dtype
+
+    @property
+    def batch_size(self) -> int:
+        """Number of samples (batch size), captured before data was dropped."""
+        return self._batch_size
+
+    @property
+    def ensemble_size(self) -> int:
+        """Number of ensemble members, captured before data was dropped."""
+        return self._ensemble_size
+
+    def flatten(self) -> "FlatSource":
+        # coordinates and timedeltas are repeated per member to line up with the folded data
+        repeated_coords = [c.repeat(self.ensemble_size, 1) for c in self.coordinates]
+        repeated_timedeltas = (
+            None if self.timedeltas is None else [td.repeat(self.ensemble_size) for td in self.timedeltas]
+        )
+
+        if len(repeated_coords) > 1:
+            coordinates = torch.cat(repeated_coords, dim=0)
+            timedeltas = None if repeated_timedeltas is None else torch.cat(repeated_timedeltas, dim=0)
+        else:
+            coordinates = repeated_coords[0]
+            timedeltas = None if repeated_timedeltas is None else repeated_timedeltas[0]
+
+        # Flatten per-window shard sizes into one list for the concatenated data.
+        # NOTE this changes the order of observations when gathering:
+        #   GPU0  GPU1   GPU0  GPU1            GPU0        GPU1
+        #   w1_0, w1_1 | w2_0, w2_1  becomes  w1_0, w2_0, w1_1, w2_1
+        flat_shard_sizes = None
+        if self.shard_sizes is not None:
+            if len(self.shard_sizes) != 1:
+                msg = (
+                    f"Source {self.name!r}: a sharded tabular source is supported only at batch size 1, "
+                    f"but this batch has {len(self.shard_sizes)} samples."
+                )
+                raise NotImplementedError(msg)
+            window_shard_sizes = self.shard_sizes[0]
+            # sum per-rank shard sizes across all windows to get totals for the concatenated data
+            flat_shard_sizes = [
+                sum(sizes[rank] for sizes in window_shard_sizes) for rank in range(len(window_shard_sizes[0]))
+            ]
+
+        batch_sizes = tuple(
+            0 if len(b) == 0 else b[1] - b[0] for b in self.boundaries for _ in range(self.ensemble_size)
+        )
+        return FlatSource(
+            data=None,
+            coordinates=coordinates.to(self.device),
+            timedeltas=None if timedeltas is None else timedeltas.to(self.device),
+            device=self.device,
+            shard_sizes=flat_shard_sizes,
+            batch_sizes=batch_sizes,
+        )
