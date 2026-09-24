@@ -16,6 +16,7 @@ import torch_geometric
 from hydra.utils import get_class
 from numpy import unique
 from omegaconf import DictConfig
+from packaging import version
 from torch.nn import Module
 
 LOGGER = logging.getLogger(__name__)
@@ -46,7 +47,9 @@ def _meets_library_versions_for_compile() -> bool:
         LOGGER.warning(msg)
         has_triton = False
 
-    version_req = torch.__version__ >= "2.6" and torch_geometric.__version__ >= "2.6"
+    version_req = version.parse(torch.__version__) >= version.parse("2.6") and version.parse(
+        torch_geometric.__version__,
+    ) >= version.parse("2.6")
 
     if not version_req:
         msg = "Minimum library versions for compilation not met. "
