@@ -30,11 +30,13 @@ class BaseVariableTokenizer(nn.Module):
         assert isinstance(
             vocabulary, VariableVocabulary
         ), f"vocabulary must be an object created for VariableVocabulary class, got {type(vocabulary)}"
+        self.emb_dim = emb_dim
+        self.out_dim = out_dim
 
-        self.emb_variables_metadata = EmbedMetadata(vocabulary=vocabulary, emb_dim=emb_dim)
-        self.value_encoder = nn.Linear(1, emb_dim)
-        self.normalize = nn.LayerNorm(emb_dim)
-        self.output_projection = nn.Linear(emb_dim, out_dim)
+        self.emb_variables_metadata = EmbedMetadata(vocabulary=vocabulary, emb_dim=self.emb_dim)
+        self.value_encoder = nn.Linear(1, self.emb_dim)
+        self.normalize = nn.LayerNorm(self.emb_dim)
+        self.output_projection = nn.Linear(self.emb_dim, self.out_dim)
 
     @abstractmethod
     def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor: ...
@@ -173,11 +175,25 @@ class SumPoolingTransform(BaseVariableTokenizer):
 
 
 class Detokenizer(BaseVariableTokenizer):
+    # TODO: explore different methods for detokenization
     def __init__(self, emb_dim, out_dim, vocabulary, **kwargs):
         super().__init__(emb_dim, out_dim, vocabulary, **kwargs)
+
+        self.grid_projection = torch.nn.Linear(out_dim, self.emb_dim)
+        self.variable_projection = torch.nn.Linear(self.emb_dim, self.emb_dim)
+        self.variable_bias = torch.nn.Linear(self.emb_dim, 1)
 
     def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
         if isinstance(variables, str):
             variables = [variables]
 
         emb_variables = self.emb_variables_metadata(variables)
+
+        x = self.grid_projection(x)
+
+        queries = self.variable_projection(emb_variables)
+
+        # hadamard product between queries and x, then sum over the embedding dimension
+        x = torch.einsum("ge,ve->gv", x, queries)
+        x = x / queries.shape[-1] ** 0.5
+        return x + self.variable_bias(variables).squeeze(-1)
