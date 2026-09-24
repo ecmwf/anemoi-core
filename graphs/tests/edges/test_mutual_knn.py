@@ -95,9 +95,9 @@ def test_mutual_knn_masking(graph_with_nodes):
     nodes = graph_with_nodes["test_nodes"]
     edge_index = builder.compute_edge_index(nodes, nodes)
 
-    mask2 = nodes["mask2"].squeeze()
-    assert mask2[edge_index[0]].all()
-    assert mask2[edge_index[1]].all()
+    mask2 = nodes["mask2"].squeeze().cpu()
+    assert mask2[edge_index[0].cpu()].all()
+    assert mask2[edge_index[1].cpu()].all()
 
 
 def test_mutual_knn_sklearn_fallback(graph_with_nodes):

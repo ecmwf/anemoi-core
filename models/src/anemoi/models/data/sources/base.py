@@ -191,6 +191,10 @@ class Source(ABC):
         """
         return self.spec.name_to_index
 
+    def contiguous(self) -> "Source":
+        """Return a new view whose underlying data tensors are contiguous."""
+        return self.apply_func(lambda t, **_: t.contiguous())
+
     def clone(self, **kwargs) -> "Source":
         """Return a new view with replacements, sharing fields that are not replaced.
 
