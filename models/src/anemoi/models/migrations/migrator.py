@@ -57,25 +57,26 @@ MigrationVersions = TypedDict("MigrationVersions", {"migration": str, "anemoi-mo
 
 
 def _get_code_digest(content: str) -> str:
-    """Get a digest for some python code. This does not take indentations, comments
-    (except docstrings) and is based on the code's ast.
+    """Get a digest for some python code.
+
+    This does not take indentations, comments (except docstrings) and is based on the code's ast.
 
     Parameters
     ----------
     content : str
-        Some valid python code
+        Some valid python code.
 
     Returns
     -------
     str
-        The digest of the code
+        The digest of the code.
     """
     code = ast.dump(ast.parse(content), include_attributes=False)
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
 class CkptMigration(Migration[CkptType, CkptType, MigrationVersions]):
-    """Represents a ckpt migration"""
+    """Represents a ckpt migration."""
 
     def __init__(
         self,
@@ -111,21 +112,22 @@ class CkptMigration(Migration[CkptType, CkptType, MigrationVersions]):
 
     @property
     def migrate_setup(self) -> Callable[[MigrationContext], None] | None:
-        """Setup function to execute before loading the checkpoint. This can be used to
-        mock missing modules or Attributes.
+        """Setup function to execute before loading the checkpoint.
+
+        This can be used to mock missing modules or Attributes.
         """
         return self._migrate_setup
 
 
 class MissingAttribute:
-    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class"""
+    """Placeholder type when encountering ImportError or AttributeError in Unpickler.find_class."""
 
     def __init__(self, *args, **kwargs):
         pass
 
 
 def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
-    """Get the Unpickler
+    """Get the Unpickler.
 
     Parameters
     ----------
@@ -141,7 +143,8 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
     """
 
     class _Unpickler(Unpickler):
-        """And Unpickler that does not fail when the pickle object has some reference to non-existing attributes.
+        """Unpickler that does not fail when the pickle object has some reference to non-existing attributes.
+
         This is useful to load the "migrations" key from the checkpoint regardless of import issues.
         """
 
@@ -181,8 +184,9 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                 raise
 
     class UnpicklerWrapper:
-        """For torch.load's pickle_module argument.
-        A "module" with the LenientUnpickler as Unpickler.
+        """UnpicklerWrapper for torch.load's pickle_module argument.
+
+        A "module" with the previously defined Unpickler.
         """
 
         Unpickler = _Unpickler
@@ -191,12 +195,14 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
 
 
 def _load_ckpt(path: str | PathLike, replace_attrs: dict[str, list[str]] | bool = False) -> CkptType:
-    """Loads a checkpoint
+    """Load a checkpoint.
+
+    Slight wrapper around torch.load to load with the custom unpickler.
 
     Parameters
     ----------
     path : str | PathLike
-        Checkpoint path
+        Checkpoint path.
     replace_attrs : list[str] | bool, default False
         Replace the provided attrs by a ``MissingAttribute`` object. If False, Fill not
         try to replace attributes. If True, will replace every missing attribute. You can use
@@ -225,7 +231,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         migrations: Sequence[CkptMigration] | None = None,
         obj_migration_key: str | None = None,
     ) -> None:
-        """Create the migrator object
+        """Create the migrator object.
 
         Parameters
         ----------
@@ -262,6 +268,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
 
     def _check_registered_script_changed(self, ckpt: CkptType) -> bool:
         """Checks whether the checkpoint has run a migration that was changed.
+
         We use the signature stored in the history to detect it.
 
         Parameters
@@ -295,7 +302,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         Parameters
         ----------
         context : MigrationContext
-            The context object
+            The context object.
         """
         for module_path in getattr(context, "deleted_modules", []):
             if module_path in sys.modules:
@@ -324,7 +331,7 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             setattr(mod_start, mod_name_start, attr_end)
 
     def sync(self, path: str | PathLike) -> tuple[CkptType, CkptType, list[CkptMigration]]:
-        """Migrate or rollbacks the checkpoint using provided migrations
+        """Migrate or rollbacks the checkpoint using provided migrations.
 
         Parameters
         ----------
@@ -335,9 +342,9 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         -------
         tuple[CkptType, CkptType, list[CkptMigration]]
             * The original checkpoint (might have obfuscated attributes with `MissingAttribute`
-                if it cannot be imported
-            * The migrated checkpoint
-            * The list of executed migrations
+                if it cannot be imported,
+            * the migrated checkpoint,
+            * the list of executed migrations.
         """
         # First load the checkpoint and obfuscate any import issue, just to get the
         # migrations from the checkpoint. The real checkpoint is reloaded afterwards.
@@ -415,18 +422,19 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
 
     def register_migrations(self, ckpt: CkptType) -> CkptType:
         """Registers a list of migration to the checkpoint.
+
         Note: this does not execute any migration. It only registers them in the migration
         key of the checkpoint.
 
         Parameters
         ----------
         ckpt : CkptType
-            The checkpoint
+            The checkpoint.
 
         Returns
         -------
         CkptType
-            Checkpoint with registered migrations
+            Checkpoint with registered migrations.
         """
         if self._obj_migration_key not in ckpt:
             ckpt[self._obj_migration_key] = []
