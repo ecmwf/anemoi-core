@@ -121,9 +121,7 @@ class BaseGraphModel(nn.Module):
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = encoder_name
-            self.encoder_fusing_strategy[encoder_name] = (
-                encoder_config.dataset_fusing_strategy
-            )
+            self.encoder_fusing_strategy[encoder_name] = encoder_config.dataset_fusing_strategy
 
         self.input_datasets = list(self.dataset2encoder.keys())
 
@@ -135,9 +133,7 @@ class BaseGraphModel(nn.Module):
         for decoder_name, decoder_config in decoders_config.items():
             datasets_to_decode = decoder_config["target_datasets"]
             self.decoder2datasets[decoder_name] = datasets_to_decode
-            assert (
-                len(datasets_to_decode) == 1
-            ), "Each decoder must be associated with exactly one dataset for now."
+            assert len(datasets_to_decode) == 1, "Each decoder must be associated with exactly one dataset for now."
             for d in datasets_to_decode:
                 self.dataset2decoder[d] = decoder_name
 
@@ -167,9 +163,7 @@ class BaseGraphModel(nn.Module):
 
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in ("not_supported"):
-                raise ValueError(
-                    f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'."
-                )
+                raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
@@ -206,21 +200,13 @@ class BaseGraphModel(nn.Module):
         self.output_dim = {}
 
         for dataset_name, dataset_indices in data_indices.items():
-            self._internal_input_idx[dataset_name] = (
-                dataset_indices.model.input.prognostic
-            )
-            self._internal_output_idx[dataset_name] = (
-                dataset_indices.model.output.prognostic
-            )
+            self._internal_input_idx[dataset_name] = dataset_indices.model.input.prognostic
+            self._internal_output_idx[dataset_name] = dataset_indices.model.output.prognostic
             self._forcing_input_idx[dataset_name] = dataset_indices.model.input.forcing
 
             self.num_input_channels[dataset_name] = len(dataset_indices.model.input)
-            self.num_input_channels_forcings[dataset_name] = len(
-                dataset_indices.model.input.forcing
-            )
-            self.num_input_channels_prognostic[dataset_name] = len(
-                dataset_indices.model.input.prognostic
-            )
+            self.num_input_channels_forcings[dataset_name] = len(dataset_indices.model.input.forcing)
+            self.num_input_channels_prognostic[dataset_name] = len(dataset_indices.model.input.prognostic)
             self.num_output_channels[dataset_name] = len(dataset_indices.model.output)
 
             self.input_dim[dataset_name] = self._calculate_input_dim(dataset_name)
@@ -250,22 +236,12 @@ class BaseGraphModel(nn.Module):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
         if self.variable_tokenizer is not None:
-            return (
-                self.n_step_input * self.variable_tokenizer.out_dim
-                + self.node_attributes.attr_ndims[dataset_name]
-            )
-        return (
-            self.n_step_input * self.num_input_channels[dataset_name]
-            + self.node_attributes.attr_ndims[dataset_name]
-        )
+            return self.n_step_input * self.variable_tokenizer.out_dim + self.node_attributes.attr_ndims[dataset_name]
+        return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
-        nodes_name = (
-            self._graph_name_hidden
-            if isinstance(self._graph_name_hidden, str)
-            else self._graph_name_hidden[0]
-        )
+        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
         return self.node_attributes.attr_ndims[nodes_name]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
@@ -294,9 +270,9 @@ class BaseGraphModel(nn.Module):
             dataset_internal_output_idx = self._internal_output_idx[dataset_name]
             dataset_internal_input_idx = self._internal_input_idx[dataset_name]
 
-            assert len(dataset_internal_output_idx) == len(
-                dataset_indices.model.output.full
-            ) - len(dataset_indices.model.output.diagnostic), (
+            assert len(dataset_internal_output_idx) == len(dataset_indices.model.output.full) - len(
+                dataset_indices.model.output.diagnostic
+            ), (
                 f"Dataset '{dataset_name}': Mismatch between the internal data indices ({len(dataset_internal_output_idx)}) and "
                 f"the output indices excluding diagnostic variables "
                 f"({len(dataset_indices.model.output.full) - len(dataset_indices.model.output.diagnostic)})",
@@ -335,18 +311,14 @@ class BaseGraphModel(nn.Module):
             if grid_shard_sizes is None:
                 in_out_sharded[dataset_name] = False
             else:
-                in_out_sharded[dataset_name] = (
-                    grid_shard_sizes[dataset_name] is not None
-                )
+                in_out_sharded[dataset_name] = grid_shard_sizes[dataset_name] is not None
 
         return in_out_sharded
 
     def _get_consistent_dim(self, x: dict[str, Tensor], dim: int) -> int:
         dim_sizes = [_x.shape[dim] for _x in x.values()]
         # Assert all datasets have the same sizes
-        assert all(
-            bs == dim_sizes[0] for bs in dim_sizes
-        ), f"Dimensions must be the same across datasets: {dim_sizes}"
+        assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
         return dim_sizes[0]
 
@@ -385,16 +357,12 @@ class BaseGraphModel(nn.Module):
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
-    def _build_residual(
-        self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict
-    ) -> None:
+    def _build_residual(self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict) -> None:
         """Instantiate the per-dataset residual connection modules."""
         self.residual = torch.nn.ModuleDict()
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
-            assert (
-                residual_config is not None
-            ), f"Residual config for dataset '{dataset_name}' is None."
+            assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
@@ -409,15 +377,11 @@ class BaseGraphModel(nn.Module):
         node_attributes_graph = HeteroData()
         for dataset_name in self.dataset_names:
             node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
-            node_attributes_graph[dataset_name].num_nodes = self._graph_data[
-                dataset_name
-            ].num_nodes
+            node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
 
         for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
             node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
-            node_attributes_graph[hidden_name].num_nodes = self._graph_data[
-                hidden_name
-            ].num_nodes
+            node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
 
         return node_attributes_graph
 
@@ -464,15 +428,11 @@ class BaseGraphModel(nn.Module):
         if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
             return tensors, grid_shard_sizes
 
-        source_grid_shard_sizes = (
-            grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-        )
+        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
         projected_tensors = []
         output_grid_shard_sizes: ShardSizes = None
         for index, tensor in enumerate(tensors):
-            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[
-                dataset_name
-            ](
+            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
                 tensor,
                 model_comm_group=model_comm_group,
                 grid_shard_sizes=source_grid_shard_sizes,
@@ -562,21 +522,17 @@ class BaseGraphModel(nn.Module):
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
             for dataset_name in dataset_names:
-                (projected_tensor,), grid_shard_sizes = (
-                    self._apply_spatial_preprocessor(
-                        (x[dataset_name],),
-                        dataset_name,
-                        spatial_pre_processors,
-                        model_comm_group,
-                        grid_shard_sizes,
-                    )
+                (projected_tensor,), grid_shard_sizes = self._apply_spatial_preprocessor(
+                    (x[dataset_name],),
+                    dataset_name,
+                    spatial_pre_processors,
+                    model_comm_group,
+                    grid_shard_sizes,
                 )
                 x[dataset_name] = projected_tensor
 
             for dataset_name in dataset_names:
-                x[dataset_name] = pre_processors[dataset_name](
-                    x[dataset_name], in_place=False
-                )
+                x[dataset_name] = pre_processors[dataset_name](x[dataset_name], in_place=False)
             y_hat = self.forward(
                 x,
                 model_comm_group=model_comm_group,
@@ -586,9 +542,7 @@ class BaseGraphModel(nn.Module):
 
             # Apply post-processing
             for dataset_name in dataset_names:
-                y_hat[dataset_name] = post_processors[dataset_name](
-                    y_hat[dataset_name], in_place=False
-                )
+                y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
