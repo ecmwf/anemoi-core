@@ -23,7 +23,8 @@ from typing import TypedDict
 
 from anemoi.training import __version__
 from anemoi.training.migrations.config import Config
-from anemoi.utils.migrations import IncompleteMigrationScript
+from anemoi.utils.migrations import IncompatibleObjectError
+from anemoi.utils.migrations import IncompleteMigrationScriptError
 from anemoi.utils.migrations import Migration
 from anemoi.utils.migrations import MigrationMetadata
 from anemoi.utils.migrations import Migrator
@@ -39,7 +40,7 @@ _CONFIG_MIGRATION_KEY = "migration_state"
 LOGGER = logging.getLogger(__name__)
 
 
-class IncompatibleConfigException(BaseException):
+class IncompatibleConfigError(IncompatibleObjectError):
     """The provided config cannot be migrated because it is to old/recent."""
 
 
@@ -75,7 +76,7 @@ class ConfigMigration(Migration[Config, Config, MigrationVersions]):
     def from_migration(cls, name: str, migration: ModuleType) -> Self:
         if not hasattr(migration, "metadata") or not isinstance(migration.metadata, MigrationMetadata):
             msg = "Migration script is missing metadata."
-            raise IncompleteMigrationScript(msg)
+            raise IncompleteMigrationScriptError(msg)
 
         metadata = migration.metadata
         signature = _get_code_digest(getsource(migration))
@@ -119,112 +120,25 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         self._migration_hash_to_name = {migration.name_hash: migration.name for migration in migrations}
         super().__init__(migrations, obj_migration_key or _CONFIG_MIGRATION_KEY)
 
-    def _current_migration_name(self, obj: Config) -> str | None:
+    def _migration_state(self, obj: Config) -> list[str] | None:
+        """The migration state of the object.
+
+        Parameters
+        ----------
+        obj : Config
+            The config to extract the migration state from.
+
+        Returns
+        -------
+        list[str] | None
+            The migration state. It contains the migration already executed.
+            If None, the object doesn't have any migration state and is assumed too
+            old to be migratable.
+
+        """
         if self._obj_migration_key not in obj:
-            msg = "config is not compatible"
-            raise IncompatibleConfigException(msg)
-        migration_state = obj[self._obj_migration_key].value
-        if migration_state is not None and not isinstance(migration_state, str):
-            msg = "The migration state should be None or str."
-            raise TypeError(msg)
-
-        if migration_state is None:
             return None
-
-        if migration_state not in self._migration_hash_to_name:
-            msg = "The config's migration state is not a valid migration."
-            raise IncompatibleConfigException(msg)
-
-        return self._migration_hash_to_name[migration_state]
-
-    def _current_group(self, obj: Config) -> int:
-        """Get the compatibility group of the config.
-
-        Note that if the compatibility group is not the latest group, then the config cannot be migrated.
-
-        Parameters
-        ----------
-        config : Config
-            The config to get the group
-
-        Returns
-        -------
-        int
-            Index of the compatibility group
-        """
-        current_migration_name = self._current_migration_name(obj)
-        if current_migration_name is None:
-            return 0
-
-        if current_migration_name not in self._migration_groups:
-            msg = "config is not compatible"
-            raise IncompatibleConfigException(msg)
-        return self._migration_groups[current_migration_name]
-
-    def is_compatible(self, obj: Config) -> bool:
-        """Checks whether the object is compatible with the current version.
-
-        Parameters
-        ----------
-        obj : _T
-            The object
-
-        Returns
-        -------
-        bool
-            Whether it is compatible
-        """
-        # No migration means checkpoint too old, no migrations available.
-        if self._obj_migration_key not in obj:
-            return False
-        # If empty, means first group
-        if obj[self._obj_migration_key].value is None:
-            return True
-
-        obj_compat_group = self._current_group(obj)
-        return obj_compat_group == len(self._compatibility_groups) - 1
-
-    def registered_migrations(self, obj: Config) -> list[ConfigMigration]:
-        compat_group = self._compatibility_groups[self._current_group(obj)]
-        current_migration_name = self._current_migration_name(obj)
-        if current_migration_name is None:
-            return []
-        migrations: list[ConfigMigration] = []
-        for migration in compat_group:
-            migrations.append(migration)
-            if migration.name == current_migration_name:
-                break
-        return migrations
-
-    def missing_migrations(self, obj: Config) -> list[ConfigMigration]:
-        compat_group = self._compatibility_groups[self._current_group(obj)]
-        current_migration_name = self._current_migration_name(obj)
-        if current_migration_name is None:
-            return compat_group
-        if current_migration_name not in self._migration_refs:
-            msg = (f"config cannot be migrated. Extra migrations are registered. ({current_migration_name})",)
-            raise IncompatibleConfigException(msg)
-        last_registered_migration = self._migration_refs[current_migration_name]
-        return compat_group[last_registered_migration + 1 :]
-
-    def get_first_incompatible_version(self, config: Config) -> str | None:
-        """Get the first version where you cannot update the config.
-
-        Parameters
-        ----------
-        config : Config
-            the config to check
-
-        Returns
-        -------
-        str | None
-            If None, no incompatibility (you can update to any version). Otherwise,
-            the first anemoi-models version where your config would not be compatible.
-        """
-        group = self._current_group(config)
-        if group == len(self._compatibility_groups) - 1:
-            return None
-        return self._compatibility_groups[group + 1][0].metadata.versions["anemoi-training"]
+        return obj[self._obj_migration_key].value
 
     def sync(self, path: str | Path) -> tuple[Config, Config, list[ConfigMigration]]:
         """Migrate or rollbacks the config using provided migrations.
@@ -246,19 +160,23 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         config = deepcopy(old_config)
 
         if not self.is_compatible(config):
-            first_incompatible_version = self.get_first_incompatible_version(config)
+            first_incompatible_migration = self.get_first_incompatible_migration(config)
+            assert first_incompatible_migration is not None
+            first_incompatible_version = first_incompatible_migration.metadata.versions["anemoi-training"]
             msg = (
                 "No compatible migration available: the config is too old. "
                 f"Use a version of anemoi-training < {first_incompatible_version}."
             )
-            raise IncompatibleConfigException(msg)
+            raise IncompatibleConfigError(msg)
         missing_migrations = self.missing_migrations(config)
         for migration in missing_migrations:
             if migration.migrate is None:
                 msg = (f"Migration {migration.name} cannot be executed. Missing migrate function.",)
-                raise IncompatibleConfigException(msg)
+                raise IncompatibleConfigError(msg)
             config = migration.migrate(config)
-            config[_CONFIG_MIGRATION_KEY] = migration.name_hash
+            migration_state = config[self._obj_migration_key].value
+            migration_state.append(migration.name_hash)
+            config[self._obj_migration_key] = migration_state
         return old_config, config, missing_migrations
 
     def inspect(self, path: str | Path) -> tuple[list[Migration], list[Migration]]:
@@ -277,10 +195,12 @@ class ConfigMigrator(Migrator[ConfigMigration, Config]):
         """
         config = Config.from_path(path)
         if not self.is_compatible(config):
-            first_incompatible_version = self.get_first_incompatible_version(config)
+            first_incompatible_migration = self.get_first_incompatible_migration(config)
+            assert first_incompatible_migration is not None
+            first_incompatible_version = first_incompatible_migration.metadata.versions["anemoi-training"]
             msg = (
                 "No compatible migration available: the config is too old. "
                 f"Use a version of anemoi-training < {first_incompatible_version}."
             )
-            raise IncompatibleConfigException(msg)
+            raise IncompatibleConfigError(msg)
         return list(self.registered_migrations(config)), list(self.missing_migrations(config))
