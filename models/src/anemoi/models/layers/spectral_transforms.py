@@ -281,7 +281,7 @@ class ReducedSHT(SHT):
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
         use_graphed_rfft : bool
             Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            higher memory usage and may not be supported by all devices.
         """
         super().__init__()
 
@@ -345,7 +345,7 @@ class OctahedralSHT(SHT):
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
         """
         super().__init__()
         self.nlat = nlat
@@ -427,7 +427,7 @@ class InverseReducedSHT(InverseSpectralTransform):
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
         use_graphed_irfft : bool
             Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            higher memory usage and may not be supported by all devices.
         """
         super().__init__()
 
@@ -485,7 +485,7 @@ class InverseOctahedralSHT(InverseSpectralTransform):
             Spectral truncation. Defaults to nlat // 2 - 1.
         use_graphed_irfft : bool
             Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices. If False, a naive implementation is used.
+            higher memory usage and may not be supported by all devices.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
