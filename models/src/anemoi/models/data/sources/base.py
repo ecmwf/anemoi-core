@@ -178,6 +178,12 @@ class Source(ABC):
         """Number of ensemble members in this source, or 1 if not applicable."""
         ...
 
+    @property
+    @abstractmethod
+    def time_size(self) -> int:
+        """Number of time windows in this source."""
+        ...
+
     @abstractmethod
     def empty(self) -> "Source":
         """Return a new view with no data."""

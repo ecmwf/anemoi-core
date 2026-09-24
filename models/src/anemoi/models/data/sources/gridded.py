@@ -87,6 +87,14 @@ class GriddedSource(Source):
 
         return self.data.shape[self.layout.ensemble]
 
+    @property
+    def time_size(self) -> int:
+        """Number of time steps in this source."""
+        if self.layout.time is None:
+            raise ValueError(f"{self.__class__.__name__}.time_size requires a layout with a time axis.")
+
+        return self.data.shape[self.layout.time]
+
     def empty(self) -> "EmptyGriddedSource":
         """Return a copy with ``data`` dropped, keeping shape metadata that ``data`` would otherwise supply.
 
@@ -333,10 +341,10 @@ class GriddedSource(Source):
 
         tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{self.data.dtype}, {self.data.device}]")
         for axis in range(self.data.ndim):
-            tree.add(f"\tDim {axis} ({dims[axis]}): {self.data.shape[axis]}")
+            tree.add(f"Dim {axis} ({dims[axis]}): {self.data.shape[axis]}")
 
         if self.shard_sizes is not None:
-            tree.add(f"\tShard sizes: {self.shard_sizes}")
+            tree.add(f"Shard sizes: {self.shard_sizes}")
 
         return tree
 

@@ -176,16 +176,14 @@ class BaseTask(ABC):
         """
         time_indices = self.get_batch_output_indices(**kwargs)
         for dataset_name, view in batch.items():
-            if view.layout.time_in_grid:
-                continue
-            num_times = view.data.shape[view.layout.axis("time", ndim=view.data.ndim)]
-            if time_indices and max(time_indices) >= num_times:
+            if time_indices and max(time_indices) >= view.time_size:
                 msg = (
-                    f"Batch for dataset '{dataset_name}' contains {num_times} time steps, "
+                    f"Batch for dataset '{dataset_name}' contains {view.time_size} time steps, "
                     f"but requires index {max(time_indices)} (indices {time_indices}). "
                     "The dataloader's time window does not match the task rollout."
                 )
                 raise ValueError(msg)
+
         time_indices = normalize_time_indices(time_indices)
 
         target_tensors = batch.select(time=time_indices)

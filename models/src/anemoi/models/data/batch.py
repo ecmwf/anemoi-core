@@ -126,23 +126,22 @@ class Batch:
         """Return whether ``dataset_name``'s coordinates are static."""
         return dataset_name in self.sources and self.sources[dataset_name].coordinates_are_static
 
-    def __repr__(self) -> str:
-        """Compact summary of per-dataset shapes, layouts and static-coords flag."""
+    def tree(self) -> Tree:
+        """Return a tree representation of the batch."""
         if not self.sources:
-            return "Batch(<empty>)"
+            return Tree("Batch(<empty>)")
 
-        lines = ["Batch("]
-        for name, source in self.sources.items():
-            if isinstance(source.data, list):
-                shapes = [tuple(t.shape) for t in source.data]
-                shape_repr = f"list[{len(source.data)}] of shapes={shapes}"
-            else:
-                shape_repr = f"shape={tuple(source.data.shape)}"
-            static_repr = " static_coords" if source.coordinates_are_static else ""
-            shard_repr = f" shard_sizes={source.shard_sizes}" if source.shard_sizes is not None else ""
-            lines.append(f"  {name}: {shape_repr} layout={source.layout!r}{static_repr}{shard_repr}")
-        lines.append(")")
-        return "\n".join(lines)
+        tree = Tree("Batch")
+        for source in self.sources.values():
+            tree.add(source.tree())
+
+        return tree
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
 
     def __getitem__(self, dataset_name: str) -> Source:
         """Return the source for one dataset."""

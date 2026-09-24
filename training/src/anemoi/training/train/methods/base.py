@@ -869,7 +869,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         y: Batch,
         validation_mode: bool = False,
         **kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, Source]]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Batch]:
         """Compute loss and metrics for the given predictions and targets.
 
         Parameters
@@ -885,7 +885,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         Returns
         -------
-        tuple[torch.Tensor | None, dict[str, torch.Tensor], dict[str, Source]]
+        tuple[torch.Tensor | None, dict[str, torch.Tensor], Batch]
             Loss, metrics dictionary (if validation_mode), and full predictions
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
@@ -918,7 +918,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             for metric_name, metric_value in dataset_metrics.items():
                 metrics_next[f"{dataset_name}_{metric_name}"] = metric_value
 
-        return total_loss, metrics_next, y_preds
+        return total_loss, metrics_next, Batch(y_preds)
 
     def _map_dataset_processors(self, batch: Batch, processors: Any, **kwargs) -> Batch:
         """Apply per-dataset processors without mutating the selected batch."""

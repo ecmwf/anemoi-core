@@ -128,6 +128,17 @@ class TabularSource(Source):
         return ensemble_size[0]
 
     @property
+    def time_size(self) -> int:
+        """Number of time steps in this source."""
+        assert self.layout.time_in_grid, f"{self.__class__.__name__}.time_size requires a layout with time_in_grid=True."
+        time_sizes = [len(boundaries) for boundaries in self.boundaries]
+        if len(set(time_sizes)) != 1:
+            msg = f"Inconsistent time sizes across batch samples: {time_sizes}"
+            raise ValueError(msg)
+
+        return time_sizes[0]
+
+    @property
     def device(self) -> torch.device:
         """Device of the source's data tensor."""
         return self.data[0].device
@@ -434,8 +445,7 @@ class TabularSource(Source):
             raise ValueError(msg)
 
         if isinstance(indices, slice):
-            time_size = len(self.boundaries)
-            idx_list = list(range(*indices.indices(time_size)))
+            idx_list = list(range(*indices.indices(self.time_size)))
         elif isinstance(indices, int):
             idx_list = [int(indices)]
         else:
@@ -513,16 +523,16 @@ class TabularSource(Source):
         dtype = self.data[0].dtype
         device = self.data[0].device
         tree = Tree(prefix + self.name + " | " + self.__class__.__name__ + f"[{dtype}, {device}]")
-        tree.add(f"\tDim 0 (batch): {len(self.data)}")
+        tree.add(f"Dim 0 (batch): {len(self.data)}")
         for axis in range(self.data[0].ndim):
             name = dims[axis]
             if name == "grid":
-                tree.add(f"\tDim {axis+1} ({name}): {len(self.boundaries)} time slices")
+                tree.add(f"Dim {axis+1} ({name}): {self.time_size} time slices")
                 for i, sample in enumerate(self.data):
                     time_slice_lengths = [str(s.stop - s.start) for s in self.boundaries[i]]
-                    tree.add(f"\t\tSample {i+1}: {sample[0].shape[axis]} <- {' + '.join(time_slice_lengths)}")
+                    tree.add(f"\tSample {i+1}: {sample.shape[axis]} <- {' + '.join(time_slice_lengths)}")
             else:
-                tree.add(f"\tDim {axis+1} ({name}): {self.data[0].shape[axis]}")
+                tree.add(f"Dim {axis+1} ({name}): {self.data[0].shape[axis]}")
 
         return tree
 
@@ -588,9 +598,7 @@ class EmptyTabularSource(TabularSource):
                 sum(sizes[rank] for sizes in window_shard_sizes) for rank in range(len(window_shard_sizes[0]))
             ]
 
-        batch_sizes = tuple(
-            0 if len(b) == 0 else b[1] - b[0] for b in self.boundaries for _ in range(self.ensemble_size)
-        )
+        batch_sizes = tuple(coords.shape[0] for coords in self.coordinates for _ in range(self.ensemble_size))
         return FlatSource(
             data=None,
             coordinates=coordinates.to(self.device),
