@@ -30,6 +30,8 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
     """Message passing hierarchical graph neural network."""
 
+    supports_variable_io = False
+
     def _build_networks(self, model_config):
         """Builds the model components."""
         # Encoder data -> hidden
@@ -124,7 +126,11 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         # Main processor at deepest level
         self.processor_graph_provider = create_graph_provider(
             graph=self._graph_data[
-                (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
+                (
+                    self._graph_name_hidden[self.num_hidden - 1],
+                    "to",
+                    self._graph_name_hidden[self.num_hidden - 1],
+                )
             ],
             edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
             src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
@@ -265,7 +271,12 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             grid_shard_sizes=grid_shard_sizes,
         )
         for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+            self._assert_valid_sharding(
+                batch_size,
+                ensemble_size,
+                in_out_sharded[dataset_name],
+                model_comm_group,
+            )
 
         # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
         x_hidden_latents = {}

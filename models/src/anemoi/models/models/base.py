@@ -39,6 +39,9 @@ LOGGER = logging.getLogger(__name__)
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
+    supports_shared_encoder_decoder = False
+    supports_variable_io = False
+
     def __init__(
         self,
         *,
@@ -75,11 +78,14 @@ class BaseGraphModel(nn.Module):
         self.latent_skip = model_config.model.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
+            model_config.model.node_trainable_parameters,
+            self._build_named_node_attributes_graph(),
         )
 
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
+
+        self._build_variable_io(model_config=model_config.model)
 
         self._calculate_shapes_and_indices(data_indices)
 
@@ -229,6 +235,8 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         """Calculate the encoder input dimension for a given dataset."""
+        if self.variable_tokenizer is not None:
+            return self.n_step_input * self.variable_tokenizer.out_dim + self.node_attributes.attr_ndims[dataset_name]
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
@@ -313,6 +321,22 @@ class BaseGraphModel(nn.Module):
         assert all(bs == dim_sizes[0] for bs in dim_sizes), f"Dimensions must be the same across datasets: {dim_sizes}"
 
         return dim_sizes[0]
+
+    def _build_variable_io(self, model_config: DotDict) -> None:
+        """Validate variable I/O support."""
+
+        requested = any(
+            getattr(model_config, name, None)
+            for name in (
+                "variable_tokenizer",
+                "variable_detokenizer",
+                "variable_dropout",
+            )
+        )
+
+        assert (
+            self.supports_variable_io or not requested
+        ), f"{self.__class__.__name__} does not support variable-agnostic I/O."
 
     @abstractmethod
     def _build_networks(self, model_config: DotDict) -> None:
@@ -490,7 +514,10 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, model_comm_group=model_comm_group
                     )
                     x[dataset_name] = shard_tensor(
-                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                        x[dataset_name],
+                        -2,
+                        grid_shard_sizes[dataset_name],
+                        model_comm_group,
                     )
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
@@ -522,7 +549,10 @@ class BaseGraphModel(nn.Module):
                 assert grid_shard_sizes is not None
                 for dataset_name in dataset_names:
                     y_hat[dataset_name] = gather_tensor(
-                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                        y_hat[dataset_name],
+                        -2,
+                        grid_shard_sizes[dataset_name],
+                        model_comm_group,
                     )
 
         return y_hat
