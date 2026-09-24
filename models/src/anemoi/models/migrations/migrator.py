@@ -30,7 +30,8 @@ from typing import TypedDict
 
 from anemoi.models import __version__
 from anemoi.models.migrations.setup_context import MigrationContext
-from anemoi.utils.migrations import IncompleteMigrationScript
+from anemoi.utils.migrations import IncompatibleObjectError
+from anemoi.utils.migrations import IncompleteMigrationScriptError
 from anemoi.utils.migrations import Migration
 from anemoi.utils.migrations import MigrationMetadata
 from anemoi.utils.migrations import Migrator
@@ -43,7 +44,7 @@ _CKPT_MIGRATION_KEY = "migrations"
 LOGGER = logging.getLogger(__name__)
 
 
-class IncompatibleCheckpointException(BaseException):
+class IncompatibleCheckpointError(IncompatibleObjectError):
     """The provided checkpoint cannot be migrated because it is to old/recent."""
 
 
@@ -90,7 +91,7 @@ class CkptMigration(Migration[CkptType, CkptType, MigrationVersions]):
     @classmethod
     def from_migration(cls, name: str, migration: ModuleType) -> Self:
         if not hasattr(migration, "metadata") or not isinstance(migration.metadata, MigrationMetadata):
-            raise IncompleteMigrationScript("Migration script is missing metadata.")
+            raise IncompleteMigrationScriptError("Migration script is missing metadata.")
 
         metadata = migration.metadata
         signature = _get_code_digest(getsource(migration))
@@ -171,7 +172,11 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                     or module_name in deleted_modules
                     or wild_name in replace_attrs
                 ):
-                    LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
+                    LOGGER.debug(
+                        "Missing attribute %s.%s is checkpoint. Ignoring.",
+                        module_name,
+                        global_name,
+                    )
                     return MissingAttribute
                 raise
 
@@ -235,52 +240,25 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
 
         super().__init__(migrations, obj_migration_key or _CKPT_MIGRATION_KEY)
 
-    def _current_group(self, obj: CkptType) -> int:
-        """Get the compatibility group of the checkpoint. Note that if the compatibility
-        group is not the latest group, then the checkpoint cannot be migrated.
+    def _migration_state(self, obj: CkptType) -> list[str] | None:
+        """The migration state of the object.
 
         Parameters
         ----------
-        ckpt : CkptType
-            The checkpoint to get the group
+        obj : CkptType
+            The ckpt to extract the migration state from.
 
         Returns
         -------
-        int
-            Index of the compatibility group
+        list[str] | None
+            The migration state. It contains the migration already executed.
+            If None, the object doesn't have any migration state and is assumed too
+            old to be migratable.
+
         """
         if self._obj_migration_key not in obj:
-            raise IncompatibleCheckpointException("Checkpoint is not compatible")
-
-        if not len(obj[self._obj_migration_key]):
-            return 0
-        first_migration = obj[self._obj_migration_key][0]["name"]
-        for k, group in enumerate(self._compatibility_groups):
-            if group[0].name == first_migration:
-                return k
-        raise IncompatibleCheckpointException("Checkpoint is not compatible")
-
-    def registered_migrations(self, obj: CkptType) -> list[CkptMigration]:
-        migrations: list[CkptMigration] = []
-        compat_group = self._compatibility_groups[self._current_group(obj)]
-        for registered_migration in obj[self._obj_migration_key]:
-            if registered_migration["name"] not in self._migration_refs:
-                raise IncompatibleCheckpointException(
-                    f"Checkpoint cannot be migrated. Extra migrations are registered. ({registered_migration['name']})"
-                )
-            migrations.append(compat_group[self._migration_refs[registered_migration["name"]]])
-        return migrations
-
-    def missing_migrations(self, obj: CkptType) -> list[CkptMigration]:
-        compat_group = self._compatibility_groups[self._current_group(obj)]
-        if not len(obj[self._obj_migration_key]):
-            return compat_group
-        if obj[self._obj_migration_key][-1]["name"] not in self._migration_refs:
-            raise IncompatibleCheckpointException(
-                f"Checkpoint cannot be migrated. Extra migrations are registered. ({obj[self._obj_migration_key][-1]['name']})"
-            )
-        last_registered_migration = self._migration_refs[obj[self._obj_migration_key][-1]["name"]]
-        return compat_group[last_registered_migration + 1 :]
+            return None
+        return [state["name"] for state in obj[self._obj_migration_key]]
 
     def _check_registered_script_changed(self, ckpt: CkptType) -> bool:
         """Checks whether the checkpoint has run a migration that was changed.
@@ -309,25 +287,6 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
                 has_run_modified_migrations = True
         return has_run_modified_migrations
 
-    def get_first_incompatible_version(self, ckpt: CkptType) -> str | None:
-        """Get the first version where you cannot update the checkpoint
-
-        Parameters
-        ----------
-        ckpt : CkptType
-            the checkpoint to check
-
-        Returns
-        -------
-        str | None
-            If None, no incompatibility (you can update to any version). Otherwise,
-            the first anemoi-models version where your checkpoint would not be compatible.
-        """
-        group = self._current_group(ckpt)
-        if group == len(self._compatibility_groups) - 1:
-            return None
-        return self._compatibility_groups[group + 1][0].metadata.versions["anemoi-models"]
-
     def _resolve_context(self, context: MigrationContext) -> None:
         """Resolves the final context object after all setup callbacks have been executed.
 
@@ -347,11 +306,17 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
             LOGGER.debug("Move module %s to %s.", module_path_start, module_path_end)
             importlib.import_module(module_path_end)
             sys.modules[module_path_start] = sys.modules[module_path_end]
-        for full_attribute_path_end, attribute_path_start in context.attribute_paths.items():
+        for (
+            full_attribute_path_end,
+            attribute_path_start,
+        ) in context.attribute_paths.items():
             attribute_path_start, _, mod_name_start = attribute_path_start.rpartition(".")
             attribute_path_end, _, mod_name_end = full_attribute_path_end.rpartition(".")
             LOGGER.debug(
-                "Move attribute %s from %s to %s.", mod_name_start, attribute_path_start, full_attribute_path_end
+                "Move attribute %s from %s to %s.",
+                mod_name_start,
+                attribute_path_start,
+                full_attribute_path_end,
             )
             mod_end = importlib.import_module(attribute_path_end, __name__)
             attr_end = getattr(mod_end, mod_name_end)
@@ -380,8 +345,10 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         ckpt = deepcopy(old_ckpt)
 
         if not self.is_compatible(ckpt):
-            first_incompatible_version = self.get_first_incompatible_version(ckpt)
-            raise IncompatibleCheckpointException(
+            first_incompatible_migration = self.get_first_incompatible_migration(ckpt)
+            assert first_incompatible_migration is not None
+            first_incompatible_version = first_incompatible_migration.metadata.versions["anemoi-models"]
+            raise IncompatibleCheckpointError(
                 "No compatible migration available: the checkpoint is too old. "
                 f"Use a version of anemoi-models < {first_incompatible_version}."
             )
@@ -402,13 +369,17 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         ckpt["hyper_parameters"]["metadata"].setdefault("migrations", {}).setdefault("history", [])
         for migration in missing_migrations:
             if migration.migrate is None:
-                raise IncompatibleCheckpointException(
+                raise IncompatibleCheckpointError(
                     f"Migration {migration.name} cannot be executed. Missing migrate function."
                 )
             ckpt = migration.migrate(ckpt)
             ckpt[_CKPT_MIGRATION_KEY].append(migration.serialize())
             ckpt["hyper_parameters"]["metadata"]["migrations"]["history"].append(
-                {"type": "migrate", "name": migration.name, "signature": migration.signature}
+                {
+                    "type": "migrate",
+                    "name": migration.name,
+                    "signature": migration.signature,
+                }
             )
         return old_ckpt, ckpt, missing_migrations
 
@@ -429,8 +400,10 @@ class CkptMigrator(Migrator[CkptMigration, CkptType]):
         """
         ckpt = _load_ckpt(path, replace_attrs=True)
         if not self.is_compatible(ckpt):
-            first_incompatible_version = self.get_first_incompatible_version(ckpt)
-            raise IncompatibleCheckpointException(
+            first_incompatible_migration = self.get_first_incompatible_migration(ckpt)
+            assert first_incompatible_migration is not None
+            first_incompatible_version = first_incompatible_migration.metadata.versions["anemoi-models"]
+            raise IncompatibleCheckpointError(
                 "No compatible migration available: the checkpoint is too old. "
                 f"Use a version of anemoi-models < {first_incompatible_version}."
             )
@@ -477,7 +450,8 @@ class SaveCkpt:
                 {
                     "name": migration.get("name", "dummy_name"),
                     "metadata": migration.get(
-                        "metadata", {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}}
+                        "metadata",
+                        {"versions": {"migration": "1.0.0", "anemoi-models": "x.x.x"}},
                     ),
                     "signature": migration.get("signature", migration.get("name", "")),
                 }
