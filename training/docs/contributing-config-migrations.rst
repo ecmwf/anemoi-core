@@ -167,3 +167,41 @@ Updating a value
         if config.has_key("data.datasets.foo.bar"):
             config.update_value("data.datasets.foo.bar", "new_value")
         return config
+
+
+Provide a general summary of the migration
+------------------------------------------
+
+.. code:: python
+
+    from anemoi.training.migrations.config import Config
+
+
+    def migrate(config: Config) -> Config:
+        config.add_summary((
+            "Add here a summary of the changes to the config, or give context"
+            "of the changes introduced in your PR. This summary will be displayed"
+            "at the top of the users migrated config."
+        ))
+        return config
+
+************************************
+ Prompt an LLM to make the migration
+************************************
+
+You can generate an LLM prompt to give to your LLM to generate the migration for you:
+
+.. code:: bash
+
+    anemoi-training config migration llm-prompt [-h] [--ref, -r REF] [--base, -b BASE] [--output, -o OUTPUT] [--context, -c CONTEXT [CONTEXT ...]]
+
+The prompt contains some general coding guidelines, information about the
+``Config`` class, and a git diff of your changes.
+
+
+By default (no options), this will generate a prompt with a diff between HEAD and origin/main on the
+files given as context. The default context contains:
+
+- ``training/src/anemoi/training/schemas/*``
+- ``training/src/anemoi/training/config/*``
+- ``training/docs/*``
