@@ -344,6 +344,22 @@ class Node:
         self._interpolation_handler.rename(parts, end)
         self.drop_key(start, remove_empty)
 
+    def update_value(self, keys: str, value: Any) -> None:
+        """Update the value of a dot-delimited key.
+
+        It is equivalent to ``node.select(parent)[key] = value``.
+
+        Parameters
+        ----------
+        keys : str
+            The dot-delimited path in the tree to update.
+        value : Any
+            The new value.
+        """
+        parents, key = parents_head(keys)
+        parent_node = self.select(parents)
+        parent_node[key] = value
+
     def set_comments(self, before: str | None = None, inline: str | None = None, after: str | None = None) -> None:
         """Adds comments in the config.
 
