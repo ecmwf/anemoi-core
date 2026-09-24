@@ -16,6 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -24,7 +25,6 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.utils.enums import TensorDim
-from anemoi.models.data.utils import apply_pairwise
 
 
 def csr_matmul(matrix: torch.Tensor, node_values: torch.Tensor) -> torch.Tensor:

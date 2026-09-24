@@ -8,14 +8,15 @@
 # nor does it submit to any jurisdiction.
 
 
-from anemoi.models.data.sources import GriddedSource
-from anemoi.models.data.sources import Source
-from anemoi.models.data.sources import TabularSource
-import torch
-
 from collections.abc import Callable
 from collections.abc import Sequence
 from typing import Any
+
+import torch
+
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import Source
+from anemoi.models.data.sources import TabularSource
 
 
 def _apply_pairwise_tabular(
@@ -24,7 +25,7 @@ def _apply_pairwise_tabular(
     func: Callable[..., torch.Tensor],
     *,
     per_sample_kwargs: dict[str, Sequence[Any]] | None = None,
-    **kwargs
+    **kwargs,
 ) -> torch.Tensor:
     if not isinstance(target, TabularSource):
         msg = f"Other source must be a TabularSource; got {type(target).__name__}."
@@ -120,8 +121,7 @@ def _apply_pairwise_gridded(
 
 
 def apply_pairwise(pred: Source, target: Source, func: Callable, *args: Any, **kwargs) -> torch.Tensor:
-    """Apply a function to two aligned source views.
-    """
+    """Apply a function to two aligned source views."""
     if isinstance(pred, GriddedSource):
         return _apply_pairwise_gridded(pred, target, func, *args, **kwargs)
 

@@ -16,6 +16,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import reduce_tensor
@@ -25,7 +26,6 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
-from anemoi.models.data.utils import apply_pairwise
 
 EnergyScoreNorm = Literal["spatial", "variables", "spatial_and_variables"]
 
