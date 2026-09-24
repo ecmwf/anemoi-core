@@ -65,7 +65,7 @@ model:
   # mean/std intentionally omitted: JointVariableNormalizer above already normalizes upstream,
   # so FeatureTokenizer's own defaults (mean=0, std=1 - i.e. a no-op) are what we want here.
   input_transform:
-    _target_: anemoi.models.layers.embedder.Embedder
+    _target_: anemoi.models.layers.embedder.PMAEmbedder
     dim: 16
     d_model: 64
     nhead: 4

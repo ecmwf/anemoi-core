@@ -170,7 +170,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # this key present-but-None for configs that never set it, not absent - `.get` only
         # falls back to its default when the key is missing entirely.
         input_transform_config = model_config.model.get("input_transform") or {
-            "_target_": "anemoi.models.layers.embedder.PlainInputTransform"
+            "_target_": "anemoi.models.layers.embedder.FlattenInputTransform"
         }
         self.input_transform = instantiate(
             input_transform_config,
