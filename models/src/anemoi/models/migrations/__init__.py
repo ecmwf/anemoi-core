@@ -13,7 +13,7 @@ from .migrator import MIGRATION_PATH
 from .migrator import CkptMigration
 from .migrator import CkptMigrator
 from .migrator import CkptType
-from .migrator import IncompatibleCheckpointException
+from .migrator import IncompatibleCheckpointError
 from .migrator import MigrationVersions
 from .migrator import MissingAttribute
 from .migrator import SaveCkpt
@@ -24,7 +24,7 @@ __all__ = [
     "CkptMigration",
     "CkptMigrator",
     "CkptType",
-    "IncompatibleCheckpointException",
+    "IncompatibleCheckpointError",
     "MigrationContext",
     "MigrationMetadata",
     "MigrationOp",

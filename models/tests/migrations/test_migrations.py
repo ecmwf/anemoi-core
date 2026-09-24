@@ -16,8 +16,9 @@ import torch
 from anemoi.models.migrations import CkptMigration
 from anemoi.models.migrations import CkptMigrator
 from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import IncompatibleCheckpointException
+from anemoi.models.migrations import IncompatibleCheckpointError
 from anemoi.models.migrations import SaveCkpt
+from anemoi.utils.migrations import IncompatibleObjectError
 
 
 def test_run_all_migrations(old_migrator: CkptMigrator, empty_ckpt: Path):
@@ -41,17 +42,20 @@ def rollback_fn_extra_migration(ckpt: CkptType) -> CkptType:
 def test_extra_migration(old_migrator: CkptMigrator, save_ckpt: SaveCkpt):
     dummy_model = save_ckpt(
         {"foo": "foo"},
-        migrations=[{"name": "1750840837_add_foo"}, {"name": "dummy", "rollback": rollback_fn_extra_migration}],
+        migrations=[
+            {"name": "1750840837_add_foo"},
+            {"name": "dummy", "rollback": rollback_fn_extra_migration},
+        ],
     )
 
-    with pytest.raises(IncompatibleCheckpointException):
+    with pytest.raises(IncompatibleObjectError):
         _, _, _ = old_migrator.sync(dummy_model)
 
 
 def test_break_ckpt_too_old(migrator: CkptMigrator, tmp_path: Path):
     path = tmp_path / "model.ckpt"
     torch.save({"pytorch-lightning_version": "", "migrations": []}, path)
-    with pytest.raises(IncompatibleCheckpointException):
+    with pytest.raises(IncompatibleCheckpointError):
         migrator.sync(path)
 
 

@@ -24,7 +24,7 @@ from anemoi.utils.migrations import migrations_in_incorrect_order
 
 from ..migrations import MIGRATION_PATH
 from ..migrations import CkptMigrator
-from ..migrations import IncompatibleCheckpointException
+from ..migrations import IncompatibleCheckpointError
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
@@ -246,7 +246,7 @@ class Migration(Command):
                 console.print(
                     f"  [green]+ MIGRATE [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
                 )
-        except IncompatibleCheckpointException as e:
+        except IncompatibleCheckpointError as e:
             print(str(e))
 
     def run_inspect(self, args: Namespace) -> None:
@@ -307,7 +307,7 @@ class Migration(Command):
             if len(missing_migrations) and not len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
-        except IncompatibleCheckpointException as e:
+        except IncompatibleCheckpointError as e:
             print(str(e))
 
     def run_fix_order(self) -> None:
