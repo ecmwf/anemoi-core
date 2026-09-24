@@ -41,7 +41,7 @@ class VariableDropout(nn.Module):
 
     def forward(
         self, x: torch.Tensor, names: list[str], prognostic_indices: list[int]
-    ) -> tuple[torch.Tensor, list[str]]:
+    ) -> tuple[torch.Tensor, list[str], torch.Tensor]:
         """Forward pass for the VariableDropout layer.
         args:
         x : torch.Tensor
@@ -50,9 +50,14 @@ class VariableDropout(nn.Module):
             The list of variable names corresponding to the last dimension of x.
         prognostic_indices : list[int]
             The indices of the prognostic variables in the names list.
-        return:
-        tuple[torch.Tensor, list[str]]
-            The output tensor after dropout and the updated list of variable names.
+        Returns
+        -------
+        x : torch.Tensor
+            Input with selected variables removed.
+        names : list[str]
+            Names corresponding to the remaining channels of ``x``.
+        drop_indices : torch.Tensor
+            Indices of dropped variables in the original input channel layout.
         """
         if not self.training or self.dropout_rate == 0.0:
             return x, names
@@ -67,7 +72,7 @@ class VariableDropout(nn.Module):
         num_prognostic = len(prognostic_indices)
 
         if num_prognostic <= 1:
-            return x, names
+            return x, names, torch.empty(0, dtype=torch.long, device=x.device)
 
         if not self.multi_variable_dropout:
             num_drop = 1
@@ -85,4 +90,4 @@ class VariableDropout(nn.Module):
         keep_cpu = keep.tolist()
         names = [name for name, keep_variable in zip(names, keep_cpu) if keep_variable]
 
-        return x, names
+        return x, names, drop_indices
