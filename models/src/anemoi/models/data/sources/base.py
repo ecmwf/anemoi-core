@@ -296,16 +296,6 @@ class Source(ABC):
         pass
 
     @abstractmethod
-    def apply_pairwise(self, other: "Source", func: Callable, **kwargs) -> torch.Tensor:
-        """Combine this source with another through ``func``, returning a tensor.
-
-        The pairwise counterpart of :meth:`apply_func`; a loss is the motivating
-        case. Both sources must describe the same thing: same layout, same
-        coordinates, same number of samples.
-        """
-        pass
-
-    @abstractmethod
     def shard(self, group: ProcessGroup | None) -> "Source":
         """Split this source across ``group`` along its grid axis.
 

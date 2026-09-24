@@ -182,7 +182,8 @@ class CRPS(BaseLoss):
         squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
-        return pred.apply_pairwise(
+        return apply_pairwise(
+            pred,
             target,
             self._evaluate_loss_tensor,
             squash=squash,

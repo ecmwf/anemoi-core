@@ -12,7 +12,6 @@ import logging
 from collections.abc import Callable
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any
 
 import numpy as np
 import torch
@@ -20,21 +19,12 @@ from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
-from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
 
 LOGGER = logging.getLogger(__name__)
-
-
-def _shape_without_ensemble_dim(tensor: torch.Tensor, layout: TensorLayout) -> tuple[int, ...]:
-    """Tensor shape with the ensemble axis removed, needed for comparisons that ignore member count."""
-    if layout.ensemble is None:
-        return tuple(tensor.shape)
-    axis = layout.axis("ensemble", ndim=tensor.ndim)
-    return tuple(size for dim, size in enumerate(tensor.shape) if dim != axis)
 
 
 def _fold_members(source: "TabularSource", sample: torch.Tensor) -> torch.Tensor:
@@ -229,72 +219,6 @@ class TabularSource(Source):
             new_data.append(chunk)
 
         return self.clone(data=new_data, **kwargs)
-
-    def apply_pairwise(
-        self,
-        other: "TabularSource",
-        func: Callable,
-        *,
-        per_sample_kwargs: dict[str, Sequence[Any]] | None = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        """Apply a loss function to this view and another view, returning the result."""
-        if not isinstance(other, TabularSource):
-            msg = f"Other source must be a TabularSource; got {type(other).__name__}."
-            raise TypeError(msg)
-
-        if self.layout != other.layout:
-            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
-            raise ValueError(msg)
-
-        if len(self.data) != len(other.data):
-            msg = f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
-            raise ValueError(msg)
-        # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-
-        per_sample_kwargs = {} if per_sample_kwargs is None else per_sample_kwargs
-        if kwargs.keys() & per_sample_kwargs.keys():
-            raise ValueError("Loss arguments cannot be both shared and per-sample.")
-        for name, values in per_sample_kwargs.items():
-            if len(values) != len(self.data):
-                raise ValueError(f"Loss argument {name!r} requires one value per sample ({len(self.data)}).")
-
-        losses = []
-        non_empty = []
-        for i, (pred, target) in enumerate(zip(self.data, other.data)):
-            # every axis but the ensemble one must line up for this to work
-            assert _shape_without_ensemble_dim(pred, self.layout) == _shape_without_ensemble_dim(target, self.layout), (
-                f"Sample {i} of both views must have the same shape apart from the ensemble axis; "
-                f"got {tuple(pred.shape)} and {tuple(target.shape)}."
-            )
-            assert torch.all(
-                self.coordinates[i] == other.coordinates[i]
-            ), f"Sample {i} of both views must have the same coordinates; got {self.coordinates[i]} and {other.coordinates[i]}."
-            sample_kwargs = kwargs | {name: values[i] for name, values in per_sample_kwargs.items()}
-
-            losses.append(
-                func(
-                    pred,
-                    target,
-                    layout=self.layout,
-                    statistics=self.statistics,
-                    name_to_index=self.name_to_index,
-                    **sample_kwargs,
-                )
-            )
-            # Handle empty batches: a fully-empty worker returns a graph-connected 0
-            non_empty.append(pred.shape[self.layout.grid] > 0)
-
-        if not losses:
-            msg = "Cannot apply a loss to an empty sparse source view."
-            raise ValueError(msg)
-
-        stacked = torch.stack(losses)
-        num_non_empty = sum(non_empty)
-        # Divide by the number of non-empty samples (>= 1) rather than the batch size.
-        # When every sample is empty, the stacked tensor is all-zero and graph-connected,
-        # so summing and dividing by 1 preserves the zero gradient path.
-        return stacked.sum(dim=0) / max(num_non_empty, 1)
 
     def shard(self, group: ProcessGroup | None) -> "TabularSource":
         """Not supported: observation grids vary per sample."""

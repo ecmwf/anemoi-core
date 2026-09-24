@@ -412,7 +412,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Timedeltas for the target nodes, or None if the dataset does not have timedeltas (gridded).
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        
+
         flat_target_spec: "FlatSource" = target_spec.flatten()
 
         target_features = self.decoders_target_input[self.dataset2decoder[dataset_name]]
@@ -454,7 +454,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_target_node_features,
             grid_shard_sizes,
             x_target_forcing.flatten().batch_sizes,
-            target_timedeltas
+            target_timedeltas,
         )
 
     def _assemble_output(

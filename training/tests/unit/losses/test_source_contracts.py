@@ -50,6 +50,27 @@ def test_training_checks_float32_before_casting(side: str, dtype: torch.dtype) -
         BaseTrainingModule._evaluate_loss(MSELoss(), pred, target)
 
 
+def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
+    pred = _grid(torch.ones(1, 1, 1, 3, 2))
+    other_layout = _grid(
+        torch.zeros(1, 1, 1, 3, 2),
+        layout=TensorLayout(batch=-5, time=-4, ensemble=-3, grid=-2, variables=-1),
+    )
+    with pytest.raises(ValueError, match="same layout"):
+        MSELoss().apply_pairwise(pred, other_layout, lambda p, t, **_: (p - t).sum())
+
+    other_coordinates = pred.clone(coordinates=torch.ones_like(pred.coordinates))
+    with pytest.raises(AssertionError, match="same coordinates"):
+        MSELoss().apply_pairwise(pred, other_coordinates, lambda p, t, **_: (p - t).sum())
+
+
+def test_base_loss_pairwise_runs_gridded_callback() -> None:
+    pred = _grid(torch.ones(1, 1, 1, 3, 2))
+    target = _grid(torch.zeros_like(pred.data))
+    result = MSELoss().apply_pairwise(pred, target, lambda p, t, **_: (p - t).abs().sum())
+    torch.testing.assert_close(result, torch.tensor(6.0))
+
+
 def test_training_loss_disables_outer_autocast() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2, requires_grad=True))
     target = _grid(torch.zeros_like(pred.data))
@@ -128,8 +149,28 @@ def test_sparse_loss_distinguishes_shared_and_per_sample_arguments() -> None:
         assert isinstance(matrices, list)
         return ((pred @ matrices[0]) + (target @ matrices[1])).mean() * weight
 
-    result = view.apply_loss(view, loss, matrices=matrices, per_sample_kwargs={"weight": weights})
+    result = MSELoss().apply_pairwise(view, view, loss, matrices=matrices, per_sample_kwargs={"weight": weights})
     torch.testing.assert_close(result, torch.tensor(7.5))
+
+
+def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() -> None:
+    empty = torch.empty(0, 2, requires_grad=True)
+    non_empty = torch.ones(2, 2, requires_grad=True)
+    pred = build_source(
+        name="obs",
+        data=[empty, non_empty],
+        variables=["a", "b"],
+        statistics={},
+        coordinates=[torch.zeros(0, 2), torch.zeros(2, 2)],
+        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+    )
+    target = pred.clone(data=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
+    result = MSELoss().apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
+    torch.testing.assert_close(result, torch.tensor(4.0))
+    result.backward()
+    assert empty.grad is not None
+    torch.testing.assert_close(empty.grad, torch.zeros_like(empty))
+    torch.testing.assert_close(non_empty.grad, torch.ones_like(non_empty))
 
 
 def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
@@ -156,7 +197,8 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
     per_sample = {"weight": [torch.tensor(1.0)] * (1 if case == "length" else 2)}
     shared = {} if case == "length" else {"weight": torch.tensor(1.0)}
     with pytest.raises(ValueError, match=r"one value per sample|both shared and per-sample"):
-        view.apply_loss(
+        MSELoss().apply_pairwise(
+            view,
             view,
             lambda *_args, **_kwargs: pytest.fail("Invalid arguments reached the loss"),
             per_sample_kwargs=per_sample,

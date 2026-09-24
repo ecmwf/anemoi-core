@@ -341,7 +341,7 @@ class EnergyScoreLoss(BaseLoss):
 
     def forward(self, pred: Source, target: Source, squash: bool = True, **kwargs) -> torch.Tensor:
         """Evaluate the score using the source views' tensor layout."""
-        return pred.apply_pairwise(target, self._evaluate_loss_tensor, squash=squash, **kwargs)
+        return apply_pairwise(pred, target, self._evaluate_loss_tensor, squash=squash, **kwargs)
 
     def _forward_impl(
         self,

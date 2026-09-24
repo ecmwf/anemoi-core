@@ -317,7 +317,8 @@ class SpectralLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Dispatch to the tensor-level _forward_impl via the source view's layout."""
-        return pred.apply_pairwise(
+        return self.apply_pairwise(
+            pred,
             target,
             self._forward_impl,
             squash=squash,

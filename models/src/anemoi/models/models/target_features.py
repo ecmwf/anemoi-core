@@ -112,12 +112,7 @@ class DecodingTargetFeature(ABC):
         ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
 
         out = self._compute(
-            x_input_data,
-            x_encoded_data,
-            x_target,
-            target_spec,
-            batch_size=batch_size,
-            dataset_name=dataset_name
+            x_input_data, x_encoded_data, x_target, target_spec, batch_size=batch_size, dataset_name=dataset_name
         )
 
         if self.needs_sharding and grid_shard_sizes is not None:
