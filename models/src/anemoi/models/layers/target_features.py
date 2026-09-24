@@ -156,7 +156,7 @@ class InputForcingsFeature(DecodingTargetFeature):
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
     ) -> Tensor:
-        x_forcing = torch.index_select(x_input_data, dim=-1, index=self.model._forcing_input_idx[dataset_name])
+        x_forcing = x_input_data[..., self.model._forcing_input_idx[dataset_name]]
         return einops.rearrange(x_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
 
 
