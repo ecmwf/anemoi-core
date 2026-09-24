@@ -20,6 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.utils.enums import TensorDim
+from anemoi.models.data.utils import apply_pairwise
 
 if TYPE_CHECKING:
     from anemoi.models.data import TensorLayout

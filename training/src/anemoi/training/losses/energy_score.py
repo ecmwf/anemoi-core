@@ -25,6 +25,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+from anemoi.models.data.utils import apply_pairwise
 
 EnergyScoreNorm = Literal["spatial", "variables", "spatial_and_variables"]
 

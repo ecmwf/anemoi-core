@@ -24,6 +24,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.utils.enums import TensorDim
+from anemoi.models.data.utils import apply_pairwise
 
 
 def csr_matmul(matrix: torch.Tensor, node_values: torch.Tensor) -> torch.Tensor:
