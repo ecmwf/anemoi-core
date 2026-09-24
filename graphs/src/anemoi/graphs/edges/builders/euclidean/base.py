@@ -18,18 +18,11 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
+from anemoi.graphs.utils import PYG_INSTRUCTIONS
 from anemoi.graphs.utils import cuda_device_of
 from anemoi.graphs.utils import is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
-
-
-PYG_LIB_INSTRUCTIONS = r"""The 'pyg_lib' library is not installed.
-Installing 'pyg_lib' can significantly improve performance for graph creation.
-You can install it using:
-    TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
-    pip install pyg-lib -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
-"""
 
 
 class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
@@ -84,7 +77,7 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             with cuda_device_of(source_coords.device):
                 edge_index = self._compute_edge_index_pyg(source_coords, target_coords, skip_flip=skip_flip, **kwargs)
         else:
-            LOGGER.warning(PYG_LIB_INSTRUCTIONS)
+            LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
 
             if skip_flip:
