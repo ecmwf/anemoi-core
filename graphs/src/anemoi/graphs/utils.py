@@ -9,9 +9,9 @@
 
 
 import contextlib
-import re
 import logging
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
