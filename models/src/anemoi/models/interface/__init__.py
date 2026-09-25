@@ -239,7 +239,9 @@ class AnemoiModelInterface(torch.nn.Module):
         """Return one dataset's latlon tensor, in radians. Convenience method to liaise with anemoi-inference."""
         latitudes = payload.get("latitudes")
         longitudes = payload.get("longitudes")
+        return latitudes, longitudes
 
+    def _old_coords(self):
         if latitudes is None or longitudes is None:
             return self.model._graph_data[dataset_name].x
 
@@ -266,124 +268,23 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
-    def _is_tabular(self, dataset_name: str) -> bool:
-        return self.data_layouts[dataset_name].time_in_grid
-
-    def _prepare_data(self, payload: dict, dataset_name: str, variables: list[str]) -> SourceSample:
-        """Prepare the input data for the model.
-
-        Parameters
-        ----------
-        payload : dict
-            data, plus, optionally, latitudes / longitudes (in degrees), layout, and for tabular
-            datasets: timedeltas (seconds) and boundaries ((start, stop) pairs, one per time slot).
-        dataset_name : str
-            The name of the dataset.
-        variables : list[str]
-            Names of the variables along the data tensor's variable axis, in order.
-
-        Returns
-        -------
-        SourceSample
-            One dataset's contribution to one sample.
-        """
-        data = payload.get("data")
-        coordinates = self._coordinates_in_radians(payload, dataset_name)
-        if data is not None:
-            coordinates = coordinates.to(device=data.device)
-
-        is_tabular = self._is_tabular(dataset_name)
-        default_layout = ("grid", "variables") if is_tabular else ("time", "ensemble", "grid", "variables")
-        layout_names = tuple(payload.get("layout") or default_layout)
-
-        if data is not None:
-            assert data.ndim == len(layout_names), (
-                f"Dataset {dataset_name!r}: data tensor of shape {tuple(data.shape)} does not match "
-                f"the specified layout {layout_names}."
-            )
-            var_axis = layout_names.index("variables")
-            assert data.shape[var_axis] == len(variables), (
-                f"Dataset {dataset_name!r}: data tensor carries {data.shape[var_axis]} variables "
-                f"but {len(variables)} were expected ({variables})."
-            )
-
-        timedeltas = payload.get("timedeltas")
-        if timedeltas is not None:
-            timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32).reshape(-1)
-            if data is not None:
-                timedeltas = timedeltas.to(device=data.device)
-
-        boundaries = payload.get("boundaries")
-        if boundaries is not None:
-            boundaries = tuple(self._as_boundary_slices(boundaries, dataset_name))
-        elif is_tabular:
-            raise ValueError(f"Tabular dataset {dataset_name!r} needs boundaries!")
-
-        return SourceSample(
-            data=data,
-            coordinates=coordinates,
-            variables=variables,
-            statistics=self._statistics_for(dataset_name, variables),
-            # `time_in_grid` cannot be read off the axis names, so it comes from the dataset kind
-            layout=TensorLayout.from_tuple(*layout_names, time_in_grid=is_tabular),
-            grid_size=coordinates.shape[0],
-            coordinates_are_static=self.is_dataset_static[dataset_name] and not is_tabular,
-            timedeltas=timedeltas,
-            boundaries=boundaries,
-            shard_sizes=payload.get("shard_sizes"),
-        )
-
-    @staticmethod
-    def _as_boundary_slices(boundaries, dataset_name: str) -> list[slice]:
-        """Convert the boundary contract's ``(start, stop)`` pairs to the slices views use."""
-        result = []
-        for entry in boundaries:
-            if isinstance(entry, slice):
-                result.append(entry)
-                continue
-            try:
-                start, stop = entry
-            except (TypeError, ValueError) as err:
-                msg = (
-                    f"Dataset {dataset_name!r}: each boundary must be a (start, stop) pair or a slice, "
-                    f"got {entry!r}."
-                )
-                raise ValueError(msg) from err
-            result.append(slice(int(start), int(stop)))
-        return result
-
-    def prepare_input_spec(self, data: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
-        """Build the input specs. The caller supplies model-input-space variables per dataset."""
-        return {
-            dataset_name: self._prepare_data(
-                self._as_payload(ds_data),
-                dataset_name,
-                self.data_indices[dataset_name].model.input.ordered_names,
-            )
-            for dataset_name, ds_data in data.items()
-        }
-
-    def prepare_target_payloads(self, target: dict[str, torch.Tensor | dict]) -> dict[str, SourceSample]:
-        """Build the decoder conditioning specs -- the forcing variables at the output times."""
-        assert target is not None, "predict_step requires a valid target argument"
-
-        missing = [dataset_name for dataset_name in self.model.target_datasets if dataset_name not in target]
-        if missing:
-            msg = f"No target provided for decoded dataset(s) {missing}; got targets for {list(target)}."
-            raise ValueError(msg)
-
-        spec = {}
-        for dataset_name in self.model.target_datasets:
-            payload = self._as_payload(target[dataset_name])
-            forcing_names = self._target_forcing_names(dataset_name)
-            if payload.get("data") is None:
-                raise ValueError(f"Target payload for dataset {dataset_name!r} carries no data.")
-            spec[dataset_name] = self._prepare_data(payload, dataset_name, forcing_names)
-
-        return spec
-
     def get_batch(self, data: dict[str, SourceSample]) -> Batch:
         """Collate the per-dataset samples into a single-sample Batch."""
+        for dataset_name, sample in data.items():
+            assert "latitudes" in sample and "longitudes" in sample, (
+                f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
+            )
+            latitudes = torch.as_tensor(sample.pop("latitudes"), dtype=torch.float32).reshape(-1)
+            longitudes = torch.as_tensor(sample.pop("longitudes"), dtype=torch.float32).reshape(-1)
+            assert latitudes.shape == longitudes.shape, (
+                f"Dataset {dataset_name!r}: latitudes {tuple(latitudes.shape)} and longitudes "
+                f"{tuple(longitudes.shape)} must describe the same nodes."
+            )
+            sample["coordinates"] = torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1))
+
+            assert "layout" in sample, f"Dataset {dataset_name!r}: missing 'layout' in the sample."
+            assert "variables" in sample, f"Dataset {dataset_name!r}: missing 'variables' in the sample."
+
         return Batch.collate(data)
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
@@ -391,40 +292,39 @@ class AnemoiModelInterface(torch.nn.Module):
         The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
         """
         unwrapped = {}
-        for dataset_name in batch.dataset_names:
-            view = batch[dataset_name]
+        for dataset_name, sample in batch.items():
             is_tabular = self._is_tabular(dataset_name)
 
-            data, coordinates, timedeltas = view.data, view.coordinates, view.timedeltas
+            data, coordinates, layout = sample.data, sample.coordinates, layout = sample.layout
             if is_tabular:
                 # Sparse payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
                 coordinates = None if coordinates is None else coordinates[0]
-                timedeltas = None if timedeltas is None else timedeltas[0]
-                layout = view.layout
             else:
-                batch_axis = view.layout.axis("batch", ndim=data.ndim) if view.layout.batch is not None else None
+                batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
                 if batch_axis is not None:
                     assert data.shape[batch_axis] == 1, (
                         f"Dataset {dataset_name!r}: expected a single sample to unwrap, got "
                         f"{data.shape[batch_axis]}."
                     )
                     data = data.squeeze(batch_axis)
-                layout = view.layout.without_batch_dim()
+                layout = layout.without_batch_dim()
+
+            coords_deg = torch.rad2deg(coordinates)
 
             payload = {
                 "data": data,
-                "variables": view.variables,
+                "latitudes": coords_deg[:, 0],
+                "longitudes": coords_deg[:, 1],
+                "variables": sample.variables,
                 "layout": layout.axis_names,
             }
-            if coordinates is not None:
-                degrees = torch.rad2deg(coordinates)
-                payload["latitudes"] = degrees[:, 0]
-                payload["longitudes"] = degrees[:, 1]
-            if timedeltas is not None:
-                payload["timedeltas"] = timedeltas
-            if view.boundaries is not None:
-                sample_bounds = view.boundaries[0]
+
+            if sample.timedeltas is not None:
+                payload["timedeltas"] = sample.timedeltas
+
+            if sample.boundaries is not None:
+                sample_bounds = sample.boundaries[0]
                 payload["boundaries"] = [(int(s.start), int(s.stop)) for s in sample_bounds]
 
             unwrapped[dataset_name] = payload
@@ -433,8 +333,9 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def predict_step(
         self,
-        batch: dict[str, dict],
-        target: dict[str, dict],
+        x: dict[str, dict],
+        target_forcing: dict[str, dict] = None,
+        target_template: dict[str, dict] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -443,11 +344,11 @@ class AnemoiModelInterface(torch.nn.Module):
 
         Parameters
         ----------
-        batch : dict[str, dict]
+        x : dict[str, dict]
             Input data, one payload per dataset. A payload carries the data in
             model-input space and, optionally, the latlons (in degrees)
             and layout. If the coords are omitted, we fall back to the graph.
-        target : dict[str, dict]
+        target_forcing : dict[str, dict]
             Decoder conditioning, one payload per decoded dataset, holding the forcing
             variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional
@@ -463,23 +364,12 @@ class AnemoiModelInterface(torch.nn.Module):
         dict[str, torch.Tensor]
             Predicted data.
         """
-        x = self.prepare_input_spec(batch)  # TODO: move to anemoi-inference
-        target_spec = self.prepare_target_payloads(target)  # TODO: move to anemoi-inference
+        assert target_template is not None, "target_template must be provided for prediction."
 
         # Convert to batch
         x = self.get_batch(x)
-        target = self.get_batch(target_spec)
-
-        for dataset_name in x.dataset_names:
-            view = x[dataset_name]
-            if view.layout.batch is None and not isinstance(view.data, list):
-                msg = (
-                    f"Dataset {dataset_name!r} has neither a batch axis in its layout "
-                    f"({view.layout!r}) nor a per-sample list payload, so the batch dimension is "
-                    "missing."
-                )
-                raise ValueError(msg)
-
+        target = self.get_batch(target_template)
+    
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
             "x": x,
@@ -499,7 +389,8 @@ class AnemoiModelInterface(torch.nn.Module):
         if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
-        return self.unwrap_batch(self.model.predict_step(**predict_kwargs, **kwargs))
+        pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
+        return self.unwrap_batch(pred_batch)
 
     def _update_metadata(self) -> None:
         self.model.fill_metadata(self.metadata)
