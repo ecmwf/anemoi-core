@@ -32,7 +32,7 @@ def seed():
 
 
 def reference_rfft(x, lengths):
-    """Use independent per-ring torch.fft calls with native normalization/autograd."""
+    """Compute each ring's FFT separately with torch.fft and autograd."""
     modes = max(lengths) // 2 + 1
     return torch.stack(
         [
