@@ -57,9 +57,53 @@ for training and supports:
 
 .. note::
 
-   Users wishing to change the format of the batch input into the model
-   should sub-class ``MultiDataset`` and override the ``__iter__``
-   method or the ``get_sample`` method.
+   Users wishing to change sample selection or the format of the batch input
+   should subclass the configured iteration (``BaseIteration`` or
+   ``CrossDatasetIteration``) and select it in ``dataloader.iteration``.
+   Override ``MultiDataset.__iter__`` only when replacing the complete sampling
+   workflow.
+
+Multi-Domain
+------------
+
+``MultiDataset`` combines independent domains when configured with
+``CrossDatasetIteration``. The default ``BaseIteration``
+returns synchronized data from every reader in each sample, whereas
+cross-dataset sampling returns data from one reader at a time. The readers may
+have different grids and date ranges. Each domain is partitioned independently
+across distributed sample groups and data-loader workers.
+
+The data module selects multi-domain sampling through the iteration configuration::
+
+   dataloader:
+     iteration:
+       _target_: anemoi.training.data.iteration.CrossDatasetIteration
+     batch_size:
+       training: 1
+       validation: 1
+       test: 1
+
+A batch size of one is currently required because each sample contains one
+domain key. Common variables are checked for metadata compatibility once when
+training starts. Flat encoder-processor-decoder models can route each domain
+through its own hidden mesh while sharing the encoder, processor, and decoder weights::
+
+   model:
+     model:
+       hidden_nodes_name:
+         sg_1: sg_1_hidden
+         sg_2: sg_2_hidden
+
+Each mapped hidden node set must have corresponding domain-to-hidden,
+hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
+feature dimensions must match because the model weights remain shared. The
+hierarchical, ensemble, and transport model variants do not currently support
+per-domain hidden meshes.
+
+With Anemoi's current distributed strategy, domain-specific trainable node and
+edge features must be disabled because the active domain, and therefore the
+active graph-specific parameters, changes between batches. Supporting these
+parameters requires a non-static graph and unused-parameter detection.
 
 API Reference
 =============
@@ -76,6 +120,14 @@ Multi-Dataset API
 -----------------
 
 .. automodule:: anemoi.training.data.multidataset
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Iteration API
+-------------
+
+.. automodule:: anemoi.training.data.iteration
    :members:
    :no-undoc-members:
    :show-inheritance:
