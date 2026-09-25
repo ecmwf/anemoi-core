@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import logging
 from types import SimpleNamespace
 
 import einops
@@ -18,6 +19,7 @@ import torch
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 
+from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
 from anemoi.training.losses import HuberLoss
@@ -71,6 +73,46 @@ def _assert_variable_and_scalar_shapes(
     assert out.shape == (nvars,), "squash=False should return per-variable loss"
     out_total = loss(pred, target, squash=True)
     assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
+
+
+@pytest.mark.parametrize("scaler_name", ["stdev_tendency", "var_tendency"])
+def test_tendency_scaler_logs_small_weights_including_data_index_zero(
+    scaler_name: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Log the actual prognostic weights, including small values at dataset index zero."""
+    data_indices = IndexCollection(
+        DictConfig({"forcing": ["forcing"], "diagnostic": ["diag"], "target": ["truth"]}),
+        {"a": 0, "forcing": 1, "truth": 2, "b": 3, "diag": 4},
+    )
+    weights = torch.tensor([0.0001234, 0.0005678, 1.0])
+    with caplog.at_level(logging.INFO, logger="anemoi.training.losses.loss"):
+        get_loss_function(
+            DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": [scaler_name]}),
+            scalers={scaler_name: (TensorDim.VARIABLE.value, weights)},
+            data_indices=data_indices,
+        )
+
+    assert caplog.messages == [
+        "Parameter a is being scaled by statistic_tendencies by 0.0001234",
+        "Parameter b is being scaled by statistic_tendencies by 0.0005678",
+    ]
+
+
+@pytest.mark.parametrize("scaler_name", ["stdev_tendency", "var_tendency"])
+def test_tendency_scaler_applies_without_data_indices(scaler_name: str) -> None:
+    """Optional variable metadata must not prevent attaching and applying a tendency scaler."""
+    loss = get_loss_function(
+        DictConfig({"_target_": "anemoi.training.losses.MSELoss", "scalers": [scaler_name, "grid"]}),
+        scalers={
+            scaler_name: (TensorDim.VARIABLE.value, torch.tensor([2.0, 4.0])),
+            "grid": (TensorDim.GRID.value, torch.ones(1)),
+        },
+    )
+    pred = torch.tensor([1.0, 2.0]).reshape(1, 1, 1, 1, 2)
+
+    # Mean weighted squared error: (2 * 1^2 + 4 * 2^2) / 2 = 9.
+    torch.testing.assert_close(loss(pred, torch.zeros_like(pred)), torch.tensor(9.0))
 
 
 def test_unsquashed_loss_preserves_single_variable_dimension() -> None:
@@ -1075,10 +1117,12 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
         pytest.param("reduced_sht", {"grid": "n320", "truncation": 3}, id="reduced"),
     ],
 )
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_spectral_crps_sht_transforms(
     transform: str,
     transform_kwargs: dict[str, object],
     mocker: MockerFixture,
+    dtype: torch.dtype,
 ) -> None:
     ring_sizes = [20, 24, 28, 32, 32, 28, 24, 20]
     if transform == "reduced_sht":
@@ -1087,8 +1131,8 @@ def test_spectral_crps_sht_transforms(
         mocker.patch("anemoi.transform.grids.named.lookup", return_value={"latitudes": latitudes})
 
     nvars = 2
-    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, requires_grad=True)
-    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars)
+    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, dtype=dtype, requires_grad=True)
+    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars, dtype=dtype)
     loss = _make_loss(
         "anemoi.training.losses.spectral.SpectralCRPSLoss",
         transform=transform,

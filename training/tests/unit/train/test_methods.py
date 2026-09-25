@@ -20,6 +20,7 @@ import pytest
 import pytorch_lightning as pl
 import torch
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -301,6 +302,204 @@ def test_initialise_updating_scalers_uses_runtime_storage() -> None:
             loss_or_metric.scaler.get_scaler_tensor("nan_mask_weights"),
             updating_spec[1],
         )
+
+
+def test_after_batch_transfer_replaces_source_grid_shard_metadata() -> None:
+    source_grid_shard_sizes = [4, 4]
+    target_grid_shard_sizes = [2, 2]
+
+    class RegriddingSpatialProcessor(torch.nn.Module):
+        def forward(
+            self,
+            x: torch.Tensor,
+            model_comm_group: object | None = None,
+            grid_shard_sizes: list[int] | None = None,
+        ) -> tuple[torch.Tensor, list[int]]:
+            assert model_comm_group is comm_group
+            assert grid_shard_sizes == source_grid_shard_sizes
+            return x[..., :2, :], target_grid_shard_sizes
+
+    class ModelWithSpatialPreprocessor(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.spatial_pre_processors = torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()})
+            self.pre_processors = torch.nn.ModuleDict({"data": Processors([])})
+
+    comm_group = object()
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = ModelWithSpatialPreprocessor()
+    module.model_comm_group = comm_group
+    module.model_comm_group_rank = 1
+    module.grid_shard_sizes = {"data": source_grid_shard_sizes}
+    module.grid_shard_slice = {"data": slice(4, 8)}
+    module._setup_batch_sharding = lambda batch: batch
+    module._prepare_loss_scalers = lambda: None
+
+    result = module.on_after_batch_transfer({"data": torch.zeros(1, 1, 1, 4, 1)}, 0)
+
+    assert result["data"].shape[-2] == 2
+    assert module.grid_shard_sizes == {"data": target_grid_shard_sizes}
+    assert module.grid_shard_slice == {"data": slice(2, 4)}
+
+
+def _allgather_module(reader_group_size: int = 2) -> SingleTraining:
+    module = SingleTraining.__new__(SingleTraining)
+    module.grid_dim = -2
+    module.reader_group_size = reader_group_size
+    module.reader_group_rank = 1
+    module.reader_group_id = 0
+    module.reader_groups = ["reader_group"]
+    return module
+
+
+def test_allgather_batch_returns_input_when_not_sharded() -> None:
+    module = _allgather_module()
+    batch = torch.zeros(1, 1, 1, 8, 1)
+
+    assert module.allgather_batch(batch, None) is batch
+
+
+def test_allgather_batch_returns_input_for_single_reader() -> None:
+    module = _allgather_module(reader_group_size=1)
+    batch = torch.zeros(1, 1, 1, 8, 1)
+
+    assert module.allgather_batch(batch, [4, 4]) is batch
+
+
+def test_allgather_batch_gathers_with_supplied_shard_sizes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Shard sizes come from the caller, so post-projection grids gather correctly."""
+    gathered = torch.zeros(1, 1, 1, 4, 1)
+    calls = []
+
+    def fake_gather_tensor(tensor: torch.Tensor, dim: int, shard_sizes: list[int], group: object) -> torch.Tensor:
+        calls.append((tensor, dim, shard_sizes, group))
+        return gathered
+
+    monkeypatch.setattr("anemoi.training.train.methods.base.gather_tensor", fake_gather_tensor)
+
+    module = _allgather_module()
+    batch = torch.zeros(1, 1, 1, 2, 1)
+
+    assert module.allgather_batch(batch, [2, 2]) is gathered
+    assert calls == [(batch, -2, [2, 2], "reader_group")]
+
+
+def test_allgather_batch_rejects_mismatched_shard_size() -> None:
+    module = _allgather_module()
+    # Source-grid shard sizes against a post-projection shard: previously gathered silently.
+    batch = torch.zeros(1, 1, 1, 2, 1)
+
+    with pytest.raises(ValueError, match="grid shard of size 4"):
+        module.allgather_batch(batch, [4, 4])
+
+
+def _spatial_grid_module(input_grid_size: int, reader_grid_sizes: dict[str, int] | None) -> SingleTraining:
+    class Projector(torch.nn.Module):
+        @property
+        def input_grid_size(self) -> int:
+            return input_grid_size
+
+    class ModelWithProjector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            self.spatial_pre_processors = torch.nn.ModuleDict({"in_lres": Projector()})
+
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = ModelWithProjector()
+    if reader_grid_sizes is None:
+        module._trainer = SimpleNamespace(datamodule=None)
+    else:
+        readers = {name: SimpleNamespace(grid_size=size) for name, size in reader_grid_sizes.items()}
+        module._trainer = SimpleNamespace(
+            datamodule=SimpleNamespace(ds_train=SimpleNamespace(data_readers=readers)),
+        )
+    return module
+
+
+def test_spatial_processor_grid_sizes_accepts_matching_source_grid() -> None:
+    module = _spatial_grid_module(input_grid_size=8, reader_grid_sizes={"in_lres": 8})
+
+    module._validate_spatial_processor_grid_sizes()
+
+
+def test_spatial_processor_grid_sizes_rejects_mismatched_source_grid() -> None:
+    """A projector shorter than the zarr grid would silently truncate every rank's read."""
+    module = _spatial_grid_module(input_grid_size=8, reader_grid_sizes={"in_lres": 10})
+
+    with pytest.raises(ValueError, match=r"in_lres.*8.*10"):
+        module._validate_spatial_processor_grid_sizes()
+
+
+def test_spatial_processor_grid_sizes_skips_without_datamodule() -> None:
+    module = _spatial_grid_module(input_grid_size=8, reader_grid_sizes=None)
+
+    module._validate_spatial_processor_grid_sizes()
+
+
+def test_spatial_processor_grid_sizes_rejects_unknown_dataset() -> None:
+    module = _spatial_grid_module(input_grid_size=8, reader_grid_sizes={"other": 10})
+
+    with pytest.raises(ValueError, match=r"in_lres.*no corresponding training data reader"):
+        module._validate_spatial_processor_grid_sizes()
+
+
+def _target_grid_module(output_grid_size: int | None) -> SingleTraining:
+    class Projector(torch.nn.Module):
+        @property
+        def output_grid_size(self) -> int:
+            return output_grid_size
+
+    class ModelWithProjector(torch.nn.Module):
+        def __init__(self) -> None:
+            super().__init__()
+            processors = {} if output_grid_size is None else {"in_lres": Projector()}
+            self.spatial_pre_processors = torch.nn.ModuleDict(processors)
+
+    module = SingleTraining.__new__(SingleTraining)
+    pl.LightningModule.__init__(module)
+    module.model = ModelWithProjector()
+    return module
+
+
+def _graph_with_nodes(**node_counts: int) -> HeteroData:
+    graph = HeteroData()
+    for name, count in node_counts.items():
+        graph[name].num_nodes = count
+    return graph
+
+
+def test_spatial_processor_target_grid_accepts_matching_dataset_nodes() -> None:
+    module = _target_grid_module(output_grid_size=4)
+
+    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4))
+
+
+def test_spatial_processor_target_grid_rejects_mismatched_dataset_nodes() -> None:
+    """The encoder concatenates node attributes, so a mismatch dies mid-forward instead."""
+    module = _target_grid_module(output_grid_size=4)
+
+    with pytest.raises(ValueError, match=r"in_lres.*4.*6"):
+        module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=6))
+
+
+def test_spatial_processor_target_grid_uses_each_datasets_nodes() -> None:
+    module = _target_grid_module(output_grid_size=4)
+    other_projector = torch.nn.Module()
+    other_projector.output_grid_size = 6
+    module.model.spatial_pre_processors["other"] = other_projector
+
+    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4, other=6))
+
+    with pytest.raises(ValueError, match=r"other.*6.*4"):
+        module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=4, other=4))
+
+
+def test_spatial_processor_target_grid_skips_without_processors() -> None:
+    module = _target_grid_module(output_grid_size=None)
+
+    module._validate_spatial_processor_target_grid(_graph_with_nodes(in_lres=6))
 
 
 # Shared minimal configs
@@ -851,8 +1050,19 @@ def test_training_module_plot_adapter_reflects_forecaster_task() -> None:
 
 def _make_single_training(task: Any, data_indices: dict[str, IndexCollection]) -> SingleTraining:
     """Build a SingleTraining module wired for unit tests."""
-    module = SingleTraining.__new__(SingleTraining)
+    return _make_training_module(SingleTraining, task, data_indices)
+
+
+def _make_training_module(
+    module_cls: type[BaseTrainingModule],
+    task: Any,
+    data_indices: dict[str, IndexCollection],
+) -> BaseTrainingModule:
+    """Build a SingleTraining or EnsembleTraining module wired for unit tests."""
+    module = module_cls.__new__(module_cls)
     pl.LightningModule.__init__(module)
+    if issubclass(module_cls, EnsembleTraining):
+        module.nens_per_device = 1
     _wire_training_module(
         module,
         data_indices=data_indices,
@@ -982,6 +1192,155 @@ def test_single_training_loss_is_averaged_over_num_steps(
 
     # Expected average: 3.0 = (2.0 + 4.0) / 2
     assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
+
+
+def _make_scripted_rollout_module(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+    *,
+    rollout: dict[str, int],
+    validation_rollout: int | None,
+    per_step_losses: list[float],
+) -> BaseTrainingModule:
+    """Build a module with a real Forecaster whose per-step dataset losses are scripted.
+
+    Only ``compute_dataset_loss_metrics`` is stubbed: each step returns its scripted value both as the dataset loss
+    and as the metric ``metric/<step>``, so the real ``compute_loss_metrics`` builds the metric keys.
+    """
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout=rollout,
+        validation_rollout=validation_rollout,
+    )
+    module = _make_training_module(module_cls, task, _data_indices_single())
+
+    losses = iter([torch.tensor(value) for value in per_step_losses])
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+
+    def scripted_loss_metrics(
+        y_pred: torch.Tensor,
+        *_args: Any,
+        rollout_step: int,
+        validation_mode: bool = False,
+        **_kwargs: Any,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], torch.Tensor]:
+        value = next(losses)
+        metrics = {f"metric/{rollout_step + 1}": value} if validation_mode else {}
+        return value, metrics, y_pred
+
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+    monkeypatch.setattr(module, "compute_dataset_loss_metrics", scripted_loss_metrics)
+    monkeypatch.setattr(module_cls, "logger_enabled", False)
+    monkeypatch.setattr(module, "log", MagicMock())
+    return module
+
+
+def _rollout_batch() -> dict[str, torch.Tensor]:
+    return {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+
+
+def _assert_metrics(metrics: dict[str, torch.Tensor], expected: dict[str, float]) -> None:
+    assert sorted(metrics) == sorted(expected)
+    for name, value in expected.items():
+        assert torch.isclose(metrics[name], torch.tensor(value)), f"{name}: expected {value}, got {metrics[name]}"
+
+
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
+def test_validation_step_longer_validation_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+) -> None:
+    """validation_rollout > training rollout: losses average the training rollout, metrics cover every step."""
+    module = _make_scripted_rollout_module(
+        monkeypatch,
+        module_cls,
+        rollout={"start": 2, "maximum": 2},
+        validation_rollout=4,
+        per_step_losses=[2.0, 4.0, 100.0, 200.0],
+    )
+
+    output = module.validation_step(_rollout_batch(), batch_idx=0)
+
+    # Steps 3 and 4 are unrolled but excluded from the losses: (2.0 + 4.0) / 2 = 3.0
+    assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
+    _assert_metrics(
+        output.metrics,
+        {
+            "data_dummyloss_loss": 3.0,
+            "data_metric/1": 2.0,
+            "data_metric/2": 4.0,
+            "data_metric/3": 100.0,
+            "data_metric/4": 200.0,
+        },
+    )
+
+
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
+def test_validation_step_shorter_validation_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+) -> None:
+    """validation_rollout < training rollout: all training steps are unrolled, losses and metrics cover them."""
+    module = _make_scripted_rollout_module(
+        monkeypatch,
+        module_cls,
+        rollout={"start": 3, "maximum": 3},
+        validation_rollout=2,
+        per_step_losses=[1.0, 2.0, 6.0],
+    )
+
+    output = module.validation_step(_rollout_batch(), batch_idx=0)
+
+    # All three training steps enter the losses: (1.0 + 2.0 + 6.0) / 3 = 3.0
+    assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
+    _assert_metrics(
+        output.metrics,
+        {"data_dummyloss_loss": 3.0, "data_metric/1": 1.0, "data_metric/2": 2.0, "data_metric/3": 6.0},
+    )
+
+
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
+def test_validation_step_unset_validation_rollout_follows_training_rollout(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+) -> None:
+    """validation_rollout unset: validation unrolls exactly the current training rollout."""
+    module = _make_scripted_rollout_module(
+        monkeypatch,
+        module_cls,
+        rollout={"start": 1, "epoch_increment": 1, "maximum": 3},
+        validation_rollout=None,
+        per_step_losses=[2.0],
+    )
+
+    output = module.validation_step(_rollout_batch(), batch_idx=0)
+
+    assert torch.isclose(output.loss, torch.tensor(2.0)), f"Expected 2.0, got {output.loss.item()}"
+    _assert_metrics(output.metrics, {"data_dummyloss_loss": 2.0, "data_metric/1": 2.0})
+
+
+@pytest.mark.parametrize("module_cls", [SingleTraining, EnsembleTraining])
+def test_training_step_averages_all_rollout_steps_without_metrics(
+    monkeypatch: pytest.MonkeyPatch,
+    module_cls: type[BaseTrainingModule],
+) -> None:
+    """In training mode every rollout step enters the loss and no metrics are produced."""
+    module = _make_scripted_rollout_module(
+        monkeypatch,
+        module_cls,
+        rollout={"start": 2, "maximum": 2},
+        validation_rollout=4,
+        per_step_losses=[2.0, 4.0],
+    )
+
+    output = module._step(_rollout_batch())
+
+    assert torch.isclose(output.loss, torch.tensor(3.0)), f"Expected 3.0, got {output.loss.item()}"
+    assert output.metrics == {}
+    assert len(output.predictions) == 2
 
 
 def test_single_training_advance_input_called_between_rollout_steps(
