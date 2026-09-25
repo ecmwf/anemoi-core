@@ -307,14 +307,14 @@ class DatasetCache(pl.LightningDataModule):
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
-        try:
-            for position, value in zip(positions, values):
-                namespace.store(sequence, position, value, grid_id, sync=sync)
-        except OSError as error:
-            if not _is_capacity_error(error):
-                raise
-            self.cache_full.value = True
+        for position, value in zip(positions, values):
+            namespace.store(sequence, position, value, grid_id, sync=sync)
+
+        # check if cache is full
+        total, used, free = shutil.disk_usage(self.cache_root)
+        if (used/total) > .8:
             LOGGER.warning("Dataset cache is full on node %s", self.node_id)
+            self.cache_full.value = True
 
     def store_records(self, dataset_id, sequence, positions, values, grid_indices=None):
         namespace = self.namespaces[dataset_id]
