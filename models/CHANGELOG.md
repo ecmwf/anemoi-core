@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.19.1](https://github.com/ecmwf/anemoi-core/compare/models-0.19.0...models-0.19.1) (2026-09-25)
+
+
+### Features
+
+* **models:** Grouped ffts and explicitly backward for gaussian grids ([#1414](https://github.com/ecmwf/anemoi-core/issues/1414)) ([0bdabce](https://github.com/ecmwf/anemoi-core/commit/0bdabce5237c7debd7aef0c605c0cc51785c3467))
+* Spatial preprocessor ([#1305](https://github.com/ecmwf/anemoi-core/issues/1305)) ([89f26fa](https://github.com/ecmwf/anemoi-core/commit/89f26fadd5d0daa9054776b538569da80e713a20))
+
+
+### Bug Fixes
+
+* Add error when passing multiple datasets for one encoder ([#1394](https://github.com/ecmwf/anemoi-core/issues/1394)) ([a01e517](https://github.com/ecmwf/anemoi-core/commit/a01e51785811904e7e61f1152791308f87c08220))
+* Docstrings SkipConnection ([#1431](https://github.com/ecmwf/anemoi-core/issues/1431)) ([02ca484](https://github.com/ecmwf/anemoi-core/commit/02ca48436b37ccc8a60644fb3fcccc7a526553f2))
+* **models:** Decoder-only multi-dataset training for ensemble models ([#1401](https://github.com/ecmwf/anemoi-core/issues/1401)) ([6a98583](https://github.com/ecmwf/anemoi-core/commit/6a9858304a7062c2892e544d18e41948e405f42b))
+* **models:** Spatial_pre_processors attribute access ([#1410](https://github.com/ecmwf/anemoi-core/issues/1410)) ([b52b034](https://github.com/ecmwf/anemoi-core/commit/b52b034bb562dc42a4662fbadad9b5ee2f27e81a))
+* **tests:** Make tests discoverable ([#1359](https://github.com/ecmwf/anemoi-core/issues/1359)) ([54db8ce](https://github.com/ecmwf/anemoi-core/commit/54db8ce706d08f1f6ce814ca40bfc2dc7dba02e1))
+* Torch2.6 compatibility ([#1383](https://github.com/ecmwf/anemoi-core/issues/1383)) ([a48ce21](https://github.com/ecmwf/anemoi-core/commit/a48ce2107ba0d14a5983344b71aab3c3653d4bfc))
+
 ## [0.19.0](https://github.com/ecmwf/anemoi-core/compare/models-0.18.0...models-0.19.0) (2026-09-07)
 
 
