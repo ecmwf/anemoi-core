@@ -36,6 +36,7 @@ from anemoi.training.tasks import Autoencoder
 from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.train.methods import da_single as da_single_module
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.corrector import InstrumentCorrectors
 from anemoi.training.train.methods.da_single import DASingleTraining
@@ -2554,6 +2555,127 @@ def test_da_single_training_truncates_grad_through_early_da_cycles(
     assert grad_modes == expected
     # Every step still contributes a prediction, so callback indexing stays aligned.
     assert len(output.predictions) == len(expected)
+
+
+@pytest.mark.parametrize(
+    ("checkpoint_steps", "validation_mode", "expected"),
+    [
+        (0, False, [False, False, False, False, False]),
+        (3, False, [True, True, True, False, False]),
+        (4, False, [True, True, True, True, False]),
+        # Validation runs without gradients, so nothing is checkpointed.
+        (3, True, [False, False, False, False, False]),
+    ],
+)
+def test_da_single_training_checkpoints_leading_model_calls(
+    monkeypatch: pytest.MonkeyPatch,
+    checkpoint_steps: int,
+    validation_mode: bool,
+    expected: list[bool],
+) -> None:
+    """Only the first checkpoint_steps grad-tracked model calls run inside a checkpoint."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=3,
+        da_loss_weight=0.0,
+        checkpoint_steps=checkpoint_steps,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.grid_shard_slice = {"data": slice(1, 3)}
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y: dict[str, torch.Tensor] = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(
+        module,
+        "compute_loss_metrics",
+        lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y),
+    )
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    in_checkpoint = False
+    real_checkpoint = da_single_module.checkpoint
+
+    def _recording_checkpoint(fn: Any, *args: Any, **kwargs: Any) -> Any:
+        nonlocal in_checkpoint
+        in_checkpoint = True
+        try:
+            return real_checkpoint(fn, *args, **kwargs)
+        finally:
+            in_checkpoint = False
+
+    monkeypatch.setattr(da_single_module, "checkpoint", _recording_checkpoint)
+
+    forward_in_checkpoint: list[bool] = []
+    original_forward = module.forward
+
+    def _recording_forward(x: dict[str, torch.Tensor], **kwargs: Any) -> dict[str, torch.Tensor]:
+        forward_in_checkpoint.append(in_checkpoint)
+        return original_forward(x, **kwargs)
+
+    monkeypatch.setattr(module, "forward", _recording_forward)
+
+    batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+    module._step(batch, validation_mode=validation_mode)
+
+    assert forward_in_checkpoint == expected
+
+
+class _LinearDictModel(torch.nn.Module):
+    """Tiny differentiable model mapping each dataset tensor through a shared Linear."""
+
+    def __init__(self, num_vars: int) -> None:
+        super().__init__()
+        self.lin = torch.nn.Linear(num_vars, num_vars)
+
+    def forward(self, x: dict[str, torch.Tensor], **_kwargs: Any) -> dict[str, torch.Tensor]:
+        return {name: torch.tanh(self.lin(t)) for name, t in x.items()}
+
+
+def _da_step_loss_and_grads(checkpoint_steps: int, batch: dict[str, torch.Tensor]) -> tuple[torch.Tensor, list]:
+    """Run one DA training _step on a tiny real model and backpropagate the loss."""
+    torch.manual_seed(0)
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=3,
+        da_loss_weight=0.0,
+        checkpoint_steps=checkpoint_steps,
+    )
+    module = _make_da_single_training(task, data_indices)
+    module.model = _LinearDictModel(len(_NAME_TO_INDEX))
+    target = {"data": torch.ones(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    task.get_targets = lambda *_a, **_kw: target
+    # Autoregress on the raw prediction so gradients flow back through every DA cycle.
+    task.advance_input = lambda _x, y_pred, *_a, **_kw: y_pred
+    module.compute_loss_metrics = lambda y_for_loss, y_target, **_kw: (
+        (y_for_loss["data"] - y_target["data"]).pow(2).mean(),
+        {},
+        None,
+    )
+
+    output = module._step(batch, validation_mode=False)
+    output.loss.sum().backward()
+    return output.loss.detach(), [p.grad.clone() for p in module.model.parameters()]
+
+
+def test_da_single_training_checkpointing_preserves_gradients() -> None:
+    """Checkpointing DA-cycle model calls leaves the loss and gradients unchanged."""
+    batch = {"data": torch.randn(1, 2, 1, 4, len(_NAME_TO_INDEX))}
+    loss_ref, grads_ref = _da_step_loss_and_grads(0, batch)
+    loss_ckpt, grads_ckpt = _da_step_loss_and_grads(3, batch)
+
+    torch.testing.assert_close(loss_ckpt, loss_ref)
+    assert all(torch.any(g != 0) for g in grads_ref)
+    for g_ckpt, g_ref in zip(grads_ckpt, grads_ref, strict=True):
+        torch.testing.assert_close(g_ckpt, g_ref)
 
 
 def test_da_single_training_skips_targets_for_unweighted_da_steps(monkeypatch: pytest.MonkeyPatch) -> None:

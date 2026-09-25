@@ -110,6 +110,55 @@ def test_da_grad_cycles_out_of_range_raises(da_grad_cycles: int) -> None:
         DAForecaster(multistep_input=1, multistep_output=1, timestep="6h", da_cycles=3, da_grad_cycles=da_grad_cycles)
 
 
+@pytest.mark.parametrize(
+    ("da_grad_cycles", "checkpoint_steps", "expected"),
+    [
+        (3, 0, [False, False, False, False, False]),
+        (3, 2, [True, True, False, False, False]),
+        (3, 3, [True, True, True, False, False]),
+        (3, 5, [True, True, True, True, True]),
+        # Counting starts at the first grad-tracked step; no_grad cycles are never checkpointed.
+        (1, 2, [False, False, True, True, False]),
+        (0, 1, [False, False, False, True, False]),
+    ],
+)
+def test_step_uses_checkpoint_selects_leading_grad_steps(
+    da_grad_cycles: int,
+    checkpoint_steps: int,
+    expected: list[bool],
+) -> None:
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=3,
+        da_grad_cycles=da_grad_cycles,
+        checkpoint_steps=checkpoint_steps,
+    )
+    assert [task.step_uses_checkpoint(**step) for step in task.steps("training")] == expected
+
+
+def test_checkpoint_steps_defaults_to_zero() -> None:
+    task = DAForecaster(multistep_input=1, multistep_output=1, timestep="6h", da_cycles=4)
+    assert task.checkpoint_steps == 0
+    assert not any(task.step_uses_checkpoint(**step) for step in task.steps("training"))
+
+
+@pytest.mark.parametrize(("da_grad_cycles", "checkpoint_steps"), [(3, -1), (3, 6), (1, 4)])
+def test_checkpoint_steps_out_of_range_raises(da_grad_cycles: int, checkpoint_steps: int) -> None:
+    with pytest.raises(ValueError, match="checkpoint_steps"):
+        DAForecaster(
+            multistep_input=1,
+            multistep_output=1,
+            timestep="6h",
+            rollout={"start": 1, "maximum": 2},
+            da_cycles=3,
+            da_grad_cycles=da_grad_cycles,
+            checkpoint_steps=checkpoint_steps,
+        )
+
+
 # ── DA blend ──────────────────────────────────────────────────────────────
 
 

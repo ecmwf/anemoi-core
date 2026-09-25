@@ -74,7 +74,12 @@ class DAForecasterSchema(BaseModel):
     da_grad_cycles: NonNegativeInt | None = Field(default=None, example=[None, 1, 0])
     (
         "Number of trailing DA cycles that backpropagate; earlier cycles run under no_grad as a spin-up. "
-        "Defaults to da_cycles (all)."
+        "Defaults to da_cycles (all). Values below da_cycles degraded validation in A/B runs."
+    )
+    checkpoint_steps: NonNegativeInt = Field(default=0, example=[0, 2, 4])
+    (
+        "Number of leading grad-tracked steps (DA cycles first) whose model call is activation-checkpointed. "
+        "Saves memory at the cost of recomputing those calls in backward; gradients are unchanged."
     )
 
 

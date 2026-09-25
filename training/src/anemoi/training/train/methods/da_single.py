@@ -17,6 +17,8 @@ Pairs with :class:`anemoi.training.tasks.da_forecaster.DAForecaster`. Extends
 - The total loss is averaged over the forecast steps only.
 - DA cycles before the last ``task.da_grad_cycles`` run under ``no_grad`` in
   training, truncating backpropagation through the assimilation spin-up.
+- The model calls of the first ``task.checkpoint_steps`` grad-tracked steps are
+  activation-checkpointed to save memory without changing gradients.
 - A training-only per-instrument corrector network is applied to predictions
   before the loss (never for state advancement).
 """
@@ -237,7 +239,11 @@ class DASingleTraining(SingleTraining):
                 forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
                 if skip_input is not None:
                     forward_kwargs["skip_input"] = skip_input
-                y_pred = self(x, **forward_kwargs)
+                if not validation_mode and self.task.step_uses_checkpoint(**task_kwargs):
+                    # Keep only the inputs and recompute this call in backward.
+                    y_pred = checkpoint(self, x, use_reentrant=False, **forward_kwargs)
+                else:
+                    y_pred = self(x, **forward_kwargs)
 
                 if weight > 0:
                     y = self.task.get_targets(batch, **task_kwargs)
