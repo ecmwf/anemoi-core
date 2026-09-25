@@ -680,3 +680,37 @@ def test_sht_power_spectrum_counts_negative_zonal_wavenumbers(direct_cls, invers
     )
     mean_square = (ring_weights[:, None] * fields[0, 0, 0] ** 2).sum(dim=0) / (4 * math.pi)
     torch.testing.assert_close(psd[0, 0, 0].sum(dim=0), (4 * math.pi) ** 2 * mean_square)
+
+
+@pytest.mark.parametrize(
+    "grid_kind,latitude_grid,nlat",
+    [("regular", "legendre-gauss", 48), ("octahedral", "legendre-gauss", 48), ("regular", "equiangular-poles", 49)],
+)
+@pytest.mark.parametrize("shape", [(3, 3), (9, 5), (24, 24)])
+def test_inverse_accepts_smaller_coefficient_arrays(grid_kind, latitude_grid, nlat, shape):
+    """A smaller [l, m] array gives the same field and gradients as an inverse built for that size."""
+    truncation = 23
+    lons_per_lat = _lons_per_lat(nlat=nlat, grid_kind=grid_kind)
+    n_l, n_m = shape
+    large = InverseSphericalHarmonicTransform(lons_per_lat, truncation, latitude_grid=latitude_grid)
+    small = InverseSphericalHarmonicTransform(lons_per_lat, max(n_l, n_m) - 1, latitude_grid=latitude_grid)
+
+    torch.manual_seed(0)
+    coefficients = torch.randn(2, n_l, n_m, dtype=torch.complex128).tril()
+    coefficients[..., 0].imag = 0
+    coefficients.requires_grad_()
+    padded = torch.nn.functional.pad(coefficients, (0, max(n_l, n_m) - n_m, 0, max(n_l, n_m) - n_l))
+    weights = torch.randn(2, sum(lons_per_lat), dtype=torch.float64)
+
+    actual = large(coefficients)
+    expected = small(padded)
+    torch.testing.assert_close(actual, expected, rtol=1e-12, atol=1e-12)
+    actual_grad = torch.autograd.grad((weights * actual).sum(), coefficients)[0]
+    expected_grad = torch.autograd.grad((weights * expected).sum(), coefficients)[0]
+    torch.testing.assert_close(actual_grad, expected_grad, rtol=1e-12, atol=1e-12)
+
+
+def test_inverse_rejects_coefficient_arrays_beyond_its_truncation():
+    inverse = InverseSphericalHarmonicTransform(_lons_per_lat(nlat=16, grid_kind="octahedral"), 7)
+    with pytest.raises(ValueError):
+        inverse(torch.zeros(1, 9, 8, dtype=torch.complex128))
