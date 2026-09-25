@@ -151,6 +151,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
         the per-node attributes on the feature dimension, and computes the residual skip tensor.
 
+        Parameters
+        ----------
+        x : Tensor
+            Raw input for this dataset, shaped ``(batch, time, ensemble, grid, vars)``.
+        batch_size : int
+            Number of samples in the batch, used to repeat the node attributes.
+        grid_shard_sizes : DatasetShardSizes or None
+            Grid shard sizes for every dataset. ``None`` means no dataset is sharded.
+        model_comm_group : ProcessGroup or None, optional
+            Group of devices that share the model when the grid is sharded.
+        dataset_name : str or None, optional
+            Name of the dataset to assemble. Required.
+
         Returns
         -------
         tuple[Tensor, Tensor, ShardSizes]
@@ -195,6 +208,22 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         Concatenates the feature blocks listed in ``decoders_target_input`` for this dataset's
         decoder into the per-node vector fed to the decoder as ``x_dst``.
+
+        Parameters
+        ----------
+        x_input_data : Tensor
+            Raw input for this dataset, shaped ``(batch, time, ensemble, grid, vars)``.
+        x_encoded_data : Tensor or None
+            Data-node output of this dataset's encoder, or ``None`` when the dataset has
+            no encoder.
+        batch_size : int
+            Number of samples in the batch.
+        grid_shard_sizes : DatasetShardSizes or None, optional
+            Grid shard sizes for every dataset. ``None`` means no dataset is sharded.
+        model_comm_group : ProcessGroup or None, optional
+            Group of devices that share the model when the grid is sharded.
+        dataset_name : str or None, optional
+            Name of the dataset to assemble. Required.
 
         Returns
         -------
@@ -291,17 +320,19 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs
+            Additional model-specific arguments.
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
 
