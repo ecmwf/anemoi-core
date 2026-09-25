@@ -18,6 +18,16 @@ from torch import Tensor
 from torch.nn import Module
 from torch.nn import functional as F
 
+# PyTorch keeps a cuFFT plan for each ring length, batch size and direction, 4096 per GPU by default.
+# On an octahedral grid every latitude has its own ring length, so at O1280 a wavelet transform with its
+# backward pass alone needs 5120 plans. When they do not all fit, plans are thrown away and rebuilt on
+# every call, which makes the transforms many times slower. A plan holds about 120 KB of GPU memory, and
+# only plans that are actually used take memory, so the limit is raised here and never lowered.
+CUFFT_PLAN_CACHE_SIZE = 8192
+for _device in range(torch.cuda.device_count()):
+    _plan_cache = torch.backends.cuda.cufft_plan_cache[_device]
+    _plan_cache.max_size = max(_plan_cache.max_size, CUFFT_PLAN_CACHE_SIZE)
+
 
 class RingFFT(Module):
     """Compute ring FFTs and their adjoints, grouping rings by length.

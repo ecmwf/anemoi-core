@@ -291,6 +291,20 @@ class LegendreTableSet:
             zonal_sign=(-1.0) ** torch.arange(truncation + 1, dtype=dtype, device=device),
         )
 
+    def up_to(self, truncation: int) -> tuple[list[tuple[int, Tensor]], Tensor, Tensor]:
+        """Return Legendre blocks, quadrature weights and signs (-1)^m for a truncation up to this set's own.
+
+        Select blocks starting at m <= truncation and slice their order and degree axes to the required
+        size. See ``hemisphere_legendre_blocks`` for the layout.
+        """
+        n_j = (truncation + 2) // 2
+        blocks = [
+            (m0, table[: truncation + 1 - m0, :, : n_j - m0 // 2])
+            for m0, table in self.legendre_blocks
+            if m0 <= truncation
+        ]
+        return blocks, self.quadrature_weight, self.zonal_sign[: truncation + 1]
+
 
 class LegendreTables:
     """Cache Legendre tables for spherical harmonic transforms in this process.
@@ -333,24 +347,6 @@ class LegendreTables:
 
 
 LEGENDRE_TABLES = LegendreTables()
-
-
-def _transform_tables(
-    nlat: int, latitude_grid: LatitudeGrid, truncation: int, dtype: torch.dtype, device: torch.device
-) -> tuple[list[tuple[int, Tensor]], Tensor, Tensor]:
-    """Return cached Legendre blocks, quadrature weights and signs (-1)^m for this truncation.
-
-    Select blocks starting at m <= truncation and slice their order and degree axes to the required
-    size. See ``hemisphere_legendre_blocks`` for the layout.
-    """
-    tables = LEGENDRE_TABLES.get(nlat, latitude_grid, truncation, dtype, device)
-    n_j = (truncation + 2) // 2
-    blocks = [
-        (m0, table[: truncation + 1 - m0, :, : n_j - m0 // 2])
-        for m0, table in tables.legendre_blocks
-        if m0 <= truncation
-    ]
-    return blocks, tables.quadrature_weight, tables.zonal_sign[: truncation + 1]
 
 
 class SphericalHarmonicTransform(Module):
@@ -493,9 +489,8 @@ class SphericalHarmonicTransform(Module):
         """
 
         x = torch.view_as_real(self.rfft_rings(x)[..., : self.truncation + 1])  # [..., latitude, m, real/imaginary]
-        blocks, quadrature_weight, zonal_sign = _transform_tables(
-            self.nlat, self.latitude_grid, self.truncation, x.dtype, x.device
-        )
+        tables = LEGENDRE_TABLES.get(self.nlat, self.latitude_grid, self.truncation, x.dtype, x.device)
+        blocks, quadrature_weight, zonal_sign = tables.up_to(self.truncation)
 
         # Pair each northern ring with its mirror in the south. Degrees with l + m even take the sum of
         # the two rings and degrees with l + m odd the difference: with l = 2 j + r, that is
@@ -649,7 +644,8 @@ class InverseSphericalHarmonicTransform(Module):
         Parameters
         ----------
         x : torch.Tensor
-            spectral representation of field [..., total wavenumber l, zonal wavenumber m].
+            spectral representation of field [..., total wavenumber l, zonal wavenumber m]. Both sizes may be
+            smaller than truncation + 1; the missing higher wavenumbers are then taken as zero.
 
         Returns
         -------
@@ -657,10 +653,21 @@ class InverseSphericalHarmonicTransform(Module):
             field [..., grid].
         """
 
+        n_l, n_m = x.shape[-2], x.shape[-1]
+        size = self.truncation + 1
+        if not (1 <= n_l <= size and 1 <= n_m <= size):
+            raise ValueError(
+                f"Spectral shape (l={n_l}, m={n_m}) must lie between 1 and truncation + 1 = {size} in both dimensions."
+            )
+        # A smaller input uses only the part of the tables that it reaches, so it costs less. The tables
+        # are still built for the full truncation, so that inputs of growing size do not rebuild them.
+        truncation = max(n_l, n_m) - 1
+        tables = LEGENDRE_TABLES.get(self.nlat, self.latitude_grid, self.truncation, x.real.dtype, x.device)
+        blocks, _, zonal_sign = tables.up_to(truncation)
+        n_j = (truncation + 2) // 2
+
         x = torch.view_as_real(x)  # [..., l, m, real/imaginary]
-        blocks, _, zonal_sign = _transform_tables(self.nlat, self.latitude_grid, self.truncation, x.dtype, x.device)
-        n_j = (self.truncation + 2) // 2
-        x = F.pad(x, (0, 0, 0, 0, 0, 2 * n_j - (self.truncation + 1)))
+        x = F.pad(x, (0, 0, 0, truncation + 1 - n_m, 0, 2 * n_j - n_l))
         x = x.unflatten(-3, (n_j, 2))  # [..., j, r, m, real/imaginary], with l = 2 j + r
 
         # Sum the even and the odd degrees separately on the northern rings. The mirrored southern ring
