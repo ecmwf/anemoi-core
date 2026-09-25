@@ -11,12 +11,13 @@ from types import SimpleNamespace
 
 import numpy as np
 
+from anemoi.training.data.iteration import BaseIteration
 from anemoi.training.data.iteration import CrossDatasetIteration
 
 
 def make_dataset(
-    valid_date_indices: dict[str, np.ndarray],
-    chunk_index_range: dict[str, np.ndarray],
+    valid_date_indices: np.ndarray | dict[str, np.ndarray],
+    chunk_index_range: np.ndarray | dict[str, np.ndarray],
     *,
     shuffle: bool = True,
     seed: int = 42,
@@ -76,3 +77,18 @@ def test_cross_dataset_iteration_repeats_for_same_seed() -> None:
     second = make_dataset(valid_date_indices, chunk_index_range)
 
     assert iteration._sample_indices(first) == iteration._sample_indices(second)
+
+
+def test_cross_dataset_iteration_matches_base_iteration_for_one_dataset() -> None:
+    valid_date_indices = np.arange(8)
+    chunk_index_range = np.arange(2, 7)
+    base_dataset = make_dataset(valid_date_indices, chunk_index_range)
+    cross_dataset = make_dataset(
+        {"dataset": valid_date_indices},
+        {"dataset": chunk_index_range},
+    )
+
+    base_indices = BaseIteration()._sample_indices(base_dataset)
+    cross_indices = CrossDatasetIteration()._sample_indices(cross_dataset)
+
+    assert [index for _, index in cross_indices] == base_indices.tolist()

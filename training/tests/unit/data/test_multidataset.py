@@ -19,6 +19,10 @@ from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
+ITERATION_CONFIG = {
+    "_target_": "anemoi.training.data.iteration.BaseIteration",
+}
+
 
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
@@ -49,7 +53,11 @@ class TestMultiDataset:
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
-        return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+        return MultiDataset(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
+            iteration=ITERATION_CONFIG,
+        )
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns a flat range over the valid (sequence, position) anchors."""
@@ -153,7 +161,11 @@ class TestMultiDataset:
         empty_dataset = data_readers["dataset_b"]
         err_msg = f"No valid anchors found for data reader 'dataset_b': {empty_dataset}"
         with pytest.raises(ValueError, match=re.escape(err_msg)):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=relative_date_indices,
+                iteration=ITERATION_CONFIG,
+            )
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when intersection of valid anchors is empty."""
@@ -165,4 +177,8 @@ class TestMultiDataset:
         data_readers["dataset_b"].compute_anchors.return_value = np.array([[0, 5], [0, 6], [0, 7]], dtype=np.int64)
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=relative_date_indices,
+                iteration=ITERATION_CONFIG,
+            )

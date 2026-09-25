@@ -6,7 +6,6 @@ fake_dataloading: False
 
 iteration:
   _target_: anemoi.training.data.iteration.CrossDatasetIteration
-check_dataset_units: true
 
 read_group_size: ${system.hardware.num_gpus_per_model}
 

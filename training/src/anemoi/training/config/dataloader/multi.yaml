@@ -4,8 +4,8 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
-iteration: null
-check_dataset_units: false
+iteration:
+  _target_: anemoi.training.data.iteration.BaseIteration
 
 # ============
 # read_group_size:

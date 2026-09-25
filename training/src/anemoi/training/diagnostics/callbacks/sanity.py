@@ -10,8 +10,10 @@
 import logging
 
 import pytorch_lightning as pl
-from omegaconf import OmegaConf
 
+from anemoi.training.data.iteration import CrossDatasetIteration
+from anemoi.training.losses.utils import check_loss_tree_variable_units
+from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 from anemoi.training.utils.variables_metadata import check_variables_metadata_compatibility
 
 LOGGER = logging.getLogger(__name__)
@@ -60,19 +62,33 @@ class CheckVariableOrder(pl.callbacks.Callback):
 
     @staticmethod
     def _check_variable_units(trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Check unit compatibility between checkpoint and current dataset.
+        """Check variable compatibility required by the configured training run.
 
         Raises
         ------
         ValueError
-            If variables have incompatible units between checkpoint and dataset.
+            If variables have incompatible metadata.
         """
-        ckpt_variables_metadata = getattr(pl_module, "_ckpt_variables_metadata", None)
-        compat_cfg = trainer.datamodule.config.training.get("check_variables_compatibility", {})
-        compat_options = (
-            OmegaConf.to_container(compat_cfg, resolve=True) if OmegaConf.is_config(compat_cfg) else (compat_cfg or {})
-        )
-        check_variables_metadata_compatibility(ckpt_variables_metadata, trainer.datamodule.metadata, **compat_options)
+        compat_options = dict(trainer.datamodule.config.training.check_variables_compatibility)
+
+        if isinstance(trainer.datamodule.ds_train.iteration, CrossDatasetIteration):
+            check_datasets_variables_compatibility(
+                {name: data.typed_variables for name, data in trainer.datamodule.ds_train.data.items()},
+                **compat_options,
+            )
+
+        for dataset_name in pl_module.target_dataset_names:
+            check_loss_tree_variable_units(
+                pl_module.loss[dataset_name],
+                trainer.datamodule.metadata[dataset_name].get("variables_metadata"),
+            )
+
+        if pl_module._ckpt_variables_metadata is not None:
+            check_variables_metadata_compatibility(
+                pl_module._ckpt_variables_metadata,
+                trainer.datamodule.metadata,
+                **compat_options,
+            )
 
     def on_validation_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
         """Check the order of the variables in the model from checkpoint and the validation data.

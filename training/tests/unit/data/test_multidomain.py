@@ -18,6 +18,7 @@ from pytest_mock import MockFixture
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.tasks.temporal_downscaler import TemporalDownscaler
+from anemoi.training.utils.variables_metadata import check_datasets_variables_compatibility
 from anemoi.transform.variables import Variable
 
 ITERATION_CONFIG = {
@@ -61,7 +62,6 @@ class TestMultiDomain:
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
             iteration=ITERATION_CONFIG,
-            check_dataset_units=True,
         )
 
     def test_sharding(self, multi_domain: MultiDataset) -> None:
@@ -99,17 +99,14 @@ class TestMultiDomain:
                 iteration=ITERATION_CONFIG,
             )
 
-    def test_check_datasets_units_runs_during_initialization(self, multi_domain: MultiDataset) -> None:
+    def test_check_datasets_units(self, multi_domain: MultiDataset) -> None:
         multi_domain.data_readers["dataset_b"].data.typed_variables = {
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
 
         with pytest.raises(ValueError, match="Variable compatibility check failed"):
-            MultiDataset(
-                data_readers=multi_domain.data_readers,
-                relative_date_indices=multi_domain.relative_date_indices,
-                iteration=ITERATION_CONFIG,
-                check_dataset_units=True,
+            check_datasets_variables_compatibility(
+                {name: data.typed_variables for name, data in multi_domain.data.items()},
             )
 
     def test_check_datasets_units_accepts_compatibility_options(self, multi_domain: MultiDataset) -> None:
@@ -117,12 +114,9 @@ class TestMultiDomain:
             "10u": Variable.from_dict("10u", {"units": "km/h"}),
         }
 
-        MultiDataset(
-            data_readers=multi_domain.data_readers,
-            relative_date_indices=multi_domain.relative_date_indices,
-            iteration=ITERATION_CONFIG,
-            check_dataset_units=True,
-            check_variables_compatibility={"ignore_units": True},
+        check_datasets_variables_compatibility(
+            {name: data.typed_variables for name, data in multi_domain.data.items()},
+            ignore_units=True,
         )
 
     def test_temporal_downscaler_offsets_are_loaded_from_one_domain(self, mocker: MockFixture) -> None:

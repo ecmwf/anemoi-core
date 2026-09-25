@@ -78,15 +78,15 @@ The data module selects multi-domain sampling through the iteration configuratio
    dataloader:
      iteration:
        _target_: anemoi.training.data.iteration.CrossDatasetIteration
-     check_dataset_units: true
      batch_size:
        training: 1
        validation: 1
        test: 1
 
 A batch size of one is currently required because each sample contains one
-domain key. Flat encoder-processor-decoder models can route each domain through
-its own hidden mesh while sharing the encoder, processor, and decoder weights::
+domain key. Common variables are checked for metadata compatibility once when
+training starts. Flat encoder-processor-decoder models can route each domain
+through its own hidden mesh while sharing the encoder, processor, and decoder weights::
 
    model:
      model:

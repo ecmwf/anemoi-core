@@ -24,7 +24,6 @@ from torch.utils.data import IterableDataset
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.iteration import BaseIteration
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -41,14 +40,12 @@ class MultiDataset(IterableDataset):
         self,
         data_readers: dict[str, BaseAnemoiReader],
         relative_date_indices: dict[str, TimeIndices],
+        iteration: Mapping[str, object],
         shuffle: bool = True,
         label: str = "multi",
         epoch: int = 0,
         rollout: int = 1,
         fake_dataloading: bool = False,
-        iteration: Mapping[str, object] | None = None,
-        check_dataset_units: bool = False,
-        check_variables_compatibility: Mapping[str, object] | None = None,
     ) -> None:
         """Initialize multi-dataset with synchronized data readers.
 
@@ -59,6 +56,8 @@ class MultiDataset(IterableDataset):
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
             Precomputed relative date indices for each data reader
+        iteration : Mapping[str, object]
+            Hydra configuration for dataset iteration
         shuffle : bool, optional
             Shuffle batches, by default True
         label : str, optional
@@ -69,13 +68,6 @@ class MultiDataset(IterableDataset):
             Rollout length represented by the loaded relative date indices, by default 1
         fake_dataloading : bool, optional
             Load one real sample and reuse it for subsequent accesses, by default False
-        iteration : Mapping[str, object], optional
-            Hydra configuration for dataset iteration, by default ``BaseIteration``
-        check_dataset_units : bool, optional
-            Check common variable metadata for compatibility, by default False
-        check_variables_compatibility : Mapping[str, object], optional
-            Options forwarded to ``Variable.check_compatibility`` when
-            ``check_dataset_units`` is enabled.
         """
         self.data_readers = data_readers
         self.label = label
@@ -101,19 +93,16 @@ class MultiDataset(IterableDataset):
             )
             raise ValueError(msg)
 
-        self.iteration = BaseIteration() if iteration is None else instantiate(iteration)
+        self.iteration = instantiate(iteration)
         self._set_date_indices(relative_date_indices)
+        if isinstance(self.valid_date_indices, Mapping):
+            LOGGER.info("valid date indices: %s", self.valid_date_indices)
 
         self._lazy_init_model_and_reader_group_info()
-        if check_dataset_units:
-            self._check_datasets_units(**dict(check_variables_compatibility or {}))
 
     def _set_date_indices(self, relative_date_indices: dict[str, TimeIndices]) -> None:
         """Set anchors and relative date indices."""
-        initializing = not hasattr(self, "valid_date_indices")
         self.anchors, self.valid_date_indices = self.iteration.compute_anchors(self, relative_date_indices)
-        if initializing and isinstance(self.valid_date_indices, Mapping):
-            LOGGER.info("valid date indices: %s", self.valid_date_indices)
 
         # Normalize the date indices to use slices where possible.
         self.relative_date_indices = {
@@ -338,38 +327,6 @@ class MultiDataset(IterableDataset):
         else:
             self.n_samples_per_worker = samples_per_worker
             self.chunk_index_range = chunk_index_range
-
-    def _check_datasets_units(self, **options: object) -> None:
-        """Check common variables for compatibility across datasets."""
-        from anemoi.transform.variables import Variable
-
-        dataset_variables = {}
-        for name, data in self.data.items():
-            if variables := data.typed_variables:
-                dataset_variables[name] = variables
-        if len(dataset_variables) == 0:
-            LOGGER.warning("All datasets have empty metadata, skipping units check.")
-            return
-        if len(dataset_variables) == 1:
-            LOGGER.warning("Only one dataset has variable metadata, skipping units check.")
-            return
-
-        dataset_names = list(dataset_variables)
-        for index, dataset_name in enumerate(dataset_names):
-            for other_name in dataset_names[index + 1 :]:
-                common_variables = dataset_variables[dataset_name].keys() & dataset_variables[other_name].keys()
-                try:
-                    Variable.check_compatibility(
-                        {name: dataset_variables[dataset_name][name] for name in common_variables},
-                        {name: dataset_variables[other_name][name] for name in common_variables},
-                        **options,
-                    )
-                except ValueError as error:
-                    msg = (
-                        f"Variable compatibility check failed for domain1 '{dataset_name}' "
-                        f"and domain2 '{other_name}': {error}"
-                    )
-                    raise ValueError(msg) from error
 
     def per_worker_init(self, n_workers: int, worker_id: int) -> None:
         """Initialize all data readers for this worker."""

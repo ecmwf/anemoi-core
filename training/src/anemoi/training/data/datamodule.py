@@ -132,23 +132,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
-        dataset_options = {}
-        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
-        if dataloader_config.get("fake_dataloading", False):
-            dataset_options["fake_dataloading"] = True
-        if dataloader_config.get("iteration") is not None:
-            dataset_options["iteration"] = dataloader_config.iteration
-        if dataloader_config.get("check_dataset_units", False):
-            dataset_options["check_dataset_units"] = True
 
         return MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
+            iteration=self.config.dataloader.iteration,
             shuffle=shuffle,
             label=label,
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
-            **dataset_options,
+            fake_dataloading=self.config.dataloader.fake_dataloading,
         )
 
     def set_epoch(self, epoch: int) -> None:
@@ -201,7 +194,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         assert stage in {"training", "validation", "test"}
 
         batch_size = self.config.dataloader.batch_size[stage]
-        if isinstance(getattr(ds, "iteration", None), CrossDatasetIteration) and batch_size != 1:
+        if isinstance(ds.iteration, CrossDatasetIteration) and batch_size != 1:
             msg = "Multi-domain sampling currently requires a batch size of one."
             raise ValueError(msg)
 

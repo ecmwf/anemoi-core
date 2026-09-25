@@ -137,7 +137,7 @@ class CrossDatasetIteration(BaseIteration):
             for name, indices in dataset.valid_date_indices.items()
         }
         samples = [(name, int(index)) for name, indices in dataset_indices.items() for index in indices]
-        if dataset.shuffle:
+        if dataset.shuffle and len(dataset_indices) > 1:
             order = dataset.rng.choice(len(samples), size=len(samples), replace=False)
             samples = [samples[int(index)] for index in order]
 

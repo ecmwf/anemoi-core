@@ -18,6 +18,7 @@ from pytest_mock import MockFixture
 from torch.utils.data import IterableDataset
 
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
+from anemoi.training.data.iteration import BaseIteration
 from anemoi.training.data.iteration import CrossDatasetIteration
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.tasks import Forecaster
@@ -27,6 +28,8 @@ from anemoi.training.tasks.base import BaseTask
 
 class TinyIterableDataset(IterableDataset):
     """Minimal iterable dataset for DataLoader construction tests."""
+
+    iteration = BaseIteration()
 
     def __iter__(self) -> Iterator[int]:
         yield 0
@@ -217,6 +220,14 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     datamodule.epoch = 7
     datamodule.task = mocker.Mock()
     datamodule.task.steps.return_value = ({}, {})
+    datamodule.config = DictConfig(
+        {
+            "dataloader": {
+                "iteration": {"_target_": "anemoi.training.data.iteration.BaseIteration"},
+                "fake_dataloading": False,
+            },
+        },
+    )
 
     data_reader = object()
     create_dataset = mocker.patch("anemoi.training.data.datamodule.create_dataset", return_value=data_reader)
@@ -232,10 +243,12 @@ def test_get_dataset_uses_current_epoch_for_lazy_construction(mocker: MockFixtur
     multi_dataset.assert_called_once_with(
         data_readers={"data": data_reader},
         relative_date_indices={"data": [0, 1]},
+        iteration=datamodule.config.dataloader.iteration,
         shuffle=False,
         label="validation",
         epoch=7,
         rollout=2,
+        fake_dataloading=False,
     )
 
 
