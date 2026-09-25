@@ -28,10 +28,7 @@ from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.halo import build_halo_info
-from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.halo import verify_halo_info
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -60,7 +57,6 @@ NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 # Change attention implementation during inference runtime
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
-ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 class BaseBlock(nn.Module, ABC):
@@ -417,13 +413,13 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         out_channels : int
             Number of output channels.
         num_chunks : int
-            Number of chunks
+            Number of chunks.
         mlp_extra_layers : int, optional
-            Extra layers in MLP, by default 0
+            Extra layers in MLP, by default 0.
         update_src_nodes : bool, optional
-            Update src if src and dst nodes are given, by default True
+            Update src if src and dst nodes are given, by default True.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear".
         kwargs : dict
             Additional arguments for the base class.
         """
@@ -1096,54 +1092,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         )
 
         self.shard_strategy = shard_strategy
-        self._cached_halo_info = None
-        self._cached_halo_cache_specs = None
-        self._cached_partition = None
-
-    def _get_or_build_cached_halo_info(
-        self,
-        x: Tensor,
-        edge_index: Adj,
-        shard_info: GraphShardInfo,
-        batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
-    ):
-        """Return cached halo info, building it once when model sharding is active."""
-        if not model_is_distributed(model_comm_group):
-            return None
-
-        if batch_size != 1:
-            raise ValueError(
-                "GraphTransformerProcessorBlock halo exchange requires batch_size=1 when model sharding is enabled."
-            )
-
-        cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
-            return self._cached_halo_info
-
-        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
-
-        bipartite_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_info.nodes,
-            dst_nodes=shard_info.nodes,
-            edges=shard_info.edges,
-        )
-        partition = build_graph_partition_from_shard_info(edge_index, (x, x), bipartite_shard_info, model_comm_group)
-        self._cached_partition = partition
-        self._cached_halo_info = build_halo_info(
-            partition,
-            edge_index,
-            model_comm_group,
-            shard_info.edges,
-            debug=ANEMOI_DEBUG_SHARDING,
-        )
-        self._cached_halo_cache_specs = cache_specs
-
-        if ANEMOI_DEBUG_SHARDING:
-            verify_halo_info(self._cached_halo_info, partition, model_comm_group)
-
-        return self._cached_halo_info
 
     def _forward_edges_shard_strategy(
         self,
@@ -1155,14 +1103,18 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         model_comm_group: Optional[ProcessGroup],
         num_chunks: int,
         edges_are_dst_sorted: bool,
+        halo_info: Optional[HaloInfo] = None,
     ) -> Tensor:
-        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
-
+        if model_is_distributed(model_comm_group) and halo_info is None:
+            raise ValueError(
+                "Distributed edge-sharded GraphTransformerProcessorBlock requires halo_info "
+                "from GraphTransformerProcessor."
+            )
         if halo_info is not None:
             x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
             edge_index_for_attention = halo_info.edge_index_local
             # attention_size: local nodes (dst) attend to local + halo nodes (src)
-            attention_size = (halo_info.total_nodes, halo_info.num_local_nodes)
+            attention_size = (halo_info.total_src_nodes, halo_info.num_local_dst_nodes)
         else:
             x_plus_halo = x
             edge_index_for_attention = edge_index
@@ -1227,6 +1179,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         edges_are_dst_sorted: bool = True,
+        halo_info: Optional[HaloInfo] = None,
         **kwargs,
     ):
         x_skip = x
@@ -1250,6 +1203,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
                 model_comm_group,
                 num_chunks,
                 edges_are_dst_sorted,
+                halo_info,
             )
         else:
             out = self._forward_heads_shard_strategy(
