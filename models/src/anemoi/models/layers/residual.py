@@ -64,7 +64,12 @@ class SkipConnection(BaseResidualConnection):
 
     The default is to return the last input step.
     This module is used to bypass processing layers and directly pass the latest input forward.
-    """
+    Parameters
+    ----------
+    step : int, default -1
+        Index along the time dimension of the input to return.
+        -1 selects the most recent (last) input step.
+"""
 
     def __init__(self, step: int = -1, **_) -> None:
         super().__init__()
