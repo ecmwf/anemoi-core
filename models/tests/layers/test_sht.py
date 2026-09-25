@@ -138,13 +138,53 @@ def _dense_reference(
     return torch.view_as_complex(forward.contiguous()), grid
 
 
-@pytest.fixture(params=[1, 3, 16], ids=lambda width: f"orders_per_block={width}")
+@pytest.fixture(params=[(1, 4), (3, 2), (16, 8)], ids=lambda layout: f"first_width={layout[0]}-widen_after={layout[1]}")
 def order_blocks(request, monkeypatch):
-    """Set the minimum number of orders per Legendre block for each test."""
-    monkeypatch.setattr(spectral_helpers, "MIN_ORDERS_PER_BLOCK", request.param)
+    """Set the width of the first Legendre blocks and how many there are before the width doubles.
+
+    The small layouts make the blocks widen within the truncations these tests use.
+    """
+    width, before_widening = request.param
+    monkeypatch.setattr(spectral_helpers, "FIRST_BLOCK_WIDTH", width)
+    monkeypatch.setattr(spectral_helpers, "BLOCKS_BEFORE_WIDENING", before_widening)
     LEGENDRE_TABLES.clear()  # tables built with other blocks must not be reused
     yield request.param
     LEGENDRE_TABLES.clear()
+
+
+@pytest.mark.parametrize("layout", [(1, 4), (3, 2), (16, 8)])
+def test_block_boundaries_do_not_depend_on_the_truncation(layout, monkeypatch):
+    """A lower truncation uses the leading blocks of a higher one, so cut tables match tables built for it."""
+    monkeypatch.setattr(spectral_helpers, "FIRST_BLOCK_WIDTH", layout[0])
+    monkeypatch.setattr(spectral_helpers, "BLOCKS_BEFORE_WIDENING", layout[1])
+    largest = first_orders_of_blocks(1279)
+    for truncation in range(1280):
+        assert first_orders_of_blocks(truncation) == [m for m in largest if m <= truncation]
+
+
+def test_default_blocks_widen_from_order_128():
+    assert first_orders_of_blocks(639) == [*range(0, 128, 16), 128, 160, 192, 224, 256, 320, 384, 448, 512]
+
+
+def test_transforms_of_different_truncations_can_be_recomputed_for_gradients(order_blocks):
+    """Two truncations on one grid inside a checkpoint, from an empty cache.
+
+    The higher truncation replaces the tables the lower one built during the forward pass, and the pass is run
+    again for the gradients. Both runs must save the same tensors, and the gradients must match the uncheckpointed
+    ones.
+    """
+    # Above T127 blocks laid out by truncation would differ between the two; T255 needs 256 latitudes.
+    lons = _lons_per_lat(256, "octahedral")
+    low, high = SphericalHarmonicTransform(lons, 31), SphericalHarmonicTransform(lons, 255)
+    x = torch.randn(2, sum(lons), dtype=torch.float64, requires_grad=True)
+
+    def loss(x):
+        return low(x).abs().square().sum() + high(x).abs().square().sum()
+
+    (expected,) = torch.autograd.grad(loss(x), x)
+    LEGENDRE_TABLES.clear()
+    torch.utils.checkpoint.checkpoint(loss, x, use_reentrant=False).backward()
+    torch.testing.assert_close(x.grad, expected)
 
 
 @pytest.mark.parametrize("truncation", [5, 6, 14, 15, 31])

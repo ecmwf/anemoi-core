@@ -160,15 +160,24 @@ def legendre_by_degree(truncation: int, x: np.ndarray, device: torch.device | st
         yield current
 
 
-# The orders m are split into at most this many blocks, each at least this wide.
-BLOCKS_OF_ORDERS = 8
-MIN_ORDERS_PER_BLOCK = 16
+# The orders m are split into blocks FIRST_BLOCK_WIDTH wide for the first BLOCKS_BEFORE_WIDENING blocks, and the
+# width doubles each time m doubles from there. The blocks are narrow where most zeros can be left out and few at
+# high orders. Their boundaries do not depend on the truncation, so a lower truncation uses the leading blocks of a
+# higher one, and its tables look the same whether they were built for it or cut from a larger set.
+FIRST_BLOCK_WIDTH = 16
+BLOCKS_BEFORE_WIDENING = 8
 
 
 def first_orders_of_blocks(truncation: int) -> list[int]:
     """Return the first order m of each block covering orders 0 through truncation."""
-    width = max(MIN_ORDERS_PER_BLOCK, -(-(truncation + 1) // BLOCKS_OF_ORDERS))
-    return list(range(0, truncation + 1, width))
+    starts, m, width = [], 0, FIRST_BLOCK_WIDTH
+    widen_at = FIRST_BLOCK_WIDTH * BLOCKS_BEFORE_WIDENING
+    while m <= truncation:
+        if m >= widen_at:
+            width, widen_at = 2 * width, 2 * widen_at
+        starts.append(m)
+        m += width
+    return starts
 
 
 def hemisphere_legendre_blocks(
@@ -252,7 +261,9 @@ class LegendreTables:
     """Cache Legendre tables for spherical harmonic transforms in this process.
 
     Each (nlat, dtype, device) has one table set, built on first use. A higher truncation replaces
-    the cached set; lower truncations use slices. Tables remain cached until ``clear`` is called.
+    the cached set; lower truncations use slices, which have the same blocks as tables built for them (see
+    ``first_orders_of_blocks``), so a transform does the same work whichever set it uses. Tables remain cached
+    until ``clear`` is called.
 
     Building tables under ``FakeTensorMode`` stores tensors without data and breaks subsequent calls
     with real inputs. ``torch.compile`` with the ``eager`` and ``aot_eager`` backends builds real
