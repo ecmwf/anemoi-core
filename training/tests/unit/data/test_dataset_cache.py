@@ -131,11 +131,12 @@ class TestProcessZMQCacheServerClient:
         finally:
             client.close()
 
-    def test_missing_entry(self, running_server):
+    @pytest.mark.parametrize("dataset_id", ["dataset", "unknown-dataset"])
+    def test_missing_entry(self, running_server, dataset_id):
         client = CacheClient(self.endpoint(running_server))
         try:
             with pytest.raises(RemoteCacheMiss):
-                client.fetch(CacheKey("dataset", 0, 100))
+                client.fetch(CacheKey(dataset_id, 0, 100))
         finally:
             client.close()
 
@@ -186,7 +187,7 @@ class TestDatasetCacheNamespace:
         def sequence_length(self, sequence=0):
             return self.data.shape[0] if self.data.ndim == 4 else self.data.shape[-2]
 
-    def test_analysis_entry_is_committed_once(self, tmp_path, sample_data):
+    def test_analysis_entry_is_stored_once(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
 
         first = sample_data[3]
@@ -195,16 +196,6 @@ class TestDatasetCacheNamespace:
 
         np.testing.assert_array_equal(namespace.local(0, 3), sample_data[3])
         assert list(namespace.committed()) == [("all", 0, 3)]
-
-    def test_stale_marker_is_repaired(self, tmp_path, sample_data):
-        namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
-        entry, marker, _ = namespace.paths(0, 3)
-        marker.parent.mkdir(parents=True)
-        marker.touch()
-
-        assert namespace.local(0, 3) is None
-        assert namespace.store(0, 3, sample_data[3])
-        np.testing.assert_array_equal(namespace.local(0, 3), sample_data[3])
 
     def test_trajectory_sequences_do_not_collide(self, tmp_path):
         data = np.arange(2 * 3 * 1 * 4 * 5).reshape(2, 3, 1, 4, 5)
@@ -229,9 +220,8 @@ class TestDatasetCacheNamespace:
         with pytest.raises(OSError, match="Not enough free space"):
             namespace.store(0, 3, sample_data[3])
 
-        entry, marker, _ = namespace.paths(0, 3)
+        entry, _ = namespace.paths(0, 3)
         assert not entry.exists()
-        assert not marker.exists()
 
     def test_negative_position(self, tmp_path, sample_data):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
@@ -245,7 +235,7 @@ class TestDatasetCacheNamespace:
         assert namespace.store(0, 3, data[3])
         np.testing.assert_array_equal(namespace.local(0, 3), data[3])
 
-        entry, _, _ = namespace.paths(0, 3)
+        entry, _ = namespace.paths(0, 3)
         assert entry.suffixes[-2:] == [".npy", ".blosc"]
         assert entry.stat().st_size < data[3].nbytes / 2
 
@@ -305,7 +295,22 @@ def test_check_cache_reads_missing_records_from_multiple_nodes(tmp_path, sample_
     np.testing.assert_array_equal(np.stack(values), sample_data[[3, 4]])
 
 
-def test_check_cache_recovers_partial_remote_batch(tmp_path, sample_data, monkeypatch):
+def test_check_cache_does_not_probe_without_location_snapshot(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    cache._leaders = {0: 0, 1: 1}
+
+    monkeypatch.setattr(cache, "_remote_cache", lambda node: pytest.fail("unadvertised remote node was checked"))
+
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
+
+    assert values == [None]
+    assert missing == [0]
+
+
+def test_check_cache_falls_back_after_stale_remote_batch(tmp_path, sample_data, monkeypatch):
     namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
     cache = DatasetCache(object(), tmp_path)
     cache.namespaces[namespace.dataset_id] = namespace
@@ -319,18 +324,42 @@ def test_check_cache_recovers_partial_remote_batch(tmp_path, sample_data, monkey
         def request_shard(self, key, positions):
             raise RemoteCacheMiss(key)
 
-        def fetch(self, key):
-            if key.position == 4:
-                raise RemoteCacheMiss(key)
-            return sample_data[key.position]
-
     monkeypatch.setattr(cache, "_remote_cache", lambda node: Remote())
 
     values, missing = cache.check_cache(namespace.dataset_id, 0, [3, 4])
 
-    np.testing.assert_array_equal(values[0], sample_data[3])
-    assert values[1] is None
-    assert missing == [1]
+    assert values == [None, None]
+    assert missing == [0, 1]
+    assert cache._locations[CacheKey(namespace.dataset_id, 0, 3)] == set()
+    assert cache._locations[CacheKey(namespace.dataset_id, 0, 4)] == set()
+
+
+def test_check_cache_tries_only_one_advertised_node(tmp_path, sample_data, monkeypatch):
+    namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", TestDatasetCacheNamespace.FakeReader(sample_data))
+    cache = DatasetCache(object(), tmp_path)
+    cache.namespaces[namespace.dataset_id] = namespace
+    cache.node_id = 0
+    key = CacheKey(namespace.dataset_id, 0, 3)
+    cache._locations = {key: {1, 2}}
+    requested = []
+
+    class Remote:
+        def request_shard(self, key, positions):
+            requested.append((1, positions))
+            raise RemoteCacheMiss(key)
+
+    def remote_cache(node):
+        assert node == 1
+        return Remote()
+
+    monkeypatch.setattr(cache, "_remote_cache", remote_cache)
+
+    values, missing = cache.check_cache(namespace.dataset_id, 0, [3])
+
+    assert values == [None]
+    assert missing == [0]
+    assert requested == [(1, [3])]
+    assert cache._locations[key] == {2}
 
 
 def test_grid_shards_are_cached_separately(tmp_path, sample_data):

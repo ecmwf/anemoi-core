@@ -43,6 +43,11 @@ def save_cache_array(target, value):
     target.write(_BLOSC.encode(buffer.getbuffer()))
 
 
+def read_cache_entry(entries_path, sequence, position, grid_id="all"):
+    entry = Path(entries_path) / grid_id / str(sequence) / f"{position}.npy.blosc"
+    return load_cache_array(entry) if entry.exists() else None
+
+
 def _is_capacity_error(error: OSError) -> bool:
     errnos = {errno.ENOSPC, getattr(errno, "EDQUOT", errno.ENOSPC)}
     messages = ("disk quota exceeded", "no space left on device", "not enough free space")
@@ -59,9 +64,8 @@ class DatasetCacheNamespace:
         self.sequence_lengths = [int(reader.sequence_length(index)) for index in range(self.num_sequences)]
         self.path = root / hashlib.sha256(dataset_id.encode()).hexdigest()[:20]
         self.entries_path = self.path / "entries"
-        self.markers_path = self.path / "committed"
         self.locks_path = self.path / "locks"
-        for path in (self.entries_path, self.markers_path, self.locks_path):
+        for path in (self.entries_path, self.locks_path):
             path.mkdir(parents=True, exist_ok=True)
 
     def normalize(self, sequence, position):
@@ -80,7 +84,6 @@ class DatasetCacheNamespace:
         sequence, position = self.normalize(sequence, position)
         return (
             self.entries_path / grid_id / str(sequence) / f"{position}.npy.blosc",
-            self.markers_path / grid_id / str(sequence) / str(position),
             self.locks_path / grid_id / str(sequence) / f"{position}.lock",
         )
 
@@ -93,17 +96,15 @@ class DatasetCacheNamespace:
             fcntl.flock(lock, fcntl.LOCK_UN)
 
     def local(self, sequence, position, grid_id="all"):
-        entry, marker, _ = self.paths(sequence, position, grid_id)
-        return load_cache_array(entry) if marker.exists() and entry.exists() else None
+        sequence, position = self.normalize(sequence, position)
+        return read_cache_entry(self.entries_path, sequence, position, grid_id)
 
     def store(self, sequence, position, value, grid_id="all", sync=True):
-        entry, marker, lock = self.paths(sequence, position, grid_id)
+        entry, lock = self.paths(sequence, position, grid_id)
         with self.lock(lock):
-            if marker.exists() and entry.exists():
+            if entry.exists():
                 return False
-            marker.unlink(missing_ok=True)
             entry.parent.mkdir(parents=True, exist_ok=True)
-            marker.parent.mkdir(parents=True, exist_ok=True)
             temporary = entry.with_suffix(f".{os.getpid()}.{threading.get_ident()}.tmp")
             try:
                 with temporary.open("wb") as target:
@@ -112,22 +113,19 @@ class DatasetCacheNamespace:
                         target.flush()
                         os.fsync(target.fileno())
                 os.replace(temporary, entry)
-                marker.touch()
                 return True
             except OSError:
                 temporary.unlink(missing_ok=True)
-                entry.unlink(missing_ok=True)
                 raise
 
     def committed(self):
         return (
-            (grid.name, int(sequence.name), int(marker.name))
-            for grid in self.markers_path.iterdir()
+            (grid.name, int(sequence.name), int(entry.name.removesuffix(".npy.blosc")))
+            for grid in self.entries_path.iterdir()
             if grid.is_dir()
             for sequence in grid.iterdir()
             if sequence.is_dir()
-            for marker in sequence.iterdir()
-            if marker.name.isdigit()
+            for entry in sequence.glob("*.npy.blosc")
         )
 
 class DatasetCache(pl.LightningDataModule):
@@ -262,6 +260,11 @@ class DatasetCache(pl.LightningDataModule):
             self._connections[key] = CacheClient(self._endpoint(node))
         return self._connections[key]
 
+    @staticmethod
+    def _increment(counter: Value, amount: int) -> None:
+        with counter.get_lock():
+            counter.value += amount
+
     def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
@@ -272,43 +275,32 @@ class DatasetCache(pl.LightningDataModule):
         keys = [CacheKey(dataset_id, int(sequence), position, grid_id) for position in positions]
         values = [namespace.local(sequence, position, grid_id) for position in positions]
         missing = [index for index, value in enumerate(values) if value is None]
-        self.total_fetches.value += len(positions)
-        self.cache_hits_local.value += len(positions) - len(missing)
+        self._increment(self.total_fetches, len(positions))
+        self._increment(self.cache_hits_local, len(positions) - len(missing))
 
         unresolved = set(missing)
-        candidates = {
-            index: set(self._locations.get(keys[index], set())) - {self.node_id}
-            for index in missing
-        }
-        while any(candidates[index] for index in unresolved):
-            nodes = set().union(*(candidates[index] for index in unresolved))
-            node = min(
-                nodes,
-                key=lambda candidate: (-sum(candidate in candidates[index] for index in unresolved), candidate),
-            )
-            batch = [index for index in sorted(unresolved) if node in candidates[index]]
+        remote_batches = {}
+        for index in missing:
+            nodes = self._locations.get(keys[index], set()) - {self.node_id}
+            if nodes:
+                remote_batches.setdefault(min(nodes), []).append(index)
+
+        for node, batch in remote_batches.items():
             try:
                 remote_positions = [positions[index] for index in batch]
                 connection = self._remote_cache(node)
                 remote = connection.request_shard(keys[batch[0]], remote_positions)
                 for index, value in zip(batch, remote):
                     values[index] = value
+                    self._locations.setdefault(keys[index], set()).add(node)
                 unresolved.difference_update(batch)
-                self.cache_hits_remote.value += len(batch)
-            except RemoteCacheMiss:
+                self._increment(self.cache_hits_remote, len(batch))
+            except (RemoteCacheMiss, RemoteCacheUnavailable):
                 for index in batch:
-                    try:
-                        values[index] = connection.fetch(keys[index])
-                        unresolved.remove(index)
-                        self.cache_hits_remote.value += 1
-                    except (RemoteCacheMiss, RemoteCacheUnavailable):
-                        candidates[index].discard(node)
-            except RemoteCacheUnavailable:
-                for index in batch:
-                    candidates[index].discard(node)
+                    self._locations[keys[index]].discard(node)
 
         missing = sorted(unresolved)
-        self.cache_misses.value += len(missing)
+        self._increment(self.cache_misses, len(missing))
         return values, missing
 
     def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=True):
@@ -336,8 +328,7 @@ class DatasetCache(pl.LightningDataModule):
             self._writer = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dataset-cache-writer")
         if self._pending_write is not None:
             if not self._pending_write.done():
-                with self.cache_writes_skipped.get_lock():
-                    self.cache_writes_skipped.value += len(positions)
+                self._increment(self.cache_writes_skipped, len(positions))
                 return
             self._pending_write.result()
         copied_values = [np.array(value, copy=True) for value in values]
