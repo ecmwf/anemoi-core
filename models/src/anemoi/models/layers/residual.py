@@ -69,7 +69,7 @@ class SkipConnection(BaseResidualConnection):
     step : int, default -1
         Index along the time dimension of the input to return.
         -1 selects the most recent (last) input step.
-"""
+    """
 
     def __init__(self, step: int = -1, **_) -> None:
         super().__init__()
