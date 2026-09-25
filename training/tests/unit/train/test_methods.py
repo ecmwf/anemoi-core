@@ -2653,8 +2653,14 @@ def _da_step_loss_and_grads(checkpoint_steps: int, batch: dict[str, torch.Tensor
     module.model = _LinearDictModel(len(_NAME_TO_INDEX))
     target = {"data": torch.ones(1, 1, 1, 4, len(_NAME_TO_INDEX))}
     task.get_targets = lambda *_a, **_kw: target
+
     # Autoregress on the raw prediction so gradients flow back through every DA cycle.
-    task.advance_input = lambda _x, y_pred, *_a, **_kw: y_pred
+    # Rebind the entry of the same dict in place, as the real advance_input does.
+    def _advance_input(x: dict[str, torch.Tensor], y_pred: dict[str, torch.Tensor], *_a: Any, **_kw: Any) -> dict:
+        x["data"] = y_pred["data"]
+        return x
+
+    task.advance_input = _advance_input
     module.compute_loss_metrics = lambda y_for_loss, y_target, **_kw: (
         (y_for_loss["data"] - y_target["data"]).pow(2).mean(),
         {},

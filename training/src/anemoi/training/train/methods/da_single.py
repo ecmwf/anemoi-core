@@ -240,8 +240,11 @@ class DASingleTraining(SingleTraining):
                 if skip_input is not None:
                     forward_kwargs["skip_input"] = skip_input
                 if not validation_mode and self.task.step_uses_checkpoint(**task_kwargs):
-                    # Keep only the inputs and recompute this call in backward.
-                    y_pred = checkpoint(self, x, use_reentrant=False, **forward_kwargs)
+                    # Keep only the inputs and recompute this call in backward. advance_input
+                    # rebinds entries of the x dict in place, so hand the checkpoint its own
+                    # shallow copies: recompute must see this step's inputs, not the latest state.
+                    ckpt_kwargs = {k: dict(v) if isinstance(v, dict) else v for k, v in forward_kwargs.items()}
+                    y_pred = checkpoint(self, dict(x), use_reentrant=False, **ckpt_kwargs)
                 else:
                     y_pred = self(x, **forward_kwargs)
 
