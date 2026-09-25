@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Compare grouped FFTs and their explicit adjoints with PyTorch's own autograd."""
+"""Compare grouped ring FFTs and their adjoints with torch.fft and autograd."""
 
 import pytest
 import torch
@@ -31,7 +31,7 @@ def seed():
 
 
 def reference_rfft(x, lengths):
-    """Use independent per-ring torch.fft calls with native normalization/autograd."""
+    """Compute each ring's FFT separately with torch.fft and autograd."""
     modes = max(lengths) // 2 + 1
     return torch.stack(
         [
@@ -140,7 +140,7 @@ def test_roundtrip_without_saved_activations(fft_device):
 
 
 def test_metadata_follows_module_conversion(fft_device):
-    """Moving an initialized SHT must move FFT metadata without rounding its scales."""
+    """Check that FFT metadata follows the module's device and retains its integer values."""
     lengths = [5, 8, 8, 5]
     direct = SphericalHarmonicTransform(lengths, truncation=2).cpu()
     inverse = InverseSphericalHarmonicTransform(lengths, truncation=2).cpu()

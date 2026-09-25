@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Batched PyTorch FFTs for equal-length latitude rings, with explicit adjoints."""
+"""Batch latitude rings by length for FFTs and their adjoints."""
 
 from collections import defaultdict
 from numbers import Integral
@@ -20,12 +20,11 @@ from torch.nn import functional as F
 
 
 class RingFFT(Module):
-    """Share packing and FFT operations between the forward, inverse and their adjoints.
+    """Compute ring FFTs and their adjoints, grouping rings by length.
 
-    Both transforms use ``norm="forward"``. We only retain grid metadata, because
-    the linear transforms do not need any saved forward activations for backward.
-    Metadata is stored as nonpersistent integer buffers, so moving the parent
-    SHT moves it too, and it is insensitive to dtype conversions.
+    Both transforms use ``norm="forward"``. Gradients use the adjoints and require only grid
+    metadata. The metadata is stored in nonpersistent integer buffers that follow the module's
+    device and retain their dtype during module conversions.
     """
 
     def __init__(self, lengths: list[int]) -> None:
