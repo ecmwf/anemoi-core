@@ -6,6 +6,12 @@
 # In applying this licence, ECMWF does not waive the privileges and immunities
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from anemoi.models.data.spec import SourceSpec
+
 # How a source's axes collapse into ``(nodes, features)``.
 FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
 

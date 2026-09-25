@@ -11,8 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from batch_builders import build_batch
-from batch_builders import build_source
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
@@ -29,6 +27,8 @@ from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
+from tests.batch_builders import build_batch
+from tests.batch_builders import build_source
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -359,8 +359,8 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     }
     model._hidden_coordinates = lambda: torch.zeros(5, 2)
     model._build_conditioning_kwargs = lambda *_args, **_kwargs: ({"data": {}}, {}, {"data": {}})
-    model._assemble_target = lambda _input, encoded, target, **_kwargs: (
-        flatten(target).coordinates,
+    model._assemble_target = lambda _input, encoded, target, _target_template, **_kwargs: (
+        target.flatten().coordinates,
         encoded,
         None,
         None,
@@ -478,7 +478,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     expected_target_features = torch.zeros(3, 4)
     assembled_views = {}
 
-    def _assemble_target_stub(_input_view, _encoded_data, target_view, **_kwargs):
+    def _assemble_target_stub(_input_view, _encoded_data, target_view, _target_template, **_kwargs):
         assembled_views["obs"] = target_view
         return (
             torch.zeros(3, 2),

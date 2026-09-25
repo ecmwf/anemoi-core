@@ -22,6 +22,7 @@ from anemoi.training.losses.base import Squash_mode
 from anemoi.training.utils.enums import TensorDim
 
 if TYPE_CHECKING:
+    from anemoi.models.data import Source
     from anemoi.models.data import TensorLayout
 
 LOGGER = logging.getLogger(__name__)

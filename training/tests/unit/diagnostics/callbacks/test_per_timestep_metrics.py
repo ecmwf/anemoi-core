@@ -13,13 +13,13 @@ from unittest.mock import MagicMock
 
 import pytest
 import torch
-from batch_builders import build_source
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import Source
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 from anemoi.training.losses import MSELoss
 from anemoi.training.train.step_output import TrainingStepOutput
+from tests.batch_builders import build_source
 
 BS = 2
 TIME = 6

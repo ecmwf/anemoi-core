@@ -9,7 +9,6 @@
 
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from pydantic import TypeAdapter
 from pytest_mock import MockerFixture
@@ -26,6 +25,7 @@ from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+from tests.batch_builders import build_source
 
 
 def _view(data: torch.Tensor) -> Source:

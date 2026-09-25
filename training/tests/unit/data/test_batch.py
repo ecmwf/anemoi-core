@@ -13,12 +13,12 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import SourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources.base import Source
+from tests.batch_builders import build_batch
 
 
 def _gridded_layout() -> TensorLayout:
@@ -169,7 +169,7 @@ def test_gridded_source_view_flatten_repeats_static_coordinates_over_batch_and_e
         statistics={"a": {}},
     )
 
-    flat = flatten(batch["a"])
+    flat = batch["a"].flatten()
 
     expected_coordinates = coordinates.unsqueeze(0).unsqueeze(0).expand(2, 2, 4, 2).reshape(16, 2)
     assert flat.data.shape == (16, 3)
@@ -186,7 +186,7 @@ def test_gridded_source_view_flatten_repeats_dynamic_coordinates_over_ensemble()
         statistics={"a": {}},
     )
 
-    flat = flatten(batch["a"])
+    flat = batch["a"].flatten()
 
     expected_coordinates = coordinates.unsqueeze(1).expand(2, 2, 4, 2).reshape(16, 2)
     assert flat.data.shape == (16, 3)

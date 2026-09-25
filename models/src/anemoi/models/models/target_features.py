@@ -24,8 +24,8 @@ from anemoi.models.distributed.graph import shard_tensor
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data.flat import FlatSource
     from anemoi.models.data.sources.base import Source
-    from anemoi.models.data_adapter import FlatSource
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.models.base import BaseGraphModel
 
@@ -112,12 +112,7 @@ class DecodingTargetFeature(ABC):
         ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
 
         out = self._compute(
-            x_input_data,
-            x_encoded_data,
-            x_target,
-            target_spec,
-            batch_size=batch_size,
-            dataset_name=dataset_name
+            x_input_data, x_encoded_data, x_target, target_spec, batch_size=batch_size, dataset_name=dataset_name
         )
 
         if self.needs_sharding and grid_shard_sizes is not None:
@@ -252,7 +247,7 @@ class PrognosticsFeature(DecodingTargetFeature):
         indices = self.model._internal_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        return flatten(x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices)).data
+        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
 
 
 @register_target_feature("trainable_parameters")

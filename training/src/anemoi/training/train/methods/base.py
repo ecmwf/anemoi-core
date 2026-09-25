@@ -29,6 +29,8 @@ from anemoi.models.data import Batch
 from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.shapes import DatasetShardSizes
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -615,10 +617,21 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
 
+    def _grid_shard_sizes(self, source: Source | Batch) -> ShardSizes | DatasetShardSizes:
+        """Grid shard sizes of the source, or per dataset when given a Batch.
+
+        Returns None when the source is replicated (not sharded) or is a TabularSource.
+        """
+        if isinstance(source, Batch):
+            return {name: self._grid_shard_sizes(dataset_source) for name, dataset_source in source.items()}
+        if isinstance(source, TabularSource):
+            return None
+        return source.shard_sizes
+
     def _grid_shard_slice(self, source: Source) -> slice | None:
         """Local grid shard slice for ``source``, derived from its shard sizes.
 
-        Returns ``None`` when the source is replicated (not sharded).
+        Returns None when the source is replicated (not sharded).
         """
         # no per-grid scalers/masks for TabularSource that would need to be sliced
         if isinstance(source, TabularSource):

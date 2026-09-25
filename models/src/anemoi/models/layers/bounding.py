@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from abc import ABC
 from abc import abstractmethod
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -19,6 +20,9 @@ from torch import nn
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.activations import leaky_hardtanh
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 
 class BaseBounding(nn.Module, ABC):
@@ -233,9 +237,7 @@ class LeakyFractionBounding(FractionBounding):
         self, data: torch.Tensor, indices: torch.Tensor, name_to_index: dict[str, int], **_kwargs
     ) -> torch.Tensor:
         total_index = torch.tensor([name_to_index[self.total_var]], dtype=torch.long)
-        data[..., indices] = torch.nn.functional.leaky_hardtanh(
-            data[..., indices], min_val=self.min_val, max_val=self.max_val
-        )
+        data[..., indices] = leaky_hardtanh(data[..., indices], min_val=self.min_val, max_val=self.max_val)
         data[..., indices] *= data[..., total_index]
         return data
 

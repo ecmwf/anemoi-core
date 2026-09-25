@@ -303,7 +303,7 @@ class EnsembleTraining(BaseTrainingModule):
             # must be preprocessed accordingly (e.g., with NaN masking)
             target_forcings = self.preprocess_inputs(target_forcings)
 
-            y_pred = self(x, target=target_forcings, **task_step_kwargs)
+            y_pred = self(x, target_forcings=target_forcings, target_template=y.empty(), **task_step_kwargs)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

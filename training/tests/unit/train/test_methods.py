@@ -19,11 +19,10 @@ import einops
 import pytest
 import pytorch_lightning as pl
 import torch
-from batch_builders import build_batch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import Source
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
@@ -56,6 +55,8 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
+from tests.batch_builders import build_batch
+from tests.batch_builders import build_source
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
@@ -825,7 +826,7 @@ class _DataBatch:
         self.data = data
 
     def __getitem__(self, dataset_name: str) -> torch.Tensor:
-        return self[dataset_name].data
+        return self.data[dataset_name]
 
     def keys(self) -> KeysView[str]:
         return self.data.keys()
@@ -1037,7 +1038,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
     target = loss_data[0] if sparse else loss_data
     network_input = objective.conditioned_target["data"]
     network_input = network_input[0] if sparse else network_input
-    torch.testing.assert_close(flatten(target), torch.tensor([2.0, float("nan")]), equal_nan=True)
+    torch.testing.assert_close(target.flatten(), torch.tensor([2.0, float("nan")]), equal_nan=True)
     assert torch.isfinite(network_input).all()
 
     layout = (
@@ -1057,7 +1058,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
     # Dense reduction sums grid nodes; sparse reduction averages them.
     torch.testing.assert_close(loss, torch.tensor(0.5 if sparse else 1.0))
     loss.backward()
-    torch.testing.assert_close(flatten(prediction.grad), torch.tensor([1.0 if sparse else 2.0, 0.0]))
+    torch.testing.assert_close(prediction.grad.flatten(), torch.tensor([1.0 if sparse else 2.0, 0.0]))
 
 
 class _FakeImputingProcessors:
@@ -1705,12 +1706,12 @@ def _make_scripted_rollout_module(
     dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
     def scripted_loss_metrics(
-        y_pred: SourceView,
+        y_pred: Source,
         *_args: Any,
         rollout_step: int,
         validation_mode: bool = False,
         **_kwargs: Any,
-    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], SourceView]:
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor], Source]:
         value = next(losses)
         metrics = {f"metric/{rollout_step + 1}": value} if validation_mode else {}
         return value, metrics, y_pred
@@ -2013,7 +2014,7 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
     assert core_model.call["args"] == (x,)
     assert core_model.call["kwargs"]["target_template"] is target_template
     assert core_model.call["kwargs"]["model_comm_group"] is forecaster.model_comm_group
-    # Shard sizes are read off the input SourceViews (replicated here -> None per dataset)
+    # Shard sizes are read off the input Sources (replicated here -> None per dataset)
     assert core_model.call["kwargs"]["grid_shard_sizes"] == {"data": None}
     assert core_model.call["kwargs"]["schedule_params"] == {"num_steps": 2}
     assert core_model.call["kwargs"]["sampler_params"] == {"sampler": "heun"}

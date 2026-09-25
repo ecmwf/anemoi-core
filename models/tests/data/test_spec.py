@@ -9,7 +9,6 @@
 
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import SourceSample
@@ -18,6 +17,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import make_source
 from anemoi.models.data.sources.tabular import GriddedSource
 from anemoi.models.data.sources.tabular import TabularSource
+from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)

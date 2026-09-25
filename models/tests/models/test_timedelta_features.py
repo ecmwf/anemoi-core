@@ -11,13 +11,13 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from batch_builders import build_source
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.utils.config import DotDict
+from tests.batch_builders import build_source
 
 
 def _model_with_timedelta_attributes(dtype: str = "float32") -> AnemoiModelEncProcDec:

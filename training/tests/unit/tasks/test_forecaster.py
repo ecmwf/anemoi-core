@@ -11,15 +11,16 @@ import datetime
 
 import pytest
 import torch
-from batch_builders import build_batch
 from omegaconf import DictConfig
 
+from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import OffsetForecaster
 from anemoi.training.utils.masks import Boolean1DMask
 from anemoi.training.utils.masks import NoOutputMask
+from tests.batch_builders import build_batch
 
 
 def _make_minimal_index_collection(
@@ -528,12 +529,12 @@ def test_rollout_rotates_input_only_grid_like_upstream(input_values: list[float]
         output_mask={name: NoOutputMask() for name in coordinates},
     )
 
-    torch.testing.assert_close(flatten(advanced["forecast"].data), torch.arange(2.0, n_input + 2))
-    torch.testing.assert_close(flatten(advanced["conditioning"].data), torch.tensor(expected_values))
+    torch.testing.assert_close(advanced["forecast"].data.flatten(), torch.arange(2.0, n_input + 2))
+    torch.testing.assert_close(advanced["conditioning"].data.flatten(), torch.tensor(expected_values))
     assert advanced["conditioning"].coordinates is coordinates["conditioning"]
     assert advanced["conditioning"].variables == ["A"]
-    torch.testing.assert_close(flatten(batch["forecast"].data), torch.arange(1.0, n_input + 1))
-    torch.testing.assert_close(flatten(batch["conditioning"].data), torch.tensor(input_values))
+    torch.testing.assert_close(batch["forecast"].data.flatten(), torch.arange(1.0, n_input + 1))
+    torch.testing.assert_close(batch["conditioning"].data.flatten(), torch.tensor(input_values))
     (advanced["forecast"].data.sum() + advanced["conditioning"].data.sum()).backward()
     torch.testing.assert_close(prediction.grad, torch.ones_like(prediction))
     torch.testing.assert_close(conditioning.grad, torch.ones_like(conditioning))

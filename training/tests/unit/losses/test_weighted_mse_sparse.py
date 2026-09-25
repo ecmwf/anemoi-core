@@ -5,11 +5,11 @@
 from __future__ import annotations
 
 import torch
-from batch_builders import build_source
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources.base import Source
 from anemoi.training.losses import WeightedMSELoss
+from tests.batch_builders import build_source
 
 
 def _sparse_view(data: list[torch.Tensor]) -> Source:

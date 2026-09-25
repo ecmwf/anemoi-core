@@ -55,11 +55,6 @@ class BaseEdgeBuilder(ABC):
         self, source_coords: torch.Tensor, target_coords: torch.Tensor
     ) -> torch.Tensor: ...
 
-    @abstractmethod
-    def compute_edge_index_from_coords(
-        self, source_coords: torch.Tensor, target_coords: torch.Tensor
-    ) -> torch.Tensor: ...
-
     def prepare_node_data(self, graph: HeteroData) -> tuple[NodeStorage, NodeStorage]:
         """Prepare node information and get source and target nodes."""
         return graph[self.source_name], graph[self.target_name]
