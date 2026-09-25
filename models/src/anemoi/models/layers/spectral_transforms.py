@@ -239,9 +239,9 @@ class RegularSHT(SHT):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the regular grid.
+            Number of latitudes in the regular grid. Must be even.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         """
         super().__init__()
         self.nlat = nlat
@@ -278,10 +278,9 @@ class ReducedSHT(SHT):
         grid : str
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Use CUDA graphs for the ring FFTs. Requires CUDA and may use more memory. Default is False.
         """
         super().__init__()
 
@@ -340,12 +339,11 @@ class OctahedralSHT(SHT):
         Parameters
         ----------
         nlat : int
-            Number of latitudes in the octahedral grid. The number of longitudes per latitude will be determined based
-            on the octahedral grid structure.
+            Number of latitudes in the octahedral grid. Must be even.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         use_graphed_rfft : bool
-            Whether to use a graphed implementation of the rfft on reduced grids, which can be faster but may have higher memory usage and may not be supported by all devices.
+            Use CUDA graphs for the ring FFTs. Requires CUDA and may use more memory. Default is False.
         """
         super().__init__()
         self.nlat = nlat
@@ -389,9 +387,9 @@ class InverseRegularSHT(InverseSpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes.
+            Number of latitudes. Must be even.
         truncation : int | None
-            Spectral truncation. Defaults to ``nlat // 2 - 1``.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
@@ -424,10 +422,9 @@ class InverseReducedSHT(InverseSpectralTransform):
         grid : str
             Name of the reduced Gaussian grid (e.g., "n320"). Only "n320" is currently supported.
         truncation : int | None
-            Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Use CUDA graphs for the inverse ring FFTs. Requires CUDA and may use more memory. Default is False.
         """
         super().__init__()
 
@@ -480,12 +477,11 @@ class InverseOctahedralSHT(InverseSpectralTransform):
         Parameters
         ----------
         nlat : int
-            Number of latitudes.
+            Number of latitudes. Must be even.
         truncation : int | None
-            Spectral truncation. Defaults to nlat // 2 - 1.
+            Maximum total wavenumber. Defaults to nlat // 2 - 1.
         use_graphed_irfft : bool
-            Whether to use a graphed implementation of the irfft on reduced grids, which can be faster but may have
-            higher memory usage and may not be supported by all devices.
+            Use CUDA graphs for the inverse ring FFTs. Requires CUDA and may use more memory. Default is False.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """

@@ -358,6 +358,17 @@ class ScalarOrnsteinConnection(BaseResidualConnection):
         Whether theta is a trainable parameter.
     regressors : list[str] | None
         Variable names to use as regressors.
+    graph : HeteroData | None
+        Graph of the model. Not used here; residual connections are all built with the same arguments.
+    statistics : dict | None
+        Statistics of the dataset per variable. When ``theta_init`` is 0, ``stdev`` and ``stdev_tend``
+        give the initial theta.
+    data_indices : IndexCollection
+        Indices of the model's variables, from which the prognostic and regressor variables are taken.
+        Required.
+    dataset_name : str | None
+        Name of the dataset in the graph. Not used here; residual connections are all built with the
+        same arguments.
     """
 
     def __init__(
@@ -448,6 +459,17 @@ class SpectralOrnsteinConnection(BaseResidualConnection):
         ``truncate=True``).
     anti_aliasing : bool
         If True (and ``truncate=True``), use anti-aliasing blending in the filter.
+    graph : HeteroData | None
+        Graph of the model. The coordinates of the dataset's nodes give the number of latitudes and
+        longitudes. Required.
+    statistics : dict | None
+        Statistics of the dataset per variable. When ``theta_init`` is 0, ``stdev`` and ``stdev_tend``
+        give the initial theta.
+    data_indices : IndexCollection
+        Indices of the model's variables, from which the prognostic and regressor variables are taken.
+        Required.
+    dataset_name : str | None
+        Name of the dataset's nodes in ``graph``. Required.
     """
 
     def __init__(
