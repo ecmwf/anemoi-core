@@ -259,7 +259,8 @@ class AnemoiTrainer(ABC):
             validate_loaded_graph(graph, required)
             return graph
 
-        return GraphCreator(graph_config).create(save_path=save_path, overwrite=overwrite)
+        graph_creator = GraphCreator.initialize_from_config(graph_config)
+        return graph_creator.create_graph(save_path=save_path, overwrite=overwrite)
 
     def _validate_transfer_learning_datasets(
         self,

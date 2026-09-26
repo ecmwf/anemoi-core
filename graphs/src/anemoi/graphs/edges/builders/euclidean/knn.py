@@ -30,8 +30,9 @@ class BaseKNNEdges(BaseDistanceEdgeBuilders):
         num_nearest_neighbours: int,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name, attributes=attributes)
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
         self.num_nearest_neighbours = num_nearest_neighbours
@@ -136,10 +137,10 @@ class KNNEdges(BaseKNNEdges):
     """
 
 
-class ReversedKNNEdges(KNNEdges):
+class KNNEdges(BaseKNNEdges):
     """Computes KNN based edges and adds them to the graph.
 
-    It uses as reference the source nodes.
+    It uses as reference the target nodes.
 
     Attributes
     ----------
@@ -158,9 +159,9 @@ class ReversedKNNEdges(KNNEdges):
     -------
     register_edges(graph)
         Register the edges in the graph.
-    register_attributes(graph, config)
+    register_attributes(graph, attributes)
         Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
+    update_graph(graph, attributes)
         Update the graph with the edges.
     """
 
@@ -207,9 +208,9 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
     -------
     register_edges(graph)
         Register the edges in the graph.
-    register_attributes(graph, config)
+    register_attributes(graph, attributes)
         Register attributes in the edges of the graph.
-    update_graph(graph, attrs_config)
+    update_graph(graph, attributes)
         Update the graph with the edges.
     """
 
@@ -221,8 +222,15 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         reversed_num_nearest_neighbours: int | None = None,
         source_mask_attr_name: str | None = None,
         target_mask_attr_name: str | None = None,
+        attributes: list | None = None,
     ) -> None:
-        super().__init__(source_name, target_name, source_mask_attr_name, target_mask_attr_name)
+        super().__init__(
+            source_name,
+            target_name,
+            source_mask_attr_name,
+            target_mask_attr_name,
+            attributes=attributes,
+        )
         assert isinstance(num_nearest_neighbours, int), "Number of nearest neighbours must be an integer."
         assert num_nearest_neighbours > 0, "Number of nearest neighbours must be positive."
 

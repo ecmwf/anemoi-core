@@ -39,19 +39,19 @@ class ReducedGaussianGridNodes(BaseNodeBuilder):
         Get the lat-lon coordinates of the nodes.
     register_nodes(graph, name)
         Register the nodes in the graph.
-    register_attributes(graph, name, config)
+    register_attributes(graph, name, attributes)
         Register the attributes in the nodes of the graph specified.
-    update_graph(graph, name, attrs_config)
+    update_graph(graph, name, attributes)
         Update the graph with new nodes and attributes.
     """
 
-    def __init__(self, grid: int, name: str) -> None:
+    def __init__(self, grid: str, name: str, attributes: list | None = None) -> None:
         """Initialize the ReducedGaussianGridNodes builder."""
         assert re.fullmatch(
             r"^[oOnN]\d+$", grid
         ), f"{self.__class__.__name__}.grid must match the format [n|N|o|O]XXX with XXX latitude lines between the pole and equator."
         self.grid = grid
-        super().__init__(name)
+        super().__init__(name, attributes=attributes)
 
     def get_coordinates(self) -> torch.Tensor:
         """Get the coordinates of the nodes.

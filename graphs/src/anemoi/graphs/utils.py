@@ -11,6 +11,7 @@
 import contextlib
 import logging
 import os
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
@@ -46,6 +47,23 @@ You can install it using:
     TORCH_VERSION=$(python -c "import torch; print(torch.__version__)")
     pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 """
+
+
+def camel_to_snake(name: str) -> str:
+    """Convert camel case to snake case.
+
+    Parameters
+    ----------
+    name : str
+        Camel case string.
+
+    Returns
+    -------
+    str
+        Snake case string.
+    """
+    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
+    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
 
 
 def get_distributed_device() -> torch.device:
