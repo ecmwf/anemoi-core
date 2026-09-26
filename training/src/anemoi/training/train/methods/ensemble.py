@@ -178,6 +178,21 @@ class EnsembleTraining(BaseTrainingModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
 
+    def _member_template(self, targets: Batch) -> Batch:
+        """Data-free output geometry for the tiled members of ``targets``.
+
+        The decoder reads its target node count from the template, so it must describe as many
+        members as the tiled input. Only the captured member count changes: the targets themselves
+        keep their single member for the loss, and nothing is copied.
+        """
+        template = targets.empty()
+        return template.with_sources(
+            {
+                name: source.clone(_ensemble_size=source.ensemble_size * self.nens_per_device)
+                for name, source in template.items()
+            },
+        )
+
     def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
         """Repeat the data nens_per_device times along its ensemble axis (identified from the layout)."""
         repeats = [1] * data.ndim
@@ -195,7 +210,8 @@ class EnsembleTraining(BaseTrainingModule):
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
     ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
-        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.ndim)
+        # a Source has no ndim; the layout's rank is the per-tensor rank (per sample for tabular sources)
+        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.layout.ndim)
 
         def gather_members(tensor: torch.Tensor) -> torch.Tensor:
             return gather_tensor(
@@ -299,11 +315,16 @@ class EnsembleTraining(BaseTrainingModule):
                 **task_step_kwargs,
             )
             y = self.preprocess_targets(raw_targets)
-            # the target forcings are consumed by the decoder, so they are model *inputs* and
-            # must be preprocessed accordingly (e.g., with NaN masking)
-            target_forcings = self.preprocess_inputs(target_forcings)
+            # the target forcings are consumed by the decoder, so they are model inputs and
+            # must be preprocessed accordingly (e.g., with NaN masking) and tiled like x
+            target_forcings = self._expand_ens_dim(self.preprocess_inputs(target_forcings))
 
-            y_pred = self(x, target_forcings=target_forcings, target_template=y.empty(), **task_step_kwargs)
+            y_pred = self(
+                x,
+                target_forcings=target_forcings,
+                target_template=self._member_template(y),
+                **task_step_kwargs,
+            )
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
