@@ -9,23 +9,27 @@
 
 """Tests for PerTimestepMetrics callback."""
 
+import functools
 from unittest.mock import MagicMock
 
 import pytest
 import torch
 
+from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import Source
 from anemoi.training.diagnostics.callbacks.per_timestep_metrics import PerTimestepMetrics
 from anemoi.training.losses import MSELoss
+from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
-from tests.batch_builders import build_source
+from tests.batch_builders import build_batch
 
 BS = 2
 TIME = 6
 ENS = 4
 GRID = 16
 NVAR = 3
+
+_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
 @pytest.fixture
@@ -38,6 +42,16 @@ def callback_every_2() -> PerTimestepMetrics:
     return PerTimestepMetrics(every_n_batches=2)
 
 
+def _gridded_batch(data: torch.Tensor, layout: TensorLayout = _LAYOUT) -> Batch:
+    return build_batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(data.shape[layout.grid], 2)},
+        layouts={"data": layout},
+        variables={"data": [f"v{i}" for i in range(data.shape[layout.variables])]},
+        static_coords={"data"},
+    )
+
+
 def _make_pl_module(
     n_timesteps: int = TIME,
     n_grid: int = GRID,
@@ -46,24 +60,18 @@ def _make_pl_module(
     """Create a mocked pl_module with the attributes needed by the callback."""
     pl_module = MagicMock()
 
-    target = torch.randn(BS, n_timesteps, n_grid, n_var)
+    # targets keep a single ensemble member; get_targets returns (targets, target_forcings)
+    targets = _gridded_batch(torch.randn(BS, n_timesteps, 1, n_grid, n_var))
+    pl_module.task.steps.return_value = ({"rollout_step": 0}, {"rollout_step": 1})
+    pl_module.task.get_targets.return_value = (targets, None)
+    pl_module.preprocess_targets.side_effect = lambda y: y
 
-    # task.get_targets returns targets with ensemble dim
-    y_full = {"data": target.unsqueeze(2)}
-    pl_module.task.get_targets.return_value = y_full
-    pl_module._collapse_ens_dim.return_value = {"data": target}
-
-    pl_module.grid_shard_slice = {"data": None}
-    # no grid sharding: return tensors unchanged with a None slice, as the real method does.
+    # no grid sharding: return sources unchanged with a None slice, as the real method does.
     pl_module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
     pl_module.logger_enabled = True
 
     # calculate_val_metrics returns a dict of metric_name -> tensor
-    def mock_calculate_val_metrics(
-        _y_pred: torch.Tensor,
-        _y: torch.Tensor,
-        **_kwargs: object,
-    ) -> dict[str, torch.Tensor]:
+    def mock_calculate_val_metrics(*_args: object, **_kwargs: object) -> dict[str, torch.Tensor]:
         return {
             "fkcrps_metric/data/pl": torch.tensor(1.0),
             "fkcrps_metric/data/sfc": torch.tensor(2.0),
@@ -81,11 +89,8 @@ def _make_outputs(
     n_var: int = NVAR,
 ) -> TrainingStepOutput:
     """Create outputs as returned by validation_step."""
-    val_loss = torch.tensor(0.5)
-    metrics = {}
-    y_pred = torch.randn(BS, n_timesteps, n_ens, n_grid, n_var)
-    y_preds_dict = {"data": y_pred}
-    return TrainingStepOutput(loss=val_loss, metrics=metrics, predictions=[y_preds_dict])
+    y_pred = _gridded_batch(torch.randn(BS, n_timesteps, n_ens, n_grid, n_var))
+    return TrainingStepOutput(loss=torch.tensor(0.5), metrics={}, predictions=[y_pred])
 
 
 def _make_trainer() -> MagicMock:
@@ -94,10 +99,9 @@ def _make_trainer() -> MagicMock:
     return trainer
 
 
-def _make_batch(n_timesteps: int = TIME) -> dict[str, torch.Tensor]:
-    """Create a batch dict with the expected structure."""
-    total_steps = 2 + n_timesteps
-    return {"data": torch.randn(BS, total_steps, GRID, NVAR)}
+def _make_batch(n_timesteps: int = TIME) -> Batch:
+    """Create a validation batch; the mocked task slices targets from it."""
+    return _gridded_batch(torch.randn(BS, 2 + n_timesteps, 1, GRID, NVAR))
 
 
 class TestPerTimestepMetrics:
@@ -193,7 +197,7 @@ class TestPerTimestepMetrics:
         assert "val_fkcrps_metric/data/sfc/t_1" in logged_names
 
     def test_skips_when_no_outputs(self, callback: PerTimestepMetrics) -> None:
-        """Should skip gracefully when outputs is empty or missing y_preds."""
+        """Should skip gracefully when outputs is empty or missing predictions."""
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
@@ -214,12 +218,13 @@ class TestPerTimestepMetrics:
 
         callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
 
-        # Check each call has time dim of size 1
+        # Check each call has time dim of size 1, and the prediction keeps its ensemble members
         for call in pl_module.calculate_val_metrics.call_args_list:
-            y_pred_arg = call.args[0]
-            y_arg = call.args[1]
-            assert y_pred_arg.shape[1] == 1  # time dim
-            assert y_arg.shape[1] == 1  # time dim
+            y_pred_arg, y_arg = call.args
+            assert y_pred_arg.time_size == 1
+            assert y_arg.time_size == 1
+            assert y_pred_arg.ensemble_size == ENS
+            assert y_arg.ensemble_size == 1
 
     def test_passes_kwargs_to_calculate_val_metrics(self, callback: PerTimestepMetrics) -> None:
         """Verify kwargs passed to calculate_val_metrics."""
@@ -233,65 +238,52 @@ class TestPerTimestepMetrics:
         _, kwargs = pl_module.calculate_val_metrics.call_args_list[0]
         assert kwargs["grid_shard_slice"] is None
         assert kwargs["dataset_name"] == "data"
+        assert kwargs["without_scalers"] == ["time"]
 
-    def test_uses_collapse_ens_dim(self, callback: PerTimestepMetrics) -> None:
-        """Should call _collapse_ens_dim on targets when available."""
+    def test_scores_validation_outputs_without_rerunning_the_model(self, callback: PerTimestepMetrics) -> None:
+        """The predictions come from validation_step; the targets are those of the first validation step."""
         trainer = _make_trainer()
         pl_module = _make_pl_module()
         batch = _make_batch()
         outputs = _make_outputs()
 
         callback.on_validation_batch_end(trainer, pl_module, outputs, batch, batch_idx=0)
-        pl_module._collapse_ens_dim.assert_called_once()
+
+        pl_module.assert_not_called()  # no second forward pass
+        pl_module.task.steps.assert_called_once_with("validation")
+        pl_module.task.get_targets.assert_called_once_with(
+            batch,
+            data_indices=pl_module.data_indices,
+            rollout_step=0,
+        )
+        pl_module.preprocess_targets.assert_called_once()
 
 
-def test_per_timestep_metrics_resolves_time_and_ensemble_axes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_per_timestep_metrics_values_follow_the_layout_time_axis() -> None:
+    """End to end through the real calculate_val_metrics, with the time axis in an unusual position."""
     layout = TensorLayout(batch=0, ensemble=1, grid=2, time=3, variables=4)
+    # 2 members predicting 1 at t_1 and 2 at t_2 against zero targets with a single member
     pred_data = torch.ones(2, 2, 3, 2, 1)
     pred_data[:, :, :, 1, :] = 2.0
     target_data = torch.zeros(2, 1, 3, 2, 1)
 
-    def view(data: torch.Tensor) -> Source:
-        return build_source(
-            name="data",
-            data=data,
-            variables=["a"],
-            statistics={},
-            coordinates=torch.zeros(3, 2),
-            layout=layout,
-            coordinates_are_static=True,
-        )
-
-    pred, target = view(pred_data), view(target_data)
     module = MagicMock()
-    module.task.get_inputs.return_value = {"data": pred}
-    module.task.get_targets.return_value = ({"data": target}, None)
-    module.preprocess_inputs.side_effect = lambda x: x
-    module._expand_ens_dim.side_effect = lambda x: x
-    module.preprocess_targets.side_effect = lambda x: x
-    module.postprocess_targets.side_effect = lambda x: x
-    module.return_value = {"data": pred}
-    module.ens_comm_subgroup = object()
-    module.ens_comm_subgroup_size = 2
-    module.model.post_processors = {"data": lambda x, **_kwargs: x}
+    module.task.steps.return_value = ({},)
+    module.task.get_targets.return_value = (_gridded_batch(target_data, layout), None)
+    module.preprocess_targets.side_effect = lambda y: y
+    module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
+    module._postprocess_dataset_view.side_effect = lambda view, _name, _layout: view
     module.metrics = {"data": {"mse": MSELoss()}}
     module.val_metric_ranges = {"data": {"all": [0]}}
-    module._grid_shard_slice.return_value = None
     module.model_comm_group = None
     module.logger_enabled = True
+    module.calculate_val_metrics = functools.partial(BaseTrainingModule.calculate_val_metrics, module)
 
-    def gather(data: torch.Tensor, *, dim: int, sizes: list[int], mgroup: object) -> torch.Tensor:
-        assert mgroup is module.ens_comm_subgroup
-        assert dim == 1
-        assert sizes == [2, 2]
-        return torch.cat([data, data], dim=dim)
-
-    monkeypatch.setattr("anemoi.models.distributed.graph.gather_tensor", gather)
-    batch = MagicMock()
-    batch.size = 2
-    PerTimestepMetrics()._eval_per_timestep(module, batch)
+    outputs = TrainingStepOutput(loss=torch.tensor(0.0), metrics={}, predictions=[_gridded_batch(pred_data, layout)])
+    PerTimestepMetrics().on_validation_batch_end(_make_trainer(), module, outputs, _make_batch(), batch_idx=0)
 
     assert module.log.call_count == 2
+    # MSE sums over the 3 grid points: 3 * 1^2 at t_1 and 3 * 2^2 at t_2
     for step, (call, expected) in enumerate(zip(module.log.call_args_list, [3.0, 12.0], strict=True), start=1):
         assert call.args[0] == f"val_mse_metric/data/all/t_{step}"
         torch.testing.assert_close(call.args[1], torch.tensor(expected))
