@@ -268,25 +268,6 @@ class Batch:
         """Return a new batch with ``func`` applied to every source's data."""
         return Batch(sources={name: source.apply_func(func, **kwargs) for name, source in self.sources.items()})
 
-    def apply_pairwise(self, other: "Batch", func: Callable, **kwargs) -> dict[str, torch.Tensor]:
-        """Apply ``func`` to each ``(self[name], other[name])`` pair.
-
-        The per-dataset counterpart of a loss over two batches::
-
-            batch.apply_pairwise(target, loss_fn)
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            One result per dataset name, as returned by
-            :meth:`Source.apply_pairwise`.
-        """
-        missing = set(self.sources) - set(other.sources)
-        if missing:
-            msg = f"Other batch is missing dataset(s) {sorted(missing)}."
-            raise ValueError(msg)
-        return {name: source.apply_pairwise(other[name], func, **kwargs) for name, source in self.sources.items()}
-
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.
 
