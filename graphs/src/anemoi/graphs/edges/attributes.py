@@ -31,18 +31,18 @@ LOGGER = logging.getLogger(__name__)
 
 class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
     """Base class for creating edge attributes.
-    
-    It uses the information provided in the config to describe how the attribute is computed. 
+
+    It uses the information provided in the config to describe how the attribute is computed.
 
     It expects the following attributes to be defined:
-    - `name` defines the name of the edge attribute being created. This will be used to store the computed edge 
+    - `name` defines the name of the edge attribute being created. This will be used to store the computed edge
     attributes in the graph data structure (`:class:torch_geometric.data.HeteroData`).
     - `node_attr_name` defines the name of the node attribute needed from the node storage object
     (provided to `.forward()`) from which edge attributes are derived. The coordinates are stored in the `x` attribute
     of the node storage. All the other node attributes are user-defined.
 
     There are other arguments that can be specified too:
-    - `norm_by_group` specifies whether the edge attribute should be normalized by group. This is useful when 
+    - `norm_by_group` specifies whether the edge attribute should be normalized by group. This is useful when
     the graph has multiple groups of nodes and you want to normalize the edge attributes within each group separately.
     - `dtype` specifies the data type of the edge attribute. The default is "torch.float32".
     - `norm` specifies the normalization method to be applied to the edge attribute. The default is None, meaning
@@ -52,8 +52,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         -
         - None: no normalization is applied.
 
-
-    The `compute_edge_attribute` method must be implemented by subclasses to define how the edge attribute 
+    The `compute_edge_attribute` method must be implemented by subclasses to define how the edge attribute
     is computed from the specified node attributes.
 
     Example
@@ -119,10 +118,11 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
     """Base class for positional edge attribute builders.
-    
+
     This class serves as a base for edge attribute builders that rely on positional information of nodes
     (e.g., its coordinates).
     """
+
     node_attr_name: str = "x"
     _idx_lat: int = 0
     _idx_lon: int = 1
@@ -130,7 +130,7 @@ class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
 
 class EdgeLength(BasePositionalBuilder):
     """Computes edge length.
-    
+
     Computes the haversine distance between the source and target nodes.
     """
 
