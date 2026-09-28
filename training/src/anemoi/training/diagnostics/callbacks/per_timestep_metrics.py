@@ -14,7 +14,6 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-import pytorch_lightning as pl
 import torch
 from pytorch_lightning.callbacks import Callback
 
@@ -22,6 +21,8 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
+    import pytorch_lightning as pl
+
     from anemoi.models.data import Batch
     from anemoi.models.data.sources import Source
     from anemoi.training.train.step_output import TrainingStepOutput

@@ -130,7 +130,9 @@ class TabularSource(Source):
     @property
     def time_size(self) -> int:
         """Number of time steps in this source."""
-        assert self.layout.time_in_grid, f"{self.__class__.__name__}.time_size requires a layout with time_in_grid=True."
+        assert (
+            self.layout.time_in_grid
+        ), f"{self.__class__.__name__}.time_size requires a layout with time_in_grid=True."
         time_sizes = [len(boundaries) for boundaries in self.boundaries]
         if len(set(time_sizes)) != 1:
             msg = f"Inconsistent time sizes across batch samples: {time_sizes}"

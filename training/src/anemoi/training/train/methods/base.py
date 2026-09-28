@@ -29,8 +29,6 @@ from anemoi.models.data import Batch
 from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.interface import AnemoiModelInterface
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.losses import get_loss_function
@@ -63,6 +61,8 @@ if TYPE_CHECKING:
 
     from anemoi.models.data.sources.base import Source
     from anemoi.models.data_indices.collection import IndexCollection
+    from anemoi.models.distributed.shapes import DatasetShardSizes
+    from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
     from anemoi.training.losses.scalers.base_scaler import BaseScaler
     from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler

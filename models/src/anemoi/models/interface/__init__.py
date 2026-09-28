@@ -16,7 +16,6 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -235,24 +234,6 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         return ds_data if isinstance(ds_data, dict) else {"data": ds_data}
 
-    def _coordinates_in_radians(self, payload: dict, dataset_name: str) -> torch.Tensor:
-        """Return one dataset's latlon tensor, in radians. Convenience method to liaise with anemoi-inference."""
-        latitudes = payload.get("latitudes")
-        longitudes = payload.get("longitudes")
-        return latitudes, longitudes
-
-    def _old_coords(self):
-        if latitudes is None or longitudes is None:
-            return self.model._graph_data[dataset_name].x
-
-        latitudes = torch.as_tensor(latitudes, dtype=torch.float32).reshape(-1)
-        longitudes = torch.as_tensor(longitudes, dtype=torch.float32).reshape(-1)
-        assert latitudes.shape == longitudes.shape, (
-            f"Dataset {dataset_name!r}: latitudes {tuple(latitudes.shape)} and longitudes "
-            f"{tuple(longitudes.shape)} must describe the same nodes."
-        )
-        return torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1))
-
     def _statistics_for(self, dataset_name: str, variables: list[str]) -> dict:
         """Slice the checkpoint's data-space statistics down to the variables.
         Same alignment that is done for the model outputs in AnemoiModelEncProcDec._assemble_output.
@@ -271,9 +252,9 @@ class AnemoiModelInterface(torch.nn.Module):
     def get_batch(self, data: dict[str, SourceSample]) -> Batch:
         """Collate the per-dataset samples into a single-sample Batch."""
         for dataset_name, sample in data.items():
-            assert "latitudes" in sample and "longitudes" in sample, (
-                f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
-            )
+            assert (
+                "latitudes" in sample and "longitudes" in sample
+            ), f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
             latitudes = torch.as_tensor(sample.pop("latitudes"), dtype=torch.float32).reshape(-1)
             longitudes = torch.as_tensor(sample.pop("longitudes"), dtype=torch.float32).reshape(-1)
             assert latitudes.shape == longitudes.shape, (
@@ -369,7 +350,7 @@ class AnemoiModelInterface(torch.nn.Module):
         # Convert to batch
         x = self.get_batch(x)
         target = self.get_batch(target_template)
-    
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
             "x": x,

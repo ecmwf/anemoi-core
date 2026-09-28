@@ -607,10 +607,9 @@ class ScaleTensor(nn.Module):
             msg = "subset_indices must be a tuple of per-dimension indexers, e.g. (..., indices)"
             raise TypeError(msg)
 
-        if subset_indices is not None and subset_indices != (...,):
-            x_subset = x[subset_indices]
-        else:
-            x_subset = x
+        # Determine the subset of the input tensor to work with
+        x_subset = x[subset_indices] if subset_indices is not None and subset_indices != (...,) else x
+
         out = x_subset.clone()
 
         for dims, scaler in self.tensors.values():

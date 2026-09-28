@@ -11,14 +11,18 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 import torch
-from pytest_mock import MockFixture
 
 from anemoi.models.data.batch import Batch
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.multidataset import MultiDataset
+
+if TYPE_CHECKING:
+    from pytest_mock import MockFixture
 
 # ---------------------------------------------------------------- Reader API
 

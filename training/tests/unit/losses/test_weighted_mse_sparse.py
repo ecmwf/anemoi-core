@@ -4,12 +4,16 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import torch
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.base import Source
 from anemoi.training.losses import WeightedMSELoss
 from tests.batch_builders import build_source
+
+if TYPE_CHECKING:
+    from anemoi.models.data.sources.base import Source
 
 
 def _sparse_view(data: list[torch.Tensor]) -> Source:
