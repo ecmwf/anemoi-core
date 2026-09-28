@@ -14,8 +14,9 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.tabular import GriddedSource
-from anemoi.models.data.sources.tabular import TabularSource
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import EnergyScoreLoss
@@ -57,17 +58,17 @@ def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
         layout=TensorLayout(batch=-5, time=-4, ensemble=-3, grid=-2, variables=-1),
     )
     with pytest.raises(ValueError, match="same layout"):
-        MSELoss().apply_pairwise(pred, other_layout, lambda p, t, **_: (p - t).sum())
+        apply_pairwise(pred, other_layout, lambda p, t, **_: (p - t).sum())
 
     other_coordinates = pred.clone(coordinates=torch.ones_like(pred.coordinates))
     with pytest.raises(AssertionError, match="same coordinates"):
-        MSELoss().apply_pairwise(pred, other_coordinates, lambda p, t, **_: (p - t).sum())
+        apply_pairwise(pred, other_coordinates, lambda p, t, **_: (p - t).sum())
 
 
 def test_base_loss_pairwise_runs_gridded_callback() -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2))
     target = _grid(torch.zeros_like(pred.data))
-    result = MSELoss().apply_pairwise(pred, target, lambda p, t, **_: (p - t).abs().sum())
+    result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).abs().sum())
     torch.testing.assert_close(result, torch.tensor(6.0))
 
 
@@ -149,7 +150,7 @@ def test_sparse_loss_distinguishes_shared_and_per_sample_arguments() -> None:
         assert isinstance(matrices, list)
         return ((pred @ matrices[0]) + (target @ matrices[1])).mean() * weight
 
-    result = MSELoss().apply_pairwise(view, view, loss, matrices=matrices, per_sample_kwargs={"weight": weights})
+    result = apply_pairwise(view, view, loss, matrices=matrices, per_sample_kwargs={"weight": weights})
     torch.testing.assert_close(result, torch.tensor(7.5))
 
 
@@ -165,7 +166,7 @@ def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() ->
         layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
     )
     target = pred.clone(data=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
-    result = MSELoss().apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
+    result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
     torch.testing.assert_close(result, torch.tensor(4.0))
     result.backward()
     assert empty.grad is not None
@@ -197,7 +198,7 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
     per_sample = {"weight": [torch.tensor(1.0)] * (1 if case == "length" else 2)}
     shared = {} if case == "length" else {"weight": torch.tensor(1.0)}
     with pytest.raises(ValueError, match=r"one value per sample|both shared and per-sample"):
-        MSELoss().apply_pairwise(
+        apply_pairwise(
             view,
             view,
             lambda *_args, **_kwargs: pytest.fail("Invalid arguments reached the loss"),

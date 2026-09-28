@@ -31,6 +31,7 @@ import einops
 import torch
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
@@ -317,7 +318,7 @@ class SpectralLoss(BaseLoss):
         **kwargs,
     ) -> torch.Tensor:
         """Dispatch to the tensor-level _forward_impl via the source view's layout."""
-        return self.apply_pairwise(
+        return apply_pairwise(
             pred,
             target,
             self._forward_impl,

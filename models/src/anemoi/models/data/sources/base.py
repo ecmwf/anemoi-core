@@ -36,6 +36,9 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+# How a source's axes collapse into ``(nodes, features)``.
+FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
+
 
 def resolve_device(device: torch.device | str) -> torch.device:
     """Resolve ``device`` to a concrete device, filling in the current CUDA index.

@@ -9,6 +9,7 @@
 
 from typing import TYPE_CHECKING
 
+from .base import FLATTEN_PATTERN
 from .base import Source
 from .gridded import GriddedSource
 from .tabular import TabularSource
@@ -16,10 +17,8 @@ from .tabular import TabularSource
 if TYPE_CHECKING:
     from anemoi.models.data.spec import SourceSpec
 
-# How a source's axes collapse into ``(nodes, features)``.
-FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
-
 __all__ = [
+    "FLATTEN_PATTERN",
     "GriddedSource",
     "TabularSource",
     "Source",

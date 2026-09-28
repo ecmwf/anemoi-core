@@ -31,7 +31,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 
 if TYPE_CHECKING:
-    from anemoi.models.data.sources.tabular import GriddedSource
+    from anemoi.models.data.sources.gridded import GriddedSource
 
 LOGGER = logging.getLogger(__name__)
 

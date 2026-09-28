@@ -25,6 +25,7 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data import Source
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.imputer import InputImputer
@@ -68,7 +69,7 @@ class DummyLoss(torch.nn.Module):
     def forward(self, y_pred: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
         del kwargs
         if isinstance(y_pred, Source):
-            return y_pred.apply_loss(y, lambda pred, target, **_kwargs: torch.mean((pred - target) ** 2))
+            return apply_pairwise(y_pred, y, lambda pred, target, **_kwargs: torch.mean((pred - target) ** 2))
         return torch.mean((y_pred - y) ** 2)
 
 

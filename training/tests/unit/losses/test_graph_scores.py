@@ -19,7 +19,7 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.compile import mark_for_compilation
 from anemoi.training.losses import CRPS

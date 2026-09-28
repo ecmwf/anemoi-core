@@ -15,7 +15,7 @@ from anemoi.models.data import SourceSample
 from anemoi.models.data import SourceSpec
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import make_source
-from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data.sources.tabular import TabularSource
 from tests.batch_builders import build_batch
 

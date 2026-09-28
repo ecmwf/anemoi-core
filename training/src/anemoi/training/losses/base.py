@@ -24,7 +24,6 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import Source
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor

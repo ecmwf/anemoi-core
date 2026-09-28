@@ -14,7 +14,7 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import MSELoss

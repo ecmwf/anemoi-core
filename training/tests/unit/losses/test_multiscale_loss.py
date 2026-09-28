@@ -14,7 +14,7 @@ from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.tabular import GriddedSource
+from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.training.losses import CRPS
