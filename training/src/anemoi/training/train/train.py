@@ -736,8 +736,12 @@ class AnemoiTrainer(ABC):
             accumulate_grad_batches=self.config.training.accum_grad_batches,
             gradient_clip_val=self.config.training.gradient_clip.val,
             gradient_clip_algorithm=self.config.training.gradient_clip.algorithm,
-            # we have our own DDP-compliant sampler logic baked into the dataset
+            # the datamodule builds samplers that split the data between groups of
+            # ranks training on the same samples, not between single ranks
             use_distributed_sampler=False,
+            # a changing rollout changes the number of samples, which a sampler
+            # reads only when it is built
+            reload_dataloaders_every_n_epochs=int(self.datamodule.rollout_changes_between_epochs),
             enable_progress_bar=self.config.diagnostics.enable_progress_bar,
             enable_checkpointing=self.config.diagnostics.enable_checkpointing,
             check_val_every_n_epoch=getattr(self.config.diagnostics, "check_val_every_n_epoch", 1),
