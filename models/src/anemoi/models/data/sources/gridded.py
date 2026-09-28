@@ -18,7 +18,6 @@ from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
-from anemoi.models.data.sources.base import FLATTEN_PATTERN
 from anemoi.models.data.sources.base import Source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
@@ -31,6 +30,9 @@ LOGGER = logging.getLogger(__name__)
 
 class GriddedSource(Source):
     """Gridded data source."""
+
+    # How a source's axes collapse into ``(nodes, features)``.
+    FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
 
     def __post_init__(self):
         super().__post_init__()
@@ -132,7 +134,7 @@ class GriddedSource(Source):
 
         if self.data is not None:
             current_pattern = self.layout.normalized(self.data.ndim).pattern
-            flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {FLATTEN_PATTERN}")
+            flattened_data = einops.rearrange(self.data, f"{current_pattern} -> {GriddedSource.FLATTEN_PATTERN}")
         else:
             flattened_data = None
 
@@ -180,7 +182,7 @@ class GriddedSource(Source):
     def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":
         new_data = einops.rearrange(
             data,
-            f"{FLATTEN_PATTERN} -> {self.layout.normalized(self.data.ndim).pattern}",
+            f"{GriddedSource.FLATTEN_PATTERN} -> {self.layout.normalized(self.data.ndim).pattern}",
             batch=self.batch_size,
             ensemble=self.ensemble_size,
             time=self.data.shape[self.layout.time],
