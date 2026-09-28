@@ -12,6 +12,7 @@ import math
 import einops
 import torch
 import torch.nn as nn
+import torch.utils.checkpoint
 
 from anemoi.models.layers.cls_pooling import ClsSelfAttentionPool
 from anemoi.models.layers.set_transformer import PMA
@@ -48,18 +49,11 @@ def sinusoidal_positional_encoding(positions, dim):
 class FeatureTokenizer(nn.Module):
     """One vector per feature: physical-variable embedding + level positional encoding, alongside the raw value."""
 
-    def __init__(self, feature_names, dim, mean=None, std=None):
+    def __init__(self, feature_names, dim):
         super().__init__()
         self.feature_names = feature_names
         tokenizer = Tokenizer(feature_names)
         self.feature_to_idx = {name: i for i, name in enumerate(feature_names)}
-
-        if mean is None:
-            mean = torch.zeros(len(feature_names))
-        if std is None:
-            std = torch.ones(len(feature_names))
-        self.register_buffer("mean", mean)
-        self.register_buffer("std", std)
 
         self.variable_embedding = nn.Embedding(tokenizer.num_variables, dim)
 
@@ -96,10 +90,10 @@ class FeatureTokenizer(nn.Module):
 
         feature_names, if given, must be a subset (or reordering) of the names this
         tokenizer was constructed with, in the same column order as `values`. Used to
-        look up per-column buffers (variable embedding, level encoding, mean/std) by
-        name for this call, instead of assuming `values` has every originally-known
-        feature in its original order. Omit (default None) for the original, fixed
-        full-feature-set behavior - existing callers are unaffected.
+        look up per-column buffers (variable embedding, level encoding) by name for
+        this call, instead of assuming `values` has every originally-known feature in
+        its original order. Omit (default None) for the original, fixed full-feature-
+        set behavior - existing callers are unaffected.
         """
         if feature_names is None:
             idx = None
@@ -124,8 +118,6 @@ class FeatureTokenizer(nn.Module):
         variable_idx = self.variable_idx if idx is None else self.variable_idx[idx]
         level_pe_full = self.level_pe if idx is None else self.level_pe[idx]
         has_level = self.has_level if idx is None else self.has_level[idx]
-        mean = self.mean if idx is None else self.mean[idx]
-        std = self.std if idx is None else self.std[idx]
 
         variable_embedding = self.variable_embedding(variable_idx).unsqueeze(0).expand(batch_size, -1, -1)
 
@@ -133,8 +125,7 @@ class FeatureTokenizer(nn.Module):
         no_level_embedding = self.no_level_embedding.view(1, 1, -1).expand(batch_size, n_features, -1)
         level_encoding = torch.where(has_level.view(1, -1, 1), level_pe, no_level_embedding)
 
-        normalized_values = (values - mean) / std
-        value = normalized_values.unsqueeze(-1)
+        value = values.unsqueeze(-1)
         value_encoding = self.value_encoder(value)
 
         frame_encoding = frame_idx.float().view(batch_size, 1, 1).expand(batch_size, n_features, 1)
@@ -162,9 +153,9 @@ class PMAEmbedder(nn.Module):
     or order.
     """
 
-    def __init__(self, feature_names, dim, d_model, nhead, mean=None, std=None):
+    def __init__(self, feature_names, dim, d_model, nhead):
         super().__init__()
-        self.feature_tokenizer = FeatureTokenizer(feature_names, dim, mean=mean, std=std)
+        self.feature_tokenizer = FeatureTokenizer(feature_names, dim)
         self.input_proj = nn.Linear(2 + 3 * dim, d_model)
         self.pma = PMA(d_model, nhead, num_seeds=1)
         self.output_dim = d_model
@@ -201,9 +192,9 @@ class DeepSetEmbedder(nn.Module):
     total variable count and mean needs no padding/masking for a smaller set.
     """
 
-    def __init__(self, feature_names, dim, d_model, mean=None, std=None):
+    def __init__(self, feature_names, dim, d_model):
         super().__init__()
-        self.feature_tokenizer = FeatureTokenizer(feature_names, dim, mean=mean, std=std)
+        self.feature_tokenizer = FeatureTokenizer(feature_names, dim)
         self.phi = nn.Sequential(
             nn.Linear(2 + 3 * dim, d_model),
             nn.SiLU(),
@@ -250,17 +241,10 @@ class HierarchicalEmbedder(nn.Module):
     the per-level summary already exists) as separate concerns.
     """
 
-    def __init__(self, feature_names, hidden_dim, d_model, nhead, mean=None, std=None):
+    def __init__(self, feature_names, hidden_dim, d_model, nhead):
         super().__init__()
         self.feature_names = feature_names
         tokenizer = Tokenizer(feature_names)
-
-        if mean is None:
-            mean = torch.zeros(len(feature_names))
-        if std is None:
-            std = torch.ones(len(feature_names))
-        self.register_buffer("mean", mean)
-        self.register_buffer("std", std)
 
         self.variable_embedding = nn.Embedding(tokenizer.num_variables, hidden_dim)
         self.register_buffer("variable_idx", torch.tensor(tokenizer.variable_idx))
@@ -274,7 +258,25 @@ class HierarchicalEmbedder(nn.Module):
         group_levels = torch.tensor(sorted(groups.keys()), dtype=torch.float32)
         self.register_buffer("level_pe", sinusoidal_positional_encoding(group_levels, d_model))
 
-        self.value_proj = nn.Linear(hidden_dim + 1, d_model)
+        # groups have different sizes (a level with 5 variables vs. one with 2) - pad every
+        # group to the largest one's size so stage 1 runs as a single batched call instead of
+        # one Python-level call per level; group_mask marks the padding to be excluded from
+        # attention. Fixed at construction time from feature_names, like level_groups itself.
+        self.max_group_size = max(len(group) for group in self.level_groups)
+        n_groups = len(self.level_groups)
+        group_idx_padded = torch.zeros(n_groups, self.max_group_size, dtype=torch.long)
+        group_mask = torch.ones(n_groups, self.max_group_size, dtype=torch.bool)
+        for i, group in enumerate(self.level_groups):
+            group_idx_padded[i, : len(group)] = torch.tensor(group, dtype=torch.long)
+            group_mask[i, : len(group)] = False
+        self.register_buffer("group_idx_padded", group_idx_padded)
+        self.register_buffer("group_mask", group_mask)
+
+        # split into two projections (instead of one Linear over the concatenation) so the
+        # variable-embedding term can be added via broadcasting - concatenation would force
+        # materializing variable_embedding at full (n_rows, ...) size first.
+        self.variable_proj = nn.Linear(hidden_dim, d_model, bias=False)
+        self.value_proj = nn.Linear(1, d_model)
         self.stage1_pool = ClsSelfAttentionPool(d_model, nhead)
         self.stage2_pool = ClsSelfAttentionPool(d_model, nhead)
         self.output_dim = d_model
@@ -288,18 +290,38 @@ class HierarchicalEmbedder(nn.Module):
         batch, n_time, ensemble, grid, _n_vars = x.shape
         x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
         n_rows = x_vars.shape[0]
-        normalized = (x_vars - self.mean) / self.std
+        n_groups = len(self.level_groups)
 
-        level_tokens = []
-        for group in self.level_groups:
-            group_idx = torch.tensor(group, device=x.device)
-            values = normalized[:, group_idx].unsqueeze(-1)
-            variable_embedding = self.variable_embedding(self.variable_idx[group_idx])
-            variable_embedding = variable_embedding.unsqueeze(0).expand(n_rows, -1, -1)
-            tokens = self.value_proj(torch.cat([variable_embedding, values], dim=-1))
-            level_tokens.append(self.stage1_pool(tokens))
+        # Stage 1 gathers every group's (padded) values and variable embeddings at once - shape
+        # (rows, n_groups, max_group_size, ...) - instead of once per group in a Python loop.
+        # variable_embedding has no row dimension (identity doesn't vary by row), so
+        # variable_proj(variable_embedding) is computed once and broadcast-added below, instead
+        # of expanding it to match rows and concatenating (which would force that expansion into
+        # real memory). Row-chunked (like ClsSelfAttentionPool's own internal chunking) so this
+        # intermediate stays bounded to one chunk's worth - a single-shot construction across
+        # all of O96's rows at once materializes tens of GB.
+        variable_embedding = self.variable_embedding(self.variable_idx[self.group_idx_padded])
+        variable_component = self.variable_proj(variable_embedding).unsqueeze(0)
 
-        level_tokens = torch.stack(level_tokens, dim=1) + self.level_pe.unsqueeze(0)
+        row_chunk_size = max(1, self.stage1_pool._MAX_CHUNK // n_groups)
+        level_tokens_chunks = []
+        for x_vars_chunk in x_vars.split(row_chunk_size, dim=0):
+            n_rows_chunk = x_vars_chunk.shape[0]
+            values = x_vars_chunk[:, self.group_idx_padded].unsqueeze(-1)
+            tokens = self.value_proj(values) + variable_component
+
+            # flatten (row, group) into one batch dim for a single stage1_pool call per chunk;
+            # group_mask is the same for every row, so it's expanded (not repeated) to match.
+            tokens = tokens.reshape(n_rows_chunk * n_groups, self.max_group_size, -1)
+            mask = self.group_mask.unsqueeze(0).expand(n_rows_chunk, -1, -1).reshape(n_rows_chunk * n_groups, -1)
+            # gradient checkpointing: recomputes stage1_pool's activations during backward
+            # instead of retaining them, trading compute for the training-time memory that
+            # retaining them across every one of O96's row-chunks would otherwise need.
+            pooled = torch.utils.checkpoint.checkpoint(self.stage1_pool, tokens, mask, use_reentrant=False)
+            level_tokens_chunks.append(pooled.reshape(n_rows_chunk, n_groups, -1))
+        level_tokens = torch.cat(level_tokens_chunks, dim=0)
+
+        level_tokens = level_tokens + self.level_pe.unsqueeze(0)
         node_embedding = self.stage2_pool(level_tokens)
 
         node_embedding = einops.rearrange(

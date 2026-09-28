@@ -46,14 +46,38 @@ class ClsSelfAttentionPool(nn.Module):
             nn.Linear(4 * dim, dim),
         )
 
-    def forward(self, x):
-        # x: (batch, n_tokens, dim) -> (batch, dim)
-        cls = self.cls_token.expand(x.shape[0], -1, -1)
-        sequence = self.norm(torch.cat([cls, x], dim=1))
-        pooled_chunks = [
-            self.mha(chunk, chunk, chunk, need_weights=False)[0][:, 0]
-            for chunk in sequence.split(self._MAX_CHUNK, dim=0)
-        ]
-        pooled = torch.cat(pooled_chunks, dim=0)
-        pooled = pooled + self.residual_proj(x.mean(dim=1))
-        return pooled + self.ffn(self.ffn_norm(pooled))
+    def forward(self, x, key_padding_mask=None):
+        """x: (batch, n_tokens, dim) -> (batch, dim)
+
+        key_padding_mask: (batch, n_tokens) bool, True = that token is padding (a shorter
+        set batched alongside longer ones) and must be excluded from attention entirely -
+        both as something other tokens attend to, and from the residual's mean. Omit
+        (default None) when every row in the batch has the same real token count - treated
+        as nothing being padded.
+        """
+        if key_padding_mask is None:
+            key_padding_mask = x.new_zeros(x.shape[0], x.shape[1], dtype=torch.bool)
+
+        # Running the whole block (attention, residual, FFN) on the full batch before chunking
+        # would defeat the point of chunking - each of those steps would materialize a
+        # batch-sized tensor regardless. Each chunk runs the entire block and is discarded
+        # once concatenated, so peak memory stays bounded to one chunk's worth, not the full
+        # batch, at every step.
+        output_chunks = []
+        for x_chunk, mask_chunk in zip(x.split(self._MAX_CHUNK, dim=0), key_padding_mask.split(self._MAX_CHUNK, dim=0)):
+            cls_chunk = self.cls_token.expand(x_chunk.shape[0], -1, -1)
+            sequence_chunk = self.norm(torch.cat([cls_chunk, x_chunk], dim=1))
+            # CLS is never padding - prepend a False (not-padding) column to match sequence_chunk.
+            cls_mask_chunk = mask_chunk.new_zeros(mask_chunk.shape[0], 1)
+            full_mask_chunk = torch.cat([cls_mask_chunk, mask_chunk], dim=1)
+            pooled_chunk = self.mha(
+                sequence_chunk, sequence_chunk, sequence_chunk, key_padding_mask=full_mask_chunk, need_weights=False
+            )[0][:, 0]
+
+            valid_chunk = (~mask_chunk).unsqueeze(-1).float()
+            residual_chunk = (x_chunk * valid_chunk).sum(dim=1) / valid_chunk.sum(dim=1).clamp(min=1)
+            pooled_chunk = pooled_chunk + self.residual_proj(residual_chunk)
+
+            output_chunks.append(pooled_chunk + self.ffn(self.ffn_norm(pooled_chunk)))
+
+        return torch.cat(output_chunks, dim=0)
