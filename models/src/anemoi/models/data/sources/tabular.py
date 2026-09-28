@@ -149,7 +149,7 @@ class TabularSource(Source):
         """
         return EmptyTabularSource(
             data=None,
-            spec=self.spec,
+            **self._metadata_kwargs(),
             coordinates=self.coordinates,
             timedeltas=self.timedeltas,
             boundaries=self.boundaries,
@@ -348,7 +348,7 @@ class TabularSource(Source):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
-        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
+        return self.clone(data=new_data, **self._select_variable_metadata(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSource":
         """Return a new view restricted to the given time indices.

@@ -57,7 +57,7 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from tests.batch_builders import build_batch
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
@@ -1372,7 +1372,7 @@ def _gridded_view(
 ) -> Source:
     """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSource."""
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    return build_source(
+    return make_source(
         name="data",
         data=data,
         variables=list(variables),
@@ -1450,7 +1450,7 @@ def _tabular_view(
 ) -> Source:
     """Wrap a list of ``(grid, variables)`` tensors in a TabularSource (sparse obs)."""
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return build_source(
+    return make_source(
         name="data",
         data=data,
         variables=list(variables),

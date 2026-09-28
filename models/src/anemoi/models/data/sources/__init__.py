@@ -7,24 +7,26 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import TYPE_CHECKING
+from anemoi.models.data.layout import TensorLayout
 
 from .base import Source
 from .gridded import GriddedSource
 from .tabular import TabularSource
 
-if TYPE_CHECKING:
-    from anemoi.models.data.spec import SourceSpec
-
 __all__ = [
     "GriddedSource",
     "TabularSource",
     "Source",
+    "make_source",
 ]
 
 
-def make_source(spec: "SourceSpec", **kwargs) -> Source:
-    if spec.layout.time_in_grid:
-        return TabularSource(spec=spec, **kwargs)
+def make_source(layout: TensorLayout, **kwargs) -> Source:
+    """Build a source of the kind ``layout`` describes.
 
-    return GriddedSource(spec=spec, **kwargs)
+    >>> make_source(name="era5", variables=["t"], layout=layout, data=x, coordinates=coords)
+    """
+    if layout.time_in_grid:
+        return TabularSource(layout=layout, **kwargs)
+
+    return GriddedSource(layout=layout, **kwargs)

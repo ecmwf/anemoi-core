@@ -29,7 +29,7 @@ class SourceSample:
 
     This is what ``reader.get_sample()`` returns and what :meth:`Batch.collate`
     consumes. Everything needed to build the collated
-    :class:`~anemoi.models.data.spec.SourceSpec` travels with the payload, so
+    :class:`~anemoi.models.data.sources.Source` travels with the payload, so
     collation needs no side channel.
 
     Parameters

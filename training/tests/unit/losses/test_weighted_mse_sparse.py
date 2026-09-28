@@ -10,7 +10,7 @@ import torch
 
 from anemoi.models.data import TensorLayout
 from anemoi.training.losses import WeightedMSELoss
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 if TYPE_CHECKING:
     from anemoi.models.data.sources.base import Source
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 def _sparse_view(data: list[torch.Tensor]) -> Source:
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return build_source(
+    return make_source(
         name="obs",
         data=data,
         variables=["a", "b"],

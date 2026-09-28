@@ -59,7 +59,7 @@ def test_update_source_preserves_layout_and_coordinate_staticness():
     batch = _batch({"grid": ["a", "b"]})
     view = batch["grid"].clone(
         coordinates=torch.zeros(3, 2),
-        spec=batch["grid"].spec.clone(coordinates_are_static=True),
+        coordinates_are_static=True,
     )
     fixed = batch.replace("grid", view)
     assert fixed.is_static_coords("grid")
@@ -69,7 +69,8 @@ def test_update_source_preserves_layout_and_coordinate_staticness():
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=-2, variables=-1)
     moving = view.clone(
         coordinates=torch.zeros(2, 3, 2),
-        spec=view.spec.clone(layout=layout, coordinates_are_static=False),
+        layout=layout,
+        coordinates_are_static=False,
     )
     updated = fixed.replace("grid", moving)
     assert not updated.is_static_coords("grid")
@@ -93,7 +94,7 @@ def test_model_output_cast_and_variable_metadata_agree():
     }
     model.boundings = {"grid": torch.nn.Identity()}
     grid = _batch({"grid": ["a", "b"]})["grid"]
-    target = grid.clone(spec=grid.spec.clone(statistics={"mean": torch.tensor([1.0, 2.0])}))
+    target = grid.clone(statistics={"mean": torch.tensor([1.0, 2.0])})
     model.statistics = {"grid": target.statistics}
     output = model._assemble_output(torch.ones(6, 1, dtype=torch.bfloat16), None, target, torch.bfloat16, "grid")
     assert output.dtype == torch.float32

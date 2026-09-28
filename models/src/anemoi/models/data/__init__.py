@@ -15,12 +15,10 @@ from .sample import SourceSample
 from .sources import GriddedSource
 from .sources import Source
 from .sources import TabularSource
-from .spec import SourceSpec
 
 __all__ = [
     "Batch",
     "SourceSample",
-    "SourceSpec",
     "TensorLayout",
     "GriddedSource",
     "TabularSource",

@@ -12,10 +12,11 @@ import torch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import SourceSample
-from anemoi.models.data import SourceSpec
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources.gridded import EmptyGriddedSource
 from anemoi.models.data.sources.gridded import GriddedSource
+from anemoi.models.data.sources.tabular import EmptyTabularSource
 from anemoi.models.data.sources.tabular import TabularSource
 from tests.batch_builders import build_batch
 
@@ -56,109 +57,116 @@ def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
         layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
         variables={"grid": variables},
         statistics={"grid": {"mean": torch.arange(n_vars, dtype=torch.float32)}},
-        grid_sizes={"grid": 4},
         static_coords=("grid",),
     )
 
 
-class TestSourceSpec:
+class TestSourceMetadata:
     def test_rejects_duplicate_variable_names(self) -> None:
         with pytest.raises(ValueError, match="unique variable names"):
-            SourceSpec(name="grid", variables=["a", "a"], layout=GRIDDED_LAYOUT)
+            make_source(
+                name="grid",
+                variables=["a", "a"],
+                layout=GRIDDED_LAYOUT,
+                data=torch.zeros(1, 1, 4, 2),
+                coordinates=torch.zeros(4, 2),
+            )
 
-    def test_name_to_index_is_memoised(self) -> None:
-        spec = SourceSpec(name="grid", variables=["a", "b"], layout=GRIDDED_LAYOUT)
-        assert spec.name_to_index == {"a": 0, "b": 1}
-        assert spec.name_to_index is spec.name_to_index
-
-    def test_select_variables_indexes_names_and_statistics_together(self) -> None:
-        spec = SourceSpec(
-            name="grid",
-            variables=["a", "b", "c"],
-            layout=GRIDDED_LAYOUT,
-            statistics={"mean": torch.tensor([10.0, 20.0, 30.0])},
-        )
-        selected = spec.select_variables([0, 2])
-        assert selected.variables == ["a", "c"]
-        assert selected.statistics["mean"].tolist() == [10.0, 30.0]
-        # the receiver is not mutated
-        assert spec.variables == ["a", "b", "c"]
-
-    def test_select_variables_accepts_a_slice(self) -> None:
-        spec = SourceSpec(name="grid", variables=["a", "b", "c"], layout=GRIDDED_LAYOUT)
-        assert spec.select_variables(slice(1, 3)).variables == ["b", "c"]
-
-    @pytest.mark.parametrize(
-        ("layout", "expected_type"),
-        [(GRIDDED_LAYOUT, GriddedSource), (TABULAR_LAYOUT, TabularSource)],
-    )
-    def test_empty_builds_a_dataless_source_of_the_right_kind(self, layout, expected_type) -> None:
-        spec = SourceSpec(name="src", variables=["a", "b"], layout=layout)
-        empty = spec.empty(batch_size=3)
-
-        assert isinstance(empty, expected_type)
-        assert empty.spec is spec
-
-        samples = empty.data if isinstance(empty.data, list) else [empty.data]
-        if layout.time_in_grid:
-            assert len(samples) == 3
-        for sample in samples:
-            # full variable axis, zero-length grid axis
-            normalized = layout.normalized(sample.ndim)
-            assert sample.shape[normalized.variables] == 2
-            assert sample.shape[normalized.grid] == 0
-
-
-class TestSpecOnViews:
-    def test_spec_fields_read_through_the_view(self) -> None:
+    def test_fields_read_through_the_view(self) -> None:
         view = gridded_batch()["grid"]
         assert view.name == "grid"
         assert view.variables == ["a", "b", "c"]
+        assert view.n_variables == 3
         assert view.layout == GRIDDED_LAYOUT.with_batch_dim()
         assert view.grid_size == 4
         assert view.coordinates_are_static is True
         assert view.name_to_index == {"a": 0, "b": 1, "c": 2}
 
-    def test_repeated_access_reuses_one_spec(self) -> None:
+    def test_name_to_index_is_memoised(self) -> None:
         batch = gridded_batch()
-        assert batch["grid"].spec is batch["grid"].spec
         assert batch["grid"].name_to_index is batch["grid"].name_to_index
 
-    def test_batch_spec_covers_every_dataset(self) -> None:
-        batch = Batch.collate([{"grid": gridded_payload(), "obs": tabular_payload()}])  # noqa: E501
-        assert set(batch.spec) == {"grid", "obs"}
-        assert batch.spec["obs"].layout.time_in_grid is True
-        assert batch.spec["obs"].grid_size is None
+    def test_name_to_index_follows_a_variable_rename(self) -> None:
+        renamed = gridded_batch()["grid"].clone(variables=["x", "y", "z"])
+        assert renamed.name_to_index == {"x": 0, "y": 1, "z": 2}
 
-    def test_make_source_dispatches_on_the_spec_layout(self) -> None:
-        spec = SourceSpec(name="grid", variables=["a", "b"], layout=GRIDDED_LAYOUT, coordinates_are_static=True)
-        view = make_source(spec, data=torch.zeros(1, 1, 4, 2), coordinates=torch.zeros(4, 2))
-        assert isinstance(view, GriddedSource)
-        assert view.spec is spec
+    @pytest.mark.parametrize(
+        ("layout", "expected_type"),
+        [(GRIDDED_LAYOUT, GriddedSource), (TABULAR_LAYOUT, TabularSource)],
+    )
+    def test_make_source_dispatches_on_the_layout(self, layout, expected_type) -> None:
+        if layout.time_in_grid:
+            payload = {
+                "data": [torch.zeros(1, 4, 2)],
+                "coordinates": [torch.zeros(4, 2)],
+                "timedeltas": [torch.zeros(4)],
+                "boundaries": [(slice(0, 4),)],
+            }
+        else:
+            payload = {"data": torch.zeros(1, 1, 4, 2), "coordinates": torch.zeros(4, 2)}
+        view = make_source(name="src", variables=["a", "b"], layout=layout, coordinates_are_static=True, **payload)
+        assert isinstance(view, expected_type)
         assert view.coordinates_are_static is True
 
-    def test_clone_replaces_the_spec_wholesale(self) -> None:
+    @pytest.mark.parametrize(
+        ("payload", "expected_type"),
+        [(gridded_payload, EmptyGriddedSource), (tabular_payload, EmptyTabularSource)],
+    )
+    def test_empty_keeps_the_metadata(self, payload, expected_type) -> None:
+        view = Batch.collate([{"src": payload()}])["src"]
+        empty = view.empty()
+
+        assert isinstance(empty, expected_type)
+        assert empty.data is None
+        assert empty.name == view.name
+        assert empty.variables == view.variables
+        assert empty.layout == view.layout
+        assert empty.statistics is view.statistics
+        assert empty.coordinates_are_static == view.coordinates_are_static
+
+
+class TestSourceTransformations:
+    """Transformations must carry the metadata through, and never mutate the receiver."""
+
+    def test_clone_replaces_metadata(self) -> None:
         view = gridded_batch()["grid"]
-        cloned = view.clone(spec=view.spec.clone(variables=["x", "y", "z"]))
+        cloned = view.clone(variables=["x", "y", "z"])
         assert cloned.variables == ["x", "y", "z"]
         assert view.variables == ["a", "b", "c"]
         # payload is shared by reference when it is not replaced
         assert cloned.data is view.data
 
-    def test_select_variables_keeps_data_and_spec_consistent(self) -> None:
+    def test_select_variables_keeps_data_and_metadata_consistent(self) -> None:
         view = gridded_batch()["grid"]
         selected = view.select(variables=[0, 2])
         assert selected.variables == ["a", "c"]
         assert selected.statistics["mean"].tolist() == [0.0, 2.0]
         assert selected.data.shape[selected.layout.variables] == 2
+        # the receiver is not mutated
+        assert view.variables == ["a", "b", "c"]
+
+    def test_select_variables_accepts_a_slice(self) -> None:
+        selected = gridded_batch()["grid"].select(variables=slice(1, 3))
+        assert selected.variables == ["b", "c"]
+        assert selected.statistics["mean"].tolist() == [1.0, 2.0]
+
+    def test_select_variables_accepts_a_tensor(self) -> None:
+        selected = gridded_batch()["grid"].select(variables=torch.tensor([2]))
+        assert selected.variables == ["c"]
+        assert selected.statistics["mean"].tolist() == [2.0]
+
+    def test_select_variables_on_a_tabular_source(self) -> None:
+        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        selected = view.select(variables=[1])
+        assert selected.variables == ["sp"]
+        assert selected.statistics["mean"].tolist() == [2.0]
+        assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
 
 
 class TestBatchTransformations:
-    """Transformations must carry the spec through, and never mutate the receiver."""
-
     def test_replace_swaps_one_source(self) -> None:
         batch = gridded_batch()
-        renamed = batch.replace("grid", batch["grid"].clone(spec=batch["grid"].spec.clone(variables=["x", "y", "z"])))
+        renamed = batch.replace("grid", batch["grid"].clone(variables=["x", "y", "z"]))
         assert renamed["grid"].variables == ["x", "y", "z"]
         assert batch["grid"].variables == ["a", "b", "c"]
 
@@ -169,7 +177,8 @@ class TestBatchTransformations:
         assert selected["grid"].name_to_index == {"b": 0}
         assert batch["grid"].variables == ["a", "b", "c"]
 
-    def test_device_transfer_preserves_the_spec(self) -> None:
+    def test_device_transfer_preserves_the_metadata(self) -> None:
         batch = gridded_batch()
         moved = batch.to("cpu")
-        assert moved["grid"].spec is batch["grid"].spec
+        assert moved["grid"].variables is batch["grid"].variables
+        assert moved["grid"].statistics is batch["grid"].statistics

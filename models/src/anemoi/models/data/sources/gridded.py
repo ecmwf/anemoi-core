@@ -109,7 +109,7 @@ class GriddedSource(Source):
         derived from a ``None`` tensor.
         """
         return EmptyGriddedSource(
-            spec=self.spec,
+            **self._metadata_kwargs(),
             data=None,
             coordinates=self.coordinates,
             shard_sizes=self.shard_sizes,
@@ -262,7 +262,7 @@ class GriddedSource(Source):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = self._index_vars(self.data, indices)
-        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
+        return self.clone(data=new_data, **self._select_variable_metadata(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "GriddedSource":
         """Return a new view restricted to the given time indices.
@@ -294,11 +294,6 @@ class GriddedSource(Source):
         else:
             idx_list = [int(i) for i in indices]
 
-        if self.layout.time is None:
-            msg = f"Layout {self.layout!r} has no time axis; cannot select_time on a gridded view."
-            raise ValueError(msg)
-
-        assert isinstance(self.data, torch.Tensor), "Gridded view must wrap a single tensor."
         idx = torch.as_tensor(idx_list, dtype=torch.long, device=self.data.device)
         new_data = self.data.index_select(self.layout.time, idx)
         return self.clone(data=new_data)
