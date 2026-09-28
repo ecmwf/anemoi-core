@@ -46,7 +46,7 @@ jobs:
             set -eux
             module load python3/3.12.9-01
             # Shared working dir on $PERM. The clone + virtualenv are built once
-            # here and reused by each test, then removed by the cleanup-env job.
+            # here and reused by each test, then removed by cleanup-env or sweep-stale-envs.
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             REPO_NAME=anemoi-core
             REPO_BRANCH=${{ github.head_ref || github.ref_name }}
@@ -91,7 +91,7 @@ jobs:
         #SBATCH --cpus-per-task=32
         #SBATCH --gpus-per-node=2
         #SBATCH --time=1:00:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --mem=120GB
     secrets: inherit
 
@@ -105,7 +105,7 @@ jobs:
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
         #SBATCH --time=01:00:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
@@ -121,7 +121,7 @@ jobs:
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
         #SBATCH --time=00:30:00
-        #SBATCH --qos=dg
+        #SBATCH --qos=ng
         #SBATCH --gpus=1
         #SBATCH --gres=gpu:1
         #SBATCH --mem=64G
@@ -132,10 +132,15 @@ jobs:
     runs-on: hpc
     timeout-minutes: 30
     needs: [build-env, test_benchmark, test_training_cycle, test_accuracy]
-    # Always free the shared venv from $PERM once the tests finish, whether they
-    # passed or failed. Guarded on build-env so it does not fire when no env was
-    # built (e.g. an unlabeled PR that skipped build-env).
-    if: ${{ always() && needs.build-env.result != 'skipped' }}
+    # Keep the env on failure so "Re-run failed jobs" (same run_id) can reuse it.
+    # Skipped tests (single-test workflow_dispatch) still allow cleanup.
+    if: >-
+      ${{
+        always() &&
+        needs.build-env.result == 'success' &&
+        !contains(needs.*.result, 'failure') &&
+        !contains(needs.*.result, 'cancelled')
+      }}
     steps:
       - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
@@ -145,6 +150,26 @@ jobs:
             rm -rf "$WORKDIR"
           sbatch_options: |
             #SBATCH --job-name=anemoi_core_cleanup_env
+            #SBATCH --time=00:15:00
+            #SBATCH --qos=nf
+            #SBATCH --mem=8G
+          troika_user: ${{ secrets.HPC_CI_INTEGRATION_USER }}
+
+  # Remove envs left behind by failed or cancelled runs.
+  sweep-stale-envs:
+    name: sweep-stale-envs
+    runs-on: hpc
+    timeout-minutes: 30
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
+        with:
+          template: |
+            set -eux
+            mkdir -p "$PERM/TESTING/integration-venvs"
+            find "$PERM/TESTING/integration-venvs" -mindepth 1 -maxdepth 1 -type d -mtime +3 -print -exec rm -rf {} +
+          sbatch_options: |
+            #SBATCH --job-name=anemoi_core_sweep_envs
             #SBATCH --time=00:15:00
             #SBATCH --qos=nf
             #SBATCH --mem=8G

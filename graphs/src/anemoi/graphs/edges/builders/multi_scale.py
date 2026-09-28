@@ -89,6 +89,11 @@ class MultiScaleEdges(BaseEdgeBuilder):
         edge_builder_cls = getattr(importlib.import_module(module_name), class_name)
         return edge_builder_cls
 
+    def compute_edge_index_from_coords(self, source_coords: torch.Tensor, target_coords: torch.Tensor) -> torch.Tensor:
+        raise NotImplementedError(
+            f"{type(self).__name__} doesn't support computing edge index directly from its coordinates."
+        )
+
     def compute_edge_index(self, source_nodes: NodeStorage, _target_nodes: NodeStorage) -> torch.Tensor:
         edge_builder_cls = MultiScaleEdges.get_edge_builder_class(source_nodes.node_type)
 
