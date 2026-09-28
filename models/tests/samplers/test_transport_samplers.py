@@ -11,7 +11,6 @@ from collections.abc import Callable
 
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
@@ -25,6 +24,7 @@ from anemoi.models.transport.schedules import ExponentialSigmaSchedule
 from anemoi.models.transport.schedules import KarrasSigmaSchedule
 from anemoi.models.transport.schedules import LinearSigmaSchedule
 from anemoi.models.transport.schedules import SigmaSchedule
+from tests.batch_builders import build_batch
 
 DATASET_NAME = "test_dataset"
 

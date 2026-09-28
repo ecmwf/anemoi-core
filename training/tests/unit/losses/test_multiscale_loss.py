@@ -9,7 +9,6 @@
 
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from pytest_mock import MockerFixture
 from torch_geometric.data import HeteroData
@@ -25,6 +24,7 @@ from anemoi.training.losses.loss import get_loss_function
 from anemoi.training.losses.multiscale import MultiscaleLossWrapper
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+from tests.batch_builders import build_source
 
 
 def _view(data: torch.Tensor) -> GriddedSource:

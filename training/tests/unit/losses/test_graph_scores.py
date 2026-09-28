@@ -11,7 +11,6 @@ from collections.abc import Callable
 
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from pydantic import TypeAdapter
@@ -41,6 +40,7 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
+from tests.batch_builders import build_source
 
 
 def _view(data: torch.Tensor) -> GriddedSource:

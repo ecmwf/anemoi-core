@@ -11,11 +11,11 @@
 import numpy as np
 import pytest
 import torch
-from batch_builders import build_source
 from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.preprocessing.normalizer import InputNormalizer
+from tests.batch_builders import build_source
 
 VARIABLES = ["x", "y", "z", "q", "other"]
 

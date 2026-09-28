@@ -17,9 +17,8 @@ from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.views import SourceView
-from anemoi.models.data.views import create_source_view
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
@@ -34,6 +33,7 @@ from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
+from tests.batch_builders import build_source
 
 
 @pytest.fixture
@@ -352,9 +352,9 @@ expected_var_tendency_scaling = torch.Tensor(
 )
 
 
-def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> SourceView:
+def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
     """Wrap a five-dimensional loss tensor in the public loss input type."""
-    return create_source_view(
+    return build_source(
         name="data",
         data=data,
         variables=variables,
@@ -691,7 +691,7 @@ def test_lead_time_decay_loss_scaling(
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
     final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
-    assert torch.allclose(flatten(final_variable_scaling), expected_scaling)
+    assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
 
 
 # ---------------------------------------------------------------------------

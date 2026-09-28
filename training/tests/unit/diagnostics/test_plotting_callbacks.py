@@ -19,7 +19,6 @@ from unittest.mock import MagicMock
 import numpy as np
 import pytest
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
@@ -39,6 +38,7 @@ from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
+from tests.batch_builders import build_batch
 
 
 # --- BatchOutputPlot builders used by this test module ----------------------

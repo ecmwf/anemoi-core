@@ -9,11 +9,11 @@
 
 import pytest
 import torch
-from batch_builders import build_batch
 from torch import nn
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from tests.batch_builders import build_batch
 
 
 class _AggregationReached(RuntimeError):

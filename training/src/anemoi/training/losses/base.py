@@ -14,6 +14,7 @@ from abc import ABC
 from abc import abstractmethod
 from collections.abc import Iterator
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import ClassVar
 from typing import Literal
@@ -28,6 +29,9 @@ from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 LOGGER = logging.getLogger(__name__)
 

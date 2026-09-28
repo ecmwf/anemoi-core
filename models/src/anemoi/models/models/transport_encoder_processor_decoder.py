@@ -134,8 +134,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     ) -> tuple[torch.Tensor, torch.Tensor, None, ShardSizes, tuple[int, ...] | None, torch.Tensor | None]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        x_features = flatten(x)
-        y_noised_features = flatten(y_noised)
+        x_features = x.flatten()
+        y_noised_features = y_noised.flatten()
         grid_shard_sizes = x_features.shard_sizes
         same_coordinates = torch.equal(x_features.coordinates, y_noised_features.coordinates)
         if same_coordinates:
@@ -183,9 +183,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             y_noised_features.timedeltas,
         )
 
-    def _assemble_output(self, x_out: "FlatSource", x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
+    def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
         del x_skip
-        pred = unflatten(target, x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        pred = target.unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
 
         return pred
@@ -490,13 +490,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name),
                     decoder_target_view,
+                    conditioned_target[dataset_name],
                     batch_size=bse,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
                 )
             )
             if "encoded_data" not in target_feature_names:
-                conditioned_target_data = flatten(conditioned_target[dataset_name]).data.to(
+                conditioned_target_data = conditioned_target[dataset_name].flatten().data
+                conditioned_target_data = conditioned_target_data.to(
                     device=target_data_latent.device,
                     dtype=target_data_latent.dtype,
                 )

@@ -15,6 +15,7 @@ from abc import ABC
 from abc import abstractmethod
 from dataclasses import dataclass
 from dataclasses import replace
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -24,6 +25,14 @@ from rich.tree import Tree
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.spec import SourceSpec
 from anemoi.models.distributed.shapes import ShardSizes
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from collections.abc import Sequence
+
+    from torch.distributed import ProcessGroup
+
+    from anemoi.models.data.flat import FlatSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -176,6 +185,12 @@ class Source(ABC):
     @abstractmethod
     def ensemble_size(self) -> int:
         """Number of ensemble members in this source, or 1 if not applicable."""
+        ...
+
+    @property
+    @abstractmethod
+    def time_size(self) -> int:
+        """Number of time windows in this source."""
         ...
 
     @abstractmethod

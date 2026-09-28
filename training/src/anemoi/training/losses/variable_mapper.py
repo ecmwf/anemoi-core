@@ -10,6 +10,7 @@
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -22,6 +23,9 @@ from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 LOGGER = logging.getLogger(__name__)
 

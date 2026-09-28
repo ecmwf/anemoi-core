@@ -11,8 +11,6 @@ from types import SimpleNamespace
 
 import pytest
 import torch
-from batch_builders import build_batch
-from batch_builders import build_source
 from omegaconf import DictConfig
 from torch import nn
 
@@ -24,6 +22,8 @@ from anemoi.models.layers.graph_provider import DynamicGraphProvider
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from tests.batch_builders import build_batch
+from tests.batch_builders import build_source
 
 
 class _NearestEdges:
@@ -106,7 +106,9 @@ def _model(model_type):
     model.decoders_target_input = {
         "0": SimpleNamespace(
             features=[SimpleNamespace(name="coordinates")],
-            tensor=lambda x, encoded, target, **kwargs: target.coordinates.new_zeros(target.coordinates.shape[0], 4),
+            tensor=lambda x, encoded, target, target_spec, **kwargs: target_spec.coordinates.new_zeros(
+                target_spec.coordinates.shape[0], 4
+            ),
         ),
     }
     model.data_indices = {
@@ -138,7 +140,7 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     def forward(inputs):
         if model_type is AnemoiTransportModelEncProcDec:
             return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
-        return model(inputs, target)
+        return model(inputs, target_forcings=target, target_template=target.empty())
 
     output = forward(batch)["grid"].data
     torch.testing.assert_close(output[:, 0, :, 0, 0], values)
@@ -185,7 +187,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         output = model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
     else:
         target = inputs.select(variables=[])
-        output = model(inputs, target)
+        output = model(inputs, target_forcings=target, target_template=target.empty())
     for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
     sum(sample.sum() for sample in output["grid"].data).backward()

@@ -39,8 +39,8 @@ from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
+    from anemoi.models.data.flat import FlatSource
     from anemoi.models.data.sources.base import Source
-    from anemoi.models.data_adapter import FlatSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -732,7 +732,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             tensors; ``batch.coordinates`` carries the per-dataset coordinate
             tensors used by dynamic graph providers / node attributes. Per-dataset
             grid sharding is carried by the batch and read through the source
-            views (``flatten(view).shard_sizes``).
+            views (``view.flatten().shard_sizes``).
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup], optional

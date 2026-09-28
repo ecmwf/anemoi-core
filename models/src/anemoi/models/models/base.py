@@ -425,7 +425,7 @@ class BaseGraphModel(nn.Module):
         """Per-dataset flag indicating whether the dataset is grid-sharded.
 
         Sharding metadata is carried by each source, which exposes it via
-        ``flatten().shard_sizes``.
+        ``.flatten().shard_sizes``.
 
         ``None`` means that dataset is replicated, not sharded.
         """
@@ -614,7 +614,13 @@ class BaseGraphModel(nn.Module):
                 )
 
             # Perform forward pass
-            y_hat = self.forward(processed_batch, target=processed_target, model_comm_group=model_comm_group, **kwargs)
+            y_hat = self.forward(
+                processed_batch,
+                target_forcings=processed_target,
+                target_template=target.empty(),
+                model_comm_group=model_comm_group,
+                **kwargs,
+            )
 
             # Apply post-processing
             for dataset_name in y_hat.dataset_names:

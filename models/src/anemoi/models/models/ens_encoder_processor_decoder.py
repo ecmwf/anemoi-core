@@ -127,7 +127,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     def forward(
         self,
         batch: Batch,
-        target: Batch,
+        target_forcings: Batch,
+        target_template: Batch,
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -139,8 +140,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ----------
         batch : Batch
             Batch envelope, one source view per dataset.
-        target : Batch
+        target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
+        target_template : Batch
+            Output geometry (coordinates, timedeltas, shard sizes) for each decoded dataset.
         fcstep : int, optional
             Forecast step to condition on, clamped to `min(1, fcstep)`.
         model_comm_group : Optional[ProcessGroup], optional
@@ -149,7 +152,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         Returns
         -------
         Batch
-            Model output, built by updating the `target` for each decoded dataset.
+            Model output, one source per decoded dataset.
         """
         dataset_names = list(batch.keys())
 
@@ -256,12 +259,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         # Decoder
         x_out_dict = {}
-        for dataset_name in self.target_datasets:
+        for dataset_name, target_dataset_template in target_template.items():
+            if dataset_name not in self.target_datasets:
+                continue
+
             target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas = (
                 self._assemble_target(
                     batch[dataset_name],
                     x_data_latent_dict.get(dataset_name, None),
-                    target[dataset_name],
+                    target_forcings.get(dataset_name, None),
+                    target_dataset_template,
                     batch_size=batch_ens_size,
                     model_comm_group=model_comm_group,
                     dataset_name=dataset_name,
@@ -313,19 +320,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name, None),
-                target[dataset_name],
+                target_forcings[dataset_name],
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
 
-        # Preserve the reconstructed output metadata rather than the decoder
-        # conditioning metadata carried by target.
-        output = target
+        # The reconstructed output metadata should match the decoded metadata.
         for dataset_name in x_out_dict.keys():
-            do_coords_match = target[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
+            do_coords_match = target_template[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
             assert (
                 do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
             ), "Target and output coordinates must match."
-            output = output.replace(dataset_name, x_out_dict[dataset_name])
 
-        return output
+        return Batch(x_out_dict)

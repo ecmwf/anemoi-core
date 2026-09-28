@@ -7,11 +7,11 @@ from __future__ import annotations
 import math
 
 import torch
-from batch_builders import build_batch
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.transport.objectives import EDMDiffusionModelObjective
 from anemoi.models.transport.settings import EdmSettings
+from tests.batch_builders import build_batch
 
 
 class _Model:

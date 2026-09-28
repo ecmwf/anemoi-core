@@ -523,7 +523,7 @@ class ObservationDataReader(BaseAnemoiReader):
     @property
     def layout(self) -> TensorLayout:
         """Return the tabular per-sample layout."""
-        return TensorLayout(grid=0, variables=1, time_in_grid=True)
+        return TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
 
     @property
     def is_static_grid(self) -> bool:
@@ -608,7 +608,7 @@ class ObservationDataReader(BaseAnemoiReader):
         )
 
         return SourceSample(
-            data=data,
+            data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,

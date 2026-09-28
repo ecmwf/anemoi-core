@@ -20,6 +20,8 @@ from dataclasses import fields
 from typing import Any
 
 import torch
+from rich.console import Console
+from rich.tree import Tree
 from torch.distributed import ProcessGroup
 from torch.utils.data import default_collate
 
@@ -89,7 +91,6 @@ class Batch:
 
     @property
     def batch_size(self) -> int:
-        """Number of samples (batch size) in this batch."""
         batch_sizes = {name: source.batch_size for name, source in self.sources.items()}
         if not batch_sizes:
             msg = "Cannot determine batch size of an empty batch."
@@ -100,6 +101,17 @@ class Batch:
             raise ValueError(msg)
 
         return next(iter(batch_sizes.values()))
+
+    @property
+    def ensemble_size(self) -> int:
+        ensemble_sizes = {name: source.ensemble_size for name, source in self.sources.items()}
+        if not ensemble_sizes:
+            raise ValueError("Cannot determine ensemble size of an empty batch.")
+
+        if len(set(ensemble_sizes.values())) != 1:
+            raise ValueError(f"Inconsistent ensemble sizes across datasets: {ensemble_sizes}")
+
+        return next(iter(ensemble_sizes.values()))
 
     @property
     def dataset_names(self) -> tuple[str, ...]:
@@ -126,23 +138,22 @@ class Batch:
         """Return whether ``dataset_name``'s coordinates are static."""
         return dataset_name in self.sources and self.sources[dataset_name].coordinates_are_static
 
-    def __repr__(self) -> str:
-        """Compact summary of per-dataset shapes, layouts and static-coords flag."""
+    def tree(self) -> Tree:
+        """Return a tree representation of the batch."""
         if not self.sources:
-            return "Batch(<empty>)"
+            return Tree("Batch(<empty>)")
 
-        lines = ["Batch("]
-        for name, source in self.sources.items():
-            if isinstance(source.data, list):
-                shapes = [tuple(t.shape) for t in source.data]
-                shape_repr = f"list[{len(source.data)}] of shapes={shapes}"
-            else:
-                shape_repr = f"shape={tuple(source.data.shape)}"
-            static_repr = " static_coords" if source.coordinates_are_static else ""
-            shard_repr = f" shard_sizes={source.shard_sizes}" if source.shard_sizes is not None else ""
-            lines.append(f"  {name}: {shape_repr} layout={source.layout!r}{static_repr}{shard_repr}")
-        lines.append(")")
-        return "\n".join(lines)
+        tree = Tree("Batch")
+        for source in self.sources.values():
+            tree.add(source.tree())
+
+        return tree
+
+    def __repr__(self) -> str:
+        console = Console(record=True, width=120)
+        with console.capture() as capture:
+            console.print(self.tree())
+        return capture.get()
 
     def __getitem__(self, dataset_name: str) -> Source:
         """Return the source for one dataset."""
