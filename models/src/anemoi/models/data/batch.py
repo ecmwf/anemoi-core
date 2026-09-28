@@ -350,6 +350,8 @@ class Batch:
                 timedeltas = [s.timedeltas for s in per_sample]
                 boundaries = [s.boundaries for s in per_sample]
                 shard_sizes = [s.shard_sizes for s in per_sample]
+                # Unsharded samples (e.g. inference payloads) collate to an unsharded source.
+                shard_sizes = None if all(s is None for s in shard_sizes) else shard_sizes
                 layout = head.layout
             else:
                 data = default_collate([s.data for s in per_sample])
