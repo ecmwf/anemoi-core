@@ -188,32 +188,6 @@ class GriddedSource(Source):
 
         return self.clone(data=new_data, **kwargs)
 
-    def apply_pairwise(
-        self, other: "GriddedSource", func: Callable, *, per_sample_kwargs=None, **kwargs
-    ) -> torch.Tensor:
-        """Combine two gridded sources through ``func``."""
-        if per_sample_kwargs is not None:
-            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
-        if not isinstance(other, GriddedSource):
-            msg = f"Other source must be a GriddedSource; got {type(other).__name__}."
-            raise TypeError(msg)
-        if self.layout != other.layout:
-            msg = f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}."
-            raise ValueError(msg)
-        # assert self.variables == other.variables, f"Both views must have the same variables; got {self.variables} and {other.variables}."
-        if self.coordinates is None or other.coordinates is None:
-            assert self.coordinates is other.coordinates, "Both views must agree on whether coordinates are available."
-        else:
-            assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
-        return func(
-            self.data,
-            other.data,
-            layout=self.layout,
-            statistics=self.statistics,
-            name_to_index=self.name_to_index,
-            **kwargs,
-        )
-
     def shard(self, group: ProcessGroup | None) -> "GriddedSource":
         """Split this source across ``group`` along its grid axis."""
         if self.shard_sizes is not None:
