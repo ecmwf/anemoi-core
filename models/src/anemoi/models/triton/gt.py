@@ -21,7 +21,6 @@ except ImportError:
     )
 
 
-
 @triton.jit
 def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
     """Pads H and C to the nearest power of 2 if needed.
