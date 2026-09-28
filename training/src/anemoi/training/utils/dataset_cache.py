@@ -2,7 +2,6 @@
 import errno
 import fcntl
 import hashlib
-import io
 import json
 import logging
 import os
@@ -30,17 +29,27 @@ from anemoi.training.utils.cache_transport import (
 
 LOGGER = logging.getLogger(__name__)
 
-_BLOSC = Blosc(cname="zstd", clevel=3, shuffle=Blosc.BITSHUFFLE)
+# Records are read and written inside dataloader workers, where numcodecs runs blosc
+# single-threaded (it only uses threads in the main process). lz4 decodes ~2x and
+# encodes ~3-8x faster than zstd there, for a similar compression ratio.
+_BLOSC = Blosc(cname="lz4", clevel=5, shuffle=Blosc.BITSHUFFLE)
 
 
 def load_cache_array(path):
-    return np.load(io.BytesIO(_BLOSC.decode(path.read_bytes())), allow_pickle=False)
+    """Read an uncompressed .npy header followed by the blosc-compressed array data."""
+    with path.open("rb") as source:
+        np.lib.format.read_magic(source)
+        shape, fortran_order, dtype = np.lib.format.read_array_header_1_0(source)
+        payload = source.read()
+    value = np.empty(shape, dtype=dtype, order="F" if fortran_order else "C")
+    _BLOSC.decode(payload, out=value)
+    return value
 
 
 def save_cache_array(target, value):
-    buffer = io.BytesIO()
-    np.save(buffer, value, allow_pickle=False)
-    target.write(_BLOSC.encode(buffer.getbuffer()))
+    value = np.ascontiguousarray(value)
+    np.lib.format.write_array_header_1_0(target, np.lib.format.header_data_from_array_1_0(value))
+    target.write(_BLOSC.encode(value))
 
 
 def read_cache_entry(entries_path, sequence, position, grid_id="all"):
@@ -99,7 +108,7 @@ class DatasetCacheNamespace:
         sequence, position = self.normalize(sequence, position)
         return read_cache_entry(self.entries_path, sequence, position, grid_id)
 
-    def store(self, sequence, position, value, grid_id="all", sync=True):
+    def store(self, sequence, position, value, grid_id="all", sync=False):
         entry, lock = self.paths(sequence, position, grid_id)
         with self.lock(lock):
             if entry.exists():
@@ -303,7 +312,7 @@ class DatasetCache(pl.LightningDataModule):
         self._increment(self.cache_misses, len(missing))
         return values, missing
 
-    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=True):
+    def _store_records(self, dataset_id, sequence, positions, values, grid_id, sync=False):
         if self.cache_full.value:
             return
         namespace = self.namespaces[dataset_id]
@@ -372,6 +381,7 @@ class DatasetCache(pl.LightningDataModule):
             for dataset_id, sequence, position, grid_id, node in entries:
                 locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
         self._locations = locations
+        LOGGER.info("Rank %d had %d fetches (%d local hits, %d remote hits, %d misses)", self.global_rank, self.total_fetches.value, self.cache_hits_local.value, self.cache_hits_remote.value, self.cache_misses.value)
 
     def teardown(self, stage=None):
         self.close_writer()

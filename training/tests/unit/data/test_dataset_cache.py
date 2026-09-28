@@ -212,11 +212,11 @@ class TestDatasetCacheNamespace:
     def test_failed_write_removes_partial_entry(self, tmp_path, sample_data, monkeypatch):
         namespace = DatasetCacheNamespace(tmp_path, "analysis:fingerprint", self.FakeReader(sample_data))
 
-        def fail_save(file, value, allow_pickle):
-            file.write(b"partial")
+        def fail_save(target, value):
+            target.write(b"partial")
             raise OSError("Not enough free space to write array")
 
-        monkeypatch.setattr(np, "save", fail_save)
+        monkeypatch.setattr("anemoi.training.utils.dataset_cache.save_cache_array", fail_save)
         with pytest.raises(OSError, match="Not enough free space"):
             namespace.store(0, 3, sample_data[3])
 
