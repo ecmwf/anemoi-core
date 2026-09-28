@@ -23,7 +23,6 @@ from torch_geometric.utils import scatter
 from anemoi.graphs.edges.directional import compute_directions
 from anemoi.graphs.normalise import NormaliserMixin
 from anemoi.graphs.utils import NodesAxis
-from anemoi.graphs.utils import camel_to_snake
 from anemoi.graphs.utils import get_distributed_device
 from anemoi.graphs.utils import haversine_distance
 
@@ -31,20 +30,58 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
-    """Base class for edge attribute builders."""
+    """Base class for creating edge attributes.
+    
+    It uses the information provided in the config to describe how the attribute is computed. 
+
+    It expects the following attributes to be defined:
+    - `name` defines the name of the edge attribute being created. This will be used to store the computed edge 
+    attributes in the graph data structure (`:class:torch_geometric.data.HeteroData`).
+    - `node_attr_name` defines the name of the node attribute needed from the node storage object
+    (provided to `.forward()`) from which edge attributes are derived. The coordinates are stored in the `x` attribute
+    of the node storage. All the other node attributes are user-defined.
+
+    There are other arguments that can be specified too:
+    - `norm_by_group` specifies whether the edge attribute should be normalized by group. This is useful when 
+    the graph has multiple groups of nodes and you want to normalize the edge attributes within each group separately.
+    - `dtype` specifies the data type of the edge attribute. The default is "torch.float32".
+    - `norm` specifies the normalization method to be applied to the edge attribute. The default is None, meaning
+    no normalization is applied. Options are:
+        - "unit-range": scales the edge attribute to the range [0, 1].
+        - "unit-std": standardizes the edge attribute to have zero mean and unit variance.
+        -
+        - None: no normalization is applied.
+
+
+    The `compute_edge_attribute` method must be implemented by subclasses to define how the edge attribute 
+    is computed from the specified node attributes.
+
+    Example
+    -------
+        class DistanceAttributeBuilder(BaseEdgeAttributeBuilder):
+            name = "distance"
+            node_attr_name = "x"
+
+            def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+                return haversine_distance(x_i[:, 0], x_i[:, 1], x_j[:, 0], x_j[:, 1])
+    """
 
     node_attr_name: str = None
     norm_by_group: bool = False
 
     def __init__(self, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
-        self.name = name or camel_to_snake(self.__class__.__name__)
+        self.name = name
         self.norm = norm
         self.dtype = dtype
         self.device = get_distributed_device()
+        if self.name is None:
+            error_msg = f"Class {self.__class__.__name__} must define 'name' either as a class attribute or in __init__"
+            raise ValueError(error_msg)
+
         if self.node_attr_name is None:
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
-            raise TypeError(error_msg)
+            raise ValueError(error_msg)
 
     def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
         if self.node_attr_name in source_nodes:
@@ -66,10 +103,10 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         return self.propagate(edge_index.to(self.device), x=x, size=size)
 
     @abstractmethod
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
 
     def message(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        edge_features = self.compute(x_i, x_j)
+        edge_features = self.compute_edge_attribute(x_i, x_j)
 
         if edge_features.ndim == 1:
             edge_features = edge_features.unsqueeze(-1)
@@ -81,23 +118,34 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
 
 class BasePositionalBuilder(BaseEdgeAttributeBuilder, ABC):
+    """Base class for positional edge attribute builders.
+    
+    This class serves as a base for edge attribute builders that rely on positional information of nodes
+    (e.g., its coordinates).
+    """
     node_attr_name: str = "x"
     _idx_lat: int = 0
     _idx_lon: int = 1
 
 
 class EdgeLength(BasePositionalBuilder):
-    """Computes edge length for bipartite graphs."""
+    """Computes edge length.
+    
+    Computes the haversine distance between the source and target nodes.
+    """
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_length = haversine_distance(x_i, x_j)
         return edge_length
 
 
 class EdgeDirection(BasePositionalBuilder):
-    """Computes edge direction for bipartite graphs."""
+    """Computes edge direction.
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    Computes the direction vectors from the source to the target nodes for each edge.
+    """
+
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
         return edge_dirs
 
@@ -117,7 +165,7 @@ class DirectionalHarmonics(EdgeDirection):
 
     Methods
     -------
-    compute(x_i, x_j)
+    compute_edge_attribute(x_i, x_j)
         Compute directional harmonics from edge directions.
     """
 
@@ -127,7 +175,7 @@ class DirectionalHarmonics(EdgeDirection):
         self.order = order
         super().__init__(name=name, norm=norm, dtype=dtype)
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
 
@@ -156,7 +204,7 @@ class Azimuth(BasePositionalBuilder):
 
     Methods
     -------
-    compute(x_i, x_j)
+    compute_edge_attribute(x_i, x_j)
         Compute edge lengths attributes.
 
     References
@@ -164,7 +212,7 @@ class Azimuth(BasePositionalBuilder):
     - https://www.movable-type.co.uk/scripts/latlong.html
     """
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Forward bearing. x_i, x_j must be radians.
         a11 = torch.cos(x_i[:, self._idx_lat]) * torch.sin(x_j[:, self._idx_lat])
         a12 = (
@@ -197,7 +245,7 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
         assert (
             node_attr is not None
@@ -252,7 +300,7 @@ class RadialBasisFeatures(EdgeLength):
 
     Methods
     -------
-    compute(x_i, x_j)
+    compute_edge_attribute(x_i, x_j)
         Compute raw edge distances (RBF computation happens in aggregate).
     aggregate(edge_features, index, ptr, dim_size)
         Compute RBF features with adaptive scaling and per-target-node normalization.
@@ -374,7 +422,7 @@ class GaussianDistanceWeights(EdgeLength):
         self.sigma = sigma
         super().__init__(name=name, norm=norm)
 
-    def compute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        dists = super().compute(x_i, x_j)
+    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        dists = super().compute_edge_attribute(x_i, x_j)
         gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
         return gaussian_weights
