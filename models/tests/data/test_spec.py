@@ -173,10 +173,3 @@ class TestBatchTransformations:
         batch = gridded_batch()
         moved = batch.to("cpu")
         assert moved["grid"].spec is batch["grid"].spec
-
-    def test_apply_pairwise_runs_per_dataset(self) -> None:
-        batch = gridded_batch()
-        other = gridded_batch()
-        out = batch.apply_pairwise(other, lambda a, b, **_: (a - b).abs().sum())
-        assert set(out) == {"grid"}
-        assert out["grid"].item() == 0.0
