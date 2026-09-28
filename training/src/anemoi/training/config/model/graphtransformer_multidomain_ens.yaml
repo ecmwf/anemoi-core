@@ -1,0 +1,35 @@
+defaults:
+- graphtransformer_multidomain
+- _self_
+
+condition_on_residual: False
+
+model:
+  _target_: anemoi.models.models.AnemoiEnsModelEncProcDec
+
+noise_injector:
+  _target_: anemoi.models.layers.ensemble.NoiseConditioning
+  noise_std: 1
+  noise_channels_dim: 4
+  noise_mlp_hidden_dim: 32
+  noise_matrix: null
+  noise_edges_name: null
+  edge_weight_attribute: null
+  row_normalize_noise_matrix: false
+  autocast: false
+  layer_kernels:
+    Activation:
+      _target_: torch.nn.GELU
+
+processor:
+  layer_kernels:
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      normalized_shape: ${model.num_channels}
+      condition_shape: ${model.noise_injector.noise_channels_dim}
+      zero_init: True
+      autocast: false
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU

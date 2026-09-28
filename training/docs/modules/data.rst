@@ -97,7 +97,7 @@ through its own hidden mesh while sharing the encoder, processor, and decoder we
 Each mapped hidden node set must have corresponding domain-to-hidden,
 hidden-to-hidden, and hidden-to-domain edges in the graph. Hidden node and edge
 feature dimensions must match because the model weights remain shared. The
-hierarchical, ensemble, and transport model variants do not currently support
+hierarchical and transport model variants do not currently support
 per-domain hidden meshes.
 
 With Anemoi's current distributed strategy, domain-specific trainable node and

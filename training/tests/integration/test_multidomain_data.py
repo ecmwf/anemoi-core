@@ -58,3 +58,14 @@ def test_config_validation_multidomain(multidomain_config: tuple[DictConfig, lis
         "sg_1": "sg_1_hidden",
         "sg_2": "sg_2_hidden",
     }
+
+
+def test_config_validation_multidomain_ensemble(
+    multidomain_ensemble_config: tuple[DictConfig, list[str]],
+) -> None:
+    cfg, _ = multidomain_ensemble_config
+    cfg = convert_to_omegaconf(BaseSchema(**cfg))
+    assert cfg.model.model._target_ == "anemoi.models.models.AnemoiEnsModelEncProcDec"
+    assert cfg.training.method._target_ == "anemoi.training.train.methods.EnsembleTraining"
+    assert cfg.training.training_loss.datasets.sg_1._target_ == "anemoi.training.losses.CRPS"
+    assert cfg.training.training_loss.datasets.sg_2._target_ == "anemoi.training.losses.CRPS"
