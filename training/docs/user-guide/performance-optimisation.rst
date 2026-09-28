@@ -319,7 +319,7 @@ enabled by default. It can be selected in the config like so:
 
 .. code::
 
-   model.processor.attention_implementation: 'triton'
+   model.processor.attention_implementation: 'triton_attention'
 
 
 For the GraphTransformer processor, the 'triton' backend is the fastest.

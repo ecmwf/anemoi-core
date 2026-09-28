@@ -615,6 +615,14 @@ class TritonAttentionWrapper(nn.Module):
 
         self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
 
+        if query.shape[-2] != key.shape[-2]:
+            # Cross attention between grids of different sizes (e.g. transformer mappers)
+            raise NotImplementedError(
+                "Cross attention between sequences of different lengths is not yet implemented in the Triton-Attention "
+                f"backend (query length {query.shape[-2]}, key/value length {key.shape[-2]}).\n"
+                "Please use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+
         softmax_scale = 1 / math.sqrt(query.size(-1))
 
         out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)

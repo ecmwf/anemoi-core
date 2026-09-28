@@ -12,17 +12,6 @@ from typing import Optional
 from typing import Tuple
 
 import torch
-
-# check if triton is installed
-# If pytorch is installed on CPU then torch is not available
-try:
-    import triton
-    import triton.language as tl
-except ImportError:
-    raise ValueError(
-        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
-    )
-
 from torch_geometric.typing import Adj
 from torch_geometric.utils import index_sort
 from torch_geometric.utils.sparse import index2ptr
@@ -81,9 +70,13 @@ def edge_index_to_csc(
     return (row, colptr), perm
 
 
+# Triton is imported inside the helpers below rather than at module level, so that this
+# module (e.g. edge_index_to_csc, is_triton_available) stays importable without Triton.
+
+
 def torch_dtype_to_triton(dtype):
-    # Import inside the function for safety
-    # If triton is not installed this import will fail
+    import triton.language as tl
+
     if dtype == torch.float16:
         return tl.float16
     elif dtype == torch.bfloat16:
@@ -95,10 +88,14 @@ def torch_dtype_to_triton(dtype):
 
 
 def is_hip():
+    import triton
+
     return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
 
 
 def is_cuda():
+    import triton
+
     return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
 
 

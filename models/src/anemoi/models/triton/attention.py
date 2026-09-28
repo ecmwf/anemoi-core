@@ -27,16 +27,13 @@ from anemoi.models.triton.utils import is_hip
 from anemoi.models.triton.utils import supports_host_descriptor
 from anemoi.models.triton.utils import torch_dtype_to_triton
 
-TRITON_AVAILABLE = False
 try:
     import triton
     import triton.language as tl  # noqa: E402
-
-    TRITON_AVAILABLE = True
-except ImportError:
-    raise ValueError(
-        "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
-    )
+except ImportError as e:
+    raise ImportError(
+        "The 'triton_attention' backend was selected but Triton is not installed. To use this backend please install Triton. Otherwise, select a different attention_implementation in the models config."
+    ) from e
 
 TENSOR_DESCRIPTOR_SUPPORTED = version.parse(triton.__version__) >= version.parse("2.7")
 if TENSOR_DESCRIPTOR_SUPPORTED:
@@ -59,8 +56,7 @@ def set_allocator():
     triton.set_allocator(alloc_fn)
 
 
-if TRITON_AVAILABLE:
-    set_allocator()
+set_allocator()
 
 
 @triton.jit
@@ -474,7 +470,7 @@ def _attn_fwd(
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
         # o is a tensor descriptor which doesnt support different block sizes, so access o as a regular pointer with 2D indexing
         offs_d = tl.arange(0, HEAD_DIM)
-        o_ptrs = o + off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + offs_d[None, :]
+        o_ptrs = o + off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + offs_d[None, :]
         tl.store(o_ptrs, acc.to(dtype), mask=offs_fixed[:, None] < N_CTX)
     else:
         tl.store(m_ptrs, m_i)
@@ -495,12 +491,12 @@ def _attn_bwd_preprocess(
     off_n = tl.arange(0, HEAD_DIM)
     # load - use N_CTX for stride since tensors are not padded
     o = tl.load(
-        Out + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
+        Out + off_hz.to(tl.int64) * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
         mask=off_m[:, None] < N_CTX,
         other=0.0,
     ).to(tl.float32)
     do = tl.load(
-        DO + off_hz * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
+        DO + off_hz.to(tl.int64) * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
         mask=off_m[:, None] < N_CTX,
         other=0.0,
     ).to(tl.float32)
@@ -629,7 +625,8 @@ def _attn_bwd_dkdv(
     INV_L += off_chz
     D += off_chz
 
-    tail_case = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
+    # start_fixed is an element offset here (pid * BLOCK_FIXED), not a block index as in _attn_fwd
+    tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_CTX
 
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
 
@@ -643,7 +640,7 @@ def _attn_bwd_dkdv(
     # exp2 amplifies that mismatch dramatically for sharp attention.
     qk_scale = tl.full((), sm_scale, tl.float32) * RCP_LN2
     v = desc_v.load([fixed_offset, 0])
-    if UNEVEN_CTX and tail_case:
+    if UNEVEN_CTX and tail_fixed_block:
         # mask out-of-bounds k and v values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED/BLOCK_ITER
         k = tl.where(offs_fixed[:, None] < N_CTX, k, 0.0)
         v = tl.where(offs_fixed[:, None] < N_CTX, v, 0.0)
@@ -760,11 +757,12 @@ def _attn_bwd_dkdv(
     # when N_CTX is not divisible by BLOCK_FIXED, we may have computed values for out-of-bounds positions,
     # In this case, we set the block size of desc_d[vk] to be smaller in the tail case, such that the store only writes the in-bounds values.
 
-    tail_fixed_block = ((start_fixed + 1) * BLOCK_FIXED) > N_CTX
     if UNEVEN_CTX and tail_fixed_block:
         # need to write a smaller block size when using uneven ctx to avoid writing into the next SMs region
         # to do this, access dk and dv as regular pointers with 2D indexing
-        out_ptrs = off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + (tl.arange(0, HEAD_DIM))[None, :]
+        out_ptrs = (
+            off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + (tl.arange(0, HEAD_DIM))[None, :]
+        )
         dv_ptrs = dv_ptr + out_ptrs
         dk_ptrs = dk_ptr + out_ptrs
 
@@ -1010,7 +1008,12 @@ def _attn_bwd_dq(
     dq *= sm_scale
     # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
     if UNEVEN_CTX and tail_fixed_block:
-        dq_ptrs = dq_ptr + off_hz * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :]
+        dq_ptrs = (
+            dq_ptr
+            + off_hz.to(tl.int64) * N_CTX * HEAD_DIM
+            + offs_fixed[:, None] * HEAD_DIM
+            + tl.arange(0, HEAD_DIM)[None, :]
+        )
         tl.store(dq_ptrs, dq.to(dtype), mask=offs_fixed[:, None] < N_CTX)
     else:
         desc_dq.store([fixed_offset, 0], dq.to(dtype))
