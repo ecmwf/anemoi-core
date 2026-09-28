@@ -12,6 +12,7 @@ from typing import Optional
 from typing import Tuple
 
 import torch
+
 # check if triton is installed
 # If pytorch is installed on CPU then torch is not available
 try:
@@ -111,6 +112,7 @@ def is_blackwell():
 
 def is_hopper():
     return is_cuda() and torch.cuda.get_device_capability()[0] == 9
+
 
 def is_triton_available():
     """Checks if triton is available.

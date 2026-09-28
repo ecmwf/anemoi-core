@@ -20,7 +20,6 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
-from anemoi.models.triton.utils import torch_dtype_to_triton
 
 
 @triton.jit

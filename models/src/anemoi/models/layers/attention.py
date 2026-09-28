@@ -182,13 +182,13 @@ class MultiHeadSelfAttention(nn.Module):
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
-        self.debug=False
+        self.debug = False
         if os.getenv("DEBUG_ATTN", "0") == "1":
             self.debug = True
             self.ref_attention = attn_funcs["flash_attention"](
                 use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
             )
-            LOGGER.info(f"Loading flash attention as reference attention for debugging purposes")
+            LOGGER.info("Loading flash attention as reference attention for debugging purposes")
 
     def attention_computation(
         self,
@@ -575,7 +575,7 @@ class FlashAttentionWrapper(nn.Module):
                 dropout_p=dropout_p,
                 softcap=softcap,
                 alibi_slopes=alibi_slopes,
-                #softmax_scale=1.0 / math.sqrt(query.shape[-1]),
+                # softmax_scale=1.0 / math.sqrt(query.shape[-1]),
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out

@@ -167,8 +167,8 @@ def _attn_fwd_inner(
                 (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
             )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
 
-        #qk = tl.dot(q, k) * qk_scale
-        qk = tl.dot(q, k) 
+        # qk = tl.dot(q, k) * qk_scale
+        qk = tl.dot(q, k)
 
         if UNEVEN_CTX and tail_iter_block:
             qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
@@ -188,8 +188,8 @@ def _attn_fwd_inner(
             qk = tl.where(mask, qk, MINUS_INF)
 
         # compute max and exponent after masking (more numerically stable)
-        #m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        #p = tl.math.exp2(qk - m_ij[:, None])
+        # m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        # p = tl.math.exp2(qk - m_ij[:, None])
         m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
         p = tl.math.exp2(qk * qk_scale - m_ij[:, None])
 
@@ -818,9 +818,7 @@ def _attn_bwd_dq(
     Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context.
     """
 
-    RCP_LN2: tl.constexpr = (
-        1.44269504  # = 1/ln(2), matching the forward and dK/dV kernels
-    )
+    RCP_LN2: tl.constexpr = 1.44269504  # = 1/ln(2), matching the forward and dK/dV kernels
     qk_scale = tl.full((), sm_scale, tl.float32) * RCP_LN2
 
     # ***** 1) determine which section of the gradients this program is responsible for *****
