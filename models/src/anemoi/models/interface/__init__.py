@@ -271,9 +271,9 @@ class AnemoiModelInterface(torch.nn.Module):
     def get_batch(self, data: dict[str, SourceSample]) -> Batch:
         """Collate the per-dataset samples into a single-sample Batch."""
         for dataset_name, sample in data.items():
-            assert "latitudes" in sample and "longitudes" in sample, (
-                f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
-            )
+            assert (
+                "latitudes" in sample and "longitudes" in sample
+            ), f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
             latitudes = torch.as_tensor(sample.pop("latitudes"), dtype=torch.float32).reshape(-1)
             longitudes = torch.as_tensor(sample.pop("longitudes"), dtype=torch.float32).reshape(-1)
             assert latitudes.shape == longitudes.shape, (
@@ -369,7 +369,7 @@ class AnemoiModelInterface(torch.nn.Module):
         # Convert to batch
         x = self.get_batch(x)
         target = self.get_batch(target_template)
-    
+
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
             "x": x,
