@@ -309,7 +309,8 @@ class Batch:
         * **Tabular** (``layout.time_in_grid`` true) - the grid extent varies per
           sample, so data, coordinates, timedeltas, boundaries and shard sizes each
           become a list of length ``B`` and the per-sample layout stands, the batch
-          axis being the list itself.
+          axis being the list itself. Shard sizes stay ``None`` when no sample is
+          sharded, since ``None`` is what marks a source as replicated.
         """
         if isinstance(samples, dict):
             samples = [samples]
@@ -330,7 +331,7 @@ class Batch:
                 coordinates = [s.coordinates for s in per_sample]
                 timedeltas = [s.timedeltas for s in per_sample]
                 boundaries = [s.boundaries for s in per_sample]
-                shard_sizes = [s.shard_sizes for s in per_sample]
+                shard_sizes = _collate_tabular_shard_sizes(name, per_sample)
                 layout = head.layout
             else:
                 data = default_collate([s.data for s in per_sample])
@@ -358,6 +359,23 @@ class Batch:
         batch = Batch(sources)
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
+
+
+def _collate_tabular_shard_sizes(name: str, per_sample: list[SourceSample]) -> list[Any] | None:
+    """Collate per-sample shard sizes, or ``None`` when no sample is sharded.
+
+    Sources treat ``shard_sizes is None`` as replicated, so a list of ``None``
+    entries would wrongly read as sharded. A mix of sharded and unsharded samples
+    cannot be gathered consistently and is rejected.
+    """
+    shard_sizes = [s.shard_sizes for s in per_sample]
+    n_unsharded = sum(sizes is None for sizes in shard_sizes)
+    if n_unsharded == len(shard_sizes):
+        return None
+    if n_unsharded:
+        msg = f"Dataset {name!r} mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
+        raise ValueError(msg)
+    return shard_sizes
 
 
 def _validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:

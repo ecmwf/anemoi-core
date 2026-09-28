@@ -104,17 +104,19 @@ def _cached_static_coords(name, value, device, *, cache: dict, non_blocking: boo
     return moved
 
 
-def _variable_index(indices: slice | Sequence[int] | torch.Tensor) -> slice | list[int]:
-    """Return ``indices`` in a form that indexes both a list and an array along one axis.
+def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) -> list[int]:
+    """Resolve ``indices`` along an axis of length ``size`` to a list of ints.
 
-    Statistics are normally numpy arrays, so a tensor index is turned into a plain
-    list of ints. Slices pass through unchanged.
+    A plain list indexes lists, numpy arrays and tensors alike, and a single int
+    becomes a one-element list so the indexed axis is kept.
     """
     if isinstance(indices, slice):
-        return indices
+        return list(range(*indices.indices(size)))
+    if isinstance(indices, int):
+        return [indices]
     if isinstance(indices, torch.Tensor):
         return indices.tolist()
-    return list(indices)
+    return [int(i) for i in indices]
 
 
 @dataclass(frozen=True, slots=True)
@@ -253,11 +255,8 @@ class Source(ABC):
         Both are indexed together, so they stay consistent with the data tensor the
         caller indexes alongside.
         """
-        index = _variable_index(indices)
-        if isinstance(index, slice):
-            variables = self.variables[index]
-        else:
-            variables = [self.variables[i] for i in index]
+        index = _index_list(indices, self.n_variables)
+        variables = [self.variables[i] for i in index]
         statistics = {key: value[index] for key, value in self.statistics.items()}
         return {"variables": variables, "statistics": statistics}
 

@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from dataclasses import replace
+
 import pytest
 import torch
 
@@ -155,12 +157,46 @@ class TestSourceTransformations:
         assert selected.variables == ["c"]
         assert selected.statistics["mean"].tolist() == [2.0]
 
+    @pytest.mark.parametrize("indices", [1, slice(1, 2), [1], torch.tensor([1])])
+    def test_select_time_keeps_the_time_axis(self, indices) -> None:
+        view = gridded_batch()["grid"]
+        selected = view.select(time=indices)
+        time_axis = selected.layout.time
+        assert selected.data.shape[time_axis] == 1
+        torch.testing.assert_close(selected.data, view.data.narrow(time_axis, 1, 1))
+
+    def test_select_time_on_a_tabular_source(self) -> None:
+        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        selected = view.select(time=slice(1, None))
+        assert selected.time_size == 1
+        assert selected.boundaries == [(slice(0, 2),)]
+
     def test_select_variables_on_a_tabular_source(self) -> None:
         view = Batch.collate([{"obs": tabular_payload()}])["obs"]
         selected = view.select(variables=[1])
         assert selected.variables == ["sp"]
         assert selected.statistics["mean"].tolist() == [2.0]
         assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
+
+
+class TestCollate:
+    def test_unsharded_tabular_samples_collate_to_replicated(self) -> None:
+        batch = Batch.collate([{"obs": tabular_payload()}, {"obs": tabular_payload()}])
+        assert batch["obs"].shard_sizes is None
+        # replicated sources are returned unchanged by allgather and flatten without shard sizes
+        assert batch["obs"].allgather(None) is batch["obs"]
+        assert batch["obs"].flatten().shard_sizes is None
+
+    def test_sharded_tabular_samples_keep_per_sample_shard_sizes(self) -> None:
+        sizes = [[1, 1], [1, 1]]
+        sample = replace(tabular_payload(), shard_sizes=sizes)
+        batch = Batch.collate([{"obs": sample}])
+        assert batch["obs"].shard_sizes == [sizes]
+
+    def test_mixed_sharded_and_unsharded_samples_are_rejected(self) -> None:
+        sharded = replace(tabular_payload(), shard_sizes=[[1, 1], [1, 1]])
+        with pytest.raises(ValueError, match="mixes sharded and unsharded"):
+            Batch.collate([{"obs": sharded}, {"obs": tabular_payload()}])
 
 
 class TestBatchTransformations:
