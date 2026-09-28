@@ -13,7 +13,10 @@ from __future__ import annotations
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
+from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field
 from dataclasses import replace
 from typing import TYPE_CHECKING
 from typing import Any
@@ -23,21 +26,16 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.spec import SourceSpec
 from anemoi.models.distributed.shapes import ShardSizes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
-    from collections.abc import Sequence
 
     from torch.distributed import ProcessGroup
 
     from anemoi.models.data.flat import FlatSource
 
 LOGGER = logging.getLogger(__name__)
-
-# How a source's axes collapse into ``(nodes, features)``.
-FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
 
 
 def resolve_device(device: torch.device | str) -> torch.device:
@@ -106,59 +104,77 @@ def _cached_static_coords(name, value, device, *, cache: dict, non_blocking: boo
     return moved
 
 
+def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) -> list[int]:
+    """Resolve ``indices`` along an axis of length ``size`` to a list of ints.
+
+    A plain list indexes lists, numpy arrays and tensors alike, and a single int
+    becomes a one-element list so the indexed axis is kept.
+    """
+    if isinstance(indices, slice):
+        return list(range(*indices.indices(size)))
+    if isinstance(indices, int):
+        return [indices]
+    if isinstance(indices, torch.Tensor):
+        return indices.tolist()
+    return [int(i) for i in indices]
+
+
 @dataclass(frozen=True, slots=True)
 class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
-    Bundles the per-dataset payload (data, coordinates, timedeltas) with
-    its :class:`TensorLayout` so callers can index logical axes (``time``,
-    ``variables``) without hard-coded dimension positions. The same API
-    works for gridded and sparse observation datasets thanks to the
-    ``layout.time_in_grid`` dispatch.
+    Bundles the per-dataset payload (data, coordinates, timedeltas) with the
+    metadata that describes it (name, variables, layout, statistics) so callers
+    can index logical axes (``time``, ``variables``) without hard-coded dimension
+    positions. The same API works for gridded and sparse observation datasets
+    thanks to the ``layout.time_in_grid`` dispatch.
+
+    Parameters
+    ----------
+    name : str
+        Dataset name, as keyed in :class:`~anemoi.models.data.batch.Batch`.
+    variables : list[str]
+        Variable names along the layout's ``variables`` axis, in order. Must be
+        unique.
+    layout : TensorLayout
+        Mapping from logical axes to physical dimension positions.
+    data : torch.Tensor or list[torch.Tensor] or None
+        The payload, laid out per ``layout``.
+    statistics : Mapping[str, Any], optional
+        Per-statistic arrays over the variable axis (``mean``, ``stdev``, ...), as
+        produced by ``anemoi-datasets``. Values are normally :class:`numpy.ndarray`
+        but torch tensors are accepted.
+    coordinates_are_static : bool, optional
+        Whether this dataset's coordinate tensor is fixed for the whole run and so
+        may be shared by reference rather than transferred per batch.
+    metadata : Mapping[str, Any], optional
+        Free-form per-source metadata (e.g. ``dataset.metadata``, per-variable
+        metadata). Not interpreted here.
     """
 
-    spec: SourceSpec
+    name: str
+    variables: list[str]
+    layout: TensorLayout
     data: torch.Tensor | list[torch.Tensor] | None
     coordinates: torch.Tensor | list[torch.Tensor] = None
     timedeltas: torch.Tensor | list[torch.Tensor] | None = None
     boundaries: list[tuple[slice, ...]] | None = None
     shard_sizes: ShardSizes | list[ShardSizes] = None
+    statistics: Mapping[str, Any] = field(default_factory=dict)
+    coordinates_are_static: bool = False
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+    _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
-        """Validate the payload against the spec that describes it.
+        """Validate the metadata and the payload it describes."""
+        if self.variables is None or len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"Source {self.name!r} requires unique variable names.")
 
-        Metadata-only checks (unique variable names) live on
-        :class:`~anemoi.models.data.spec.SourceSpec`; what remains here is
-        everything that needs a materialized tensor.
-        """
         if self.coordinates is None:
             msg = f"{self.__class__.__name__} {self.name!r} requires coordinates."
             raise ValueError(msg)
 
-    @property
-    def name(self) -> str:
-        """Dataset name."""
-        return self.spec.name
-
-    @property
-    def variables(self) -> list[str]:
-        """Variable names along the variables axis, in order."""
-        return self.spec.variables
-
-    @property
-    def layout(self) -> TensorLayout:
-        """Mapping from logical axes to physical dimension positions."""
-        return self.spec.layout
-
-    @property
-    def statistics(self) -> dict[str, Any]:
-        """Per-statistic arrays over the variable axis."""
-        return self.spec.statistics
-
-    @property
-    def coordinates_are_static(self) -> bool:
-        """Whether the coordinate tensor is fixed for the whole run."""
-        return self.spec.coordinates_are_static
+        object.__setattr__(self, "_name_to_index", {name: idx for idx, name in enumerate(self.variables)})
 
     @property
     @abstractmethod
@@ -205,22 +221,44 @@ class Source(ABC):
     def name_to_index(self) -> dict[str, int]:
         """Mapping from variable name to index along the variables axis.
 
-        Memoised on the spec, so it survives repeated ``batch[name]`` access.
+        Built once per source, so it survives repeated ``batch[name]`` access.
         """
-        return self.spec.name_to_index
+        return self._name_to_index
+
+    @property
+    def n_variables(self) -> int:
+        """Number of variables along the variables axis."""
+        return len(self.variables)
 
     def contiguous(self) -> "Source":
         """Return a new view whose underlying data tensors are contiguous."""
         return self.apply_func(lambda t, **_: t.contiguous())
 
     def clone(self, **kwargs) -> "Source":
-        """Return a new view with replacements, sharing fields that are not replaced.
-
-        To change what the spec says, replace the spec::
-
-            source.clone(spec=source.spec.clone(variables=[...]))
-        """
+        """Return a new view with replacements, sharing fields that are not replaced."""
         return replace(self, **kwargs)
+
+    def _metadata_kwargs(self) -> dict[str, Any]:
+        """Return the fields describing this source, independent of its payload."""
+        return {
+            "name": self.name,
+            "variables": self.variables,
+            "layout": self.layout,
+            "statistics": self.statistics,
+            "coordinates_are_static": self.coordinates_are_static,
+            "metadata": self.metadata,
+        }
+
+    def _select_variable_metadata(self, indices: Sequence[int] | torch.Tensor | slice) -> dict[str, Any]:
+        """Return ``variables`` and ``statistics`` restricted to ``indices``, as clone kwargs.
+
+        Both are indexed together, so they stay consistent with the data tensor the
+        caller indexes alongside.
+        """
+        index = _index_list(indices, self.n_variables)
+        variables = [self.variables[i] for i in index]
+        statistics = {key: value[index] for key, value in self.statistics.items()}
+        return {"variables": variables, "statistics": statistics}
 
     def select(self, **kwargs) -> "Source":
         """Return a new view restricted to the given indices along logical dimensions.

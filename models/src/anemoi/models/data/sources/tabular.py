@@ -20,6 +20,7 @@ from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
@@ -149,7 +150,7 @@ class TabularSource(Source):
         """
         return EmptyTabularSource(
             data=None,
-            spec=self.spec,
+            **self._metadata_kwargs(),
             coordinates=self.coordinates,
             timedeltas=self.timedeltas,
             boundaries=self.boundaries,
@@ -208,7 +209,9 @@ class TabularSource(Source):
                 sum(sizes[rank] for sizes in window_shard_sizes) for rank in range(len(window_shard_sizes[0]))
             ]
 
+        # moving grids need one graph per (sample, member); see DynamicGraphProvider
         batch_sizes = tuple(sample.shape[self.layout.grid] for sample in self.data for _ in range(self.ensemble_size))
+
         device = data.device
         return FlatSource(
             data=data,
@@ -346,7 +349,7 @@ class TabularSource(Source):
         datasets. Coordinates / timedeltas / boundaries are unchanged.
         """
         new_data = [self._index_vars(t, indices) for t in self.data]
-        return self.clone(data=new_data, spec=self.spec.select_variables(indices))
+        return self.clone(data=new_data, **self._select_variable_metadata(indices))
 
     def select_time(self, indices: "slice | Sequence[int] | int") -> "TabularSource":
         """Return a new view restricted to the given time indices.
@@ -370,12 +373,7 @@ class TabularSource(Source):
             msg = f"{self.__class__.__name__} has no 'boundaries' metadata; cannot select_time."
             raise ValueError(msg)
 
-        if isinstance(indices, slice):
-            idx_list = list(range(*indices.indices(self.time_size)))
-        elif isinstance(indices, int):
-            idx_list = [int(indices)]
-        else:
-            idx_list = [int(i) for i in indices]
+        idx_list = _index_list(indices, self.time_size)
 
         new_data = []
         new_coords = []

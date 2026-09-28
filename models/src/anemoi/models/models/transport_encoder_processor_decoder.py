@@ -22,7 +22,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.batch import build_source
+from anemoi.models.data.sources import make_source
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -792,20 +792,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         sources = {}
         for dataset_name, dataset_data in data.items():
             layout = source_layouts[dataset_name]
-            grid_axis = layout.axis
-            grid_size = (
-                sum(sample.shape[grid_axis("grid", ndim=sample.ndim)] for sample in dataset_data)
-                if isinstance(dataset_data, list)
-                else dataset_data.shape[grid_axis("grid", ndim=dataset_data.ndim)]
-            )
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            sources[dataset_name] = build_source(
+            sources[dataset_name] = make_source(
                 name=dataset_name,
                 variables=self._sampling_variables(dataset_name, variable_space),
                 layout=layout,
                 statistics=self._sampling_statistics(dataset_name, variable_space),
-                grid_size=grid_size,
                 coordinates_are_static=dataset_name in static_coords,
                 data=dataset_data,
                 coordinates=self._sampling_coordinates(

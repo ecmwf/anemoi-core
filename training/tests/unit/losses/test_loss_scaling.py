@@ -33,7 +33,7 @@ from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 
 @pytest.fixture
@@ -354,7 +354,7 @@ expected_var_tendency_scaling = torch.Tensor(
 
 def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
     """Wrap a five-dimensional loss tensor in the public loss input type."""
-    return build_source(
+    return make_source(
         name="data",
         data=data,
         variables=variables,

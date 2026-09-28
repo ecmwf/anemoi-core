@@ -23,7 +23,7 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from tests.batch_builders import build_batch
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 
 class _NearestEdges:
@@ -228,7 +228,7 @@ def test_inference_forcing_only_target_preserves_output_metadata():
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = build_source(
+    view = make_source(
         name="obs",
         data=samples,
         variables=["a"],

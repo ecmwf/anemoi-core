@@ -16,7 +16,6 @@ from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
-from dataclasses import fields
 from typing import Any
 
 import torch
@@ -29,8 +28,6 @@ from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.sources import make_source
 from anemoi.models.data.sources.base import Source
-from anemoi.models.data.spec import SourceSpec
-from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
 
@@ -44,17 +41,6 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     return {key: value for key in keys}
 
 
-def build_source(**kwargs) -> Source:
-    """Build one source, taking the spec's fields flat alongside the payload.
-
-    >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
-    """
-    spec_fields = [f.name for f in fields(SourceSpec)]
-    spec_kwargs = {key: kwargs.pop(key) for key in spec_fields if key in kwargs}
-    spec = make_spec(**spec_kwargs)
-    return make_source(spec=spec, **kwargs)
-
-
 @dataclass(frozen=True, slots=True)
 class Batch:
     """A batch of per-dataset sources.
@@ -62,8 +48,8 @@ class Batch:
     A batch is one mapping from dataset name to
     :class:`~anemoi.models.data.source.Source`. Each source owns its own
     payload (data, coordinates, timedeltas, shard sizes, boundaries) together with
-    the :class:`~anemoi.models.data.spec.SourceSpec` that describes it, so there is
-    a single place per dataset where that information lives.
+    the metadata that describes it (name, variables, layout, statistics), so there
+    is a single place per dataset where that information lives.
 
     Per-dataset payload shapes are as the sources define them: gridded datasets hold
     one stacked tensor of shape ``(batch, time, ensemble, grid, vars)``; sparse
@@ -78,11 +64,6 @@ class Batch:
     """
 
     sources: dict[str, Source]
-
-    @property
-    def spec(self) -> dict[str, SourceSpec]:
-        """Per-dataset specs for this batch, without any of its data."""
-        return {name: source.spec for name, source in self.sources.items()}
 
     def empty(self) -> "Batch":
         """Return the same batch with no data, but coordinates preserved and boundaries preserved."""
@@ -243,7 +224,7 @@ class Batch:
     def with_data(self, new_data: dict[str, torch.Tensor | list[torch.Tensor]]) -> "Batch":
         """Return a new :class:`Batch` with the data payloads replaced.
 
-        Everything else about each source - coordinates, timedeltas, spec - is shared
+        Everything else about each source - coordinates, timedeltas, variables, statistics - is shared
         by reference, which preserves static-coord identity (no extra H2D, no copy).
         Passing a subset of the dataset names narrows the batch to those datasets.
 
@@ -328,7 +309,8 @@ class Batch:
         * **Tabular** (``layout.time_in_grid`` true) - the grid extent varies per
           sample, so data, coordinates, timedeltas, boundaries and shard sizes each
           become a list of length ``B`` and the per-sample layout stands, the batch
-          axis being the list itself.
+          axis being the list itself. Shard sizes stay ``None`` when no sample is
+          sharded, since ``None`` is what marks a source as replicated.
         """
         if isinstance(samples, dict):
             samples = [samples]
@@ -349,9 +331,7 @@ class Batch:
                 coordinates = [s.coordinates for s in per_sample]
                 timedeltas = [s.timedeltas for s in per_sample]
                 boundaries = [s.boundaries for s in per_sample]
-                shard_sizes = [s.shard_sizes for s in per_sample]
-                # Unsharded samples (e.g. inference payloads) collate to an unsharded source.
-                shard_sizes = None if all(s is None for s in shard_sizes) else shard_sizes
+                shard_sizes = _collate_tabular_shard_sizes(name, per_sample)
                 layout = head.layout
             else:
                 data = default_collate([s.data for s in per_sample])
@@ -363,12 +343,11 @@ class Batch:
 
             _validate_layout_against(name, layout, data)
 
-            sources[name] = build_source(
+            sources[name] = make_source(
                 name=name,
                 variables=head.variables,
                 layout=layout,
                 statistics=head.statistics,
-                grid_size=head.grid_size,
                 coordinates_are_static=head.coordinates_are_static,
                 data=data,
                 coordinates=coordinates,
@@ -380,6 +359,23 @@ class Batch:
         batch = Batch(sources)
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
+
+
+def _collate_tabular_shard_sizes(name: str, per_sample: list[SourceSample]) -> list[Any] | None:
+    """Collate per-sample shard sizes, or ``None`` when no sample is sharded.
+
+    Sources treat ``shard_sizes is None`` as replicated, so a list of ``None``
+    entries would wrongly read as sharded. A mix of sharded and unsharded samples
+    cannot be gathered consistently and is rejected.
+    """
+    shard_sizes = [s.shard_sizes for s in per_sample]
+    n_unsharded = sum(sizes is None for sizes in shard_sizes)
+    if n_unsharded == len(shard_sizes):
+        return None
+    if n_unsharded:
+        msg = f"Dataset {name!r} mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
+        raise ValueError(msg)
+    return shard_sizes
 
 
 def _validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:

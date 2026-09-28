@@ -12,10 +12,8 @@
 Production code builds a :class:`~anemoi.models.data.batch.Batch` through
 :meth:`Batch.collate` from reader :class:`~anemoi.models.data.sample.SourceSample`
 objects. Tests frequently need the *result* of collation directly - a batch whose
-tensors already carry a batch axis - which would otherwise mean spelling out a
-:class:`~anemoi.models.data.spec.SourceSpec` per dataset at every call site.
-
-These helpers take the spec's fields flat and assemble the sources.
+tensors already carry a batch axis. :func:`build_batch` takes per-dataset dicts
+and assembles the sources with :func:`~anemoi.models.data.sources.make_source`.
 
 An identical copy lives under each package's ``tests/`` directory, since the two
 suites are collected in separate pytest processes and neither package's tests are
@@ -32,28 +30,14 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import Source
 from anemoi.models.data.sources import make_source
-from anemoi.models.data.spec import make_spec
 
 LOGGER = logging.getLogger(__name__)
-
-_SPEC_FIELDS = ("name", "variables", "layout", "statistics", "grid_size", "coordinates_are_static", "metadata")
-
-
-def build_source(**kwargs) -> Source:
-    """Build one source, taking the spec's fields flat alongside the payload.
-
-    >>> build_source(name="era5", data=x, variables=["t"], layout=layout)
-    """
-    spec_kwargs = {key: kwargs.pop(key) for key in _SPEC_FIELDS if key in kwargs}
-    spec = make_spec(**spec_kwargs)
-    return make_source(spec=spec, **kwargs)
 
 
 def build_batch(
     data: Mapping[str, torch.Tensor | list[torch.Tensor]],
     coordinates: Mapping[str, Any] | None = None,
     metadata: Mapping[str, Any] | None = None,
-    grid_sizes: Mapping[str, int] | None = None,
     timedeltas: Mapping[str, Any] | None = None,
     shard_sizes: Mapping[str, Any] | None = None,
     layouts: Mapping[str, TensorLayout] | None = None,
@@ -69,7 +53,6 @@ def build_batch(
     """
     coordinates = coordinates or {}
     metadata = metadata or {}
-    grid_sizes = grid_sizes or {}
     timedeltas = timedeltas or {}
     shard_sizes = shard_sizes or {}
     layouts = layouts or {}
@@ -86,12 +69,11 @@ def build_batch(
             raise ValueError(msg)
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
-        sources[name] = build_source(
+        sources[name] = make_source(
             name=name,
             variables=variables[name],
             layout=layouts[name],
             statistics=statistics.get(name, {}),
-            grid_size=grid_sizes.get(name),
             coordinates_are_static=name in static,
             data=payload,
             coordinates=coordinates.get(name),

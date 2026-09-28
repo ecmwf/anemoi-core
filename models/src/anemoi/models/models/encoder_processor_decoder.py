@@ -476,7 +476,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         output_dtype = torch.promote_types(dtype, torch.float32)
         pred = target.unflatten(
             x_out.to(output_dtype),
-            spec=target.spec.clone(variables=output_names, statistics=output_statistics),
+            variables=output_names,
+            statistics=output_statistics,
         )
 
         if x_skip is not None:

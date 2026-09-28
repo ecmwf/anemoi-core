@@ -28,7 +28,7 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
 from tests.batch_builders import build_batch
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -221,7 +221,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    x = build_source(
+    x = make_source(
         name="obs",
         data=[torch.ones(2, 2)],
         coordinates=[torch.tensor([[0.0, 0.0], [0.1, 0.1]])],
@@ -231,7 +231,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         layout=layout,
         boundaries=[(slice(0, 2),)],
     )
-    y_noised = build_source(
+    y_noised = make_source(
         name="obs",
         data=[torch.full((3, 1), 5.0)],
         coordinates=[torch.tensor([[0.2, 0.2], [0.3, 0.3], [0.4, 0.4]])],
@@ -280,7 +280,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
     coordinates = torch.zeros(3, 2)
     x_data = torch.arange(1 * 2 * 1 * 3 * 4, dtype=torch.float32).reshape(1, 2, 1, 3, 4)
     y_noised_data = torch.full((1, 1, 1, 3, 2), 100.0)
-    x = build_source(
+    x = make_source(
         name="data",
         data=x_data,
         coordinates=coordinates,
@@ -289,7 +289,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         coordinates_are_static=True,
         layout=layout,
     )
-    y_noised = build_source(
+    y_noised = make_source(
         name="data",
         data=y_noised_data,
         coordinates=coordinates,
@@ -326,7 +326,7 @@ def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
     model.condition_on_residual = False
 
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    sparse_view = build_source(
+    sparse_view = make_source(
         name="obs",
         data=[torch.ones(2, 1)],
         coordinates=[torch.zeros(2, 2)],
@@ -532,7 +532,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
         "obs",
         batch["obs"].clone(
             data=[torch.full((3, 2), 5.0)],
-            spec=batch["obs"].spec.clone(variables=["forcing_a", "forcing_b"]),
+            variables=["forcing_a", "forcing_b"],
         ),
     )
     model._forward_transport_network(

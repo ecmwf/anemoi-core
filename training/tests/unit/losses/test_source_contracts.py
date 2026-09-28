@@ -27,11 +27,11 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.utils.index_space import IndexSpace
-from tests.batch_builders import build_source
+from anemoi.models.data.sources import make_source
 
 
 def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSource:
-    return build_source(
+    return make_source(
         name="grid",
         data=data,
         variables=["a", "b"],
@@ -125,7 +125,7 @@ def test_scores_accept_equivalent_negative_axes(loss_type: type[EnergyScoreLoss]
 
 
 def _observations() -> TabularSource:
-    return build_source(
+    return make_source(
         name="obs",
         data=[torch.ones(2, 2), torch.ones(3, 2)],
         variables=["a", "b"],
@@ -157,7 +157,7 @@ def test_sparse_loss_distinguishes_shared_and_per_sample_arguments() -> None:
 def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() -> None:
     empty = torch.empty(0, 2, requires_grad=True)
     non_empty = torch.ones(2, 2, requires_grad=True)
-    pred = build_source(
+    pred = make_source(
         name="obs",
         data=[empty, non_empty],
         variables=["a", "b"],
@@ -210,7 +210,7 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
 @pytest.mark.parametrize("backend", ["naive", "stable"])
 def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     data = torch.tensor([[[-1.0], [-1.0]], [[1.0], [1.0]]], requires_grad=True)
-    pred = build_source(
+    pred = make_source(
         name="obs",
         data=[data],
         variables=["a"],
