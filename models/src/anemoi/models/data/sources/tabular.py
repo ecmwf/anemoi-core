@@ -208,7 +208,9 @@ class TabularSource(Source):
                 sum(sizes[rank] for sizes in window_shard_sizes) for rank in range(len(window_shard_sizes[0]))
             ]
 
+        # moving grids need one graph per (sample, member); see DynamicGraphProvider
         batch_sizes = tuple(sample.shape[self.layout.grid] for sample in self.data for _ in range(self.ensemble_size))
+
         device = data.device
         return FlatSource(
             data=data,

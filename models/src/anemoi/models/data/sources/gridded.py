@@ -45,6 +45,10 @@ class GriddedSource(Source):
             msg = f"Source {self.name!r} coordinates must be a tensor, not a list."
             raise TypeError(msg)
 
+        if self.coordinates.ndim != 2:
+            msg = f"Source {self.name!r} coordinates must have shape (grid, 2); got {tuple(self.coordinates.shape)}."
+            raise ValueError(msg)
+
         if self.layout.time is None:
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
@@ -138,31 +142,9 @@ class GriddedSource(Source):
         else:
             flattened_data = None
 
-        if self.coordinates is None:
-            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires coordinates to be flattened.")
-
-        # static grids share one (grid, 2) coordinate set; moving grids carry one per sample, (batch, grid, 2)
-        grid_size = self.coordinates.shape[-2]
-        if self.coordinates.ndim == 2:
-            expected_shape = (grid_size, 2)
-            coords_pattern = "grid latlon -> (batch ensemble grid) latlon"
-        elif self.coordinates.ndim == 3:
-            expected_shape = (self.batch_size, grid_size, 2)
-            coords_pattern = "batch grid latlon -> (batch ensemble grid) latlon"
-        else:
-            raise ValueError(
-                f"{self.__class__.__name__} {self.name!r} coordinates must have shape (grid, 2) "
-                f"or (batch, grid, 2), got {tuple(self.coordinates.shape)}."
-            )
-        if tuple(self.coordinates.shape) != expected_shape:
-            raise ValueError(
-                f"{self.__class__.__name__} {self.name!r} coordinates must have shape {expected_shape}, "
-                f"got {tuple(self.coordinates.shape)}."
-            )
-
         flattened_coords = einops.repeat(
             self.coordinates,
-            coords_pattern,
+            "grid latlon -> (batch ensemble grid) latlon",
             batch=self.batch_size,
             ensemble=self.ensemble_size,
         )
@@ -172,11 +154,7 @@ class GriddedSource(Source):
             data=flattened_data,
             coordinates=flattened_coords,
             shard_sizes=self.shard_sizes,
-            device=self.device,
-            # moving grids need one graph per (sample, member); see DynamicGraphProvider
-            batch_sizes=(
-                None if self.coordinates_are_static else (grid_size,) * (self.batch_size * self.ensemble_size)
-            ),
+            device=self.device
         )
 
     def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":
