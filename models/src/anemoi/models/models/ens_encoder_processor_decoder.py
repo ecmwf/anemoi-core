@@ -45,9 +45,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
         is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
         # Read before super().__init__, which calls _calculate_input_dim.
         self.condition_on_residual = DotDict(model_config).model.condition_on_residual
@@ -57,7 +56,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             is_dataset_static=is_dataset_static,
-            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
