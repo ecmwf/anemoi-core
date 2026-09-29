@@ -22,7 +22,6 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from tests.distributed._distributed_runner import _run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
@@ -31,6 +30,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers import processor as processor_module
 from anemoi.models.layers.processor import GraphTransformerProcessor
 from anemoi.models.layers.utils import load_layer_kernels
+from tests.distributed._distributed_runner import _run_distributed_test
 
 NUM_NODES = 57
 NUM_CHANNELS = 32
