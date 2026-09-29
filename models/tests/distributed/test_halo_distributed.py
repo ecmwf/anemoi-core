@@ -22,7 +22,7 @@ from __future__ import annotations
 import pytest
 import torch
 import torch.distributed as dist
-from distributed_runner import run_distributed_test
+from tests.distributed._distributed_runner import _run_distributed_test
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
@@ -162,7 +162,7 @@ def _test_processor_matches_single_process_rank(
 def test_processor_matches_single_process(
     distributed_backend: str, distributed_world_size: int, graph: str, pre_sharded: bool, debug: bool
 ) -> None:
-    run_distributed_test(
+    _run_distributed_test(
         _test_processor_matches_single_process_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
