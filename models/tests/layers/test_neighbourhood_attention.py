@@ -7,7 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import math
+import re
 
 import pytest
 import torch
@@ -23,6 +25,7 @@ from anemoi.models.layers.neighbourhood_attention import GRID_KERNELS
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.neighbourhood_attention import check_every_key_attended
 from anemoi.models.layers.neighbourhood_attention import grid_from_coords
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
@@ -107,6 +110,28 @@ def test_nodes_in_any_order_are_sorted_into_the_grid():
 def test_invalid_settings_are_rejected(config, message):
     with pytest.raises(ValueError, match=message):
         GridNeighbourhood.from_config(config, grid_coords(ReducedGrid.octahedral(8)))
+
+
+def test_cross_attention_that_leaves_keys_unread_is_rejected():
+    query_coords, key_coords = grid_coords(ReducedGrid.octahedral(4)), grid_coords(ReducedGrid.octahedral(24))
+    config = {"grid": "octahedral", "kernel_size": [1, 3]}
+    with pytest.raises(ValueError, match=r"are attended to by no query") as error:
+        GridNeighbourhood.from_config(config, key_coords, query_coords=query_coords)
+    # The kernel named in the message reads every key point.
+    suggested = [int(k) for k in re.search(r"kernel_size \[(\d+), (\d+)\] reads every key", str(error.value)).groups()]
+    neighbourhood = GridNeighbourhood.from_config({**config, "kernel_size": suggested}, key_coords, query_coords)
+    assert neighbourhood.kernel_size == tuple(suggested)
+    assert suggested[0] >= 1 and suggested[1] >= 3
+
+
+def test_cross_attention_logs_how_queries_and_keys_are_connected(caplog):
+    query_grid, key_grid = ReducedGrid.octahedral(4), ReducedGrid.octahedral(8)
+    with caplog.at_level(logging.INFO, logger="anemoi.models.layers.neighbourhood_attention"):
+        check_every_key_attended(query_grid, key_grid, (5, 5))
+    assert f"from {key_grid.num_points} key points ({key_grid.num_rows} rows)" in caplog.text
+    assert f"to {query_grid.num_points} queries ({query_grid.num_rows} rows)" in caplog.text
+    assert "each query reads 25 to 25 keys, 25.0 on average" in caplog.text
+    assert "each key point is read by" in caplog.text
 
 
 def test_neighbourhood_is_only_built_for_neighbourhood_attention():

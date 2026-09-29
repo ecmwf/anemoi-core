@@ -17,6 +17,8 @@ import torch
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.models.layers.reduced_grid import ReducedGrid
+from anemoi.models.layers.reduced_grid import ReducedGridCrossNeighbourhoodMask
+from anemoi.models.layers.reduced_grid import ReducedGridNeighbourhoodMask
 from anemoi.models.layers.reduced_grid import matching_position
 
 KERNEL_SIZE = (5, 7)
@@ -286,3 +288,54 @@ def test_cross_between_healpix_and_octahedral_matches_the_definition(query_grid,
         expected = torch.zeros(key_grid.num_points, dtype=torch.bool)
         expected[cross_window(query_grid, key_grid, int(rows[i]), int(positions[i]), kernel_size)] = True
         assert torch.equal(mask[i], expected), f"query {i}"
+
+
+@pytest.mark.parametrize(
+    ("query_grid", "key_grid", "kernel_size"),
+    [
+        (ReducedGrid.octahedral(8), ReducedGrid.octahedral(16), (5, 5)),
+        (ReducedGrid.octahedral(16), ReducedGrid.octahedral(8), (3, 5)),
+        (ReducedGrid.octahedral(12), ReducedGrid.octahedral(24), (7, 27)),
+        (ReducedGrid.octahedral(16), ReducedGrid.octahedral(8), (3, 61)),
+        (ReducedGrid.octahedral(8), ReducedGrid.octahedral(40), (5, 5)),
+        (ReducedGrid.healpix(4), ReducedGrid.healpix(8), (5, 7)),
+        (ReducedGrid.healpix(16), ReducedGrid.healpix(4), (3, 5)),
+        (ReducedGrid.healpix(8), ReducedGrid.octahedral(8), (3, 5)),
+        (ReducedGrid.octahedral(8), ReducedGrid.healpix(8), (5, 13)),
+    ],
+    ids=[
+        "finer-keys",
+        "coarser-keys",
+        "wider-than-polar-rows",
+        "wider-than-three-polar-rows",
+        "keys-between-queries",
+        "healpix",
+        "healpix-coarser-keys",
+        "healpix-to-octahedral",
+        "octahedral-to-healpix",
+    ],
+)
+def test_connection_counts_match_the_mask(query_grid, key_grid, kernel_size):
+    rule = ReducedGridCrossNeighbourhoodMask(query_grid, key_grid, kernel_size)
+    mask = rule(0, 0, torch.arange(query_grid.num_points)[:, None], torch.arange(key_grid.num_points)[None, :])
+    assert torch.equal(rule.times_attended(), mask.sum(0))
+    assert torch.equal(rule.keys_per_query(), mask.sum(1))
+
+
+@pytest.mark.parametrize("grid", [ReducedGrid.octahedral(8), ReducedGrid.healpix(4)], ids=["octahedral", "healpix"])
+def test_connection_counts_on_one_grid_match_the_mask(grid):
+    rule = ReducedGridNeighbourhoodMask(grid, (5, 13))
+    mask = rule(0, 0, torch.arange(grid.num_points)[:, None], torch.arange(grid.num_points)[None, :])
+    assert torch.equal(rule.times_attended(), mask.sum(0))
+    assert torch.equal(rule.keys_per_query(), mask.sum(1))
+
+
+@pytest.mark.parametrize(
+    ("n_key", "kernel_size", "every_key_read"),
+    [(96, (5, 5), True), (320, (5, 5), False), (320, (9, 9), True)],
+)
+def test_keys_left_between_the_queries_of_a_coarser_grid(n_key, kernel_size, every_key_read):
+    counts = ReducedGridCrossNeighbourhoodMask(
+        ReducedGrid.octahedral(48), ReducedGrid.octahedral(n_key), kernel_size
+    ).times_attended()
+    assert bool((counts > 0).all()) == every_key_read

@@ -129,6 +129,57 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
     return grid, order
 
 
+def check_every_key_attended(query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_size: tuple[int, int]) -> None:
+    """Check that cross attention reads every key point, and log how the queries and keys are connected.
+
+    The log gives how many keys each query reads and how many queries read each key point.
+
+    Every query gets its keys, but when the key grid is much finer than the query grid, the keys
+    between two queries can be left out by both; their values then never reach the queries (in an
+    encoder: data that never reaches the processor).
+
+    Raises
+    ------
+    ValueError
+        If some key point is attended to by no query. The message names the smallest kernel of
+        at least ``kernel_size`` in both directions, with equal sides where possible, that reads
+        every key point.
+    """
+    rule = ReducedGridCrossNeighbourhoodMask(query_grid, key_grid, kernel_size)
+    counts = rule.times_attended()
+    keys = rule.keys_per_query()
+    unread = int((counts == 0).sum())
+    pair = (
+        f"neighbourhood cross attention from {key_grid.num_points} key points ({key_grid.num_rows} rows) "
+        f"to {query_grid.num_points} queries ({query_grid.num_rows} rows), kernel_size {list(kernel_size)}"
+    )
+    LOGGER.info(
+        "%s: each query reads %d to %d keys, %.1f on average; each key point is read by %d to %d queries, "
+        "%.1f on average.",
+        pair,
+        int(keys.min()),
+        int(keys.max()),
+        float(keys.float().mean()),
+        int(counts.min()),
+        int(counts.max()),
+        float(counts.float().mean()),
+    )
+    if unread == 0:
+        return
+    suggestion = ""
+    for side in range(1, key_grid.num_rows + 1, 2):
+        larger = (max(kernel_size[0], side), max(kernel_size[1], side))
+        if larger[0] > key_grid.num_rows:
+            break
+        if bool((ReducedGridCrossNeighbourhoodMask(query_grid, key_grid, larger).times_attended() > 0).all()):
+            suggestion = f" kernel_size {list(larger)} reads every key point."
+            break
+    raise ValueError(
+        f"{pair}: {unread} of {key_grid.num_points} key points ({100 * unread / key_grid.num_points:.1f}%) "
+        f"are attended to by no query, so their values are never used.{suggestion}"
+    )
+
+
 @dataclass(frozen=True, eq=False)
 class GridNeighbourhood:
     """Everything a neighbourhood attention layer needs to know about its query and key grids.
@@ -189,6 +240,7 @@ class GridNeighbourhood:
         if query_coords is None:
             return cls(family, kernel_size, backend, key_grid, key_grid, key_order, key_order, is_self_attention=True)
         query_grid, query_order = grid_from_coords(family, query_coords)
+        check_every_key_attended(query_grid, key_grid, kernel_size)
         return cls(family, kernel_size, backend, query_grid, key_grid, query_order, key_order)
 
     @property

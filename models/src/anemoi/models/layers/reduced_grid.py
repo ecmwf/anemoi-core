@@ -259,6 +259,58 @@ class ReducedGridCrossNeighbourhoodMask:
         in_cols = torch.minimum(offset, k_length - offset) <= kernel_w // 2
         return in_rows & in_cols
 
+    def keys_per_query(self) -> Tensor:
+        """How many keys each query attends to, in query grid order.
+
+        ``kernel_size[0] * kernel_size[1]``, except that a key row not longer than ``kernel_size[1]``
+        adds its whole ring, which can be fewer points.
+        """
+        kernel_h, kernel_w = self.kernel_size
+        starts = (self.row_map - kernel_h // 2).clamp(0, self.start_max)
+        k_rows = starts[:, None] + torch.arange(kernel_h)[None, :]
+        k_length = self.k_lengths[k_rows]
+        per_row = torch.where(kernel_w // 2 >= k_length // 2, k_length, kernel_w)
+        return torch.repeat_interleave(per_row.sum(1), self.q_lengths)
+
+    def times_attended(self) -> Tensor:
+        """How many queries attend to each key point, in key grid order.
+
+        Gives the same numbers as summing the mask over all queries, without building it: the
+        queries of one row share their key rows, and in each key row a query covers one run of
+        ``kernel_size[1]`` neighbouring points, going round the globe, or the whole row when the row
+        is not longer than that. Each run adds one at its first point and takes one away after its
+        last point; a running total over the key points then gives the counts.
+        """
+        kernel_h, kernel_w = self.kernel_size
+        half_w = kernel_w // 2
+        k_starts = torch.cat([torch.zeros(1, dtype=torch.long), self.k_lengths.cumsum(0)])
+        changes = torch.zeros(int(k_starts[-1]) + 1, dtype=torch.long)
+        for q_row in range(len(self.q_lengths)):
+            start = int((self.row_map[q_row] - kernel_h // 2).clamp(0, self.start_max))
+            k_rows = torch.arange(start, start + kernel_h)[:, None]
+            k_length = self.k_lengths[k_rows]
+            row_start = k_starts[k_rows]
+            q_length = self.q_lengths[q_row]
+            centre = matching_position(
+                torch.arange(int(q_length))[None, :], q_length, k_length, self.q_shifts[q_row], self.k_shifts[k_rows]
+            )
+            # A run starts at `first` and ends just before `first + kernel_w`, wrapping past the row's end.
+            whole_row = half_w >= k_length // 2
+            first = torch.where(whole_row, 0, torch.remainder(centre - half_w, k_length))
+            end = torch.where(whole_row, k_length, first + kernel_w)
+            end_in_row = torch.minimum(end, k_length)
+            wrapped = end > k_length
+            changes.index_add_(0, (row_start + first).flatten(), torch.ones(first.numel(), dtype=torch.long))
+            changes.index_add_(
+                0, (row_start + end_in_row).flatten(), torch.full((first.numel(),), -1, dtype=torch.long)
+            )
+            wrap_start = row_start.expand_as(wrapped)[wrapped]
+            changes.index_add_(0, wrap_start, torch.ones(wrap_start.numel(), dtype=torch.long))
+            changes.index_add_(
+                0, (row_start + end - k_length)[wrapped], torch.full((wrap_start.numel(),), -1, dtype=torch.long)
+            )
+        return changes.cumsum(0)[:-1]
+
 
 class ReducedGridNeighbourhoodMask(ReducedGridCrossNeighbourhoodMask):
     """Rule deciding which keys a query may attend to on a :class:`ReducedGrid`.
