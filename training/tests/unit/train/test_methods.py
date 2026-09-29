@@ -2067,8 +2067,12 @@ def test_ensemble_member_template_describes_tiled_members() -> None:
 
     b, t, g, v = 2, 1, 4, 2
     targets = _make_gridded_batch(torch.randn(b, t, 1, g, v))
+    forecaster.data_indices = {
+        name: SimpleNamespace(model=SimpleNamespace(output=SimpleNamespace(ordered_names=names)))
+        for name, names in [("data", targets["data"].variables), ("obs", ["a", "b"])]
+    }
     template = forecaster._member_template(targets)["data"]
-    assert template.data is None
+    assert not hasattr(template, "data")
     assert template.ensemble_size == 3
     # the decoder's target node count comes from the flattened template
     assert template.flatten().coordinates.shape[0] == b * 3 * g

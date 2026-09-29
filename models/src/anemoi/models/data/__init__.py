@@ -15,8 +15,11 @@ from .sample import GriddedSourceSample
 from .sample import SourceSample
 from .sample import TabularSourceSample
 from .sources import GriddedSource
+from .sources import GriddedTemplate
 from .sources import Source
 from .sources import TabularSource
+from .sources import TabularTemplate
+from .sources import Template
 
 __all__ = [
     "Batch",
@@ -28,4 +31,7 @@ __all__ = [
     "TabularSource",
     "Source",
     "FlatSource",
+    "Template",
+    "GriddedTemplate",
+    "TabularTemplate",
 ]

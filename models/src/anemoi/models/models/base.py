@@ -22,6 +22,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.sources import Template
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -532,6 +533,25 @@ class BaseGraphModel(nn.Module):
             grid_shard_sizes[dataset_name] = output_grid_shard_sizes
         return tuple(projected_tensors)
 
+    def output_templates(self, batch: Batch) -> dict[str, Template]:
+        """Return what the model predicts at the nodes of ``batch``, one template per decoded dataset.
+
+        Each template has the nodes of ``batch``'s source (coordinates, timedeltas, sizes),
+        paired with the model's output variables, in the model's output order, and their
+        statistics. ``batch`` only provides the nodes: its own variables do not matter, so
+        the targets or the output-time forcings both work.
+        """
+        templates = {}
+        for dataset_name, source in batch.items():
+            if dataset_name not in self.target_datasets:
+                continue
+            indices = self.data_indices[dataset_name]
+            variables = list(indices.model.output.ordered_names)
+            positions = [indices.name_to_index[name] for name in variables]
+            statistics = {key: values[positions] for key, values in (self.statistics[dataset_name] or {}).items()}
+            templates[dataset_name] = source.template().with_variables(variables, statistics)
+        return templates
+
     def predict_step(
         self,
         x: Batch,
@@ -618,7 +638,7 @@ class BaseGraphModel(nn.Module):
             y_hat = self.forward(
                 processed_batch,
                 target_forcings=processed_target,
-                target_template=target.empty(),
+                target_template=self.output_templates(target),
                 model_comm_group=model_comm_group,
                 **kwargs,
             )

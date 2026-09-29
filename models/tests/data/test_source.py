@@ -16,10 +16,10 @@ from anemoi.models.data import Batch
 from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources.gridded import EmptyGriddedSource
 from anemoi.models.data.sources.gridded import GriddedSource
-from anemoi.models.data.sources.tabular import EmptyTabularSource
+from anemoi.models.data.sources.gridded import GriddedTemplate
 from anemoi.models.data.sources.tabular import TabularSource
+from anemoi.models.data.sources.tabular import TabularTemplate
 from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
@@ -92,19 +92,70 @@ class TestSourceMetadata:
 
     @pytest.mark.parametrize(
         ("payload", "expected_type"),
-        [(gridded_payload, EmptyGriddedSource), (tabular_payload, EmptyTabularSource)],
+        [(gridded_payload, GriddedTemplate), (tabular_payload, TabularTemplate)],
     )
-    def test_empty_keeps_the_metadata(self, payload, expected_type) -> None:
+    def test_template_keeps_everything_but_the_data(self, payload, expected_type) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
-        empty = view.empty()
+        template = view.template()
 
-        assert isinstance(empty, expected_type)
-        assert empty.data is None
-        assert empty.name == view.name
-        assert empty.variables == view.variables
-        assert empty.layout == view.layout
-        assert empty.statistics is view.statistics
-        assert empty.coordinates_are_static == view.coordinates_are_static
+        assert isinstance(template, expected_type)
+        assert not hasattr(template, "data")
+        assert (template.name, template.variables, template.layout) == (view.name, view.variables, view.layout)
+        assert template.statistics is view.statistics
+        assert template.coordinates is view.coordinates
+        assert (template.batch_size, template.ensemble_size, template.time_size) == (
+            view.batch_size,
+            view.ensemble_size,
+            view.time_size,
+        )
+        assert template.coordinates_are_static == view.coordinates_are_static
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_unflatten_inverts_flatten(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}, {"src": payload()}])["src"]
+        rebuilt = view.template().unflatten(view.flatten().data)
+
+        assert type(rebuilt) is type(view)
+        assert rebuilt.variables == view.variables
+        data, expected = (rebuilt.data, view.data) if isinstance(view.data, list) else ([rebuilt.data], [view.data])
+        assert all(torch.equal(a, b) for a, b in zip(data, expected, strict=True))
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_flatten_matches_the_source_nodes(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}])["src"]
+        flat, nodes = view.flatten(), view.template().flatten()
+
+        assert nodes.data is None
+        torch.testing.assert_close(nodes.coordinates, flat.coordinates)
+        assert nodes.batch_sizes == flat.batch_sizes
+        assert nodes.shard_sizes == flat.shard_sizes
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_unflatten_rejects_a_wrong_shape(self, payload) -> None:
+        template = Batch.collate([{"src": payload()}])["src"].template()
+        with pytest.raises(ValueError, match="expects flat data of shape"):
+            template.unflatten(torch.zeros(1, 1))
+
+    def test_template_decodes_its_own_variables(self) -> None:
+        view = gridded_batch()["grid"]
+        template = view.template().with_variables(["z"], {"mean": torch.tensor([5.0])})
+        rows = view.batch_size * view.ensemble_size * view.grid_size
+        out = template.unflatten(torch.ones(rows, view.time_size * 1))
+
+        assert out.variables == ["z"]
+        torch.testing.assert_close(out.statistics["mean"], torch.tensor([5.0]))
+        assert out.data.shape[out.layout.variables] == 1
+
+    def test_template_with_ensemble_size_tiles_the_members(self) -> None:
+        template = Batch.collate([{"obs": tabular_payload()}])["obs"].template().with_ensemble_size(3)
+        assert template.ensemble_size == 3
+        assert template.flatten().batch_sizes == (4, 4, 4)
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_sources_require_data(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}])["src"]
+        with pytest.raises(ValueError, match="requires data"):
+            view.clone(data=None)
 
 
 class TestSourceTransformations:

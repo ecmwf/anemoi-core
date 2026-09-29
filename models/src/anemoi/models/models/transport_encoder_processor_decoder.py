@@ -183,8 +183,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
     def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
+        # The transport network predicts the conditioned target itself, so the output takes its shape and variables.
         del x_skip
-        pred = target.unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        pred = target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
 
         return pred

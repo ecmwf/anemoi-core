@@ -36,7 +36,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 LOGGER = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class SourceSample(ABC):
     """One dataset's contribution to one sample, as produced by a data reader.
 
@@ -82,7 +82,7 @@ class SourceSample(ABC):
         return f"<{self.__class__.__name__} shape={tuple(self.data.shape)} dtype={self.data.dtype}>"
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class GriddedSourceSample(SourceSample):
     """A sample on a grid that every sample of the dataset shares.
 
@@ -131,7 +131,7 @@ class GriddedSourceSample(SourceSample):
         )
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class TabularSourceSample(SourceSample):
     """A sample of points that change from sample to sample (e.g. observations).
 

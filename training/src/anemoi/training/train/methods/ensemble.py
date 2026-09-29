@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 
     from anemoi.models.data.layout import TensorLayout
     from anemoi.models.data.sources import Source
+    from anemoi.models.data.sources import Template
     from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
@@ -178,20 +179,17 @@ class EnsembleTraining(BaseTrainingModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
 
-    def _member_template(self, targets: Batch) -> Batch:
-        """Data-free output geometry for the tiled members of ``targets``.
+    def _member_template(self, targets: Batch) -> dict[str, Template]:
+        """What the model predicts for the tiled members of ``targets``.
 
         The decoder reads its target node count from the template, so it must describe as many
-        members as the tiled input. Only the captured member count changes: the targets themselves
-        keep their single member for the loss, and nothing is copied.
+        members as the tiled input. Only the member count changes: the targets themselves keep
+        their single member for the loss, and nothing is copied.
         """
-        template = targets.empty()
-        return template.with_sources(
-            {
-                name: source.clone(_ensemble_size=source.ensemble_size * self.nens_per_device)
-                for name, source in template.items()
-            },
-        )
+        return {
+            name: template.with_ensemble_size(template.ensemble_size * self.nens_per_device)
+            for name, template in self.output_templates(targets).items()
+        }
 
     def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
         """Repeat the data nens_per_device times along its ensemble axis (identified from the layout)."""

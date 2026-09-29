@@ -20,7 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import Template
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -126,7 +126,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         self,
         batch: Batch,
         target_forcings: Batch,
-        target_template: Batch,
+        target_template: dict[str, Template],
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -140,8 +140,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Batch envelope, one source view per dataset.
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
-        target_template : Batch
-            Output geometry (coordinates, timedeltas, shard sizes) for each decoded dataset.
+        target_template : dict[str, Template]
+            What to predict for each decoded dataset: its nodes (coordinates, timedeltas,
+            sizes) and variables. See :meth:`BaseModel.output_templates`.
         fcstep : int, optional
             Forecast step to condition on, clamped to `min(1, fcstep)`.
         model_comm_group : Optional[ProcessGroup], optional
@@ -318,16 +319,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name, None),
-                target_forcings[dataset_name],
+                target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
-
-        # The reconstructed output metadata should match the decoded metadata.
-        for dataset_name in x_out_dict.keys():
-            do_coords_match = target_template[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
-            assert (
-                do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
-            ), "Target and output coordinates must match."
 
         return Batch(x_out_dict)

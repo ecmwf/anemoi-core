@@ -61,6 +61,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data.sources.base import Source
+    from anemoi.models.data.sources.base import Template
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.distributed.shapes import DatasetShardSizes
     from anemoi.models.distributed.shapes import ShardSizes
@@ -962,6 +963,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def preprocess_inputs(self, batch: Batch) -> Batch:
         """Transform selected model inputs into model-input space."""
         return self._map_dataset_processors(batch, self.model.pre_processors)
+
+    def output_templates(self, targets: Batch) -> dict[str, Template]:
+        """Return what the model predicts at the nodes of ``targets``, one template per dataset.
+
+        The targets carry every variable of a dataset; each template keeps the model's output
+        variables, in the model's output order, together with their statistics.
+        """
+        templates = {}
+        for dataset_name, source in targets.items():
+            output_names = self.data_indices[dataset_name].model.output.ordered_names
+            positions = [source.name_to_index[name] for name in output_names]
+            templates[dataset_name] = source.template().select_variables(positions)
+        return templates
 
     def preprocess_targets(self, batch: Batch) -> Batch:
         """Normalize selected targets while preserving missing values."""

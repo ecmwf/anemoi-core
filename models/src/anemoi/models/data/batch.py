@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from collections.abc import Callable
 from collections.abc import Iterable
 from collections.abc import Iterator
 from collections.abc import Sequence
@@ -25,6 +24,7 @@ from torch.distributed import ProcessGroup
 
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.sources.base import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -38,7 +38,7 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     return {key: value for key in keys}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, eq=False, slots=True)
 class Batch:
     """A batch of per-dataset sources.
 
@@ -62,10 +62,9 @@ class Batch:
 
     sources: dict[str, Source]
 
-    def empty(self) -> "Batch":
-        """Return the same batch with no data, but coordinates preserved and boundaries preserved."""
-        empty_sources = {name: source.empty() for name, source in self.sources.items()}
-        return Batch(sources=empty_sources)
+    def template(self) -> dict[str, Template]:
+        """Return every source without its data, keyed by dataset name (see :meth:`Source.template`)."""
+        return {name: source.template() for name, source in self.sources.items()}
 
     @property
     def batch_size(self) -> int:

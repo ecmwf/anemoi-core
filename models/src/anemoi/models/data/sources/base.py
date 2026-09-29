@@ -118,7 +118,7 @@ def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) 
     return [int(i) for i in indices]
 
 
-@dataclass(frozen=True, slots=True, kw_only=True)
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
@@ -166,6 +166,13 @@ class Source(ABC):
         if self.variables is None or len(set(self.variables)) != len(self.variables):
             raise ValueError(f"Source {self.name!r} requires unique variable names.")
 
+        if self.data is None:
+            msg = (
+                f"{self.__class__.__name__} {self.name!r} requires data; "
+                "use a template (see Source.template) to describe a source without data."
+            )
+            raise ValueError(msg)
+
         if self.coordinates is None:
             msg = f"{self.__class__.__name__} {self.name!r} requires coordinates."
             raise ValueError(msg)
@@ -209,8 +216,12 @@ class Source(ABC):
         ...
 
     @abstractmethod
-    def empty(self) -> "Source":
-        """Return a new view with no data."""
+    def template(self) -> "Template":
+        """Return this source without its data: what it holds and where, but not the values.
+
+        ``template.unflatten(x)`` rebuilds a source of the same kind and shape from a flat
+        ``(nodes, features)`` tensor, which is how the model builds its predictions.
+        """
         ...
 
     @property
@@ -322,7 +333,10 @@ class Source(ABC):
 
     @abstractmethod
     def flatten(self) -> "FlatSource":
-        """Return a flat source (nodes, features)."""
+        """Return a flat source (nodes, features).
+
+        The inverse is ``self.template().unflatten(flat.data)``.
+        """
         pass
 
     @abstractmethod
@@ -423,3 +437,93 @@ class Source(ABC):
 
     @abstractmethod
     def tree(self, prefix: str = "") -> Tree: ...
+
+
+@dataclass(frozen=True, eq=False, slots=True, kw_only=True)
+class Template(ABC):
+    """A source without its data: what it holds (variables) and where (its nodes).
+
+    A template describes a source completely except for the values: the dataset name,
+    variables and layout, its nodes (coordinates and, for tabular data, timedeltas and
+    time windows), its shard sizes and its batch, ensemble and time sizes. It is what the
+    model is asked to predict: the model decodes at the template's nodes and names the
+    output channels after the template's variables.
+
+    Get one from an existing source with :meth:`Source.template`, or build one directly
+    when there is no data (e.g. for inference). Use :class:`GriddedTemplate` or
+    :class:`TabularTemplate`.
+
+    Parameters
+    ----------
+    name : str
+        Dataset name.
+    variables : list[str]
+        The variables to decode, in order. Must be unique.
+    layout : TensorLayout
+        Layout of the source that :meth:`unflatten` builds.
+    statistics : Mapping[str, Any], optional
+        Per-statistic arrays over ``variables``. Not needed to decode; carried along for
+        whoever needs them afterwards, e.g. to un-normalise the prediction.
+    metadata : Mapping[str, Any], optional
+        Free-form per-source metadata, passed on to the built source.
+    """
+
+    name: str
+    variables: list[str]
+    layout: TensorLayout
+    statistics: Mapping[str, Any] = field(default_factory=dict)
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if self.variables is None or len(set(self.variables)) != len(self.variables):
+            raise ValueError(f"Template {self.name!r} requires unique variable names.")
+
+    @property
+    def n_variables(self) -> int:
+        """Number of variables to decode."""
+        return len(self.variables)
+
+    def _metadata_kwargs(self) -> dict[str, Any]:
+        """Return the fields shared with the source that :meth:`unflatten` builds."""
+        return {
+            "name": self.name,
+            "variables": self.variables,
+            "layout": self.layout,
+            "statistics": self.statistics,
+            "metadata": self.metadata,
+        }
+
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "Template":
+        """Return the same nodes with only the variables at ``indices`` (and their statistics)."""
+        index = _index_list(indices, self.n_variables)
+        variables = [self.variables[i] for i in index]
+        statistics = {key: value[index] for key, value in self.statistics.items()}
+        return replace(self, variables=variables, statistics=statistics)
+
+    def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "Template":
+        """Return the same nodes with other variables to decode.
+
+        ``statistics`` should cover exactly ``variables``; it defaults to none.
+        """
+        return replace(self, variables=list(variables), statistics={} if statistics is None else statistics)
+
+    def with_ensemble_size(self, ensemble_size: int) -> "Template":
+        """Return the same template for ``ensemble_size`` members per sample."""
+        return replace(self, ensemble_size=ensemble_size)
+
+    # Every subclass also provides ``batch_size``, ``ensemble_size``, ``time_size``,
+    # ``coordinates``, ``shard_sizes`` and ``coordinates_are_static``, as fields or properties.
+    # They are not declared here: a dataclass field in a subclass cannot override a property.
+
+    @abstractmethod
+    def flatten(self) -> "FlatSource":
+        """Return the flat nodes (``data=None``): the decoder's target coordinates, timedeltas and sizes."""
+        ...
+
+    @abstractmethod
+    def unflatten(self, data: torch.Tensor) -> Source:
+        """Build a source from ``data``, a flat ``(nodes, features)`` tensor laid out like :meth:`flatten`.
+
+        The source's variables, statistics and metadata are the template's.
+        """
+        ...

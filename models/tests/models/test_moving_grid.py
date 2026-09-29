@@ -140,7 +140,7 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     def forward(inputs):
         if model_type is AnemoiTransportModelEncProcDec:
             return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
-        return model(inputs, target_forcings=target, target_template=target.empty())
+        return model(inputs, target_forcings=target, target_template=model.output_templates(target))
 
     output = forward(batch)["grid"].data
     torch.testing.assert_close(output[:, 0, :, 0, 0], values)
@@ -186,7 +186,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         output = model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
     else:
         target = inputs.select(variables=[])
-        output = model(inputs, target_forcings=target, target_template=target.empty())
+        output = model(inputs, target_forcings=target, target_template=model.output_templates(target))
     for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
     sum(sample.sum() for sample in output["grid"].data).backward()
