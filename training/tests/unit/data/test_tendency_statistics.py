@@ -69,7 +69,7 @@ class _Join:
 class _Reader(BaseAnemoiReader):
     """Minimal reader exposing only the dataset under test."""
 
-    def __init__(self, data: object) -> None:  # noqa: D107
+    def __init__(self, data: object) -> None:
         self.data = data
 
 
