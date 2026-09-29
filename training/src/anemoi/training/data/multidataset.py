@@ -134,11 +134,6 @@ class MultiDataset(IterableDataset):
                 sorted(self.optional_datasets),
             )
 
-        self.valid_date_indices = compute_valid_data_indices(
-            self.data_readers,
-            relative_date_indices,
-            # optional_datasets=self.optional_datasets,
-        )
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
         # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
         # intersection would silently keep only sequence-0 samples and produce

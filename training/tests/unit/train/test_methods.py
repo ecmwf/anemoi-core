@@ -1187,6 +1187,111 @@ def test_ensemble_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch)
     assert target_shapes == [torch.Size((b, 1, 1, g, v))]
 
 
+# ── EnsembleTraining: dataset dropout ─────────────────────────────────────────
+
+
+class _KwargRecordingModel:
+    """Wraps DummyModel and records the keyword arguments of every call."""
+
+    def __init__(self, inner: DummyModel) -> None:
+        self._inner = inner
+        self.recorded_kwargs: list[dict[str, Any]] = []
+
+    def __call__(self, x: Any, **kw: Any) -> Any:
+        self.recorded_kwargs.append(dict(kw))
+        return self._inner(x, **kw)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+
+def _make_multi_dataset_ensemble_training(task: Any) -> EnsembleTraining:
+    data_indices = {
+        "data": _make_minimal_index_collection(_NAME_TO_INDEX),
+        "ocean": _make_minimal_index_collection(_NAME_TO_INDEX),
+    }
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
+    forecaster.nens_per_device = 2
+    forecaster.model = _KwargRecordingModel(
+        DummyModel(num_output_variables=len(data_indices["data"].model.output), output_times=1),
+    )
+    forecaster.is_first_step = False
+    forecaster.updating_scalars = {}
+    forecaster.target_dataset_names = forecaster.dataset_names
+    forecaster.loss = {name: DummyLoss() for name in data_indices}
+    forecaster.loss_supports_sharding = False
+    forecaster.metrics_support_sharding = True
+    # What `_setup_dataset_dropout` would derive from the config.
+    forecaster.primary_dataset = "data"
+    forecaster.dropout_by_dataset = {"ocean": 1.0}
+    forecaster.decoder_dropout_by_dataset = {"ocean": 0.0}
+    forecaster.optional_datasets = set()
+    return forecaster
+
+
+def _multi_dataset_batch() -> dict[str, torch.Tensor]:
+    b, e, g, v = 1, 1, 4, len(_NAME_TO_INDEX)
+    return {"data": torch.randn(b, 2, e, g, v), "ocean": torch.randn(b, 2, e, g, v)}
+
+
+def test_ensemble_training_forwards_dataset_dropout_to_the_model(monkeypatch: pytest.MonkeyPatch) -> None:
+    """With p=1 the auxiliary dataset is dropped in every training forward call."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = _make_multi_dataset_ensemble_training(task)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(
+        forecaster,
+        "compute_loss_metrics",
+        lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred),
+    )
+
+    forecaster._step(_multi_dataset_batch(), validation_mode=False)
+
+    (kwargs,) = forecaster.model.recorded_kwargs
+    assert kwargs["dropped_dataset_names"] == ["ocean"]
+    assert kwargs["decoder_dropped_dataset_names"] == []
+    assert kwargs["fcstep"] == 0
+
+
+def test_ensemble_training_applies_no_random_dropout_in_validation(monkeypatch: pytest.MonkeyPatch) -> None:
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = _make_multi_dataset_ensemble_training(task)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(
+        forecaster,
+        "compute_loss_metrics",
+        lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred),
+    )
+
+    forecaster._step(_multi_dataset_batch(), validation_mode=True)
+
+    (kwargs,) = forecaster.model.recorded_kwargs
+    assert kwargs["dropped_dataset_names"] is None
+    assert kwargs["decoder_dropped_dataset_names"] is None
+
+
+def test_ensemble_training_auto_drops_optional_dataset_with_nan_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Optional datasets flagged NaN by `_normalize_batch` are dropped even in validation."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = _make_multi_dataset_ensemble_training(task)
+    forecaster.dropout_by_dataset = {"ocean": 0.0}
+    forecaster.optional_datasets = {"ocean"}
+    forecaster._batch_nan_datasets = {"ocean"}
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(
+        forecaster,
+        "compute_loss_metrics",
+        lambda y_pred, _y, **_kw: (torch.tensor(0.0), {}, y_pred),
+    )
+
+    forecaster._step(_multi_dataset_batch(), validation_mode=True)
+
+    (kwargs,) = forecaster.model.recorded_kwargs
+    assert kwargs["dropped_dataset_names"] == ["ocean"]
+
+
 # ── Multi-step rollout correctness ────────────────────────────────────────────
 
 

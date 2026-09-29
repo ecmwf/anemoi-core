@@ -206,8 +206,6 @@ class BaseAnemoiReader:
     # ------------------------------------------------------------------
     # Dataset properties
     # ------------------------------------------------------------------
->>>>>>> main
-
     @property
     def dates(self) -> np.ndarray:
         """Return dataset dates."""
@@ -401,7 +399,6 @@ class TrajectoryDataset(BaseAnemoiReader):
             open_kwargs["base_end"] = end
         self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
         self.default_sampling = sampling if sampling is not None else {"stride": None}
->>>>>>> main
 
     @property
     def num_sequences(self) -> int:

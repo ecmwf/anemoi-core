@@ -346,11 +346,12 @@ class Forecaster(BaseForecaster):
             dataset_y_pred = y_pred.get(dataset_name)
 
             if dataset_y_pred is not None and dataset_name in (dropped_datasets or []):
-                # replace NaNs in forecasts with zeroes to avoid propagation of NaNs from dropped datasets
+                # A dropped dataset emits an all-NaN forecast; advance its input with zeros
+                # so the NaNs do not propagate through the rollout. Do NOT write this back
+                # into `y_pred`: that dict is an argument of the activation-checkpointed
+                # loss call, and replacing the prediction with a grad-less zero tensor
+                # makes the backward recomputation save a different number of tensors.
                 dataset_y_pred = torch.zeros_like(dataset_y_pred)
-                nan_mask = torch.isnan(dataset_y_pred)
-                dataset_y_pred = dataset_y_pred.masked_fill(nan_mask, 0.0)
-                y_pred[dataset_name] = dataset_y_pred
 
             x[dataset_name] = self._advance_dataset_input(
                 x[dataset_name],

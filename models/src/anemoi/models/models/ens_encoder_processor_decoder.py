@@ -140,11 +140,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-        assert (
-            x_skip.shape[1] == x_out.shape[1]
-        ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-        x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        if x_skip is not None:
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            assert (
+                x_skip.shape[1] == x_out.shape[1]
+            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
+            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
 
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
@@ -158,6 +159,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        dropped_dataset_names: list[str] | set[str] | None = None,
+        decoder_dropped_dataset_names: list[str] | set[str] | None = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -173,6 +176,13 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        dropped_dataset_names : list[str] | set[str], optional
+            Datasets dropped for this forward pass: masked in the latent
+            aggregator and their decoder output replaced by NaN (the NaN-aware
+            loss then ignores them). The principal dataset is never dropped.
+        decoder_dropped_dataset_names : list[str] | set[str], optional
+            Datasets that still feed the encoder but whose decoder output is
+            replaced by NaN.
         **kwargs
             Additional keyword arguments
 
@@ -182,6 +192,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Output tensor per dataset
         """
         dataset_names = list(x.keys())
+
+        # Dataset dropout selection is passed in from the training step.
+        dropped_dataset_names, decoder_dropped_dataset_names = self._resolve_dropped_datasets(
+            dropped_dataset_names,
+            decoder_dropped_dataset_names,
+        )
 
         # Extract and validate batch & ensemble sizes across datasets
         batch_size = self._get_consistent_dim(x, 0)
@@ -249,8 +265,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             x_data_latent_dict[dataset_name] = x_data_latent
             dataset_latents[dataset_name] = x_latent
 
-        # Combine all dataset latents
-        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
+        # Combine encoder latents. Dropped datasets are still passed in so the
+        # aggregator can mask them while keeping the computation graph static.
+        if dropped_dataset_names and not self.training:
+            LOGGER.info(f"Evaluation with dropped datasets: {dropped_dataset_names}")
+        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents, dropped_sources=dropped_dataset_names)
 
         x_latent_proc, latent_noise = self.noise_injector(
             x=x_latent,
@@ -325,11 +344,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
-                x_skip_dict[dataset_name],
+                x_skip_dict.get(dataset_name, None),
                 batch_size,
                 batch_ens_size,
                 dtype=x[dataset_name].dtype,
                 dataset_name=dataset_name,
             )
+
+            if dataset_name in dropped_dataset_names or dataset_name in decoder_dropped_dataset_names:
+                # Replace output with NaN — NaN-aware loss will ignore this dataset.
+                # Multiply by 0 and add NaN to keep decoder params in the graph.
+                x_out_dict[dataset_name] = x_out_dict[dataset_name] * 0 + float("nan")
 
         return x_out_dict

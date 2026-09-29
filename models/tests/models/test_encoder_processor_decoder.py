@@ -36,8 +36,14 @@ class _SharedEncoder(nn.Module):
 
 
 class _CaptureAggregator(nn.Module):
-    def forward(self, hidden_latent: torch.Tensor, latents: dict[str, torch.Tensor]) -> torch.Tensor:
+    def forward(
+        self,
+        hidden_latent: torch.Tensor,
+        latents: dict[str, torch.Tensor],
+        dropped_sources=None,
+    ) -> torch.Tensor:
         self.latents = dict(latents)
+        self.dropped_sources = set(dropped_sources or ())
         raise _AggregationReached
 
 
@@ -45,6 +51,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
     def __init__(self) -> None:
         nn.Module.__init__(self)
         self.input_datasets = ["dataset_a", "dataset_b"]
+        self.principal_dataset_name = "dataset_a"
         self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
         self._graph_name_hidden = "hidden"
         self.input_dim_latent = 4
@@ -86,3 +93,19 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_b"], torch.full((1, 4), 2.0))
+    assert model.latent_aggregator.dropped_sources == set()
+
+
+def test_dropped_datasets_are_forwarded_to_the_aggregator() -> None:
+    model = _SharedEncoderModel()
+    inputs = {
+        "dataset_a": torch.zeros(1, 1, 1, 1, 1),
+        "dataset_b": torch.zeros(1, 1, 1, 1, 1),
+    }
+
+    with pytest.raises(_AggregationReached):
+        # The principal dataset can never be dropped; only dataset_b should reach the aggregator.
+        model(inputs, dropped_dataset_names=["dataset_a", "dataset_b"])
+
+    assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
+    assert model.latent_aggregator.dropped_sources == {"dataset_b"}

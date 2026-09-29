@@ -18,8 +18,11 @@ class DefinedAggregatorMethods(str, Enum):
     SUM = "anemoi.models.layers.aggregator.SumAggregator"
     MEAN = "anemoi.models.layers.aggregator.MeanAggregator"
     CONCAT = "anemoi.models.layers.aggregator.ConcatAggregator"
+    GATED = "anemoi.models.layers.aggregator.GatedFusionAggregator"
 
 
 class AggregatorSchema(BaseModel):
     target_: DefinedAggregatorMethods = Field(..., alias="_target_")
     "Aggregator object from anemoi.models.layers.aggregator."
+    principal_source: str | None = None
+    "Source whose latent is the running latent (GatedFusionAggregator only); defaults to the first source."

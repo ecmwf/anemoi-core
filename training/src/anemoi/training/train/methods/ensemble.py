@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.dataset_dropout import DatasetDropoutMixin
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
@@ -32,7 +33,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-class EnsembleTraining(BaseTrainingModule):
+class EnsembleTraining(DatasetDropoutMixin, BaseTrainingModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
     def __init__(
@@ -115,6 +116,9 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_rank = 0
         self.ens_comm_subgroup_num_groups = 1
         self.ens_comm_subgroup_size = 1
+
+        # Multi-encoder dataset dropout / optional-dataset auto-drop (shared with SingleTraining).
+        self._setup_dataset_dropout()
 
     def set_ens_comm_group(
         self,
@@ -252,8 +256,29 @@ class EnsembleTraining(BaseTrainingModule):
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
+
+        # Dataset dropout is drawn once per batch and reused for all rollout
+        # iterations so the same datasets are dropped within this sequence.
+        dropped_datasets, decoder_dropped_datasets, batch_auto_dropped = self._sample_dataset_dropout(
+            validation_mode,
+        )
+
         for i, task_step_kwargs in enumerate(task_steps):
-            y_pred = self(x, **task_step_kwargs)
+            current_dropped, current_decoder_dropped = self._dropout_for_step(
+                i,
+                dropped_datasets,
+                decoder_dropped_datasets,
+                batch_auto_dropped,
+            )
+            # Dropped datasets were zero-filled; every other input must be finite.
+            self._assert_inputs_finite(x, current_dropped)
+
+            y_pred = self(
+                x,
+                dropped_dataset_names=current_dropped,
+                decoder_dropped_dataset_names=current_decoder_dropped,
+                **task_step_kwargs,
+            )
 
             y = self.task.get_targets(batch, **task_step_kwargs)
 
@@ -268,7 +293,9 @@ class EnsembleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset if another step follows
+            # Advance input state for each dataset if another step follows.
+            # Datasets whose decoder was dropped this step produced NaN
+            # forecasts and must be zero-filled (same as fully-dropped ones).
             if i < len(task_steps) - 1:
                 x = self.task.advance_input(
                     x,
@@ -278,6 +305,7 @@ class EnsembleTraining(BaseTrainingModule):
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
                     grid_shard_slice=self.grid_shard_slice,
+                    dropped_datasets=self._advance_dropped(current_dropped, current_decoder_dropped),
                 )
 
             loss = loss + loss_next
