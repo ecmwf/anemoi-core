@@ -26,7 +26,6 @@ from timm.scheduler.scheduler import Scheduler as TimmScheduler
 
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.models.data import Batch
-from anemoi.models.data.sources.tabular import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.interface import AnemoiModelInterface
@@ -623,24 +622,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def _grid_shard_sizes(self, source: Source | Batch) -> ShardSizes | DatasetShardSizes:
         """Grid shard sizes of the source, or per dataset when given a Batch.
 
-        Returns None when the source is replicated (not sharded) or is a TabularSource.
+        Returns None when the source is replicated (not sharded) or tabular.
         """
         if isinstance(source, Batch):
             return {name: self._grid_shard_sizes(dataset_source) for name, dataset_source in source.items()}
-        if isinstance(source, TabularSource):
-            return None
-        return source.shard_sizes
+        return source.grid_shard_sizes
 
     def _grid_shard_slice(self, source: Source) -> slice | None:
         """Local grid shard slice for ``source``, derived from its shard sizes.
 
         Returns None when the source is replicated (not sharded).
         """
-        # no per-grid scalers/masks for TabularSource that would need to be sliced
-        if isinstance(source, TabularSource):
-            return None
-
-        shard_sizes = getattr(source, "shard_sizes", None)
+        # Tabular sources report no grid shard sizes: they have no per-grid scalers/masks to slice.
+        shard_sizes = source.grid_shard_sizes
         if not shard_sizes:
             return None
         assert isinstance(shard_sizes, list) and all(

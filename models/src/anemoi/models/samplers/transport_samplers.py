@@ -16,14 +16,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.transport.data_helpers import Data
-from anemoi.models.transport.data_helpers import add_data
-from anemoi.models.transport.data_helpers import condition_shape
-from anemoi.models.transport.data_helpers import data_dtype
-from anemoi.models.transport.data_helpers import map_data
-from anemoi.models.transport.data_helpers import randn_like_data
-from anemoi.models.transport.data_helpers import scale_data
-from anemoi.models.transport.data_helpers import zip_map_data
 
 TransportModelFunction = Callable[
     [
@@ -39,19 +31,29 @@ DenoisingFunction = TransportModelFunction
 VectorFieldFunction = TransportModelFunction
 
 
-def _map_data_dict(batch: Batch, fn: Callable[[torch.Tensor], torch.Tensor]) -> dict[str, Data]:
-    """Apply ``fn`` to every dataset's payload, returning plain per-dataset data."""
-    return {dataset_name: map_data(source.data, fn) for dataset_name, source in batch.items()}
+def _in_dtype(batch: Batch, dtype: torch.dtype) -> Batch:
+    """Return ``batch`` with every payload cast to ``dtype`` (solver precision)."""
+    return batch.map_data(lambda data: data.to(dtype))
+
+
+def _in_model_dtype(batch: Batch, x: Batch) -> Batch:
+    """Return ``batch`` with each dataset's payload cast to the dtype of the matching input."""
+    return batch.with_sources(
+        {name: source.map_data(lambda data, dtype=x[name].dtype: data.to(dtype)) for name, source in batch.items()},
+    )
+
+
+def _axpy(y: Batch, direction: Batch, step: torch.Tensor | float) -> Batch:
+    """Return ``y + step * direction``, dataset by dataset."""
+    return y.zip_map_data(lambda y_data, direction_data: y_data + direction_data * step, direction)
 
 
 def _expand_scalar_condition(value: torch.Tensor, y: Batch) -> dict[str, torch.Tensor]:
     """Expand one scalar condition so each dataset can pass it to the model."""
-    condition = {}
-    for dataset_name, source in y.items():
-        y_data = source.data
-        shape = condition_shape(y_data) if isinstance(y_data, list) else (y_data.shape[0], 1, y_data.shape[2], 1, 1)
-        condition[dataset_name] = value.view(1, 1, 1, 1, 1).expand(shape).to(data_dtype(y_data))
-    return condition
+    return {
+        dataset_name: value.view(1, 1, 1, 1, 1).expand(source.condition_shape).to(source.dtype)
+        for dataset_name, source in y.items()
+    }
 
 
 class EDMDiffusionSampler(ABC):
@@ -137,7 +139,7 @@ class EDMHeunSampler(EDMDiffusionSampler):
 
         num_steps = len(sigmas) - 1
         # Persistent dtype-precision solver state; all Heun update arithmetic uses this buffer.
-        y_solver = _map_data_dict(y, lambda sample: sample.to(dtype))
+        y_solver = _in_dtype(y, dtype)
 
         # Heun sampling loop
         for i in range(num_steps):
@@ -152,34 +154,16 @@ class EDMHeunSampler(EDMDiffusionSampler):
                 )
                 sigma_effective = sigma_i + gamma * sigma_i
 
-                for dataset_name, y_solver_data in y_solver.items():
-                    dataset_grid_shard_sizes = (
-                        grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
-                    )
-                    epsilon = scale_data(
-                        randn_like_data(
-                            y_solver_data,
-                            model_comm_group=model_comm_group,
-                            grid_shard_sizes=dataset_grid_shard_sizes,
-                        ),
-                        S_noise,
-                    )
-                    y_solver[dataset_name] = add_data(
-                        y_solver_data,
-                        scale_data(epsilon, torch.sqrt(sigma_effective**2 - sigma_i**2)),
-                    )
+                # Noise is drawn consistently across the grid shards each source records.
+                epsilon = y_solver.with_sources(
+                    {name: source.randn_like(model_comm_group) for name, source in y_solver.items()},
+                ).map_data(lambda noise: noise * S_noise)
+                y_solver = _axpy(y_solver, epsilon, torch.sqrt(sigma_effective**2 - sigma_i**2))
             else:
                 sigma_effective = sigma_i
 
             # Cast for model evaluation: run denoiser in model/input dtype.
-            y_model = y.with_data(
-                {
-                    dataset_name: map_data(
-                        y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
-                    )
-                    for dataset_name, y_data in y_solver.items()
-                },
-            )
+            y_model = _in_model_dtype(y_solver, x)
 
             sigma_effective_expanded = _expand_scalar_condition(sigma_effective, y_model)
 
@@ -190,31 +174,17 @@ class EDMHeunSampler(EDMDiffusionSampler):
                 model_comm_group,
                 grid_shard_sizes,
             )
-            D1_solver = _map_data_dict(D1, lambda sample: sample.to(dtype))
+            D1_solver = _in_dtype(D1, dtype)
 
             # Predictor state in solver precision; for Heun corrector evaluation.
-            update_direction, y_next_solver = {}, {}
-            for dataset_name in y_solver:
-                update_direction[dataset_name] = zip_map_data(
-                    y_solver[dataset_name],
-                    D1_solver[dataset_name],
-                    lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_effective + eps_prec),
-                )
-                y_next_solver[dataset_name] = add_data(
-                    y_solver[dataset_name],
-                    scale_data(update_direction[dataset_name], sigma_next - sigma_effective),
-                )
+            update_direction = y_solver.zip_map_data(
+                lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_effective + eps_prec),
+                D1_solver,
+            )
+            y_next_solver = _axpy(y_solver, update_direction, sigma_next - sigma_effective)
 
             if sigma_next != 0:
-                y_next_model = y.with_data(
-                    {
-                        dataset_name: map_data(
-                            y_next_data,
-                            lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)),
-                        )
-                        for dataset_name, y_next_data in y_next_solver.items()
-                    },
-                )
+                y_next_model = _in_model_dtype(y_next_solver, x)
                 sigma_next_expanded = _expand_scalar_condition(sigma_next, y_next_model)
 
                 D2 = denoising_fn(
@@ -224,32 +194,21 @@ class EDMHeunSampler(EDMDiffusionSampler):
                     model_comm_group,
                     grid_shard_sizes,
                 )
-                D2_solver = _map_data_dict(D2, lambda sample: sample.to(dtype))
+                D2_solver = _in_dtype(D2, dtype)
 
-                for dataset_name in y_solver:
-                    corrected_update_direction = zip_map_data(
-                        y_next_solver[dataset_name],
-                        D2_solver[dataset_name],
-                        lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_next + eps_prec),
-                    )
-                    combined_direction = zip_map_data(
-                        update_direction[dataset_name],
-                        corrected_update_direction,
-                        lambda update_sample, corrected_sample: (update_sample + corrected_sample) / 2,
-                    )
-                    y_solver[dataset_name] = add_data(
-                        y_solver[dataset_name],
-                        scale_data(combined_direction, sigma_next - sigma_effective),
-                    )
+                corrected_update_direction = y_next_solver.zip_map_data(
+                    lambda y_sample, denoised_sample: (y_sample - denoised_sample) / (sigma_next + eps_prec),
+                    D2_solver,
+                )
+                combined_direction = update_direction.zip_map_data(
+                    lambda update_sample, corrected_sample: (update_sample + corrected_sample) / 2,
+                    corrected_update_direction,
+                )
+                y_solver = _axpy(y_solver, combined_direction, sigma_next - sigma_effective)
             else:
                 y_solver = y_next_solver
 
-        return y.with_data(
-            {
-                dataset_name: map_data(y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)))
-                for dataset_name, y_data in y_solver.items()
-            },
-        )
+        return _in_model_dtype(y_solver, x)
 
 
 class DPMpp2MSampler(EDMDiffusionSampler):
@@ -275,14 +234,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         dtype = kwargs.get("dtype", self.dtype)
 
         # Keep model evaluations in model dtype, but run solver updates in sampler dtype.
-        y_model = y.with_data(
-            {
-                dataset_name: map_data(
-                    source.data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
-                )
-                for dataset_name, source in y.items()
-            },
-        )
+        y_model = _in_model_dtype(y, x)
         sigmas = sigmas.to(dtype)
 
         num_steps = len(sigmas) - 1
@@ -297,33 +249,24 @@ class DPMpp2MSampler(EDMDiffusionSampler):
 
             sigma_expanded = _expand_scalar_condition(sigma, y_model)
             denoised = denoising_fn(x, y_model, sigma_expanded, model_comm_group, grid_shard_sizes)
-            denoised_solver = _map_data_dict(denoised, lambda sample: sample.to(dtype))
+            denoised_solver = _in_dtype(denoised, dtype)
 
             if sigma_next == 0:
-                y_model = y.with_data(
-                    {
-                        dataset_name: map_data(
-                            den,
-                            lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)),
-                        )
-                        for dataset_name, den in denoised_solver.items()
-                    },
-                )
+                # The final state is the denoised field, described like the sampled target.
+                y_model = _in_model_dtype(y_model.with_data({n: s.data for n, s in denoised_solver.items()}), x)
                 break
 
-            y_solver = _map_data_dict(y_model, lambda sample: sample.to(dtype))
+            y_solver = _in_dtype(y_model, dtype)
             t = -torch.log(sigma + 1e-10)
             t_next = -torch.log(sigma_next + 1e-10) if sigma_next != 0 else float("inf")
             h = t_next - t
 
             if old_denoised is None:
-                for dataset_name in y:
-                    y_solver[dataset_name] = zip_map_data(
-                        y_solver[dataset_name],
-                        denoised_solver[dataset_name],
-                        lambda y_sample, denoised_sample: (sigma_next / sigma) * y_sample
-                        - (torch.exp(-h) - 1) * denoised_sample,
-                    )
+                y_solver = y_solver.zip_map_data(
+                    lambda y_sample, denoised_sample: (sigma_next / sigma) * y_sample
+                    - (torch.exp(-h) - 1) * denoised_sample,
+                    denoised_solver,
+                )
             else:
                 # Second order multistep
                 h_last = t - (-torch.log(sigmas[i - 1] + 1e-10)) if i > 0 else h
@@ -332,28 +275,18 @@ class DPMpp2MSampler(EDMDiffusionSampler):
                 coeff1 = 1 + 1 / (2 * r)
                 coeff2 = -1 / (2 * r)
 
-                for dataset_name in y:
-                    direction = zip_map_data(
-                        denoised_solver[dataset_name],
-                        old_denoised[dataset_name],
-                        lambda denoised_sample, old_sample: coeff1 * denoised_sample + coeff2 * old_sample,
-                    )
-                    y_solver[dataset_name] = zip_map_data(
-                        y_solver[dataset_name],
-                        direction,
-                        lambda y_sample, direction_sample: (sigma_next / sigma) * y_sample
-                        - (torch.exp(-h) - 1) * direction_sample,
-                    )
+                direction = denoised_solver.zip_map_data(
+                    lambda denoised_sample, old_sample: coeff1 * denoised_sample + coeff2 * old_sample,
+                    old_denoised,
+                )
+                y_solver = y_solver.zip_map_data(
+                    lambda y_sample, direction_sample: (sigma_next / sigma) * y_sample
+                    - (torch.exp(-h) - 1) * direction_sample,
+                    direction,
+                )
 
             old_denoised = denoised_solver
-            y_model = y.with_data(
-                {
-                    dataset_name: map_data(
-                        y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
-                    )
-                    for dataset_name, y_data in y_solver.items()
-                },
-            )
+            y_model = _in_model_dtype(y_solver, x)
 
         return y_model
 
@@ -405,21 +338,14 @@ class VectorFieldEulerSampler(VectorFieldSampler):
             raise ValueError("VectorFieldEulerSampler requires a vector_field_fn callable.")
         dtype = kwargs.get("dtype", self.dtype)
         times = times.to(dtype)
-        y_solver = _map_data_dict(y, lambda sample: sample.to(dtype))
+        y_solver = _in_dtype(y, dtype)
 
         for i in range(len(times) - 1):
             time_i = times[i]
             time_next = times[i + 1]
             dt = time_next - time_i
 
-            y_model = y.with_data(
-                {
-                    dataset_name: map_data(
-                        y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
-                    )
-                    for dataset_name, y_data in y_solver.items()
-                },
-            )
+            y_model = _in_model_dtype(y_solver, x)
             time_expanded = _expand_scalar_condition(time_i, y_model)
             vector_field = vector_field_fn(
                 x,
@@ -429,18 +355,9 @@ class VectorFieldEulerSampler(VectorFieldSampler):
                 grid_shard_sizes,
             )
 
-            for dataset_name in y_solver:
-                y_solver[dataset_name] = add_data(
-                    y_solver[dataset_name],
-                    scale_data(map_data(vector_field[dataset_name].data, lambda sample: sample.to(dtype)), dt),
-                )
+            y_solver = _axpy(y_solver, _in_dtype(vector_field, dtype), dt)
 
-        return y.with_data(
-            {
-                dataset_name: map_data(y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)))
-                for dataset_name, y_data in y_solver.items()
-            },
-        )
+        return _in_model_dtype(y_solver, x)
 
 
 class VectorFieldHeunSampler(VectorFieldSampler):
@@ -468,7 +385,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
             raise ValueError("VectorFieldHeunSampler requires a vector_field_fn callable.")
         dtype = kwargs.get("dtype", self.dtype)
         times = times.to(dtype)
-        y_solver = _map_data_dict(y, lambda sample: sample.to(dtype))
+        y_solver = _in_dtype(y, dtype)
 
         num_steps = len(times) - 1
         for i in range(num_steps):
@@ -476,14 +393,7 @@ class VectorFieldHeunSampler(VectorFieldSampler):
             time_next = times[i + 1]
             dt = time_next - time_i
 
-            y_model = y.with_data(
-                {
-                    dataset_name: map_data(
-                        y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data))
-                    )
-                    for dataset_name, y_data in y_solver.items()
-                },
-            )
+            y_model = _in_model_dtype(y_solver, x)
             time_i_expanded = _expand_scalar_condition(time_i, y_model)
             vector_field_1 = vector_field_fn(
                 x,
@@ -493,26 +403,13 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 grid_shard_sizes,
             )
 
-            y_predictor = {
-                dataset_name: add_data(
-                    y_solver[dataset_name],
-                    scale_data(map_data(vector_field_1[dataset_name].data, lambda sample: sample.to(dtype)), dt),
-                )
-                for dataset_name in y_solver
-            }
+            vector_field_1_solver = _in_dtype(vector_field_1, dtype)
+            y_predictor = _axpy(y_solver, vector_field_1_solver, dt)
             if self.euler_final_step and i == num_steps - 1:
                 y_solver = y_predictor
                 continue
 
-            y_next_model = y.with_data(
-                {
-                    dataset_name: map_data(
-                        y_data,
-                        lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)),
-                    )
-                    for dataset_name, y_data in y_predictor.items()
-                },
-            )
+            y_next_model = _in_model_dtype(y_predictor, x)
             time_next_expanded = _expand_scalar_condition(time_next, y_next_model)
             vector_field_2 = vector_field_fn(
                 x,
@@ -522,23 +419,13 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 grid_shard_sizes,
             )
 
-            for dataset_name in y_solver:
-                combined_field = zip_map_data(
-                    map_data(vector_field_1[dataset_name].data, lambda sample: sample.to(dtype)),
-                    map_data(vector_field_2[dataset_name].data, lambda sample: sample.to(dtype)),
-                    lambda first_sample, second_sample: (first_sample + second_sample) / 2,
-                )
-                y_solver[dataset_name] = add_data(
-                    y_solver[dataset_name],
-                    scale_data(combined_field, dt),
-                )
+            combined_field = vector_field_1_solver.zip_map_data(
+                lambda first_sample, second_sample: (first_sample + second_sample) / 2,
+                _in_dtype(vector_field_2, dtype),
+            )
+            y_solver = _axpy(y_solver, combined_field, dt)
 
-        return y.with_data(
-            {
-                dataset_name: map_data(y_data, lambda sample, name=dataset_name: sample.to(data_dtype(x[name].data)))
-                for dataset_name, y_data in y_solver.items()
-            },
-        )
+        return _in_model_dtype(y_solver, x)
 
 
 VECTOR_FIELD_SAMPLERS = {

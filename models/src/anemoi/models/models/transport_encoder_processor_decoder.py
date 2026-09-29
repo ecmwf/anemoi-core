@@ -40,10 +40,7 @@ from anemoi.models.transport import TransportSourceBuilder
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import get_transport_model_objective
 from anemoi.models.transport import reference_state_sampling_source
-from anemoi.models.transport import sampling_source_specs
-from anemoi.models.transport.data_helpers import Data
-from anemoi.models.transport.data_helpers import data_device
-from anemoi.models.transport.data_helpers import map_data
+from anemoi.models.transport.sources import Data
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
@@ -142,9 +139,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             data_coords = x_features.coordinates
             x_input_features = x_features.data
         else:
-            if not isinstance(x.data, list) or not isinstance(y_noised.data, list):
-                msg = "Input and conditioned target coordinates must match for dense transport data."
-                raise AssertionError(msg)
+            if not (x.is_tabular and y_noised.is_tabular):
+                raise AssertionError("Input and conditioned target coordinates must match for dense transport data.")
             data_coords = y_noised_features.coordinates
             x_input_features = torch.zeros(
                 y_noised_features.data.shape[0],
@@ -207,14 +203,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def _make_noise_emb_for_view(self, noise_emb: torch.Tensor, view: "Source") -> torch.Tensor:
         """Repeat noise embeddings over the actual flattened nodes in a source view."""
-        if not isinstance(view.data, list):
+        if not view.is_tabular:
             grid_size = view.data.shape[view.layout.axis("grid", ndim=view.data.ndim)]
             return self._make_noise_emb(noise_emb, repeat=grid_size)
 
         noise_base = noise_emb[:, 0, :, 0, :]
         if noise_base.shape[1] != view.ensemble_size:
-            msg = "Sparse transport noise embeddings must match the source view's ensemble size."
-            raise ValueError(msg)
+            raise ValueError("Sparse transport noise embeddings must match the source view's ensemble size.")
         chunks = []
         for sample_index, sample in enumerate(view.data):
             num_nodes = sample.shape[view.layout.axis("grid", ndim=sample.ndim)]
@@ -542,12 +537,11 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
 
             target_view = conditioned_target[dataset_name]
-            target_data = target_view.data[0] if isinstance(target_view.data, list) else target_view.data
             out_view = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name),
                 target_view,
-                target_data.dtype,
+                target_view.dtype,
                 dataset_name,
             )
             out_batch = out_batch.replace(dataset_name, out_view)
@@ -666,9 +660,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
-                if isinstance(dataset_data, list):
-                    msg = "Distributed gather is not supported for sparse transport sampling outputs."
-                    raise NotImplementedError(msg)
+                if processed.is_tabular:
+                    raise NotImplementedError(
+                        "Distributed gather is not supported for sparse transport sampling outputs."
+                    )
                 dataset_data = gather_tensor(
                     dataset_data,
                     -2,
@@ -686,8 +681,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         elif variable_space == "output":
             indices = self.data_indices[dataset_name].model.output
         else:
-            msg = f"Unknown sampling variable space {variable_space!r}; expected 'input' or 'output'."
-            raise ValueError(msg)
+            raise ValueError(f"Unknown sampling variable space {variable_space!r}; expected 'input' or 'output'.")
         return list(indices.ordered_names)
 
     def _sampling_statistics(self, dataset_name: str, variable_space: str) -> dict:
@@ -711,22 +705,20 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
             if dataset_grid_shard_sizes is None:
                 return coordinates
-            if isinstance(dataset_data, list) or isinstance(coordinates, list):
-                msg = "Grid sharding is not supported for sparse transport sampling templates."
-                raise NotImplementedError(msg)
+            if layout.time_in_grid:
+                raise NotImplementedError("Grid sharding is not supported for sparse transport sampling templates.")
 
-            coordinates = coordinates.to(data_device(dataset_data))
+            coordinates = coordinates.to(dataset_data.device)
             data_grid_size = dataset_data.shape[layout.axis("grid", ndim=dataset_data.ndim)]
             if coordinates.ndim == 2:
                 coordinate_grid_dim = 0
             elif coordinates.ndim == 3:
                 coordinate_grid_dim = 1
             else:
-                msg = (
+                raise ValueError(
                     "Sampling template coordinates must have shape (grid, 2) or (batch, grid, 2), "
                     f"got {tuple(coordinates.shape)} for dataset '{dataset_name}'."
                 )
-                raise ValueError(msg)
 
             coordinate_grid_size = coordinates.shape[coordinate_grid_dim]
             if coordinate_grid_size == data_grid_size:
@@ -743,7 +735,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             raise ValueError(msg)
 
-        if isinstance(dataset_data, list):
+        if layout.time_in_grid:
             msg = (
                 "Sparse transport sampling requires a Batch template carrying per-sample coordinates. "
                 f"Dataset '{dataset_name}' has sparse data but no template coordinates."
@@ -764,7 +756,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             raise ValueError(msg)
 
-        coordinates = self._graph_data[dataset_name].x.to(data_device(dataset_data))
+        # Only gridded payloads reach this point
+        coordinates = self._graph_data[dataset_name].x.to(dataset_data.device)
         if grid_shard_sizes is not None and grid_shard_sizes.get(dataset_name) is not None:
             coordinates = shard_tensor(coordinates, 0, grid_shard_sizes[dataset_name], model_comm_group)
         return coordinates
@@ -816,6 +809,37 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         return Batch(sources)
 
+    def _sampling_template(
+        self,
+        target_template: Batch,
+        *,
+        model_comm_group: Optional[ProcessGroup] = None,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+    ) -> Batch:
+        """Describe the sampled field: the target template's geometry in model-output variables.
+
+        The payloads are zero-stride views in the output width (nothing is allocated); only their
+        shape, dtype and device are read. Variables are the last payload axis.
+        """
+        payloads = {
+            name: template.map_data(
+                lambda data, n_out=self.num_output_channels[name]: data.new_zeros(()).expand(*data.shape[:-1], n_out),
+                variables=self._sampling_variables(name, "output"),
+                statistics=self._sampling_statistics(name, "output"),
+            ).data
+            for name, template in target_template.items()
+        }
+        return self._make_sampling_batch(
+            payloads,
+            variable_space="output",
+            template=target_template,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+        )
+
+    #: Named in the error raised for an invalid transport source kind.
+    _sampling_source_context = "state prediction"
+
     def build_sampling_source(
         self,
         x: Batch,
@@ -824,12 +848,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         default_kind: str = "gaussian",
-    ) -> dict[str, Data]:
-        """Build the starting/source field used by transport sampling."""
+    ) -> Batch:
+        """Build the starting/source field used by transport sampling, in model-output space.
+
+        Gaussian noise or zeros, or the latest input state projected to the predicted variables.
+        """
         request = TransportSourceRequest(
-            specs=sampling_source_specs(
-                {name: source.data for name, source in target_template.items()},
-                num_output_channels=self.num_output_channels,
+            templates=self._sampling_template(
+                target_template,
+                model_comm_group=model_comm_group,
                 grid_shard_sizes=grid_shard_sizes,
             ),
             default_kind=default_kind,
@@ -841,7 +868,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 ),
             },
             model_comm_group=model_comm_group,
-            error_context="state prediction",
+            error_context=self._sampling_source_context,
         )
         return self.transport_source.build(request)
 
@@ -948,12 +975,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 target_forcing=target_forcing,
                 **kwargs,
             )
-            out = out.with_data(
+            out = out.with_sources(
                 {
-                    dataset_name: map_data(
-                        source.data,
-                        lambda sample, name=dataset_name: sample.to(batch[name].dtype),
-                    )
+                    dataset_name: source.map_data(lambda data, dtype=batch[dataset_name].dtype: data.to(dtype))
                     for dataset_name, source in out.items()
                 },
             )
@@ -1010,6 +1034,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
 
+    _sampling_source_context = "tendency prediction"
+
     def __init__(
         self,
         *,
@@ -1064,9 +1090,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
 
-        if isinstance(x.data, list) or isinstance(y_noised.data, list):
-            msg = "Tendency transport is not implemented for sparse observation datasets."
-            raise NotImplementedError(msg)
+        if x.is_tabular or y_noised.is_tabular:
+            raise NotImplementedError("Tendency transport is not implemented for sparse observation datasets.")
 
         data_coords, x_data_latent, _x_skip, shard_sizes_data, batch_sizes, timedeltas = super()._assemble_input(
             x,
@@ -1300,37 +1325,6 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             grid_shard_sizes=grid_shard_sizes,
         )
         return (x_batch, x_t0_batch), grid_shard_sizes
-
-    def build_sampling_source(
-        self,
-        x: Batch,
-        *,
-        target_template: Batch,
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        default_kind: str = "gaussian",
-    ) -> dict[str, Data]:
-        """Build the starting/source field for tendency-space transport sampling."""
-        # Tendency prediction can use Gaussian noise, zeros, or the latest
-        # input state projected to the variables the model predicts.
-        request = TransportSourceRequest(
-            specs=sampling_source_specs(
-                {name: source.data for name, source in target_template.items()},
-                num_output_channels=self.num_output_channels,
-                grid_shard_sizes=grid_shard_sizes,
-            ),
-            default_kind=default_kind,
-            custom_source_factories={
-                "reference_state": lambda: reference_state_sampling_source(
-                    {name: source.data for name, source in x.items()},
-                    data_indices=self.data_indices,
-                    n_step_output=self.n_step_output,
-                ),
-            },
-            model_comm_group=model_comm_group,
-            error_context="tendency prediction",
-        )
-        return self.transport_source.build(request)
 
     def _after_sampling(
         self,

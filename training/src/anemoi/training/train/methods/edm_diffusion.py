@@ -11,12 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from anemoi.models.transport.data_helpers import Data
-from anemoi.models.transport.data_helpers import add_scaled_data
-from anemoi.models.transport.data_helpers import batch_data
-from anemoi.models.transport.data_helpers import broadcast_batch_scalar_data
-from anemoi.models.transport.data_helpers import condition_shapes
-from anemoi.models.transport.data_helpers import first_data_device
 from anemoi.models.transport.paths import edm_loss_weight
 from anemoi.models.transport.schedules import SIGMA_TRAINING_DISTRIBUTIONS
 from anemoi.training.train.methods.transport_base import PreparedPredictionTarget
@@ -38,19 +32,19 @@ class EDMDiffusionTransportObjective(TransportObjective):
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
-        target_data = batch_data(prepared.model_target)
+        model_target = prepared.model_target
         sigma = self._sample_training_sigma(
-            shape=condition_shapes(target_data),
-            device=first_data_device(target_data),
+            shape={name: source.condition_shape for name, source in model_target.items()},
+            device=model_target.device,
         )
-        noise_weights = self._loss_weights(sigma, target_data)
+        noise_weights = self._loss_weights(sigma, model_target)
         source = self.build_transport_source(prepared)
-        target_noised = self._noise_target(prepared.model_target, sigma, source)
+        target_noised = self._noise_target(model_target, sigma, source)
         # EDM diffusion predicts the clean target. The prediction mode decides
         # whether that clean target is a full state or a tendency field.
         # state uses DATA_FULL, tendency uses DATA_OUTPUT.
         return PreparedTransportObjective(
-            conditioned_target=prepared.model_target.with_data(target_noised),
+            conditioned_target=target_noised,
             condition=sigma,
             loss_target=prepared.loss_target,
             loss_target_layout=prepared.loss_target_layout,
@@ -82,7 +76,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
-        weights: dict[str, Data] | None = None,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute EDM diffusion loss with noise weighting."""
@@ -93,7 +87,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
             "grid_shard_slice": grid_shard_slice,
             "group": self.module.model_comm_group,
         }
-        if y_pred.layout.time_in_grid:
+        if y_pred.is_tabular:
             loss_kwargs["per_sample_kwargs"] = {"weights": weights[dataset_name]}
         else:
             loss_kwargs["weights"] = weights[dataset_name]
@@ -119,10 +113,19 @@ class EDMDiffusionTransportObjective(TransportObjective):
         self,
         x: Batch,
         sigma: dict[str, torch.Tensor],
-        source: dict[str, Data],
-    ) -> dict[str, Data]:
+        source: Batch,
+    ) -> Batch:
         """Create the corrupted target by adding scaled source noise to the clean target."""
-        return {name: add_scaled_data(x[name].data, source[name], sigma[name]) for name in x}
+        return x.with_sources(
+            {
+                name: target.map_with_condition(
+                    lambda clean, noise, sigma_sample: clean + noise * sigma_sample,
+                    sigma[name],
+                    source[name],
+                )
+                for name, target in x.items()
+            },
+        )
 
     def _sample_training_sigma(
         self,
@@ -146,14 +149,11 @@ class EDMDiffusionTransportObjective(TransportObjective):
     def _loss_weights(
         self,
         sigma: dict[str, torch.Tensor],
-        target_data: dict[str, Data],
-    ) -> dict[str, Data]:
-        """Return EDM loss weights for sampled sigma values."""
+        target: Batch,
+    ) -> dict[str, torch.Tensor | list[torch.Tensor]]:
+        """Return EDM loss weights for sampled sigma values, laid out like each target's payload."""
         sigma_data = self.module.model.model.edm.sigma_data
         return {
-            dataset_name: broadcast_batch_scalar_data(
-                target_data[dataset_name],
-                edm_loss_weight(sigma_dataset, sigma_data),
-            )
+            dataset_name: target[dataset_name].condition_per_sample(edm_loss_weight(sigma_dataset, sigma_data))
             for dataset_name, sigma_dataset in sigma.items()
         }

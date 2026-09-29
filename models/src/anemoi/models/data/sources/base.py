@@ -126,8 +126,8 @@ class Source(ABC):
     Bundles the per-dataset payload (data, coordinates, timedeltas) with the
     metadata that describes it (name, variables, layout, statistics) so callers
     can index logical axes (``time``, ``variables``) without hard-coded dimension
-    positions. The same API works for gridded and sparse observation datasets
-    thanks to the ``layout.time_in_grid`` dispatch.
+    positions. The same API works for gridded and tabular observation datasets
+    thanks to the layout.time_in_grid dispatch.
 
     Parameters
     ----------
@@ -350,6 +350,87 @@ class Source(ABC):
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "Source":
         """Apply a function to this view, returning a new view with the same metadata."""
         pass
+
+    # Structure-agnostic payload operations
+    @property
+    @abstractmethod
+    def is_tabular(self) -> bool:
+        """Whether time is folded into the grid axis (sparse observation sources)."""
+        ...
+
+    @property
+    @abstractmethod
+    def grid_shard_sizes(self) -> ShardSizes:
+        """Grid shard sizes of the payload tensor, or ``None`` when it is not grid-sharded.
+
+        Tabular sources shard per time window, not along one grid axis, so they report ``None``.
+        """
+        ...
+
+    @property
+    @abstractmethod
+    def condition_shape(self) -> tuple[int, int, int, int, int]:
+        """``(batch, 1, ensemble, 1, 1)`` shape of a per-sample, per-member condition (e.g. a noise level)."""
+        ...
+
+    @abstractmethod
+    def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor], **overrides: Any) -> "Source":
+        """Return a new view with ``fn`` applied to the payload (each sample, for tabular sources).
+
+        Unlike :meth:`apply_func`, the payload is not copied first and ``fn`` receives only
+        the tensor. ``overrides`` replace other fields in the same step (e.g. ``variables``
+        and ``statistics`` when ``fn`` changes the variable width).
+        """
+        ...
+
+    @abstractmethod
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: "Source") -> "Source":
+        """Return a new view with ``fn(self_payload, *other_payloads)`` applied sample by sample.
+
+        ``others`` must have the same structure as this source.
+        """
+        ...
+
+    @abstractmethod
+    def map_with_condition(
+        self,
+        fn: Callable[..., torch.Tensor],
+        condition: torch.Tensor,
+        *others: "Source",
+    ) -> "Source":
+        """Return a new view with ``fn(self_payload, *other_payloads, condition)`` applied.
+
+        ``condition`` is a 5-D ``(batch, 1, ensemble, 1, 1)`` per-sample, per-member tensor
+        (e.g. a noise level); each sample receives the slice that broadcasts against it.
+        """
+        ...
+
+    @abstractmethod
+    def condition_per_sample(self, condition: torch.Tensor) -> torch.Tensor | list[torch.Tensor]:
+        """Return ``condition`` (see :meth:`map_with_condition`) laid out like this source's payload."""
+        ...
+
+    @abstractmethod
+    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "Source":
+        """Return a new view whose payload is standard-normal noise of the same structure.
+
+        Grid-sharded payloads draw noise consistently across ``model_comm_group``.
+        """
+        ...
+
+    @abstractmethod
+    def pairwise(self, other: "Source", func: Callable[..., torch.Tensor], *args: Any, **kwargs) -> torch.Tensor:
+        """Apply the tensor-level ``func(pred, target, layout=..., ...)`` to this view and ``other``.
+
+        Tabular sources call ``func`` once per sample and average over non-empty samples.
+        """
+        ...
+
+    def _check_same_structure(self, others: Sequence["Source"]) -> None:
+        """Raise when ``others`` do not share this source's gridded/tabular structure."""
+        for other in others:
+            if other.is_tabular != self.is_tabular:
+                raise TypeError("Cannot combine gridded and tabular transport data.")
 
     @abstractmethod
     def shard(self, group: ProcessGroup | None) -> "Source":

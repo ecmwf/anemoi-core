@@ -22,10 +22,28 @@ from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _sample_condition(sample: torch.Tensor, condition: torch.Tensor, sample_index: int) -> torch.Tensor:
+    """Select one sample's slice of a ``(batch, 1, ensemble, 1, 1)`` condition, shaped to broadcast against it."""
+    if condition.ndim != 5:
+        msg = f"Expected transport condition to be 5D, got shape {tuple(condition.shape)}."
+        raise ValueError(msg)
+
+    sample_condition = condition[sample_index, 0, :, 0, 0]
+    if sample.ndim <= 2:
+        if sample_condition.numel() != 1:
+            msg = "Sparse observation data without an ensemble axis requires ensemble_size == 1."
+            raise NotImplementedError(msg)
+        return sample_condition.reshape(())
+
+    view_shape = [sample_condition.shape[0]] + [1] * (sample.ndim - 1)
+    return sample_condition.reshape(view_shape)
 
 
 def _fold_members(source: "TabularSource", sample: torch.Tensor) -> torch.Tensor:
@@ -173,6 +191,134 @@ class TabularSource(Source):
             for data in self.data
         ]
         return self.clone(data=new_data)
+
+    @property
+    def is_tabular(self) -> bool:
+        return True
+
+    @property
+    def grid_shard_sizes(self) -> ShardSizes:
+        # Sharded per time window, not along a single grid axis.
+        return None
+
+    @property
+    def condition_shape(self) -> tuple[int, int, int, int, int]:
+        if not self.data:
+            msg = "Cannot infer condition shape from an empty sparse data list."
+            raise ValueError(msg)
+        return self.batch_size, 1, self.ensemble_size, 1, 1
+
+    def _check_same_samples(self, others: Sequence[Source]) -> None:
+        self._check_same_structure(others)
+        for other in others:
+            if len(other.data) != len(self.data):
+                msg = (
+                    "Sparse transport data lists must have the same length, "
+                    f"got {len(self.data)} and {len(other.data)}."
+                )
+                raise ValueError(msg)
+
+    def _check_condition_batch(self, condition: torch.Tensor) -> None:
+        if condition.shape[0] != len(self.data):
+            msg = f"Condition batch size {condition.shape[0]} does not match sparse data length {len(self.data)}."
+            raise ValueError(msg)
+
+    def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor], **overrides) -> "TabularSource":
+        return self.clone(data=[fn(sample) for sample in self.data], **overrides)
+
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: Source) -> "TabularSource":
+        self._check_same_samples(others)
+        samples = zip(self.data, *(other.data for other in others), strict=True)
+        return self.clone(data=[fn(*sample_group) for sample_group in samples])
+
+    def map_with_condition(
+        self,
+        fn: Callable[..., torch.Tensor],
+        condition: torch.Tensor,
+        *others: Source,
+    ) -> "TabularSource":
+        self._check_same_samples(others)
+        self._check_condition_batch(condition)
+        samples = zip(self.data, *(other.data for other in others), strict=True)
+        return self.clone(
+            data=[
+                fn(*sample_group, _sample_condition(sample_group[0], condition, index))
+                for index, sample_group in enumerate(samples)
+            ],
+        )
+
+    def condition_per_sample(self, condition: torch.Tensor) -> list[torch.Tensor]:
+        self._check_condition_batch(condition)
+        return [_sample_condition(sample, condition, index) for index, sample in enumerate(self.data)]
+
+    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "TabularSource":
+        del model_comm_group  # each sample is drawn independently; windows are not grid-sharded
+        # torch.randn (not randn_like), as the gridded path draws through randn_with_grid_sharding.
+        return self.clone(
+            data=[torch.randn(sample.shape, dtype=sample.dtype, device=sample.device) for sample in self.data],
+        )
+
+    def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
+        if not isinstance(other, TabularSource):
+            raise TypeError(f"Other source must be a TabularSource; got {type(other).__name__}.")
+
+        if self.layout != other.layout:
+            raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
+
+        if len(self.data) != len(other.data):
+            raise ValueError(
+                f"Both sources must have the same number of samples; got {len(self.data)} and {len(other.data)}."
+            )
+
+        per_sample_kwargs = kwargs.pop("per_sample_kwargs", None) or {}
+        if kwargs.keys() & per_sample_kwargs.keys():
+            raise ValueError("Loss arguments cannot be both shared and per-sample.")
+
+        for name, values in per_sample_kwargs.items():
+            if len(values) != len(self.data):
+                raise ValueError(f"Loss argument {name!r} requires one value per sample ({len(self.data)}).")
+
+        losses = []
+        non_empty = []
+        for i, (pred_sample, target_sample) in enumerate(zip(self.data, other.data)):
+            # Every axis but the ensemble one must line up for this to work.
+            if self.layout.ensemble is None:
+                pred_shape = tuple(pred_sample.shape)
+                target_shape = tuple(target_sample.shape)
+            else:
+                ensemble_axis = self.layout.axis("ensemble", ndim=pred_sample.ndim)
+                pred_shape = tuple(size for dim, size in enumerate(pred_sample.shape) if dim != ensemble_axis)
+                target_shape = tuple(size for dim, size in enumerate(target_sample.shape) if dim != ensemble_axis)
+
+            assert pred_shape == target_shape, (
+                f"Sample {i} of both views must have the same shape apart from the ensemble axis; "
+                f"got {tuple(pred_sample.shape)} and {tuple(target_sample.shape)}."
+            )
+            assert torch.equal(self.coordinates[i], other.coordinates[i]), (
+                f"Sample {i} of both views must have the same coordinates; "
+                f"got {self.coordinates[i]} and {other.coordinates[i]}."
+            )
+            sample_kwargs = kwargs | {name: values[i] for name, values in per_sample_kwargs.items()}
+            losses.append(
+                func(
+                    pred_sample,
+                    target_sample,
+                    *args,
+                    layout=self.layout,
+                    statistics=self.statistics,
+                    name_to_index=self.name_to_index,
+                    **sample_kwargs,
+                ),
+            )
+            # A fully-empty worker contributes a graph-connected zero without
+            # reducing the mean for non-empty workers.
+            non_empty.append(pred_sample.shape[self.layout.grid] > 0)
+
+        if not losses:
+            raise ValueError("Cannot apply a loss to an empty sparse source view.")
+
+        stacked = torch.stack(losses)
+        return stacked.sum(dim=0) / max(sum(non_empty), 1)
 
     def flatten(self) -> FlatSource:
         folded = [_fold_members(self, sample) for sample in self.data]

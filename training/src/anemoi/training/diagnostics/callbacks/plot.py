@@ -673,7 +673,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             """Ensemble axis of the tensor, or None."""
             if not view.layout.has_axis("ensemble"):
                 return None
-            if isinstance(view.data, list):
+            if view.is_tabular:
+                # Tabular samples are stacked along a new leading axis by _post_process.
                 return view.layout.axis("ensemble", ndim=tensor.ndim - 1) + 1
             return view.layout.axis("ensemble", ndim=tensor.ndim)
 
@@ -695,7 +696,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
     @staticmethod
     def _align_output_metadata(view: Source, output_indices_full: Any) -> Source:
         """Re-slice a prediction view's metadata to its (model-output) variables."""
-        data0 = view.data[0] if isinstance(view.data, list) else view.data
+        data0 = view.data[0] if view.is_tabular else view.data
         var_width = data0.shape[view.layout.variables]
         if len(view.variables) == var_width:
             return view

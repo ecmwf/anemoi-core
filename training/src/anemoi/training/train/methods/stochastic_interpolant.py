@@ -11,15 +11,6 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from anemoi.models.transport.data_helpers import Data
-from anemoi.models.transport.data_helpers import add_data
-from anemoi.models.transport.data_helpers import batch_data
-from anemoi.models.transport.data_helpers import condition_shapes
-from anemoi.models.transport.data_helpers import first_data_device
-from anemoi.models.transport.data_helpers import multiply_batch_scalar_data
-from anemoi.models.transport.data_helpers import randn_like_data
-from anemoi.models.transport.data_helpers import zip_map_batch_scalar_data
-from anemoi.models.transport.data_helpers import zip_map_data
 from anemoi.models.transport.paths import stochastic_interpolant_alpha
 from anemoi.models.transport.paths import stochastic_interpolant_alpha_dot
 from anemoi.models.transport.paths import stochastic_interpolant_beta
@@ -37,6 +28,7 @@ if TYPE_CHECKING:
     import torch
 
     from anemoi.models.data import Batch
+    from anemoi.models.data.sources import Source
 
 
 class StochasticInterpolantTransportObjective(TransportObjective):
@@ -57,24 +49,20 @@ class StochasticInterpolantTransportObjective(TransportObjective):
         # (with ignore_nans) excludes them instead of fitting imputed values.
         missing = prepared.aux.get("model_target_missing")
         if missing is not None:
-            drift_target = {
-                name: zip_map_data(
-                    drift,
-                    missing[name].data,
-                    lambda values, target: values.masked_fill(target.isnan(), float("nan")),
-                )
-                for name, drift in drift_target.items()
-            }
+            drift_target = drift_target.zip_map_data(
+                lambda values, target: values.masked_fill(target.isnan(), float("nan")),
+                missing,
+            )
         return PreparedTransportObjective(
-            conditioned_target=prepared.model_target.with_data(interpolant_state),
+            conditioned_target=interpolant_state,
             condition=time_level,
-            loss_target=prepared.model_target.with_data(drift_target),
+            loss_target=drift_target,
             loss_target_layout=IndexSpace.MODEL_OUTPUT,
             pred_layout=IndexSpace.MODEL_OUTPUT,
             weights=None,
             aux={
                 "source": source,
-                "interpolant_state": prepared.model_target.with_data(interpolant_state),
+                "interpolant_state": interpolant_state,
                 "time_level": time_level,
             },
         )
@@ -99,100 +87,102 @@ class StochasticInterpolantTransportObjective(TransportObjective):
         prediction: Batch,
         objective: PreparedTransportObjective,
     ) -> Batch:
-        return prediction.with_data(
-            self._reconstruct_clean(
-                objective.aux["interpolant_state"],
-                prediction,
-                objective.aux["source"],
-                objective.aux["time_level"],
-            ),
+        return self._reconstruct_clean(
+            objective.aux["interpolant_state"],
+            prediction,
+            objective.aux["source"],
+            objective.aux["time_level"],
         )
 
     def _build_training_pair(
         self,
-        source: dict[str, Data],
+        source: Batch,
         clean_target: Batch,
-    ) -> tuple[dict[str, Data], dict[str, Data], dict[str, torch.Tensor]]:
+    ) -> tuple[Batch, Batch, dict[str, torch.Tensor]]:
         """Create the interpolated training input and the change the model should predict."""
-        target_data = batch_data(clean_target)
         time_level = self._sample_training_time(
-            condition_shapes(target_data),
-            device=first_data_device(target_data),
+            {name: clean.condition_shape for name, clean in clean_target.items()},
+            device=clean_target.device,
         )
 
-        interpolant_state: dict[str, Data] = {}
-        drift_target: dict[str, Data] = {}
+        def scaled(values: Source, factor: torch.Tensor) -> Source:
+            return values.map_with_condition(lambda data, sample_factor: data * sample_factor, factor)
+
+        def added(left: Source, right: Source) -> Source:
+            return left.zip_map_data(lambda left_data, right_data: left_data + right_data, right)
+
+        interpolant_state: dict[str, Source] = {}
+        drift_target: dict[str, Source] = {}
         noise_scale = self._noise_scale
-        for dataset_name, clean_dataset in target_data.items():
+        for dataset_name, clean in clean_target.items():
             time_dataset = time_level[dataset_name]
             alpha = stochastic_interpolant_alpha(time_dataset, self._alpha_schedule)
             beta = stochastic_interpolant_beta(time_dataset, self._beta_schedule)
             alpha_dot = stochastic_interpolant_alpha_dot(time_dataset, self._alpha_schedule)
             beta_dot = stochastic_interpolant_beta_dot(time_dataset, self._beta_schedule)
 
-            source_dataset = source[dataset_name]
-            interpolant_dataset = add_data(
-                multiply_batch_scalar_data(source_dataset, alpha),
-                multiply_batch_scalar_data(clean_dataset, beta),
-            )
-            drift_dataset = add_data(
-                multiply_batch_scalar_data(source_dataset, alpha_dot),
-                multiply_batch_scalar_data(clean_dataset, beta_dot),
-            )
+            anchor = source[dataset_name]
+            interpolant = added(scaled(clean, beta), scaled(anchor, alpha))
+            drift = added(scaled(clean, beta_dot), scaled(anchor, alpha_dot))
 
             if noise_scale != 0.0:
-                noise = randn_like_data(
-                    clean_dataset,
-                    model_comm_group=getattr(self.module, "model_comm_group", None),
-                    grid_shard_sizes=self.module._grid_shard_sizes(clean_target[dataset_name]),
-                )
+                noise = clean.randn_like(model_comm_group=getattr(self.module, "model_comm_group", None))
                 sigma = stochastic_interpolant_sigma(
                     time_dataset,
                     schedule=self._sigma_schedule,
                     noise_scale=noise_scale,
                 )
-                bridge_noise = multiply_batch_scalar_data(noise, sigma)
+                bridge_noise = scaled(noise, sigma)
                 ratio = stochastic_interpolant_bridge_noise_velocity_ratio(
                     time_dataset,
                     schedule=self._sigma_schedule,
                     eps=1e-8,
                 )
-                drift_noise = multiply_batch_scalar_data(bridge_noise, ratio)
-                interpolant_dataset = add_data(interpolant_dataset, bridge_noise)
-                drift_dataset = add_data(drift_dataset, drift_noise)
+                interpolant = added(interpolant, bridge_noise)
+                drift = added(drift, scaled(bridge_noise, ratio))
 
-            interpolant_state[dataset_name] = interpolant_dataset
-            drift_target[dataset_name] = drift_dataset
+            interpolant_state[dataset_name] = interpolant
+            drift_target[dataset_name] = drift
 
-        return interpolant_state, drift_target, time_level
+        return clean_target.with_sources(interpolant_state), clean_target.with_sources(drift_target), time_level
 
     def _reconstruct_clean(
         self,
         interpolant_state: Batch,
         drift_prediction: Batch,
-        source: dict[str, Data],
+        source: Batch,
         time_level: dict[str, torch.Tensor],
-    ) -> dict[str, Data]:
+    ) -> Batch:
         """Estimate the clean target from the model prediction for validation metrics."""
-        return {
-            dataset_name: zip_map_batch_scalar_data(
-                drift_prediction[dataset_name].data,
-                interpolant_state[dataset_name].data,
-                source[dataset_name],
-                scalar=time_level[dataset_name],
-                fn=lambda drift, interpolant, anchor, time: stochastic_interpolant_clean_mean(
-                    drift=drift,
-                    interpolant=interpolant,
-                    anchor=anchor,
-                    t=time,
-                    alpha_schedule=self._alpha_schedule,
-                    beta_schedule=self._beta_schedule,
-                    sigma_schedule=self._sigma_schedule,
-                    noise_scale=self._noise_scale,
-                ),
+
+        def clean_mean(
+            drift: torch.Tensor,
+            interpolant: torch.Tensor,
+            anchor: torch.Tensor,
+            time: torch.Tensor,
+        ) -> torch.Tensor:
+            return stochastic_interpolant_clean_mean(
+                drift=drift,
+                interpolant=interpolant,
+                anchor=anchor,
+                t=time,
+                alpha_schedule=self._alpha_schedule,
+                beta_schedule=self._beta_schedule,
+                sigma_schedule=self._sigma_schedule,
+                noise_scale=self._noise_scale,
             )
-            for dataset_name in interpolant_state
-        }
+
+        return drift_prediction.with_sources(
+            {
+                dataset_name: drift_prediction[dataset_name].map_with_condition(
+                    clean_mean,
+                    time_level[dataset_name],
+                    interpolant_state[dataset_name],
+                    source[dataset_name],
+                )
+                for dataset_name in interpolant_state
+            },
+        )
 
     def _sample_training_time(
         self,

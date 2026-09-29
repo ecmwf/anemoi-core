@@ -18,8 +18,6 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.data import Batch
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
-from anemoi.models.transport.data_helpers import batch_data
-from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
@@ -75,7 +73,7 @@ class StatePredictionMode(PredictionMode):
             # select() narrows the spec (variables, statistics) along with the data.
             reference_step = state_view.select(variables=var_idx)
             if self.module.n_step_output > 1:
-                if isinstance(reference_step.data, list):
+                if reference_step.is_tabular:
                     msg = "Multi-step reference-state transport sources are not supported for sparse datasets."
                     raise NotImplementedError(msg)
                 reference_step = reference_step.clone(
@@ -115,7 +113,9 @@ class StatePredictionMode(PredictionMode):
             aux={
                 # Build the reference-state source lazily so gaussian and zero
                 # sources never pay for (or crash on) this projection.
-                "transport_reference_source": lambda: batch_data(self._reference_state_target_space(batch)),
+                "transport_reference_source": lambda: {
+                    name: source.data for name, source in self._reference_state_target_space(batch).items()
+                },
                 # Output-time decoding forcings, normalized like the model inputs.
                 "target_forcing": self.module.preprocess_inputs(target_forcing),
                 "model_target_missing": model_target_missing,
@@ -271,7 +271,7 @@ class TendencyPredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         """Build tendency targets for training and state targets for validation metrics."""
-        if any(is_sparse_data(source.data) for source in batch.values()):
+        if any(source.is_tabular for source in batch.values()):
             msg = "Tendency prediction mode is not implemented for sparse observation datasets."
             raise NotImplementedError(msg)
 
@@ -291,15 +291,17 @@ class TendencyPredictionMode(PredictionMode):
             )
             raise AttributeError(msg)
 
+        # The tendency path is dense-only (rejected above), so it works on the payload tensors.
+        x_data = {name: source.data for name, source in x.items()}
         x_ref = self.module.model.model.apply_reference_state_truncation(
-            batch_data(x),
+            x_data,
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
         tendency_target_data_output = y_data_output.with_data(
-            self._compute_tendency_target(batch_data(y_data_output), x_ref),
+            self._compute_tendency_target({name: source.data for name, source in y_data_output.items()}, x_ref),
         )
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
         return PreparedPredictionTarget(
@@ -314,7 +316,7 @@ class TendencyPredictionMode(PredictionMode):
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
-                    batch_data(x),
+                    x_data,
                     data_indices=self.module.data_indices,
                     n_step_output=self.module.n_step_output,
                 ),
@@ -328,7 +330,10 @@ class TendencyPredictionMode(PredictionMode):
         prediction: Batch,
         prepared: PreparedPredictionTarget,
     ) -> Batch:
-        reconstructed = self._reconstruct_state(prepared.aux["x_ref"], batch_data(prediction))
+        reconstructed = self._reconstruct_state(
+            prepared.aux["x_ref"],
+            {name: source.data for name, source in prediction.items()},
+        )
         return prepared.metric_target.with_data(reconstructed)
 
     def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:

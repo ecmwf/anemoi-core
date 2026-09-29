@@ -22,6 +22,7 @@ from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -131,6 +132,72 @@ class GriddedSource(Source):
         )
         return self.clone(data=new_data)
 
+    @property
+    def is_tabular(self) -> bool:
+        return False
+
+    @property
+    def grid_shard_sizes(self) -> ShardSizes:
+        return self.shard_sizes
+
+    @property
+    def condition_shape(self) -> tuple[int, int, int, int, int]:
+        if self.data.ndim != 5:
+            raise ValueError(f"Expected dense transport data to be 5D, got shape {tuple(self.data.shape)}.")
+        return self.batch_size, 1, self.ensemble_size, 1, 1
+
+    def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor], **overrides) -> "GriddedSource":
+        return self.clone(data=fn(self.data), **overrides)
+
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: Source) -> "GriddedSource":
+        self._check_same_structure(others)
+        return self.clone(data=fn(self.data, *(other.data for other in others)))
+
+    def map_with_condition(
+        self,
+        fn: Callable[..., torch.Tensor],
+        condition: torch.Tensor,
+        *others: Source,
+    ) -> "GriddedSource":
+        self._check_same_structure(others)
+        # (batch, 1, ensemble, 1, 1) broadcasts against (batch, time, ensemble, grid, variables).
+        return self.clone(data=fn(self.data, *(other.data for other in others), condition))
+
+    def condition_per_sample(self, condition: torch.Tensor) -> torch.Tensor:
+        return condition
+
+    def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "GriddedSource":
+        # Imported here: anemoi.models.transport imports this package.
+        from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
+
+        noise = randn_like_with_grid_sharding(
+            self.data,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=self.grid_shard_sizes,
+        )
+        return self.clone(data=noise)
+
+    def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
+        if not isinstance(other, GriddedSource):
+            raise TypeError(f"Other source must be a GriddedSource; got {type(other).__name__}.")
+
+        if kwargs.pop("per_sample_kwargs", None) is not None:
+            raise ValueError("Gridded losses take batched arguments; per_sample_kwargs is only for tabular sources.")
+
+        if self.layout != other.layout:
+            raise ValueError(f"Both sources must have the same layout; got {self.layout!r} and {other.layout!r}.")
+
+        assert torch.equal(self.coordinates, other.coordinates), "Both views must have the same coordinates."
+        return func(
+            self.data,
+            other.data,
+            *args,
+            layout=self.layout,
+            statistics=self.statistics,
+            name_to_index=self.name_to_index,
+            **kwargs,
+        )
+
     def flatten(self) -> "GriddedSource":
         """Flatten the gridded source into a flat source."""
         assert (
@@ -152,10 +219,7 @@ class GriddedSource(Source):
         # already on device; see Batch.to()
 
         return FlatSource(
-            data=flattened_data,
-            coordinates=flattened_coords,
-            shard_sizes=self.shard_sizes,
-            device=self.device
+            data=flattened_data, coordinates=flattened_coords, shard_sizes=self.shard_sizes, device=self.device
         )
 
     def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":

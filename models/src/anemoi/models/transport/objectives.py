@@ -19,13 +19,18 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data import Batch
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport.data_helpers import add_data
-from anemoi.models.transport.data_helpers import map_data
-from anemoi.models.transport.data_helpers import multiply_batch_scalar_data
 from anemoi.models.transport.schedules import SIGMA_SCHEDULES
 from anemoi.models.transport.schedules import TIME_SCHEDULES
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _multiply(data: torch.Tensor, factor: torch.Tensor) -> torch.Tensor:
+    return data * factor
+
+
+def _add(left: torch.Tensor, right: torch.Tensor) -> torch.Tensor:
+    return left + right
 
 
 def _get_inference_defaults_section(model: Any, name: str) -> dict:
@@ -119,9 +124,8 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         **kwargs: Any,
     ) -> Batch:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
-        y_noised_data = {name: source.data for name, source in y_noised.items()}
-        scaled_noised = y_noised.with_data(
-            {key: multiply_batch_scalar_data(y_noised_data[key], c_in[key]) for key in y_noised_data},
+        scaled_noised = y_noised.with_sources(
+            {name: noised.map_with_condition(_multiply, c_in[name]) for name, noised in y_noised.items()},
         )
         pred = model._forward_transport_network(
             x,
@@ -131,14 +135,13 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             grid_shard_sizes=grid_shard_sizes,
             **kwargs,
         )
-        pred_data = {name: source.data for name, source in pred.items()}
-        return y_noised.with_data(
+        return y_noised.with_sources(
             {
-                key: add_data(
-                    multiply_batch_scalar_data(y_noised_data[key], c_skip[key]),
-                    multiply_batch_scalar_data(pred_data[key], c_out[key]),
+                name: noised.map_with_condition(_multiply, c_skip[name]).zip_map_data(
+                    _add,
+                    pred[name].map_with_condition(_multiply, c_out[name]),
                 )
-                for key in y_noised_data
+                for name, noised in y_noised.items()
             },
         )
 
@@ -171,20 +174,8 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             schedule_params,
             x_device,
         )
-        y_init = {
-            dataset_name: map_data(
-                source[dataset_name],
-                lambda sample: sample.to(dtype=sigma_schedule.dtype) * sigma_schedule[0],
-            )
-            for dataset_name in source
-        }
-        y_batch = model._make_sampling_batch(
-            y_init,
-            variable_space="output",
-            template=target_template,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
+        # The source is already described in model-output space, like the sampled target.
+        y_batch = source.map_data(lambda data: data.to(dtype=sigma_schedule.dtype) * sigma_schedule[0])
 
         sampler_instance = _build_inference_sampler(
             model,
@@ -291,16 +282,10 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
     ) -> Batch:
         x_device = x.device
 
-        source = model.build_sampling_source(
+        # The source is already described in model-output space, like the sampled target.
+        y_init = model.build_sampling_source(
             x,
             target_template=target_template,
-            model_comm_group=model_comm_group,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        y_init = model._make_sampling_batch(
-            source,
-            variable_space="output",
-            template=target_template,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
         )

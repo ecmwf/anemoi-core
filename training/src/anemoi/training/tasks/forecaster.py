@@ -174,7 +174,7 @@ class BaseForecaster(BaseTask):
         del rollout_step
         new_data = {}
         for dataset_name, view in x.items():
-            if view.layout.time_in_grid:
+            if view.is_tabular:
                 # Sparse observations have no explicit time axis to roll.
                 new_data[dataset_name] = view.data
                 continue

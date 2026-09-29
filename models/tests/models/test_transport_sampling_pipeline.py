@@ -16,6 +16,7 @@ from torch_geometric.data import HeteroData
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import make_source
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
@@ -28,7 +29,6 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
 from tests.batch_builders import build_batch
-from anemoi.models.data.sources import make_source
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -1099,11 +1099,21 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
     assert out["ds_a"].data.shape == (1, 2, 1, 5, 3)
 
 
+def _single_dataset_template(data: torch.Tensor) -> Batch:
+    """A one-dataset gridded batch describing the field a source builder should produce."""
+    return build_batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(data.shape[3], 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": [f"v{idx}" for idx in range(data.shape[4])]},
+    )
+
+
 def test_transport_source_builder_does_not_build_unselected_reference(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
-    target = {"data": torch.zeros(1, 1, 1, 2, 1)}
+    target = _single_dataset_template(torch.zeros(1, 1, 1, 2, 1))
 
     def reference_source_factory() -> dict[str, torch.Tensor]:
         raise AssertionError("reference source should not be built")
@@ -1114,36 +1124,36 @@ def test_transport_source_builder_does_not_build_unselected_reference(
     monkeypatch.setattr(torch, "randn", fake_randn)
 
     source = builder.build(
-        TransportSourceRequest.from_data(
-            target,
+        TransportSourceRequest(
+            templates=target,
             default_kind="reference_state",
             custom_source_factories={"reference_state": reference_source_factory},
         )
     )
 
-    torch.testing.assert_close(source["data"], torch.full_like(target["data"], 6.0))
+    torch.testing.assert_close(source["data"].data, torch.full_like(target["data"].data, 6.0))
 
 
 def test_transport_source_builder_postprocesses_reference_source(monkeypatch: pytest.MonkeyPatch) -> None:
     builder = TransportSourceBuilder(TransportSourceSettings(kind="reference_state", scale=0.5, noise_scale=0.25))
-    target = {"data": torch.zeros(1, 1, 1, 2, 1, dtype=torch.float64)}
-    reference = {"data": torch.full_like(target["data"], 4.0)}
+    target = _single_dataset_template(torch.zeros(1, 1, 1, 2, 1, dtype=torch.float64))
+    reference = {"data": torch.full_like(target["data"].data, 4.0)}
 
     monkeypatch.setattr(
         torch, "randn", lambda shape, device=None, dtype=None: torch.full(shape, 2.0, device=device, dtype=dtype)
     )
 
     source = builder.build(
-        TransportSourceRequest.from_data(
-            target,
+        TransportSourceRequest(
+            templates=target,
             default_kind="gaussian",
             custom_source_factories={"reference_state": lambda: reference},
         )
     )
 
     assert source["data"].dtype == target["data"].dtype
-    torch.testing.assert_close(source["data"], torch.full_like(target["data"], 2.5))
-    torch.testing.assert_close(reference["data"], torch.full_like(target["data"], 4.0))
+    torch.testing.assert_close(source["data"].data, torch.full_like(target["data"].data, 2.5))
+    torch.testing.assert_close(reference["data"], torch.full_like(target["data"].data, 4.0))
 
 
 def test_tendency_sampling_source_can_use_reference_state() -> None:

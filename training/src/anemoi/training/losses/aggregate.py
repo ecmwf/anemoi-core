@@ -83,9 +83,10 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         torch.Tensor
             Accumulated loss across all aggregation types.
         """
-        if pred.layout.time_in_grid:
-            msg = "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
-            raise NotImplementedError(msg)
+        if pred.is_tabular:
+            raise NotImplementedError(
+                "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
+            )
         assert (
             pred.time_size > 1
         ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."

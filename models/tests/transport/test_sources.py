@@ -12,11 +12,34 @@ from types import SimpleNamespace
 import pytest
 import torch
 
+from anemoi.models.data import Batch
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import make_source
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.models.transport.sources import TransportSourceBuilder
 from anemoi.models.transport.sources import TransportSourceRequest
 from anemoi.models.transport.sources import reference_state_sampling_source
-from anemoi.models.transport.sources import sampling_source_specs
+
+OBS_LAYOUT = TensorLayout.from_tuple("grid", "variables", time_in_grid=True)
+
+
+def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
+    """A one-dataset batch of sparse observation samples laid out as ``(grid, variables)``."""
+    nodes = [sample.shape[0] for sample in samples]
+    return Batch(
+        {
+            "obs": make_source(
+                name="obs",
+                variables=variables,
+                layout=OBS_LAYOUT,
+                data=samples,
+                coordinates=[torch.zeros(n, 2) for n in nodes],
+                timedeltas=[torch.zeros(n) for n in nodes],
+                boundaries=[(slice(0, n),) for n in nodes],
+            ),
+        },
+    )
 
 
 def _data_indices_with_positions(
@@ -69,17 +92,30 @@ def test_reference_state_sampling_source_rejects_sparse_obs() -> None:
         reference_state_sampling_source(x, data_indices=data_indices, n_step_output=1)
 
 
-def test_sampling_source_specs_support_sparse_obs_shapes() -> None:
-    target_template = {"obs": [torch.zeros(2, 0), torch.zeros(5, 0)]}
+def test_sampling_template_supports_sparse_obs_shapes() -> None:
+    output_names = ("o0", "o1", "o2", "o3")
+    model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
+    torch.nn.Module.__init__(model)
+    model.num_output_channels = {"obs": len(output_names)}
+    model.data_indices = {
+        "obs": SimpleNamespace(
+            name_to_index={name: idx for idx, name in enumerate(output_names)},
+            model=SimpleNamespace(output=SimpleNamespace(ordered_names=output_names)),
+        ),
+    }
+    model.statistics = {"obs": {}}
+    model.is_dataset_static = {"obs": False}
+    target_template = _obs_batch([torch.zeros(2, 0), torch.zeros(5, 0)], variables=[])
 
-    specs = sampling_source_specs(target_template, num_output_channels={"obs": 4})
+    template = model._sampling_template(target_template)
 
-    assert specs["obs"].is_sparse
-    assert specs["obs"].shape == [(2, 4), (5, 4)]
+    assert template["obs"].is_tabular
+    assert [tuple(sample.shape) for sample in template["obs"].data] == [(2, 4), (5, 4)]
+    assert template["obs"].variables == list(output_names)
 
 
 def test_transport_source_builder_creates_scaled_sparse_gaussian(monkeypatch: pytest.MonkeyPatch) -> None:
-    target = {"obs": [torch.zeros(2, 3), torch.zeros(5, 3)]}
+    target = _obs_batch([torch.zeros(2, 3), torch.zeros(5, 3)], variables=["a", "b", "c"])
     builder = TransportSourceBuilder(TransportSourceSettings(kind="gaussian", scale=2.0))
 
     def fake_randn(shape: tuple[int, ...], device=None, dtype=None) -> torch.Tensor:
@@ -87,9 +123,9 @@ def test_transport_source_builder_creates_scaled_sparse_gaussian(monkeypatch: py
 
     monkeypatch.setattr(torch, "randn", fake_randn)
 
-    source = builder.build(TransportSourceRequest.from_data(target, default_kind="zero"))
+    source = builder.build(TransportSourceRequest(templates=target, default_kind="zero"))["obs"]
 
-    assert isinstance(source["obs"], list)
-    assert [sample.shape for sample in source["obs"]] == [torch.Size([2, 3]), torch.Size([5, 3])]
-    torch.testing.assert_close(source["obs"][0], torch.full((2, 3), 8.0))
-    torch.testing.assert_close(source["obs"][1], torch.full((5, 3), 8.0))
+    assert source.is_tabular
+    assert [sample.shape for sample in source.data] == [torch.Size([2, 3]), torch.Size([5, 3])]
+    torch.testing.assert_close(source.data[0], torch.full((2, 3), 8.0))
+    torch.testing.assert_close(source.data[1], torch.full((5, 3), 8.0))

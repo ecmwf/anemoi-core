@@ -14,9 +14,6 @@ from typing import TYPE_CHECKING
 from typing import Any
 
 from anemoi.models.transport import TransportSourceRequest
-from anemoi.models.transport.data_helpers import Data
-from anemoi.models.transport.data_helpers import batch_data
-from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.train.methods.base import BaseTrainingModule
 
 if TYPE_CHECKING:
@@ -112,7 +109,7 @@ class PreparedTransportObjective:
     loss_target: Batch
     loss_target_layout: IndexSpace
     pred_layout: IndexSpace
-    weights: dict[str, Data] | None
+    weights: dict[str, torch.Tensor | list[torch.Tensor]] | None
     aux: dict[str, Any]
 
 
@@ -178,12 +175,13 @@ class TransportObjective:
         self,
         prepared: PreparedPredictionTarget,
         default_kind: str = "gaussian",
-    ) -> dict[str, Data]:
+    ) -> Batch:
+        """Build the transport source field, as a batch shaped and described like the model target."""
         transport_source = self.module.model.model.transport_source
         kind = transport_source.resolve_kind(default_kind)
         if kind == "reference_state":
             sparse_datasets = [
-                dataset_name for dataset_name, source in prepared.model_target.items() if is_sparse_data(source.data)
+                dataset_name for dataset_name, source in prepared.model_target.items() if source.is_tabular
             ]
             if sparse_datasets:
                 msg = (
@@ -192,19 +190,19 @@ class TransportObjective:
                 )
                 raise NotImplementedError(msg)
 
-        def reference_source_factory() -> dict[str, Data]:
+        def reference_source_factory() -> dict[str, torch.Tensor | list[torch.Tensor]]:
             reference_factory = prepared.aux.get("transport_reference_source")
             if reference_factory is None:
                 msg = "Transport source kind 'reference_state' requires a reference source in the prediction mode."
                 raise ValueError(msg)
             return reference_factory()
 
-        request = TransportSourceRequest.from_data(
-            batch_data(prepared.model_target),
+        # The model target describes the field to build, including its grid shard sizes.
+        request = TransportSourceRequest(
+            templates=prepared.model_target,
             default_kind=default_kind,
             custom_source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),
-            grid_shard_sizes=self.module._grid_shard_sizes(prepared.model_target),
             error_context="training",
         )
         return transport_source.build(request)

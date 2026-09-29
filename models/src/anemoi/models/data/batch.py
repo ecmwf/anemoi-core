@@ -245,6 +245,22 @@ class Batch:
 
         return Batch(sources={name: self.sources[name].clone(data=payload) for name, payload in new_data.items()})
 
+    def map_data(self, fn: Callable[[torch.Tensor], torch.Tensor]) -> "Batch":
+        """Return a new batch with ``fn`` applied to every dataset's payload (see :meth:`Source.map_data`)."""
+        return Batch(sources={name: source.map_data(fn) for name, source in self.sources.items()})
+
+    def zip_map_data(self, fn: Callable[..., torch.Tensor], *others: "Batch") -> "Batch":
+        """Return a new batch with ``fn`` applied dataset by dataset to this batch and ``others``.
+
+        Every batch in ``others`` must contain this batch's datasets (see :meth:`Source.zip_map_data`).
+        """
+        return Batch(
+            sources={
+                name: source.zip_map_data(fn, *(other[name] for other in others))
+                for name, source in self.sources.items()
+            },
+        )
+
     def apply(self, func: Callable, **kwargs) -> "Batch":
         """Return a new batch with ``func`` applied to every source's data."""
         return Batch(sources={name: source.apply_func(func, **kwargs) for name, source in self.sources.items()})
