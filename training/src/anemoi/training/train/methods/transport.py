@@ -18,6 +18,7 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.data import Batch
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import reference_state_sampling_source
+from anemoi.models.transport.data_helpers import batch_data
 from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -68,17 +69,20 @@ class StatePredictionMode(PredictionMode):
         # diagnostic output variables are not part of the model input, and it
         # is normalized (with imputation) like the model inputs.
         reference_state = self.module.preprocess_inputs(batch.select(time=self.module.n_step_input - 1))
-        reference_data: dict[str, torch.Tensor] = {}
+        reference = reference_state
         for dataset_name, state_view in reference_state.items():
             var_idx = self.module.data_indices[dataset_name].data.output.full.tolist()
-            reference_step = state_view.select(variables=var_idx).data
+            # select() narrows the spec (variables, statistics) along with the data.
+            reference_step = state_view.select(variables=var_idx)
             if self.module.n_step_output[dataset_name] > 1:
-                if isinstance(reference_step, list):
+                if isinstance(reference_step.data, list):
                     msg = "Multi-step reference-state transport sources are not supported for sparse datasets."
                     raise NotImplementedError(msg)
-                reference_step = reference_step.expand(-1, self.module.n_step_output[dataset_name], -1, -1, -1)
-            reference_data[dataset_name] = reference_step
-        return self.module.reduce_data_output_target_to_model_output(reference_state.with_data(reference_data))
+                reference_step = reference_step.clone(
+                    data=reference_step.data.expand(-1, self.module.n_step_output[dataset_name], -1, -1, -1),
+                )
+            reference = reference.replace(dataset_name, reference_step)
+        return self.module.reduce_data_output_target_to_model_output(reference)
 
     def prepare_target(
         self,
@@ -111,7 +115,7 @@ class StatePredictionMode(PredictionMode):
             aux={
                 # Build the reference-state source lazily so gaussian and zero
                 # sources never pay for (or crash on) this projection.
-                "transport_reference_source": lambda: self._reference_state_target_space(batch).data,
+                "transport_reference_source": lambda: batch_data(self._reference_state_target_space(batch)),
                 # Output-time decoding forcings, normalized like the model inputs.
                 "target_forcing": self.module.preprocess_inputs(target_forcing),
                 "model_target_missing": model_target_missing,
@@ -288,13 +292,15 @@ class TendencyPredictionMode(PredictionMode):
             raise AttributeError(msg)
 
         x_ref = self.module.model.model.apply_reference_state_truncation(
-            {n: s.data for n, s in x.items()},
+            batch_data(x),
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
         x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
 
-        tendency_target_data_output = y_data_output.with_data(self._compute_tendency_target(y_data_output.data, x_ref))
+        tendency_target_data_output = y_data_output.with_data(
+            self._compute_tendency_target(batch_data(y_data_output), x_ref),
+        )
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
         return PreparedPredictionTarget(
             model_target=tendency_target,
@@ -308,7 +314,7 @@ class TendencyPredictionMode(PredictionMode):
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
-                    {n: s.data for n, s in x.items()},
+                    batch_data(x),
                     data_indices=self.module.data_indices,
                     n_step_output=self.module.n_step_output,
                 ),
@@ -322,7 +328,7 @@ class TendencyPredictionMode(PredictionMode):
         prediction: Batch,
         prepared: PreparedPredictionTarget,
     ) -> Batch:
-        reconstructed = self._reconstruct_state(prepared.aux["x_ref"], prediction.data)
+        reconstructed = self._reconstruct_state(prepared.aux["x_ref"], batch_data(prediction))
         return prepared.metric_target.with_data(reconstructed)
 
     def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:
@@ -330,7 +336,7 @@ class TendencyPredictionMode(PredictionMode):
             dataset_name: self.module.model.model._apply_imputer_inverse(
                 self.module.model.post_processors,
                 dataset_name,
-                {n: s.data for n, s in target.items()},
+                target.data,
             )
             for dataset_name, target in prepared.metric_target.items()
         }
@@ -378,16 +384,18 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def get_data_output_target(self, target_full: Batch) -> Batch:
         """Select the target variables that are present in the dataset output."""
-        y = {}
+        y = target_full
         for dataset_name, target_dataset in target_full.items():
             var_idx = self.data_indices[dataset_name].data.output.full.tolist()
-            y[dataset_name] = target_dataset.select(variables=var_idx).data
+            # select() narrows the spec (variables, statistics) along with the data.
+            selected = target_dataset.select(variables=var_idx)
+            y = y.replace(dataset_name, selected)
             LOGGER.debug(
                 "SHAPE: y_data_output[%s].shape = %s",
                 dataset_name,
-                y[dataset_name].shape if hasattr(y[dataset_name], "shape") else [t.shape for t in y[dataset_name]],
+                selected.data.shape if hasattr(selected.data, "shape") else [t.shape for t in selected.data],
             )
-        return target_full.with_data(y)
+        return y
 
     def reduce_data_output_target_to_model_output(
         self,

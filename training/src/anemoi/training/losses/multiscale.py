@@ -336,6 +336,12 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         **kwargs,
     ) -> torch.Tensor:
         """Smooth gridded tensors and evaluate each scale with the source metadata."""
+        if y_pred_ens.layout.time_in_grid:
+            msg = (
+                f"{self.__class__.__name__} smooths over a fixed grid and does not support tabular "
+                f"datasets such as {y_pred_ens.name!r}. Use a pointwise loss."
+            )
+            raise NotImplementedError(msg)
         channel_shard_sizes_pred = None
         channel_shard_sizes_y = None
         is_model_sharded = grid_shard_sizes is not None

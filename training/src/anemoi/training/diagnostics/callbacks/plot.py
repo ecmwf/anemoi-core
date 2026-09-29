@@ -10,7 +10,6 @@
 
 import asyncio
 import copy
-import dataclasses
 import logging
 import threading
 import traceback
@@ -704,9 +703,8 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             output_indices = list(range(len(view.variables)))[output_indices_full]
         else:
             output_indices = [int(i) for i in output_indices_full]
-        sub_variables = [view.variables[i] for i in output_indices]
-        sub_statistics = {key: value[output_indices] for key, value in view.statistics.items()}
-        return dataclasses.replace(view, variables=sub_variables, statistics=sub_statistics)
+        # Narrow variables and statistics together; the data already has this width.
+        return view.clone(**view._select_variable_metadata(output_indices))
 
     def _sparse_sample(
         self,

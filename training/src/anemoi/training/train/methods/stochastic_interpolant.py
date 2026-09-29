@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from anemoi.models.transport.data_helpers import Data
 from anemoi.models.transport.data_helpers import add_data
+from anemoi.models.transport.data_helpers import batch_data
 from anemoi.models.transport.data_helpers import condition_shapes
 from anemoi.models.transport.data_helpers import first_data_device
 from anemoi.models.transport.data_helpers import multiply_batch_scalar_data
@@ -59,7 +60,7 @@ class StochasticInterpolantTransportObjective(TransportObjective):
             drift_target = {
                 name: zip_map_data(
                     drift,
-                    missing.data[name],
+                    missing[name].data,
                     lambda values, target: values.masked_fill(target.isnan(), float("nan")),
                 )
                 for name, drift in drift_target.items()
@@ -113,7 +114,7 @@ class StochasticInterpolantTransportObjective(TransportObjective):
         clean_target: Batch,
     ) -> tuple[dict[str, Data], dict[str, Data], dict[str, torch.Tensor]]:
         """Create the interpolated training input and the change the model should predict."""
-        target_data = clean_target.data
+        target_data = batch_data(clean_target)
         time_level = self._sample_training_time(
             condition_shapes(target_data),
             device=first_data_device(target_data),
@@ -175,8 +176,8 @@ class StochasticInterpolantTransportObjective(TransportObjective):
         """Estimate the clean target from the model prediction for validation metrics."""
         return {
             dataset_name: zip_map_batch_scalar_data(
-                drift_prediction.data[dataset_name],
-                interpolant_state.data[dataset_name],
+                drift_prediction[dataset_name].data,
+                interpolant_state[dataset_name].data,
                 source[dataset_name],
                 scalar=time_level[dataset_name],
                 fn=lambda drift, interpolant, anchor, time: stochastic_interpolant_clean_mean(
@@ -190,7 +191,7 @@ class StochasticInterpolantTransportObjective(TransportObjective):
                     noise_scale=self._noise_scale,
                 ),
             )
-            for dataset_name in interpolant_state.data
+            for dataset_name in interpolant_state
         }
 
     def _sample_training_time(

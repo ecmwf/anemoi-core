@@ -12,6 +12,7 @@ import logging
 import uuid
 from collections.abc import Callable
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 from typing import Any
 from typing import Self
 
@@ -21,43 +22,51 @@ from torch import nn
 from anemoi.models.data import TensorLayout
 from anemoi.training.utils.enums import TensorDim
 
+if TYPE_CHECKING:
+    from anemoi.models.data.sources import Source
+
 LOGGER = logging.getLogger(__name__)
 
 
-def grad_scaler(
-    module: nn.Module,
-    grad_in: tuple[torch.Tensor, ...],
-    grad_out: tuple[torch.Tensor, ...],
-) -> tuple[torch.Tensor, ...] | None:
-    """Scales the loss gradients.
+def grad_scaler(grad: torch.Tensor, grid_dim: int) -> torch.Tensor:
+    """Scales the loss gradient with respect to the prediction, channel by channel.
 
     Uses the formula in https://arxiv.org/pdf/2306.06079.pdf, section 4.3.2
 
-    Use <module>.register_full_backward_hook(grad_scaler, prepend=False) to register this hook.
-
     Parameters
     ----------
-    module : nn.Module
-        Loss object (not used)
-    grad_in : tuple[torch.Tensor, ...]
-        Loss gradients
-    grad_out : tuple[torch.Tensor, ...]
-        Output gradients (not used)
+    grad : torch.Tensor
+        Gradient of the loss with respect to the prediction, variables on the last axis.
+    grid_dim : int
+        Axis of ``grad`` holding the grid, summed over to weight each channel.
 
     Returns
     -------
-    tuple[torch.Tensor, ...]
-        Re-scaled input gradients
-
+    torch.Tensor
+        Re-scaled gradient.
     """
-    del module, grad_out
-    # first grad_input is that of the predicted state and the second is that of the "ground truth" (== zero)
-    channels = grad_in[0].shape[-1]  # number of channels
-    channel_weights = torch.reciprocal(torch.sum(torch.abs(grad_in[0]), dim=1, keepdim=True))  # channel-wise weights
-    new_grad_in = (
-        (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad_in[0]
-    )  # rescaled gradient
-    return new_grad_in, grad_in[1]
+    channels = grad.shape[-1]  # number of channels
+    channel_weights = torch.reciprocal(torch.sum(torch.abs(grad), dim=grid_dim, keepdim=True))  # channel-wise weights
+    return (channels * channel_weights) / torch.sum(channel_weights, dim=-1, keepdim=True) * grad
+
+
+def with_loss_gradient_scaling(pred: "Source") -> "Source":
+    """Return ``pred`` with :func:`grad_scaler` applied to the gradient that flows back from the loss.
+
+    The hook sits on an alias of the prediction data, so only the loss's gradient is rescaled,
+    not gradient reaching the same tensor through other paths (e.g. later rollout steps).
+    Predictions that do not require grad (validation) are returned unchanged.
+    """
+
+    def alias_with_hook(data: torch.Tensor, **_kwargs) -> torch.Tensor:
+        if not data.requires_grad:
+            return data
+        alias = data.view_as(data)
+        grid_dim = pred.layout.axis("grid", ndim=data.ndim)
+        alias.register_hook(lambda grad: grad_scaler(grad, grid_dim))
+        return alias
+
+    return pred.apply_func(alias_with_hook, in_place=True)
 
 
 def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
@@ -521,7 +530,8 @@ class ScaleTensor(nn.Module):
         Parameters
         ----------
         scaler_identifier : str | Sequence[str] | int | Sequence[int]
-            Name/s or dimension/s of the scalers to exclude
+            Name/s or dimension/s of the scalers to exclude. Axis numbers and
+            `TensorDim` members are dimensions; any other string is a scaler name.
 
         Returns
         -------
@@ -530,9 +540,11 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scaler_identifier, str | int):
             scaler_identifier = [scaler_identifier]
-        if any(isinstance(scaler, int) for scaler in scaler_identifier):
-            return self.without_by_dim(scaler_identifier)
-        return self.without_by_str(scaler_identifier)
+        # TensorDim is a StrEnum, so it must be told apart from a scaler name by type.
+        dimensions = [s for s in scaler_identifier if isinstance(s, int | TensorDim)]
+        names = [s for s in scaler_identifier if not isinstance(s, int | TensorDim)]
+        subset = self.without_by_dim(dimensions) if dimensions else self
+        return subset.without_by_str(names) if names else subset
 
     def without_by_str(self, scalers: str | Sequence[str]) -> Self:
         """Get subset of the scalers, filtering out by name.
@@ -639,6 +651,7 @@ class ScaleTensor(nn.Module):
         subset_indices: tuple[int, ...] | None = None,
         *,
         grid_shard_slice: slice | None = None,
+        grid_dim: int = -2,
     ) -> torch.Tensor:
         """Scale a given tensor by the scalers.
 
@@ -650,6 +663,8 @@ class ScaleTensor(nn.Module):
             Indices to select along one tensor dimension.
         grid_shard_slice : slice | None, optional
             Grid slice to select from a full-grid scaler.
+        grid_dim : int, optional
+            Tensor axis of the grid, used with the grid_shard_slice, by default -2.
 
         Returns
         -------
@@ -661,9 +676,9 @@ class ScaleTensor(nn.Module):
             raise TypeError(msg)
         x_subset = x[subset_indices] if subset_indices is not None else x
         scaler = self.get_scaler(x_subset.ndim)
-        if grid_shard_slice is not None and scaler.shape[TensorDim.GRID] > 1:
+        if grid_shard_slice is not None and scaler.shape[grid_dim] > 1:
             slices = [slice(None)] * x_subset.ndim
-            slices[TensorDim.GRID] = grid_shard_slice
+            slices[grid_dim] = grid_shard_slice
             scaler = scaler[tuple(slices)]
 
         return x_subset * scaler
