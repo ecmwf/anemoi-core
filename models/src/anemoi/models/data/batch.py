@@ -242,10 +242,6 @@ class Batch:
 
         return Batch(sources={name: self.sources[name].clone(data=payload) for name, payload in new_data.items()})
 
-    def apply(self, func: Callable, **kwargs) -> "Batch":
-        """Return a new batch with ``func`` applied to every source's data."""
-        return Batch(sources={name: source.apply_func(func, **kwargs) for name, source in self.sources.items()})
-
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.
 

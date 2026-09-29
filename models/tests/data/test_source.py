@@ -158,6 +158,29 @@ class TestSourceTransformations:
         assert selected.statistics["mean"].tolist() == [2.0]
         assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
 
+    def test_map_data_applies_a_tensor_function_and_keeps_metadata(self) -> None:
+        view = gridded_batch()["grid"]
+        mapped = view.map_data(lambda t: t.to(torch.float64))
+        assert mapped.dtype == torch.float64
+        torch.testing.assert_close(mapped.data, view.data.to(torch.float64))
+        assert (mapped.name, mapped.variables, mapped.layout) == (view.name, view.variables, view.layout)
+        assert mapped.coordinates is view.coordinates
+        # the receiver is not mutated
+        assert view.dtype == torch.float32
+
+    def test_map_data_does_not_clone_the_data(self) -> None:
+        view = gridded_batch()["grid"]
+        assert view.map_data(lambda t: t).data is view.data
+
+    def test_map_data_applies_per_sample_on_a_tabular_source(self) -> None:
+        view = Batch.collate([{"obs": tabular_payload(4)}, {"obs": tabular_payload(6)}])["obs"]
+        seen = []
+        mapped = view.map_data(lambda t: seen.append(tuple(t.shape)) or t * 2)
+        assert seen == [(1, 4, 2), (1, 6, 2)]
+        assert all(torch.equal(new, old * 2) for new, old in zip(mapped.data, view.data))
+        assert mapped.timedeltas is view.timedeltas
+        assert mapped.boundaries is view.boundaries
+
 
 class TestCollate:
     def test_unsharded_tabular_samples_collate_to_replicated(self) -> None:

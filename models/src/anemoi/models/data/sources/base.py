@@ -228,7 +228,7 @@ class Source(ABC):
 
     def contiguous(self) -> "Source":
         """Return a new view whose underlying data tensors are contiguous."""
-        return self.apply_func(lambda t, **_: t.contiguous())
+        return self.map_data(torch.Tensor.contiguous)
 
     def clone(self, **kwargs) -> "Source":
         """Return a new view with replacements, sharing fields that are not replaced."""
@@ -336,8 +336,26 @@ class Source(ABC):
         pass
 
     @abstractmethod
+    def map_data(self, func: Callable[[torch.Tensor], torch.Tensor]) -> "Source":
+        """Return a new view with ``func`` applied to each data tensor.
+
+        For plain tensor operations (``.to(dtype)``, ``.detach()``, ``.cpu()``, ...): ``func``
+        takes only the tensor, and the data is not cloned first. It is applied once to a
+        gridded source and once per sample to a tabular one. Use :meth:`apply_func` for
+        functions that need the source's statistics or variable indices, such as processors.
+
+        ``func`` must not modify its input in place; return a new tensor instead.
+        """
+        pass
+
+    @abstractmethod
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "Source":
-        """Apply a function to this view, returning a new view with the same metadata."""
+        """Apply a function to this view, returning a new view with the same metadata.
+
+        ``func`` is called as ``func(tensor, statistics=..., name_to_index=..., **kwargs)`` on
+        a clone of the data (or the data itself when ``in_place``). For functions of the
+        tensor alone, use :meth:`map_data`.
+        """
         pass
 
     @abstractmethod

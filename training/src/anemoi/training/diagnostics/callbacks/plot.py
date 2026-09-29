@@ -630,7 +630,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         # convert back to physical space for plotting.
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         selected = batch.select(variables={dataset_name: feature_indices})
-        input_view = pl_module.preprocess_targets(selected)[dataset_name].apply_func(lambda t, **_: t.detach().cpu())
+        input_view = pl_module.preprocess_targets(selected)[dataset_name].map_data(lambda t: t.detach().cpu())
         data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
 
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
@@ -661,7 +661,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 Source,
             ), f"Expected a prediction of type Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
-            processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
+            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
             # list of per-sample tensors. Select the requested sample, keeping a leading
             # size-1 axis so per-step outputs can be concatenated along dim 0.
@@ -782,7 +782,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             output_view = output[dataset_name] if isinstance(output, Batch) else output
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
-                output_view.apply_func(lambda t, **_: t.detach().cpu()),
+                output_view.map_data(lambda t: t.detach().cpu()),
                 in_place=False,
             )
             return _select_pred_members(output_view.data[self.sample_idx], output_view).numpy()

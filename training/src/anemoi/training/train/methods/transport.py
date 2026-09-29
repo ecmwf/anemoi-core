@@ -199,7 +199,8 @@ class TendencyPredictionMode(PredictionMode):
             pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
             post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
             assert (
-                len(pre_tend) == self.module.n_step_output[dataset_name] and len(post_tend) == self.module.n_step_output[dataset_name]
+                len(pre_tend) == self.module.n_step_output[dataset_name]
+                and len(post_tend) == self.module.n_step_output[dataset_name]
             ), "Per-step tendency processors must match n_step_output."
             assert all(
                 proc is not None for proc in pre_tend
@@ -597,7 +598,7 @@ class TransportTraining(BaseTransportTraining):
                 prepared_target,
             )
             plot_kwargs["auxiliary_output"] = {
-                dataset_name: target.apply_func(lambda data, **_: data.detach())
+                dataset_name: target.map_data(torch.Tensor.detach)
                 for dataset_name, target in conditioned_endpoint.items()
             }
             endpoint_prediction = self.transport_objective.reconstruct_endpoint(prediction, prepared_objective)

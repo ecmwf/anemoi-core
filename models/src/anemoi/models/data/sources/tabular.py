@@ -197,6 +197,19 @@ class TabularSource(Source):
             _ensemble_size=self.ensemble_size,
         )
 
+    def map_data(self, func: Callable[[torch.Tensor], torch.Tensor]) -> "TabularSource":
+        """Return a new view with ``func`` applied to each data tensor.
+
+        For plain tensor operations (``.to(dtype)``, ``.detach()``, ``.cpu()``, ...): ``func``
+        takes only the tensor, and the data is not cloned first. It is applied once to a
+        gridded source and once per sample to a tabular one. Use :meth:`apply_func` for
+        functions that need the source's statistics or variable indices, such as processors.
+
+        ``func`` must not modify its input in place; return a new tensor instead.
+        """
+        new_data = [func(t) for t in self.data]
+        return self.clone(data=new_data)
+
     def apply_func(self, func: Callable, in_place: bool = False, **kwargs) -> "TabularSource":
         """Apply a function to this view, returning a new view with the same metadata."""
         new_data = [

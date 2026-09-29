@@ -207,9 +207,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        # Define number of input/output timesteps per node for each dataset
-        self.n_step_input = {dataset_name: self.task.num_input_timesteps for dataset_name in self.dataset_names}
-        self.n_step_output = {dataset_name: self.task.num_output_timesteps for dataset_name in self.dataset_names}
+        # Define number of input/output timesteps per node for each dataset
+        self.n_step_input = dict.fromkeys(self.dataset_names, self.task.num_input_timesteps)
+        self.n_step_output = dict.fromkeys(self.dataset_names, self.task.num_output_timesteps)
 
         self.model = AnemoiModelInterface(
             config=config,
@@ -725,8 +725,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
         assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
-        pred = pred.apply_func(lambda data, **_: data.to(dtype), in_place=True)
-        target = target.apply_func(lambda data, **_: data.to(dtype), in_place=True)
+        pred = pred.map_data(lambda data: data.to(dtype))
+        target = target.map_data(lambda data: data.to(dtype))
         if gradient_scaling:
             pred = with_loss_gradient_scaling(pred)
         with torch.autocast(device_type=pred.device.type, enabled=False):

@@ -180,7 +180,7 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     pred = _observations().clone(
         data=[torch.ones(2, 2, requires_grad=True), torch.full((3, 2), 2.0, requires_grad=True)],
     )
-    target = pred.apply_func(lambda data, **_: torch.zeros_like(data))
+    target = pred.map_data(torch.zeros_like)
     module = SimpleNamespace(
         loss={"obs": WeightedMSELoss()},
         model_comm_group=None,
