@@ -87,14 +87,13 @@ def test_shared_encoder_preserves_each_dataset_latent() -> None:
     inputs = build_batch(
         data={name: torch.zeros(1, 1, 1, 1, 1) for name in model.input_datasets},
         coordinates={name: torch.zeros(1, 2) for name in model.input_datasets},
-        metadata={"static_coords": frozenset(model.input_datasets)},
         layouts={name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4) for name in model.input_datasets},
         variables={name: ["a"] for name in model.input_datasets},
         statistics={name: {} for name in model.input_datasets},
     )
 
     with pytest.raises(_AggregationReached):
-        model(inputs, target=inputs)
+        model(inputs, target_forcings=inputs, target_template=inputs.template())
 
     assert list(model.latent_aggregator.latents) == ["dataset_a", "dataset_b"]
     torch.testing.assert_close(model.latent_aggregator.latents["dataset_a"], torch.full((1, 4), 1.0))

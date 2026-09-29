@@ -51,14 +51,19 @@ def create_graph_provider(
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
 
-    Returns StaticGraphProvider if graph has edges,
+    Returns DynamicGraphProvider if no graph is given but edge builders are,
+    StaticGraphProvider if graph has edges,
     otherwise returns NoOpGraphProvider for edge-less architectures.
 
     Parameters
     ----------
     graph : HeteroData, optional
         Graph containing edges (for static mode)
-    edge_attributes : list[str], optional
+    edge_builders : list[dict[str, dict]], optional
+        Edge builder configs (for dynamic mode)
+    attributes : dict[str, dict], optional
+        Edge attribute configs (for dynamic mode)
+    edge_attribute_names : list[str], optional
         Edge attributes to use (for static mode)
     src_size : int, optional
         Source grid size (for static mode)

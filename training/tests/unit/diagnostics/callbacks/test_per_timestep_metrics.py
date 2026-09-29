@@ -59,10 +59,10 @@ def _make_pl_module(
     """Create a mocked pl_module with the attributes needed by the callback."""
     pl_module = MagicMock()
 
-    # targets keep a single ensemble member; get_targets returns (targets, target_forcings)
+    # targets keep a single ensemble member; get_targets returns (targets, target_template, target_forcings)
     targets = _gridded_batch(torch.randn(BS, n_timesteps, 1, n_grid, n_var))
     pl_module.task.steps.return_value = ({"rollout_step": 0}, {"rollout_step": 1})
-    pl_module.task.get_targets.return_value = (targets, None)
+    pl_module.task.get_targets.return_value = (targets, None, None)
     pl_module.preprocess_targets.side_effect = lambda y: y
 
     # no grid sharding: return sources unchanged with a None slice, as the real method does.
@@ -268,7 +268,7 @@ def test_per_timestep_metrics_values_follow_the_layout_time_axis() -> None:
 
     module = MagicMock()
     module.task.steps.return_value = ({},)
-    module.task.get_targets.return_value = (_gridded_batch(target_data, layout), None)
+    module.task.get_targets.return_value = (_gridded_batch(target_data, layout), None, None)
     module.preprocess_targets.side_effect = lambda y: y
     module._prepare_tensors_for_loss.side_effect = lambda y_pred, y, **_: (y_pred, y, None)
     module._postprocess_dataset_view.side_effect = lambda view, _name, _layout: view

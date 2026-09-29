@@ -876,7 +876,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                 y_hat = outputs.predictions[i][dataset_name]
                 # Pass the full target batch; index the per-dataset Source afterwards.
                 batch_obj = batch
-                y_true_batch, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
+                y_true_batch, _, _ = pl_module.task.get_targets(batch_obj, data_indices, **task_kwargs)
                 y_true_batch = pl_module.preprocess_targets(y_true_batch)
                 y_true = y_true_batch[dataset_name]
                 loss = reduce_to_last_dim(

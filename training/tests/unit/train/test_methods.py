@@ -27,6 +27,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import TabularSource
+from anemoi.models.data.sources import Template
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -1565,10 +1566,12 @@ def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) 
     )
 
 
-def _make_target_pair(data: torch.Tensor, variables: list[str] | None = None) -> tuple[Batch, Batch]:
+def _make_target_pair(
+    data: torch.Tensor,
+    variables: list[str] | None = None,
+) -> tuple[Batch, dict[str, Template], Batch]:
     target = _make_gridded_batch(data, variables=variables)
-    template = target.select(variables=[])
-    return target, template
+    return target, target.template(), target.select(variables=[])
 
 
 def test_single_training_step_with_forecaster(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1987,7 +1990,7 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
 
     task = MagicMock()
     task.get_inputs.return_value = x
-    task.get_targets.return_value = (target_values, target_template)
+    task.get_targets.return_value = (target_values, {}, target_template)
     forecaster.task = task
 
     class _CoreModel:
@@ -2067,11 +2070,7 @@ def test_ensemble_member_template_describes_tiled_members() -> None:
 
     b, t, g, v = 2, 1, 4, 2
     targets = _make_gridded_batch(torch.randn(b, t, 1, g, v))
-    forecaster.data_indices = {
-        name: SimpleNamespace(model=SimpleNamespace(output=SimpleNamespace(ordered_names=names)))
-        for name, names in [("data", targets["data"].variables), ("obs", ["a", "b"])]
-    }
-    template = forecaster._member_template(targets)["data"]
+    template = forecaster._member_template(targets.template())["data"]
     assert not hasattr(template, "data")
     assert template.ensemble_size == 3
     # the decoder's target node count comes from the flattened template
@@ -2087,7 +2086,7 @@ def test_ensemble_member_template_describes_tiled_members() -> None:
         layouts={"obs": TensorLayout(ensemble=0, grid=1, variables=2)},
         variables={"obs": ["a", "b"]},
     )
-    flat = forecaster._member_template(obs)["obs"].flatten()
+    flat = forecaster._member_template(obs.template())["obs"].flatten()
     assert flat.coordinates.shape[0] == 3 * (5 + 4)
     assert flat.batch_sizes == (5, 5, 5, 4, 4, 4)
 
@@ -2223,7 +2222,7 @@ def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
     captured_kwargs: list[dict] = []
     dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
-    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, Batch]:
+    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, dict[str, Template], Batch]:
         captured_kwargs.append(kwargs.copy())
         return dummy_target
 

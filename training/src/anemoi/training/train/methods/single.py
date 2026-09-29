@@ -41,8 +41,9 @@ class SingleTraining(BaseTrainingModule):
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for step_index, task_kwargs in enumerate(task_steps):
-            # the full target slice used for the loss, and the output-time forcing variables that condition the decoder.
-            raw_targets, target_forcings = self.task.get_targets(
+            # the full target slice used for the loss, what the model predicts at the target nodes, and the
+            # output-time forcing variables that condition the decoder.
+            raw_targets, target_template, target_forcings = self.task.get_targets(
                 batch,
                 data_indices=self.data_indices,
                 **task_kwargs,
@@ -53,7 +54,7 @@ class SingleTraining(BaseTrainingModule):
             # the input processors (so NaNs get imputed, etc.)
             target_forcings = self.preprocess_inputs(target_forcings)
 
-            y_pred = self(x, target_forcings=target_forcings, target_template=self.output_templates(y))
+            y_pred = self(x, target_forcings=target_forcings, target_template=target_template)
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

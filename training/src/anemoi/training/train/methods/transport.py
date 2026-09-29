@@ -89,7 +89,7 @@ class StatePredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         del x
-        raw_target, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        raw_target, _, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         # Loss and metric targets keep their NaNs so missing observations are
         # masked in the loss (imputation skipped).
         target_full = self.module.preprocess_targets(raw_target)
@@ -277,7 +277,7 @@ class TendencyPredictionMode(PredictionMode):
             msg = "Tendency prediction mode is not implemented for sparse observation datasets."
             raise NotImplementedError(msg)
 
-        raw_state_target, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        raw_state_target, _, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         # Tendency targets are fed through the network (as the corrupted target)
         # and converted back to states for metrics, so they are imputed like the
         # model inputs; prepare_metric_target re-inserts the missing values via
@@ -563,8 +563,9 @@ class TransportTraining(BaseTransportTraining):
         assert isinstance(batch, Batch), "batch must be a Batch instance"
         task_kwargs = {} if task_kwargs is None else task_kwargs
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
-        _, target_template = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-        # The template carries the output-time decoding forcings in the same
+        _, _, target_template = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+        # The transport sampler still sizes its noise from a data Batch, so the target forcings serve
+        # as its template for now. The template carries the output-time decoding forcings in the same
         # normalization state as the caller-provided batch (matching x).
         return self.model.model.sample(
             x,

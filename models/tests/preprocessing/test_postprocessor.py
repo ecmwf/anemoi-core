@@ -13,6 +13,8 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
+from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.normalizer import InputNormalizer
 from anemoi.models.preprocessing.postprocessor import ConditionalNaNPostprocessor
@@ -196,6 +198,29 @@ def test_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> 
     assert torch.allclose(x_processed, out, equal_nan=True), "Postprocessor produces wrong outputs."
 
 
+CHAINED_VARIABLES = ["x", "y", "z", "q", "other"]
+
+CHAINED_STATISTICS = {
+    "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0]),
+    "stdev": np.array([0.5, 0.5, 0.5, 1, 14]),
+    "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
+    "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
+}
+
+
+def make_gridded_view(payload: torch.Tensor, indices: list[int]) -> GriddedSource:
+    """Wrap a (points, variables) payload holding the ``indices`` subset of CHAINED_VARIABLES in a GriddedSource."""
+    points, num_vars = payload.shape
+    return GriddedSource(
+        name="gridded",
+        data=payload.reshape(1, 1, points, num_vars).clone(),
+        variables=[CHAINED_VARIABLES[i] for i in indices],
+        statistics={key: value[indices] for key, value in CHAINED_STATISTICS.items()},
+        coordinates=torch.zeros(points, 2),
+        layout=TensorLayout(batch=0, time=1, grid=2, variables=3),
+    )
+
+
 @pytest.fixture()
 def input_normalizer_postprocessor():
     config = DictConfig(
@@ -216,25 +241,19 @@ def input_normalizer_postprocessor():
             },
         },
     )
-    statistics = {
-        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0]),
-        "stdev": np.array([0.5, 0.5, 0.5, 1, 14]),
-        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0]),
-        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0]),
-    }
-    name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4}
+    name_to_index = {name: idx for idx, name in enumerate(CHAINED_VARIABLES)}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
     return (
-        InputNormalizer(config=config.data.normalizer, data_indices=data_indices, statistics=statistics),
+        InputNormalizer(config=config.data.normalizer),
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_ms,
             data_indices=data_indices,
-            statistics=statistics,
+            statistics=CHAINED_STATISTICS,
         ),
         NormalizedReluPostprocessor(
             config=config.data.normmrelupostprocessor_mm,
             data_indices=data_indices,
-            statistics=statistics,
+            statistics=CHAINED_STATISTICS,
         ),
     )
 
@@ -244,7 +263,7 @@ def chained_processors_input_data():
     base = torch.Tensor([[1.0, 2.0, 3.0, -1, 5.0], [-2, 1, 8.0, 9.0, 10.0]])
     base_normalized = torch.Tensor([[0.0, 0.2, 3.0, -5.5, 5.0], [-0.3, 0.1, 8.0, 4.5, 10.0]])
     expected = torch.Tensor([[1.0, 2.0, 3.0, 0.0, 5.0], [-1.5, 1, 8.0, 9.0, 10.0]])
-    return base, base_normalized, expected
+    return base, base_normalized, expected, [0, 1, 2, 3, 4]
 
 
 @pytest.fixture()
@@ -252,7 +271,8 @@ def chained_processors_inference_input_data():
     base = torch.Tensor([[1.0, 2.0, 3.0, -1, 5.0], [-2, 1, 8.0, 9.0, 10.0]])
     base_normalized = torch.Tensor([[0.0, 0.2, -5.5, 5.0], [-0.3, 0.1, 4.5, 10.0]])
     expected = torch.Tensor([[1.0, 2.0, 0.0, 5.0], [-1.5, 1, 9.0, 10.0]])
-    return base, base_normalized, expected
+    # inference output excludes the forcing "z"
+    return base, base_normalized, expected, [0, 1, 3, 4]
 
 
 fixture_combinations = (
@@ -267,12 +287,13 @@ fixture_combinations = (
 )
 def test_chained_postprocessor_inplace(postprocessor_fixture, data_fixture, request) -> None:
     """Check that the postprocessor does not modify the input tensor when in_place=False."""
-    x, x_norm, out = request.getfixturevalue(data_fixture)
+    x, x_norm, out, output_indices = request.getfixturevalue(data_fixture)
     postprocessors = request.getfixturevalue(postprocessor_fixture)
+    view = make_gridded_view(x, list(range(len(CHAINED_VARIABLES))))
     for postprocessor in postprocessors:
-        x = postprocessor.transform(x, in_place=False)
+        view = postprocessor(view, in_place=False)
     # replace with normalized tensor in correct size
-    x = x_norm.clone()
+    view = make_gridded_view(x_norm, output_indices)
     for postprocessor in postprocessors[::-1]:
-        x = postprocessor.inverse_transform(x, in_place=False)
-    assert torch.allclose(x, out, equal_nan=True)
+        view = postprocessor(view, in_place=False, inverse=True)
+    assert torch.allclose(view.data.reshape(out.shape), out, equal_nan=True)

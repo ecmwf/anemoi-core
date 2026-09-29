@@ -15,8 +15,13 @@ import torch.nn as nn
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-import anemoi.models.models.base as base_model_module
+import anemoi.models.data.sources.gridded as gridded_module
+import anemoi.models.preprocessing.spatial as spatial_module
+from anemoi.models.data import Batch
+from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
+from anemoi.models.preprocessing.spatial import SpatialPreprocessor
+from tests.batch_builders import build_batch
 
 
 class DummyGraphModel(BaseGraphModel):
@@ -42,7 +47,9 @@ def _make_data_indices() -> dict:
     dataset_indices = SimpleNamespace(
         model=SimpleNamespace(
             input=_IndexGroup(prognostic=[0], forcing=[]),
-            output=_IndexGroup(prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}),
+            output=_IndexGroup(
+                prognostic=[0], full=[0], diagnostic=[], name_to_index={"var": 0}, ordered_names=["var"]
+            ),
             _forcing=[],
         ),
         data=SimpleNamespace(
@@ -181,7 +188,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
 # ---------------------------------------------------------------------------
 
 
-def _make_minimal_model():
+def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
     """Return a DummyGraphModel with a working predict_step."""
     model_config = OmegaConf.create(
         {
@@ -192,7 +199,7 @@ def _make_minimal_model():
                 "encoders": {
                     0: {
                         "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
+                        "dataset_fusing_strategy": "none",
                         "mapper": {},
                     },
                 },
@@ -210,13 +217,26 @@ def _make_minimal_model():
             },
         }
     )
+    graph = _make_graph()
+    monkeypatch.setattr("anemoi.models.models.base.GraphCreator.create", lambda self: graph)
     return DummyGraphModel(
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
         n_step_input={"data": 1},
         n_step_output={"data": 1},
-        graph_data=_make_graph(),
+        model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
+        is_dataset_static={"data": True},
+    )
+
+
+def _gridded_batch(grid: int, variables: list[str]) -> Batch:
+    """Single-sample gridded batch on ``grid`` points."""
+    return build_batch(
+        data={"data": torch.zeros(1, 1, 1, grid, len(variables))},
+        coordinates={"data": torch.zeros(grid, 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": variables},
     )
 
 
@@ -234,7 +254,7 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
     """Spatial preprocessors must be called before normalization preprocessors."""
     call_order = []
 
-    class RecordingSpatialProcessor(nn.Module):
+    class RecordingSpatialProcessor(SpatialPreprocessor):
         def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
             call_order.append("spatial")
             return x, grid_shard_sizes
@@ -244,60 +264,61 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
             call_order.append("pre")
             return x
 
-    model = _make_minimal_model()
+    model = _make_minimal_model(monkeypatch)
 
     # Patch forward so predict_step can complete without a real graph network.
-    BATCH, TIME, GRID, VARS = 1, 1, 4, 1
-    dummy_out = torch.zeros(BATCH, 1, 1, GRID, VARS)  # (b, t, ens, grid, vars)
-    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": dummy_out})
+    monkeypatch.setattr(model, "forward", lambda x, **kw: Batch({"data": x["data"]}))
 
     spatial_processors = nn.ModuleDict({"data": RecordingSpatialProcessor()})
     pre_processors = {"data": RecordingPreProcessor()}
     post_processors = {"data": _identity_pre_processor()}
 
-    batch = {"data": torch.zeros(BATCH, TIME, GRID, VARS)}
-
     with torch.no_grad():
         model.predict_step(
-            batch,
+            _gridded_batch(grid=2, variables=["var"]),
+            target=_gridded_batch(grid=2, variables=[]),
             pre_processors=pre_processors,
             post_processors=post_processors,
-            n_step_input=TIME,
+            n_step_input={"data": 1},
             spatial_pre_processors=spatial_processors,
         )
 
-    assert call_order == ["spatial", "pre"], f"Expected spatial before pre, got order: {call_order}"
+    # The pre-processors normalize the inputs, then the target forcings.
+    assert call_order == ["spatial", "pre", "pre"], f"Expected spatial before pre, got order: {call_order}"
 
 
 def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
     source_grid_shard_sizes = [4, 4]
-    target_grid_shard_sizes = [2, 2]
+    target_grid_shard_sizes = [1, 1]
 
-    class RegriddingSpatialProcessor(nn.Module):
+    class RegriddingSpatialProcessor(SpatialPreprocessor):
         def forward(self, x, model_comm_group=None, grid_shard_sizes=None):
             assert model_comm_group is comm_group
             assert grid_shard_sizes == source_grid_shard_sizes
             return x[..., :2, :], target_grid_shard_sizes
 
-    model = _make_minimal_model()
-    comm_group = object()
+    model = _make_minimal_model(monkeypatch)
+    comm_group = SimpleNamespace(size=lambda: 2)
 
-    def forward(x, *, grid_shard_sizes=None, **_kwargs):
-        assert grid_shard_sizes == {"data": target_grid_shard_sizes}
-        return x
+    def forward(x, **_kwargs):
+        assert x["data"].shard_sizes == target_grid_shard_sizes
+        return Batch({"data": x["data"]})
 
     monkeypatch.setattr(model, "forward", forward)
-    monkeypatch.setattr(base_model_module, "get_shard_sizes", lambda *_args, **_kwargs: source_grid_shard_sizes)
-    monkeypatch.setattr(base_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+    monkeypatch.setattr(gridded_module, "get_shard_sizes", lambda *_args, **_kwargs: source_grid_shard_sizes)
+    monkeypatch.setattr(gridded_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
+    monkeypatch.setattr(spatial_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
 
     out = model.predict_step(
-        {"data": torch.zeros(1, 1, 8, 1)},
+        _gridded_batch(grid=8, variables=["var"]),
+        target=_gridded_batch(grid=2, variables=[]),
         pre_processors={"data": _identity_pre_processor()},
         post_processors={"data": _identity_pre_processor()},
-        n_step_input=1,
+        n_step_input={"data": 1},
         model_comm_group=comm_group,
         gather_out=False,
         spatial_pre_processors=nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
     )
 
-    assert out["data"].shape[-2] == 2
+    assert out["data"].data.shape[-2] == 2
+    assert out["data"].shard_sizes == target_grid_shard_sizes
