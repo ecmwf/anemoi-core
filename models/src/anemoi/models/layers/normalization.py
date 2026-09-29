@@ -14,7 +14,7 @@ from typing import Union
 from torch import Size
 from torch import Tensor
 from torch import nn
-
+from torch import zeros
 
 class AutocastLayerNorm(nn.LayerNorm):
     """LayerNorm that casts the output back to the input type."""
@@ -78,4 +78,32 @@ class ConditionalLayerNorm(nn.Module):
         out = self.norm(x)
 
         out = out * (scale + 1.0) + bias
+        return out.type_as(x) if self.autocast else out
+
+
+class ScaleOnlyConditionalLayerNorm(ConditionalLayerNorm):
+    """
+    x_norm = (1 + a(u)) * LN(x)
+
+    The conditioning on u only affects the scaling; the shift is unconditional.
+    If static_bias=False, the shift is removed (no bias).
+    """
+
+    def __init__(
+        self,
+        normalized_shape: Union[int, list, Size],
+        condition_shape: int = 16,
+        zero_init: bool = True,
+        autocast: bool = True,
+        static_bias: bool = True,
+    ) -> None:
+        super().__init__(normalized_shape, condition_shape, zero_init, autocast)
+        # Supprime le shift conditionnel (sinon paramètres sans gradient -> erreur DDP)
+        del self.bias
+        self.beta = nn.Parameter(zeros(normalized_shape)) if static_bias else None
+
+    def forward(self, x: Tensor, cond: Tensor) -> Tensor:
+        out = self.norm(x) * (self.scale(cond) + 1.0)
+        if self.beta is not None:
+            out = out + self.beta
         return out.type_as(x) if self.autocast else out
