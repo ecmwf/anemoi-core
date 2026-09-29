@@ -90,6 +90,10 @@ class Postprocessor(BasePreprocessor):
             self.index_inference_output.append(self._get_index(self.data_indices.model.output.name_to_index, name))
             self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
 
+    def transform(self, x: torch.Tensor, **_kwargs) -> torch.Tensor:
+        """Identity: postprocessors only act on the way out (``inverse_transform``)."""
+        return x
+
     def _get_index(self, name_to_index_dict, name):
         return name_to_index_dict.get(name, None)
 
