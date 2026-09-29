@@ -15,6 +15,7 @@ from typing import Any
 
 from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport.data_helpers import Data
+from anemoi.models.transport.data_helpers import batch_data
 from anemoi.models.transport.data_helpers import is_sparse_data
 from anemoi.training.train.methods.base import BaseTrainingModule
 
@@ -199,7 +200,7 @@ class TransportObjective:
             return reference_factory()
 
         request = TransportSourceRequest.from_data(
-            {n: s.data for n, s in prepared.model_target.items()},
+            batch_data(prepared.model_target),
             default_kind=default_kind,
             custom_source_factories={"reference_state": reference_source_factory},
             model_comm_group=getattr(self.module, "model_comm_group", None),

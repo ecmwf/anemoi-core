@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from anemoi.models.transport.data_helpers import Data
 from anemoi.models.transport.data_helpers import add_scaled_data
+from anemoi.models.transport.data_helpers import batch_data
 from anemoi.models.transport.data_helpers import broadcast_batch_scalar_data
 from anemoi.models.transport.data_helpers import condition_shapes
 from anemoi.models.transport.data_helpers import first_data_device
@@ -37,7 +38,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
-        target_data = prepared.model_target.data
+        target_data = batch_data(prepared.model_target)
         sigma = self._sample_training_sigma(
             shape=condition_shapes(target_data),
             device=first_data_device(target_data),
@@ -106,7 +107,13 @@ class EDMDiffusionTransportObjective(TransportObjective):
                 grid_shard_sizes=self.module._grid_shard_sizes(y),
             )
 
-        return self.module._evaluate_loss(loss, y_pred, y, **loss_kwargs)
+        return self.module._evaluate_loss(
+            loss,
+            y_pred,
+            y,
+            gradient_scaling=self.module.loss_gradient_scaling,
+            **loss_kwargs,
+        )
 
     def _noise_target(
         self,
