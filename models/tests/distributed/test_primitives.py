@@ -33,7 +33,8 @@ from anemoi.models.distributed.primitives import _expand_sharded_tensor
 from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
-from tests.distributed._distributed_runner import _run_distributed_test
+
+from ._distributed_runner import _run_distributed_test
 from .distributed_test_utils import shard_sizes_from_pattern
 from .distributed_test_utils import torch_version_less_than
 

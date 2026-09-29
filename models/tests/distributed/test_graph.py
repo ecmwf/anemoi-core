@@ -43,7 +43,7 @@ from anemoi.models.distributed.graph import reduce_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 
-from .distributed_runner import run_distributed_test
+from ._distributed_runner import _run_distributed_test
 from .distributed_test_utils import shard_sizes_from_pattern
 from .distributed_test_utils import torch_version_less_than
 
@@ -211,7 +211,7 @@ def test_ensure_sharded_shards_replicated_tensor(
     returned; with matching sizes the shard is returned as the same object
     after a consistency check.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_ensure_sharded_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -237,7 +237,7 @@ def test_ensure_sharded_validates_explicit_shard_sizes(
 ) -> None:
     """Validate explicit shards, including empty shards, along dimension zero."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_ensure_sharded_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -369,7 +369,7 @@ def test_shard_tensor_gathers_gradients(
     reassemble that tensor exactly on every rank; reordering or dropping a
     rank's contribution would fail.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_shard_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -395,7 +395,7 @@ def test_shard_tensor_gathers_gradients_with_explicit_shard_sizes(
 ) -> None:
     """Shard and gather gradients with explicit sizes, including empty shards."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_shard_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -469,7 +469,7 @@ def test_shard_tensor_no_backward_gather(
     (``_expand_sharded_tensor``): the remaining gradient slices are
     uninitialized by design and must never be read.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_shard_tensor_no_backward_gather_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -495,7 +495,7 @@ def test_shard_tensor_no_backward_gather_with_explicit_shard_sizes(
 ) -> None:
     """Expand local gradients with explicit sizes, including empty shards."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_shard_tensor_no_backward_gather_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -614,7 +614,7 @@ def test_gather_tensor_splits_gradients(
     rank's slice of its own grad_output, so a spurious cross-rank all-reduce
     would produce the slice of the rank-summed grad_outputs and fail.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_gather_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -640,7 +640,7 @@ def test_gather_tensor_splits_gradients_with_explicit_shard_sizes(
 ) -> None:
     """Gather shards and split gradients with explicit sizes, including empty shards."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_gather_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -718,7 +718,7 @@ def test_reduce_tensor(
     With rank-scaled grad_outputs, a spurious backward all-reduce would
     return the rank-summed grad_outputs instead of the rank's own and fail.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -842,7 +842,7 @@ def test_sync_tensor_gathers_and_reduces_gradients(
     from gather_tensor, whose backward keeps the rank's own grad_output
     slice without communication.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_sync_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -868,7 +868,7 @@ def test_sync_tensor_gathers_and_reduces_gradients_with_explicit_shard_sizes(
 ) -> None:
     """Synchronize gradients with explicit sizes, including empty shards."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_sync_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -933,7 +933,7 @@ def test_sync_tensor_no_forward_gather(
     backward returns the reduced grad_output whole, without splitting.
     Inputs must be same-shaped across ranks.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_sync_tensor_no_gather_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -1048,7 +1048,7 @@ def test_reduce_shard_tensor_gathers_gradients(
     conceptual full grad_output, so the gathered gradient must reassemble
     that tensor exactly.
     """
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_shard_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -1074,7 +1074,7 @@ def test_reduce_shard_tensor_gathers_gradients_with_explicit_shard_sizes(
 ) -> None:
     """Reduce and shard with explicit sizes, including empty shards."""
     shard_sizes = shard_sizes_from_pattern(shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_reduce_shard_tensor_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -1227,7 +1227,7 @@ def test_all_to_all_transpose_inverts_gradients(
     """
     if distributed_backend == "gloo" and torch_version_less_than(2, 6):
         pytest.skip("Gloo all_to_all_transpose requires torch >= 2.6.")
-    run_distributed_test(
+    _run_distributed_test(
         _test_all_to_all_transpose_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
@@ -1262,7 +1262,7 @@ def test_all_to_all_transpose_inverts_gradients_with_explicit_shard_sizes(
         pytest.skip("Gloo all_to_all_transpose requires torch >= 2.6.")
     split_shard_sizes = shard_sizes_from_pattern(split_shard_size_pattern, distributed_world_size)
     concat_shard_sizes = shard_sizes_from_pattern(concat_shard_size_pattern, distributed_world_size)
-    run_distributed_test(
+    _run_distributed_test(
         _test_all_to_all_transpose_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
