@@ -16,8 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import GriddedSourceSample
-from anemoi.models.data.sample import TabularSourceSample
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -36,8 +35,10 @@ class AnemoiModelInterface(torch.nn.Module):
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
-    n_step_input : int
-        Number of input timesteps provided to the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     statistics : dict
         Statistics for the data.
     metadata : dict
@@ -60,8 +61,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DictConfig,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
         statistics: dict,
         data_indices: dict,
         metadata: dict,
@@ -79,8 +80,10 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
+
         self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
-        self.data_layouts = {name: reader.layout.with_batch_dim() for name, reader in data_readers.items()}
+        self.sample_types = {name: reader.sample_type for name, reader in data_readers.items()}
+
         self._build_model()
         self._update_metadata()
 
@@ -90,6 +93,7 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         statistics_tendencies: dict | None = None,
+        dataset_name: str,
     ) -> tuple[
         Processors,
         Processors,
@@ -123,6 +127,7 @@ class AnemoiModelInterface(torch.nn.Module):
             processors_configs,
             data_indices,
             statistics_tendencies,
+            dataset_name,
         )
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
@@ -143,6 +148,7 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         data_indices: dict,
         statistics_tendencies: dict | None,
+        dataset_name: str,
     ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
         if statistics_tendencies is None:
             return None, None
@@ -151,7 +157,7 @@ class AnemoiModelInterface(torch.nn.Module):
             return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
-        if self.n_step_output == 1:
+        if self.n_step_output[dataset_name] == 1:
             step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
             stats_for_tendencies = step_stats or statistics_tendencies
             return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
@@ -183,6 +189,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
                 self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
+                dataset_name,
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
@@ -219,7 +226,6 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             is_dataset_static=self.is_dataset_static,
-            data_layouts=self.data_layouts,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
@@ -250,10 +256,6 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
-    def _is_tabular(self, dataset_name: str) -> bool:
-        """Whether ``dataset_name`` holds tabular (observation) data."""
-        return self.data_layouts[dataset_name].time_in_grid
-
     def get_batch(self, data: dict[str, dict]) -> Batch:
         """Collate the per-dataset payload dicts into a single-sample Batch."""
         samples = {}
@@ -272,8 +274,7 @@ class AnemoiModelInterface(torch.nn.Module):
             assert "layout" in sample, f"Dataset {dataset_name!r}: missing 'layout' in the sample."
             assert "variables" in sample, f"Dataset {dataset_name!r}: missing 'variables' in the sample."
 
-            sample_cls = TabularSourceSample if self._is_tabular(dataset_name) else GriddedSourceSample
-            samples[dataset_name] = sample_cls(**sample)
+            samples[dataset_name] = self.sample_types[dataset_name](**sample)
 
         return Batch.collate(samples)
 
@@ -283,10 +284,9 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         unwrapped = {}
         for dataset_name, sample in batch.items():
-            is_tabular = self._is_tabular(dataset_name)
 
             data, coordinates, layout = sample.data, sample.coordinates, layout = sample.layout
-            if is_tabular:
+            if isinstance(sample, TabularSource):
                 # Sparse payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
                 coordinates = None if coordinates is None else coordinates[0]

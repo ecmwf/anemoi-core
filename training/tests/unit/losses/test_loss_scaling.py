@@ -19,6 +19,7 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
@@ -33,7 +34,6 @@ from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 from anemoi.transform.variables import Variable
-from anemoi.models.data.sources import make_source
 
 
 @pytest.fixture
@@ -354,7 +354,7 @@ expected_var_tendency_scaling = torch.Tensor(
 
 def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
     """Wrap a five-dimensional loss tensor in the public loss input type."""
-    return make_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=variables,

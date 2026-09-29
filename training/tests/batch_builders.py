@@ -13,7 +13,7 @@ Production code builds a :class:`~anemoi.models.data.batch.Batch` through
 :meth:`Batch.collate` from reader :class:`~anemoi.models.data.sample.SourceSample`
 objects. Tests frequently need the *result* of collation directly - a batch whose
 tensors already carry a batch axis. :func:`build_batch` takes per-dataset dicts
-and assembles the sources with :func:`~anemoi.models.data.sources.make_source`.
+and builds a :class:`TabularSource` for list payloads and a :class:`GriddedSource` otherwise.
 
 An identical copy lives under each package's ``tests/`` directory, since the two
 suites are collected in separate pytest processes and neither package's tests are
@@ -28,8 +28,9 @@ import torch
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import Source
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources import TabularSource
 
 LOGGER = logging.getLogger(__name__)
 
@@ -69,7 +70,8 @@ def build_batch(
             raise ValueError(msg)
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
-        sources[name] = make_source(
+        source_cls = TabularSource if isinstance(payload, list) else GriddedSource
+        sources[name] = source_cls(
             name=name,
             variables=variables[name],
             layout=layouts[name],

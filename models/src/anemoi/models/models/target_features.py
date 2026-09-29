@@ -161,7 +161,8 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        return self.model.n_step_input[dataset_name] * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -175,7 +176,7 @@ class InputForcingsFeature(DecodingTargetFeature):
         indices = self.model._forcing_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        x_flat = x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten()
+        x_flat = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices).flatten()
         return x_flat.data
 
 
@@ -197,7 +198,8 @@ class TargetForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_output * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        return self.model.n_step_output[dataset_name] * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -233,7 +235,8 @@ class PrognosticsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_prognostic[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        return self.model.n_step_input[dataset_name] * self.model.num_input_channels_prognostic[dataset_name]
 
     def _compute(
         self,
@@ -247,7 +250,7 @@ class PrognosticsFeature(DecodingTargetFeature):
         indices = self.model._internal_input_idx[dataset_name]
         # Layout-agnostic: for gridded views flatten folds time into the feature axis
         # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
-        return x_input_data.select(time=slice(0, self.model.n_step_input), variables=indices).flatten().data
+        return x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices).flatten().data
 
 
 @register_target_feature("trainable_parameters")

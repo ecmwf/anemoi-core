@@ -16,6 +16,7 @@ from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.graph_provider import DynamicGraphProvider
@@ -23,7 +24,6 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from tests.batch_builders import build_batch
-from anemoi.models.data.sources import make_source
 
 
 class _NearestEdges:
@@ -179,7 +179,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         data={"grid": samples},
         coordinates={"grid": coords},
         variables={"grid": ["a"]},
-        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
+        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2)},
         statistics={"grid": {}},
     )
     if model_type is AnemoiTransportModelEncProcDec:
@@ -228,13 +228,13 @@ def test_inference_forcing_only_target_preserves_output_metadata():
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = make_source(
+    view = TabularSource(
         name="obs",
         data=samples,
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(nodes, 2) for nodes in [2, 3]],
-        layout=TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        layout=TensorLayout(ensemble=0, grid=1, variables=2),
     )
     noise = torch.arange(1.0, 2 * members + 1).reshape(2, 1, members, 1, 1).requires_grad_()
     model = _model(AnemoiTransportModelEncProcDec)

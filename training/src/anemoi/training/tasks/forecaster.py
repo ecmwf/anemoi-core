@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
 from anemoi.training.tasks.base import BaseTask
@@ -169,12 +170,12 @@ class BaseForecaster(BaseTask):
 
         Missing predictions are passed as None to the forecasting task. The
         regular Forecaster rotates these input windows without updating them.
-        Sparse observation datasets (``layout.time_in_grid=True``) pass through unchanged.
+        Tabular (observation) datasets pass through unchanged.
         """
         del rollout_step
         new_data = {}
         for dataset_name, view in x.items():
-            if view.layout.time_in_grid:
+            if isinstance(view, TabularSource):
                 # Sparse observations have no explicit time axis to roll.
                 new_data[dataset_name] = view.data
                 continue

@@ -111,9 +111,8 @@ class BaseGraphModel(nn.Module):
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
         is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
         """Initializes the graph neural network.
 
@@ -127,6 +126,12 @@ class BaseGraphModel(nn.Module):
             Data statistics
         model_graph_config : DotDict
             Graph configuration
+        n_step_input : dict[str, int]
+            Number of input time steps to embed per node for each dataset. For tabular datasets, this will be 1 as
+            nodes are not colocated at both time steps.
+        n_step_output : dict[str, int]
+            Number of output time steps to predict per node for each dataset. For tabular datasets, this will be 1
+            as nodes are not colocated at both time steps.
         """
         super().__init__()
 
@@ -146,7 +151,6 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self.is_dataset_static = is_dataset_static
-        self.data_layouts = data_layouts
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
         self.latent_skip = model_config.model.model.latent_skip
@@ -323,17 +327,8 @@ class BaseGraphModel(nn.Module):
             self.output_dim[dataset_name] = self._calculate_output_dim(dataset_name)
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        if not self.data_layouts[dataset_name].time_in_grid:
-            return (
-                self.n_step_input * self.num_input_channels[dataset_name]
-                + self.dynamic_node_attribute_dims.get(dataset_name, 0)
-                + COORDS_DIM
-                + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
-            )
-
-        # time is already part of the grid dimension
         return (
-            self.num_input_channels[dataset_name]
+            self.n_step_input[dataset_name] * self.num_input_channels[dataset_name]
             + COORDS_DIM
             + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
             + self.dynamic_node_attribute_dims.get(dataset_name, 0)
@@ -342,7 +337,10 @@ class BaseGraphModel(nn.Module):
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
+        return (
+            COORDS_DIM
+            + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
+        )
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -362,7 +360,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
-        return self.n_step_output * self.num_output_channels[dataset_name]
+        return self.n_step_output[dataset_name] * self.num_output_channels[dataset_name]
 
     @staticmethod
     def _as_hidden_node_names(
@@ -536,7 +534,7 @@ class BaseGraphModel(nn.Module):
         target: Batch,
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: int,
+        n_step_input: dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
@@ -558,8 +556,6 @@ class BaseGraphModel(nn.Module):
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        n_step_input : int
-            Number of input timesteps.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool

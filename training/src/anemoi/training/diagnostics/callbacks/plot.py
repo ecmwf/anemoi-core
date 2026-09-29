@@ -33,6 +33,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
 from anemoi.models.data import Source
+from anemoi.models.data import TabularSource
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -94,7 +95,7 @@ def _allgather_view(
 
 
 def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
-    """Return whether ``dataset_name`` uses a sparse / tabular (``time_in_grid``) layout.
+    """Return whether ``dataset_name`` is a tabular (observation) source.
 
     The gridded sample / spectrum / histogram plots assume a single lat/lon grid
     shared by the input, target and prediction panels. That does not hold for
@@ -114,8 +115,7 @@ def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
         ``True`` for sparse/observation datasets, ``False`` otherwise.
     """
     if isinstance(batch, Batch):
-        layout = batch[dataset_name].layout if dataset_name in batch else None
-        return bool(layout is not None and layout.time_in_grid)
+        return dataset_name in batch and isinstance(batch[dataset_name], TabularSource)
     return False
 
 

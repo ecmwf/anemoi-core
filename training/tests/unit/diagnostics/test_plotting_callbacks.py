@@ -376,7 +376,7 @@ def _make_sparse_batch(
         coordinates={dataset_name: [coordinates]},
         boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
-        layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1)},
         variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
         statistics={dataset_name: {}},
     )

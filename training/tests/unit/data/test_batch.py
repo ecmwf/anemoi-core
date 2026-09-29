@@ -360,7 +360,7 @@ def test_source_view_apply_func_uses_processor_and_preserves_envelope() -> None:
 
 
 def test_source_view_apply_func_handles_sparse_list_payloads() -> None:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     batch = build_batch(
         data={"obs": [torch.zeros(5, 3), torch.ones(7, 3)]},
         layouts={"obs": layout},
@@ -372,7 +372,7 @@ def test_source_view_apply_func_handles_sparse_list_payloads() -> None:
 
     def processor(tensor: torch.Tensor, *, layout: TensorLayout, **_kwargs) -> torch.Tensor:
         seen_shapes.append(tuple(tensor.shape))
-        assert layout.time_in_grid
+        assert not layout.has_axis("time")
         return tensor + 2
 
     result = batch["obs"].apply_func(processor, layout=layout)
@@ -417,7 +417,7 @@ def test_source_view_returns_sparse_coordinate_lists() -> None:
     batch = build_batch(
         data={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
         coordinates={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
-        layouts={"a": TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={"a": TensorLayout(grid=0, variables=1)},
         variables={"a": ["a", "b"]},
     )
 
@@ -442,7 +442,7 @@ def test_tensor_layout_with_batch_dim_shifts_positive_axes() -> None:
 def test_tensor_layout_without_batch_dim_is_inverse() -> None:
     from anemoi.models.data import TensorLayout
 
-    layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3, time_in_grid=False)
+    layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     roundtrip = layout.with_batch_dim().without_batch_dim()
     assert roundtrip == layout
 
@@ -450,7 +450,7 @@ def test_tensor_layout_without_batch_dim_is_inverse() -> None:
 def test_tensor_layout_without_batch_dim_sparse_roundtrip() -> None:
     from anemoi.models.data import TensorLayout
 
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     roundtrip = layout.with_batch_dim().without_batch_dim()
     assert roundtrip == layout
 
@@ -465,10 +465,9 @@ def test_tensor_layout_without_batch_dim_noop_when_already_unset() -> None:
 def test_tensor_layout_repr_elides_none_fields() -> None:
     from anemoi.models.data import TensorLayout
 
-    r = repr(TensorLayout(grid=0, variables=1, time_in_grid=True))
+    r = repr(TensorLayout(grid=0, variables=1))
     assert "grid=0" in r
     assert "variables=1" in r
-    assert "time_in_grid=True" in r
     assert "ensemble=" not in r
     assert "batch=" not in r
     assert "time=" not in r
@@ -481,7 +480,7 @@ def test_batch_repr_summarises_per_dataset() -> None:
         data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(5, 3), torch.zeros(7, 3)]},
         layouts={
             "grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-            "obs": TensorLayout(grid=0, variables=1, time_in_grid=True),
+            "obs": TensorLayout(grid=0, variables=1),
         },
         variables={"grid": ["x", "y", "z"], "obs": ["x", "y", "z"]},
     )
@@ -501,8 +500,8 @@ def test_batch_collate_rejects_invalid_layout_position() -> None:
     samples = [
         {
             "a": GriddedSourceSample(
-                data=torch.zeros(2, 3),
-                layout=TensorLayout(grid=0, variables=5),
+                data=torch.zeros(1, 2, 3),
+                layout=TensorLayout(time=0, grid=1, variables=5),
                 variables=["x", "y", "z"],
                 coordinates=torch.zeros(2, 2),
             ),
@@ -521,7 +520,7 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
     """
     from anemoi.models.data import TensorLayout
 
-    sample_layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    sample_layout = TensorLayout(grid=0, variables=1)
     samples = [
         {
             "obs": TabularSourceSample(
@@ -562,7 +561,7 @@ def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
 
 def test_batch_select_time_updates_sparse_envelope() -> None:
     """Selecting sparse time slices must also update coords, timedeltas and boundaries."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
 
     data = [
         torch.arange(5 * 2, dtype=torch.float32).reshape(5, 2),

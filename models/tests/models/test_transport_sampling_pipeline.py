@@ -16,6 +16,8 @@ from torch_geometric.data import HeteroData
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
@@ -28,7 +30,6 @@ from anemoi.models.transport import TransportSourceRequest
 from anemoi.models.transport import TransportSourceSettings
 from anemoi.models.transport import schedules
 from tests.batch_builders import build_batch
-from anemoi.models.data.sources import make_source
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -139,7 +140,7 @@ def _sparse_batch(
         data={name: data},
         coordinates={name: coordinates},
         metadata={name: {"boundaries": [(slice(0, shape[0]),) for shape in data_shapes]}},
-        layouts={name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={name: TensorLayout(grid=0, variables=1)},
         variables={name: variables},
         statistics={name: {}},
     )
@@ -198,7 +199,7 @@ def test_transport_conditioning_uses_sparse_target_node_counts() -> None:
         dtype=sigma.dtype,
     )
 
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     target = build_batch(
         data={"obs": [torch.empty(2, 1), torch.empty(4, 1)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(4, 2)]},
@@ -220,8 +221,8 @@ def test_transport_conditioning_uses_sparse_target_node_counts() -> None:
 def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not_align() -> None:
     model = _transport_model_stub()
     model.node_attributes = _EmptyNodeAttributes()
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    x = make_source(
+    layout = TensorLayout(grid=0, variables=1)
+    x = TabularSource(
         name="obs",
         data=[torch.ones(2, 2)],
         coordinates=[torch.tensor([[0.0, 0.0], [0.1, 0.1]])],
@@ -231,7 +232,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         layout=layout,
         boundaries=[(slice(0, 2),)],
     )
-    y_noised = make_source(
+    y_noised = TabularSource(
         name="obs",
         data=[torch.full((3, 1), 5.0)],
         coordinates=[torch.tensor([[0.2, 0.2], [0.3, 0.3], [0.4, 0.4]])],
@@ -280,7 +281,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
     coordinates = torch.zeros(3, 2)
     x_data = torch.arange(1 * 2 * 1 * 3 * 4, dtype=torch.float32).reshape(1, 2, 1, 3, 4)
     y_noised_data = torch.full((1, 1, 1, 3, 2), 100.0)
-    x = make_source(
+    x = GriddedSource(
         name="data",
         data=x_data,
         coordinates=coordinates,
@@ -289,7 +290,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         coordinates_are_static=True,
         layout=layout,
     )
-    y_noised = make_source(
+    y_noised = GriddedSource(
         name="data",
         data=y_noised_data,
         coordinates=coordinates,
@@ -325,8 +326,8 @@ def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
     model.node_attributes = _EmptyNodeAttributes()
     model.condition_on_residual = False
 
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    sparse_view = make_source(
+    layout = TensorLayout(grid=0, variables=1)
+    sparse_view = TabularSource(
         name="obs",
         data=[torch.ones(2, 1)],
         coordinates=[torch.zeros(2, 2)],
@@ -518,7 +519,7 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     model.processor_graph_provider = _GraphProvider()
     model.decoder_graph_provider = {"obs": _GraphProvider()}
 
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     batch = build_batch(
         data={"obs": [torch.ones(3, 1)]},
         coordinates={"obs": [torch.zeros(3, 2)]},
@@ -1335,7 +1336,7 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     model = _transport_model_stub()
     _configure_sampling_model(model, {"obs": (1, 1, 3)})
     model.is_dataset_static["obs"] = False
-    layout = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    layout = TensorLayout(ensemble=0, grid=1, variables=2)
     coordinates = [torch.zeros(3, 2), torch.ones(2, 2)]
     template = build_batch(
         data={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},

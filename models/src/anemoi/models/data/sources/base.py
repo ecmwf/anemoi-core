@@ -126,8 +126,8 @@ class Source(ABC):
     Bundles the per-dataset payload (data, coordinates, timedeltas) with the
     metadata that describes it (name, variables, layout, statistics) so callers
     can index logical axes (``time``, ``variables``) without hard-coded dimension
-    positions. The same API works for gridded and sparse observation datasets
-    thanks to the ``layout.time_in_grid`` dispatch.
+    positions. The same API works for gridded and tabular (observation) datasets;
+    the subclass decides how each operation maps onto the payload.
 
     Parameters
     ----------

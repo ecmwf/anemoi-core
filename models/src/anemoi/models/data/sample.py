@@ -68,6 +68,12 @@ class SourceSample(ABC):
 
     @classmethod
     @abstractmethod
+    def collated_layout(cls, layout: TensorLayout) -> TensorLayout:
+        """Return the layout of the collated source, given the per-sample ``layout``."""
+        ...
+
+    @classmethod
+    @abstractmethod
     def collate(cls, name: str, samples: Sequence[Self]) -> Source:
         """Collate the samples of one dataset into a batched source."""
         ...
@@ -99,19 +105,23 @@ class GriddedSourceSample(SourceSample):
     shard_sizes: ShardSizes | None = None
 
     def __post_init__(self) -> None:
-        if self.layout.time_in_grid:
-            msg = f"{self.__class__.__name__} requires a layout with an explicit time axis; got {self.layout!r}."
+        if not self.layout.has_axis("time"):
+            msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
+
+    @classmethod
+    def collated_layout(cls, layout: TensorLayout) -> TensorLayout:
+        """Samples are stacked along a new leading batch axis."""
+        return layout.with_batch_dim()
 
     @classmethod
     def collate(cls, name: str, samples: Sequence[Self]) -> GriddedSource:
         """Stack the samples along a new leading batch axis.
 
-        The layout is shifted with :meth:`TensorLayout.with_batch_dim`. The
-        coordinates of the first sample are used for the whole batch.
+        The coordinates of the first sample are used for the whole batch.
         """
         head = samples[0]
-        layout = head.layout.with_batch_dim()
+        layout = cls.collated_layout(head.layout)
         data = default_collate([s.data for s in samples])
         _validate_layout_against(name, layout, data)
 
@@ -150,24 +160,30 @@ class TabularSourceSample(SourceSample):
     shard_sizes: list[ShardSizes] | None = None
 
     def __post_init__(self) -> None:
-        if not self.layout.time_in_grid:
-            msg = f"{self.__class__.__name__} requires a layout with time_in_grid=True; got {self.layout!r}."
+        if self.layout.has_axis("time") or self.layout.has_axis("batch"):
+            msg = (
+                f"{self.__class__.__name__} requires a layout without time and batch axes; the time windows are "
+                f"given by 'boundaries' and the batch is a list. Got {self.layout!r}."
+            )
             raise ValueError(msg)
 
     @classmethod
-    def collate(cls, name: str, samples: Sequence[Self]) -> TabularSource:
-        """Keep the samples as lists of length ``B``, since their grid sizes differ.
+    def collated_layout(cls, layout: TensorLayout) -> TensorLayout:
+        """The samples are kept as a list, so the layout does not change."""
+        return layout
 
-        The per-sample layout is kept as it is: the batch axis is the list itself.
-        """
+    @classmethod
+    def collate(cls, name: str, samples: Sequence[Self]) -> TabularSource:
+        """Keep the samples as lists of length ``B``, since their grid sizes differ."""
         head = samples[0]
+        layout = cls.collated_layout(head.layout)
         data = [s.data for s in samples]
-        _validate_layout_against(name, head.layout, data)
+        _validate_layout_against(name, layout, data)
 
         return TabularSource(
             name=name,
             variables=head.variables,
-            layout=head.layout,
+            layout=layout,
             statistics=head.statistics,
             data=data,
             coordinates=[s.coordinates for s in samples],

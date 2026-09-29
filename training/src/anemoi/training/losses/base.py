@@ -194,9 +194,10 @@ class BaseLoss(nn.Module, ABC):
 
         The spatial dimension is then reduced: for gridded fields the grid (and time)
         dimensions are *summed* (grid normalisation is handled by node weighting, time by
-        the time-step scaler), while for sparse observations (``layout.time_in_grid``) the
-        grid dimension is *averaged*, since there is no node weighting and the number of
-        observations varies per sample. The batch and ensemble dimensions are averaged.
+        the time-step scaler), while for tabular observations (layouts without a time axis;
+        :func:`apply_pairwise` calls the loss once per sample) the grid dimension is
+        *averaged*, since there is no node weighting and the number of observations varies
+        per sample. The batch and ensemble dimensions are averaged.
 
         Parameters
         ----------
@@ -232,7 +233,7 @@ class BaseLoss(nn.Module, ABC):
                 msg = f"Invalid squash_mode '{squash_mode}'. Supported modes are: 'avg', 'sum'"
                 raise ValueError(msg)
 
-        if layout.time_in_grid:
+        if not layout.has_axis("time"):
             # Sparse observations: we average over the spatial dimension. Unlike
             # gridded fields there is no node weighting that normalises over grid points,
             # and the number of observations varies per sample, so we do a mean-reduce.

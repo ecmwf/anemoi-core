@@ -126,10 +126,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Mapping of variable groups for which to calculate validation metrics.
     output_mask : nn.Module
         Masking module that filters outputs during inference.
-    n_step_input : int
-        Number of input timesteps provided to the model.
-    n_step_output : int
-        Number of output timesteps predicted by the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     keep_batch_sharded : bool
         Whether to keep input batches split across GPUs instead of gathering them.
 
@@ -206,8 +206,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        self.n_step_input = self.task.num_input_timesteps
-        self.n_step_output = self.task.num_output_timesteps
+        # Define number of input/output timesteps per node for each dataset
+        self.n_step_input = {dataset_name: self.task.num_input_timesteps for dataset_name in self.dataset_names}
+        self.n_step_output = {dataset_name: self.task.num_output_timesteps for dataset_name in self.dataset_names}
 
         self.model = AnemoiModelInterface(
             config=config,
@@ -349,8 +350,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
-
-        LOGGER.debug("n_step_input: %d", self.n_step_input)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0

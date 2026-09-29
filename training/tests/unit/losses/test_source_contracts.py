@@ -27,11 +27,10 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.utils.index_space import IndexSpace
-from anemoi.models.data.sources import make_source
 
 
 def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSource:
-    return make_source(
+    return GriddedSource(
         name="grid",
         data=data,
         variables=["a", "b"],
@@ -125,13 +124,13 @@ def test_scores_accept_equivalent_negative_axes(loss_type: type[EnergyScoreLoss]
 
 
 def _observations() -> TabularSource:
-    return make_source(
+    return TabularSource(
         name="obs",
         data=[torch.ones(2, 2), torch.ones(3, 2)],
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(2, 2), torch.zeros(3, 2)],
-        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+        layout=TensorLayout(grid=0, variables=1),
     )
 
 
@@ -157,13 +156,13 @@ def test_sparse_loss_distinguishes_shared_and_per_sample_arguments() -> None:
 def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() -> None:
     empty = torch.empty(0, 2, requires_grad=True)
     non_empty = torch.ones(2, 2, requires_grad=True)
-    pred = make_source(
+    pred = TabularSource(
         name="obs",
         data=[empty, non_empty],
         variables=["a", "b"],
         statistics={},
         coordinates=[torch.zeros(0, 2), torch.zeros(2, 2)],
-        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+        layout=TensorLayout(grid=0, variables=1),
     )
     target = pred.clone(data=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
     result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
@@ -210,13 +209,13 @@ def test_sparse_loss_validates_explicit_sample_arguments(case: str) -> None:
 @pytest.mark.parametrize("backend", ["naive", "stable"])
 def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     data = torch.tensor([[[-1.0], [-1.0]], [[1.0], [1.0]]], requires_grad=True)
-    pred = make_source(
+    pred = TabularSource(
         name="obs",
         data=[data],
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],
-        layout=TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        layout=TensorLayout(ensemble=0, grid=1, variables=2),
     )
     target = pred.clone(data=[torch.tensor([[[0.0], [float("nan")]]])])
     result = CRPS(alpha=0.0, backend=backend, ignore_nans=True)(pred, target)

@@ -40,12 +40,11 @@ from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
 from anemoi.training.schemas.training import LossSchemas
 from anemoi.training.utils.index_space import IndexSpace
-from anemoi.models.data.sources import make_source
 
 
 def _view(data: torch.Tensor) -> GriddedSource:
     """Attach the layout and coordinates used by the score fixtures."""
-    return make_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=[f"v{i}" for i in range(data.shape[-1])],

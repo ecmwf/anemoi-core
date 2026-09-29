@@ -25,6 +25,8 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data import Source
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -57,7 +59,6 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.masks import NoOutputMask
 from tests.batch_builders import build_batch
-from anemoi.models.data.sources import make_source
 
 if TYPE_CHECKING:
     from collections.abc import KeysView
@@ -1043,7 +1044,7 @@ def test_stochastic_interpolant_prepare_remasks_missing_observations(
     assert torch.isfinite(network_input).all()
 
     layout = (
-        TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+        TensorLayout(ensemble=0, grid=1, variables=2)
         if sparse
         else TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
     )
@@ -1194,7 +1195,7 @@ def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None
         "minimum": torch.tensor([-10.0, -10.0]),
         "maximum": torch.tensor([10.0, 10.0]),
     }
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     data = [torch.randn(5, len(_NAME_TO_INDEX))]
     data[0][3, 0] = float("nan")  # missing observation at the output step
     batch = build_batch(
@@ -1372,7 +1373,7 @@ def _gridded_view(
 ) -> Source:
     """Wrap a ``(batch, time, ensemble, grid, variables)`` tensor in a GriddedSource."""
     layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    return make_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=list(variables),
@@ -1449,8 +1450,8 @@ def _tabular_view(
     statistics: dict[str, torch.Tensor],
 ) -> Source:
     """Wrap a list of ``(grid, variables)`` tensors in a TabularSource (sparse obs)."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return make_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="data",
         data=data,
         variables=list(variables),
@@ -2049,7 +2050,7 @@ def test_ensemble_expand_ens_dim_tiles_tabular_members() -> None:
         coordinates={"obs": [torch.zeros(5, 2), torch.zeros(4, 2)]},
         timedeltas={"obs": [torch.zeros(5), torch.zeros(4)]},
         metadata={"obs": {"boundaries": [(slice(0, 5),), (slice(0, 4),)]}},
-        layouts={"obs": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
+        layouts={"obs": TensorLayout(ensemble=0, grid=1, variables=2)},
         variables={"obs": ["a", "b"]},
     )
 
@@ -2080,7 +2081,7 @@ def test_ensemble_member_template_describes_tiled_members() -> None:
         coordinates={"obs": [torch.zeros(5, 2), torch.zeros(4, 2)]},
         timedeltas={"obs": [torch.zeros(5), torch.zeros(4)]},
         metadata={"obs": {"boundaries": [(slice(0, 5),), (slice(0, 4),)]}},
-        layouts={"obs": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
+        layouts={"obs": TensorLayout(ensemble=0, grid=1, variables=2)},
         variables={"obs": ["a", "b"]},
     )
     flat = forecaster._member_template(obs)["obs"].flatten()
@@ -3026,7 +3027,7 @@ def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
         data={"obs": [torch.zeros(2, 1)]},
         coordinates={"obs": [torch.zeros(2, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
-        layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={"obs": TensorLayout(grid=0, variables=1)},
         variables={"obs": ["a"]},
         statistics={"obs": {}},
     )

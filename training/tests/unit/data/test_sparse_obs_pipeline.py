@@ -133,7 +133,7 @@ def test_get_sample_returns_unified_contract() -> None:
     assert isinstance(sample, TabularSourceSample)
     # Each sample has one ensemble member and no explicit time axis.
     assert sample.data.shape == (1, n, v)
-    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2)
     assert sample.data.dtype == torch.float32
     np.testing.assert_allclose(sample.data[0].numpy(), payload.data)
 

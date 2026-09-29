@@ -67,8 +67,11 @@ class TabularSource(Source):
             )
             raise ValueError(msg)
 
-        if not self.layout.time_in_grid:
-            msg = f"{self.__class__.__name__} requires a layout with time_in_grid=True; got {self.layout!r}."
+        if self.layout.has_axis("time") or self.layout.has_axis("batch"):
+            msg = (
+                f"{self.__class__.__name__} requires a layout without time and batch axes; the time windows are "
+                f"given by 'boundaries' and the batch is a list. Got {self.layout!r}."
+            )
             raise ValueError(msg)
 
         if isinstance(self.data, torch.Tensor | np.ndarray):
@@ -120,10 +123,7 @@ class TabularSource(Source):
 
     @property
     def time_size(self) -> int:
-        """Number of time steps in this source."""
-        assert (
-            self.layout.time_in_grid
-        ), f"{self.__class__.__name__}.time_size requires a layout with time_in_grid=True."
+        """Number of time windows in this source, taken from ``boundaries``."""
         time_sizes = [len(boundaries) for boundaries in self.boundaries]
         if len(set(time_sizes)) != 1:
             msg = f"Inconsistent time sizes across batch samples: {time_sizes}"

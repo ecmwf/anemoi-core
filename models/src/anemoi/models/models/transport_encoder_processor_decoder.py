@@ -22,7 +22,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -794,7 +795,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             layout = source_layouts[dataset_name]
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            sources[dataset_name] = make_source(
+            # Only a tabular template can supply the timedeltas and boundaries a tabular source needs.
+            source_cls = TabularSource if isinstance(template_source, TabularSource) else GriddedSource
+            sources[dataset_name] = source_cls(
                 name=dataset_name,
                 variables=self._sampling_variables(dataset_name, variable_space),
                 layout=layout,
@@ -1000,7 +1003,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self.n_step_input[dataset],
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }

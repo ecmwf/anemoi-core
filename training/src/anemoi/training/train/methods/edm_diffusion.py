@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.transport.data_helpers import Data
 from anemoi.models.transport.data_helpers import add_scaled_data
 from anemoi.models.transport.data_helpers import broadcast_batch_scalar_data
@@ -92,7 +93,7 @@ class EDMDiffusionTransportObjective(TransportObjective):
             "grid_shard_slice": grid_shard_slice,
             "group": self.module.model_comm_group,
         }
-        if y_pred.layout.time_in_grid:
+        if isinstance(y_pred, TabularSource):
             loss_kwargs["per_sample_kwargs"] = {"weights": weights[dataset_name]}
         else:
             loss_kwargs["weights"] = weights[dataset_name]

@@ -260,14 +260,14 @@ class BaseAnemoiReader(ABC):
         whether to share coordinate tensors by reference across the batch.
         """
 
+    #: The :class:`~anemoi.models.data.SourceSample` subclass returned by :meth:`get_sample`.
+    #: This is the only record of whether the dataset is gridded or tabular.
+    sample_type: type[SourceSample]
+
     @property
     def is_tabular(self) -> bool:
-        """Return whether the dataset is tabular (2D backing array).
-
-        Kept for backward compatibility with consumers that branched on the
-        legacy flag; new code should use :attr:`is_static_grid` instead.
-        """
-        return len(self.data.shape) == 2
+        """Return whether the reader produces tabular (observation) samples."""
+        return issubclass(self.sample_type, TabularSourceSample)
 
     @property
     def variables(self) -> list[str]:
@@ -359,6 +359,8 @@ class BaseAnemoiReader(ABC):
 
 class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
+
+    sample_type = GriddedSourceSample
 
     @property
     def layout(self) -> TensorLayout:
@@ -513,10 +515,12 @@ class ObservationDataReader(BaseAnemoiReader):
     :attr:`Batch.metadata` rather than being moved to device.
     """
 
+    sample_type = TabularSourceSample
+
     @property
     def layout(self) -> TensorLayout:
         """Return the tabular per-sample layout."""
-        return TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+        return TensorLayout(ensemble=0, grid=1, variables=2)
 
     @property
     def is_static_grid(self) -> bool:

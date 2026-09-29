@@ -334,7 +334,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x.data,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
-                n_step_output=self.n_step_output,
+                n_step_output=self.n_step_output[dataset_name],
             )
         else:
             x_skip = None
@@ -941,7 +941,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_md = md_dict["metadata_inference"][dataset]
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self.n_step_input[dataset],
                 "ensemble": 1,
                 "grid": dataset_md.get("grid_size"),  # None for tabular data
             }

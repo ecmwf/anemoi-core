@@ -16,7 +16,6 @@ from anemoi.models.data import Batch
 from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import make_source
 from anemoi.models.data.sources.gridded import EmptyGriddedSource
 from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data.sources.tabular import EmptyTabularSource
@@ -24,7 +23,7 @@ from anemoi.models.data.sources.tabular import TabularSource
 from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
-TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 
 
 def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSample:
@@ -67,7 +66,7 @@ def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
 class TestSourceMetadata:
     def test_rejects_duplicate_variable_names(self) -> None:
         with pytest.raises(ValueError, match="unique variable names"):
-            make_source(
+            GriddedSource(
                 name="grid",
                 variables=["a", "a"],
                 layout=GRIDDED_LAYOUT,
@@ -92,24 +91,6 @@ class TestSourceMetadata:
     def test_name_to_index_follows_a_variable_rename(self) -> None:
         renamed = gridded_batch()["grid"].clone(variables=["x", "y", "z"])
         assert renamed.name_to_index == {"x": 0, "y": 1, "z": 2}
-
-    @pytest.mark.parametrize(
-        ("layout", "expected_type"),
-        [(GRIDDED_LAYOUT, GriddedSource), (TABULAR_LAYOUT, TabularSource)],
-    )
-    def test_make_source_dispatches_on_the_layout(self, layout, expected_type) -> None:
-        if layout.time_in_grid:
-            payload = {
-                "data": [torch.zeros(1, 4, 2)],
-                "coordinates": [torch.zeros(4, 2)],
-                "timedeltas": [torch.zeros(4)],
-                "boundaries": [(slice(0, 4),)],
-            }
-        else:
-            payload = {"data": torch.zeros(1, 1, 4, 2), "coordinates": torch.zeros(4, 2)}
-        view = make_source(name="src", variables=["a", "b"], layout=layout, coordinates_are_static=True, **payload)
-        assert isinstance(view, expected_type)
-        assert view.coordinates_are_static is True
 
     @pytest.mark.parametrize(
         ("payload", "expected_type"),
@@ -223,7 +204,9 @@ class TestCollate:
     )
     def test_sample_rejects_a_layout_of_the_other_kind(self, sample_cls, layout, extra) -> None:
         with pytest.raises(ValueError, match="requires a layout"):
-            sample_cls(data=torch.zeros(1, 4, 2), variables=["a", "b"], layout=layout, coordinates=torch.zeros(4, 2), **extra)
+            sample_cls(
+                data=torch.zeros(1, 4, 2), variables=["a", "b"], layout=layout, coordinates=torch.zeros(4, 2), **extra
+            )
 
 
 class TestBatchTransformations:
