@@ -1324,3 +1324,146 @@ def test_halo_exchange_peer_count_errors(field: str, num_entries: int, expected_
     ):
         with pytest.raises(ValueError, match=expected_message):
             halo_exchange(torch.empty((2, 3)), halo_info, _TestProcessGroup(size=2))
+
+
+@pytest.mark.parametrize(
+    "mgroup",
+    [
+        pytest.param(None, id="no_group"),
+        pytest.param(_TestProcessGroup(size=1), id="single_rank_group"),
+    ],
+)
+def test_halo_exchange_identity_without_communication(mgroup: _TestProcessGroup | None) -> None:
+    """Without communication, local values and gradients pass through unchanged."""
+    halo_info = HaloInfo(
+        num_local_src_nodes=4,
+        num_local_dst_nodes=4,
+        num_halo_nodes=0,
+        send_indices=(torch.empty(0, dtype=torch.long),),
+        recv_counts=(0,),
+        edge_index_local=torch.empty((2, 0), dtype=torch.long),
+    )
+    x = _make_range_tensor((4, 3))
+    expected = x.clone()
+    grad_output = _make_grad_output((4, 3))
+    x.requires_grad_(True)
+
+    exchanged = halo_exchange(x, halo_info, mgroup)
+
+    assert exchanged.size() == expected.size()
+    assert exchanged.dtype == expected.dtype
+    assert exchanged.device == expected.device
+    torch.testing.assert_close(exchanged, expected)
+
+    loss = (exchanged * grad_output).sum()  # d(loss)/d(exchanged) == grad_output
+    loss.backward()
+    assert x.grad is not None
+    torch.testing.assert_close(x.grad, grad_output)
+
+
+def _test_halo_exchange_rank(
+    *,
+    rank: int,
+    world_size: int,
+    device: torch.device,
+    group: dist.ProcessGroup,
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    atol: float = GLOBAL_DEFAULT_ATOL,
+    rtol: float = GLOBAL_DEFAULT_RTOL,
+) -> None:
+    send_indices = tuple(
+        torch.tensor(send_rows.get((rank, dst_rank), ()), dtype=torch.long, device=device)
+        for dst_rank in range(world_size)
+    )
+    # recv_counts_by_rank[dst_rank][src_rank]:
+    # number of rows dst_rank receives from src_rank.
+    recv_counts_by_rank = [
+        tuple(len(send_rows.get((src_rank, dst_rank), ())) for src_rank in range(world_size))
+        for dst_rank in range(world_size)
+    ]
+    recv_counts = recv_counts_by_rank[rank]
+    halo_info = HaloInfo(
+        num_local_src_nodes=shard_sizes[rank],
+        num_local_dst_nodes=shard_sizes[rank],
+        num_halo_nodes=sum(recv_counts),
+        send_indices=send_indices,
+        recv_counts=recv_counts,
+        edge_index_local=torch.empty((2, 0), dtype=torch.long, device=device),
+    )
+    full = _make_range_tensor((sum(shard_sizes), 3), device)
+    features_by_rank = torch.split(full, shard_sizes, dim=0)
+    received = []
+    for src_rank in range(world_size):
+        rows = list(send_rows.get((src_rank, rank), ()))
+        received.append(features_by_rank[src_rank][rows])
+    expected = torch.cat([features_by_rank[rank], *received])
+
+    local = features_by_rank[rank].clone().requires_grad_(True)
+    exchanged = halo_exchange(local, halo_info, group)
+
+    assert exchanged.size() == expected.size()
+    assert exchanged.dtype == expected.dtype
+    assert exchanged.device == expected.device
+    torch.testing.assert_close(exchanged, expected, atol=atol, rtol=rtol)
+
+    output_sizes = [size + sum(counts) for size, counts in zip(shard_sizes, recv_counts_by_rank)]
+    grad_output_full = _make_grad_output((sum(output_sizes), 3), device)
+    grad_outputs_by_rank = torch.split(grad_output_full, output_sizes, dim=0)
+    grad_output = grad_outputs_by_rank[rank]
+    loss = (exchanged * grad_output).sum()  # d(loss)/d(exchanged) == grad_output
+    loss.backward()
+
+    # Start with the local gradient, then add each forward destination's
+    # gradient contribution for the rows this rank sent it.
+    expected_grad = grad_outputs_by_rank[rank][: shard_sizes[rank]].clone()
+    for dst_rank in range(world_size):
+        dst_halo_grads = grad_outputs_by_rank[dst_rank][shard_sizes[dst_rank] :]
+        grad_from_dst = torch.split(dst_halo_grads, recv_counts_by_rank[dst_rank], dim=0)[rank]
+        expected_grad.index_add_(0, send_indices[dst_rank], grad_from_dst)
+
+    assert local.grad is not None
+    assert local.grad.size() == expected_grad.size()
+    assert local.grad.dtype == expected_grad.dtype
+    assert local.grad.device == expected_grad.device
+    torch.testing.assert_close(local.grad, expected_grad, atol=atol, rtol=rtol)
+
+
+@pytest.mark.distributed
+@pytest.mark.parametrize(
+    ("shard_sizes", "send_rows"),
+    [
+        pytest.param((3, 2), {(0, 1): (2, 0), (1, 0): (1,)}, id="two-rank-asymmetric"),
+        # Rank 0 sends different, equal-sized rows to ranks 1 and 2; row 2 goes to both.
+        pytest.param(
+            (4, 3, 5),
+            {(0, 1): (0, 2), (0, 2): (1, 2), (1, 0): (2,), (2, 0): (4, 0, 3), (2, 1): (1,)},
+            id="three-rank-irregular",
+        ),
+        pytest.param((3, 0, 2), {(0, 2): (0, 1), (2, 0): (1,)}, id="empty-shard"),
+        pytest.param((3, 2), {}, id="no-halos"),
+    ],
+)
+def test_halo_exchange_accumulates_halo_gradients(
+    shard_sizes: tuple[int, ...],
+    send_rows: dict[tuple[int, int], tuple[int, ...]],
+    distributed_backend: str,
+    distributed_world_size: int,
+) -> None:
+    """Append received rows forward; return and accumulate their gradients backward.
+
+    ``shard_sizes`` holds each rank's local-node count. ``send_rows[(src_rank, dst_rank)]``
+    lists the local rows sent from ``src_rank`` to ``dst_rank``; missing entries send nothing.
+    """
+    if distributed_world_size < len(shard_sizes):
+        pytest.skip(f"Schedule requires at least {len(shard_sizes)} ranks.")
+    if distributed_backend == "gloo" and torch_version_less_than(2, 6):
+        pytest.skip("Gloo halo exchange requires torch >= 2.6.")
+    shard_sizes += (0,) * (distributed_world_size - len(shard_sizes))
+    _run_distributed_test(
+        _test_halo_exchange_rank,
+        backend=distributed_backend,
+        world_size=distributed_world_size,
+        shard_sizes=shard_sizes,
+        send_rows=send_rows,
+    )
