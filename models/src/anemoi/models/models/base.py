@@ -455,6 +455,14 @@ class BaseGraphModel(nn.Module):
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
+            layout = self.data_layouts.get(dataset_name)
+            if layout is not None and layout.time_in_grid:
+                msg = (
+                    f"model.residual configures a residual connection for dataset '{dataset_name}', which is "
+                    "tabular. Residual connections need a gridded dataset with an explicit "
+                    f"time axis; remove model.residual.datasets.{dataset_name}."
+                )
+                raise ValueError(msg)
             self.residual[dataset_name] = instantiate(
                 residual_config,
                 graph=self._graph_data,
@@ -566,7 +574,7 @@ class BaseGraphModel(nn.Module):
             Whether to gather output tensors across distributed processes.
         spatial_pre_processors : Optional[nn.ModuleDict]
             Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
-            Applied after grid sharding but before normalisation.
+            Applied after grid sharding and before normalisation, as in training.
         **kwargs
             Additional arguments.
 
@@ -585,23 +593,24 @@ class BaseGraphModel(nn.Module):
                 for dataset_name in target.dataset_names:
                     target = target.replace(dataset_name, target[dataset_name].shard(model_comm_group))
 
+            # Spatial preprocessing: applied after grid sharding and, as in training, before
+            # normalisation, so projectors see raw values. The projected source is on the
+            # dataset's graph node set.
+            for dataset_name in dataset_names:
+                if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
+                    projected = spatial_pre_processors[dataset_name].project_source(
+                        x[dataset_name],
+                        self._graph_data[dataset_name].x,
+                        model_comm_group=model_comm_group,
+                    )
+                    x = x.replace(dataset_name, projected)
+
             processed_batch = x
             for dataset_name in dataset_names:
                 processed_batch = processed_batch.replace(
                     dataset_name,
                     pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
                 )
-
-            # Spatial preprocessing: applied after grid sharding, before normalisation.
-            input_data = processed_batch
-            for dataset_name in dataset_names:
-                (projected_tensor,) = self._apply_spatial_preprocessor(
-                    (processed_batch[dataset_name],),
-                    dataset_name,
-                    spatial_pre_processors,
-                    model_comm_group,
-                )
-                input_data[dataset_name] = projected_tensor
 
             # The target forcings condition the decoder, and need to go through the input processors
             processed_target = target

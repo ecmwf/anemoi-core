@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 from typing import TypeAlias
 
 import torch
@@ -12,7 +13,15 @@ import torch
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.transport.random_fields import randn_like_with_grid_sharding
 
+if TYPE_CHECKING:
+    from anemoi.models.data import Batch
+
 Data: TypeAlias = torch.Tensor | list[torch.Tensor]
+
+
+def batch_data(batch: Batch) -> dict[str, Data]:
+    """Return the per-dataset data payloads of the batch, keyed by dataset name."""
+    return {name: source.data for name, source in batch.items()}
 
 
 def is_sparse_data(data: Data) -> bool:

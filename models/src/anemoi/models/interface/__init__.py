@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -189,22 +190,6 @@ class AnemoiModelInterface(torch.nn.Module):
                 self.pre_processors_tendencies[dataset_name] = pre_tend
                 self.post_processors_tendencies[dataset_name] = post_tend
 
-        # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
-        # Keyed by dataset name; empty by default so existing models are unaffected.
-        # Built from optional config.data.datasets.<dataset_name>.spatial_processor entries.
-        self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
-        for dataset_name, dataset_config in data_config.items():
-            sp_config = getattr(dataset_config, "spatial_processor", None)
-            if sp_config is None:
-                continue
-            projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
-            if not isinstance(projector, SpatialPreprocessor):
-                raise TypeError(
-                    f"datasets.{dataset_name}.spatial_processor must instantiate a SpatialPreprocessor, "
-                    f"got {type(projector)}"
-                )
-            self.spatial_pre_processors[dataset_name] = projector
-
         # Instantiate the model
         # Only pass _target_ and _convert_ from model config to avoid passing nested model settings as kwargs.
         model_instantiate_config = {
@@ -223,9 +208,43 @@ class AnemoiModelInterface(torch.nn.Module):
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
+        # The model builds the graph from the graph config; spatial projectors read their edges from it.
+        self.graph_data = self.model._graph_data
+
+        # Spatial preprocessors (e.g. CrossGridProjector for downscaling).
+        # Keyed by dataset name; empty by default so existing models are unaffected.
+        # Built from optional config.data.datasets.<dataset_name>.spatial_processor entries.
+        self.spatial_pre_processors: torch.nn.ModuleDict = torch.nn.ModuleDict()
+        for dataset_name, dataset_config in data_config.items():
+            sp_config = getattr(dataset_config, "spatial_processor", None)
+            if sp_config is None:
+                continue
+            projector = instantiate(sp_config, graph=self.graph_data, _recursive_=False)
+            if not isinstance(projector, SpatialPreprocessor):
+                raise TypeError(
+                    f"datasets.{dataset_name}.spatial_processor must instantiate a SpatialPreprocessor, "
+                    f"got {type(projector)}"
+                )
+            self.spatial_pre_processors[dataset_name] = projector
 
         # Use the forward method of the model directly
         self.forward = self.model.forward
+
+    def apply_spatial_pre_processors(self, batch: Batch, model_comm_group: Optional[ProcessGroup] = None) -> Batch:
+        """Project each dataset that has a spatial preprocessor onto its graph node set.
+
+        Applied to raw (un-normalized) data. The projected source carries the coordinates
+        of the dataset's graph nodes, which is the grid the encoder runs on.
+        """
+        for dataset_name, projector in self.spatial_pre_processors.items():
+            if dataset_name in batch:
+                projected = projector.project_source(
+                    batch[dataset_name],
+                    self.graph_data[dataset_name].x,
+                    model_comm_group=model_comm_group,
+                )
+                batch = batch.replace(dataset_name, projected)
+        return batch
 
     @staticmethod
     def _as_payload(ds_data: torch.Tensor | dict) -> dict:
@@ -249,24 +268,72 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
-    def get_batch(self, data: dict[str, SourceSample]) -> Batch:
-        """Collate the per-dataset samples into a single-sample Batch."""
-        for dataset_name, sample in data.items():
-            assert (
-                "latitudes" in sample and "longitudes" in sample
-            ), f"Dataset {dataset_name!r}: missing 'latitudes' or 'longitudes' in the sample."
-            latitudes = torch.as_tensor(sample.pop("latitudes"), dtype=torch.float32).reshape(-1)
-            longitudes = torch.as_tensor(sample.pop("longitudes"), dtype=torch.float32).reshape(-1)
-            assert latitudes.shape == longitudes.shape, (
+    def _source_sample(self, dataset_name: str, payload: dict) -> SourceSample:
+        """Build one dataset's SourceSample from a plain inference payload.
+
+        The payload carries ``data``, ``latitudes`` / ``longitudes`` (degrees), ``layout``
+        (per-sample axis names, no batch axis) and ``variables``; tabular datasets also carry
+        ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time window).
+        Statistics, ``time_in_grid`` and whether the grid is static come from the checkpoint.
+        The payload is not modified.
+        """
+        for key in ("data", "latitudes", "longitudes", "layout", "variables"):
+            if payload.get(key) is None:
+                raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the sample.")
+
+        data = payload["data"]
+        latitudes = torch.as_tensor(payload["latitudes"], dtype=torch.float32).reshape(-1)
+        longitudes = torch.as_tensor(payload["longitudes"], dtype=torch.float32).reshape(-1)
+        if latitudes.shape != longitudes.shape:
+            raise ValueError(
                 f"Dataset {dataset_name!r}: latitudes {tuple(latitudes.shape)} and longitudes "
                 f"{tuple(longitudes.shape)} must describe the same nodes."
             )
-            sample["coordinates"] = torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1))
+        coordinates = torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1)).to(device=data.device)
 
-            assert "layout" in sample, f"Dataset {dataset_name!r}: missing 'layout' in the sample."
-            assert "variables" in sample, f"Dataset {dataset_name!r}: missing 'variables' in the sample."
+        layout_names = tuple(payload["layout"])
+        if "batch" in layout_names:
+            raise ValueError(f"Dataset {dataset_name!r}: the sample layout {layout_names} must not have a batch axis.")
+        if data.ndim != len(layout_names):
+            raise ValueError(
+                f"Dataset {dataset_name!r}: data of shape {tuple(data.shape)} does not match the layout {layout_names}."
+            )
+        # time_in_grid cannot be read off the axis names, so it comes from the dataset kind.
+        is_tabular = self.data_layouts[dataset_name].time_in_grid
+        layout = TensorLayout.from_tuple(*layout_names, time_in_grid=is_tabular)
 
-        return Batch.collate(data)
+        variables = list(payload["variables"])
+        if data.shape[layout.axis("variables", ndim=data.ndim)] != len(variables):
+            raise ValueError(
+                f"Dataset {dataset_name!r}: data carries {data.shape[layout.axis('variables', ndim=data.ndim)]} "
+                f"variables but {len(variables)} names were given."
+            )
+
+        timedeltas = payload.get("timedeltas")
+        if timedeltas is not None:
+            timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32).reshape(-1).to(device=data.device)
+
+        boundaries = payload.get("boundaries")
+        if boundaries is not None:
+            boundaries = tuple(slice(int(start), int(stop)) for start, stop in boundaries)
+
+        return SourceSample(
+            data=data,
+            variables=variables,
+            layout=layout,
+            statistics=self._statistics_for(dataset_name, variables),
+            grid_size=None if is_tabular else coordinates.shape[0],
+            coordinates_are_static=self.is_dataset_static[dataset_name] and not is_tabular,
+            coordinates=coordinates,
+            timedeltas=timedeltas,
+            boundaries=boundaries,
+        )
+
+    def get_batch(self, data: dict[str, dict]) -> Batch:
+        """Collate the per-dataset payloads into a single-sample Batch."""
+        return Batch.collate(
+            {dataset_name: self._source_sample(dataset_name, payload) for dataset_name, payload in data.items()},
+        )
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
@@ -274,10 +341,8 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         unwrapped = {}
         for dataset_name, sample in batch.items():
-            is_tabular = self._is_tabular(dataset_name)
-
-            data, coordinates, layout = sample.data, sample.coordinates, layout = sample.layout
-            if is_tabular:
+            data, coordinates, layout = sample.data, sample.coordinates, sample.layout
+            if layout.time_in_grid:
                 # Sparse payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
                 coordinates = None if coordinates is None else coordinates[0]

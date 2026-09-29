@@ -35,7 +35,7 @@ from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.loss import get_metric_ranges
 from anemoi.training.losses.scaler_tensor import TENSOR_SPEC
-from anemoi.training.losses.scaler_tensor import grad_scaler
+from anemoi.training.losses.scaler_tensor import with_loss_gradient_scaling
 from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
@@ -58,6 +58,7 @@ if TYPE_CHECKING:
     from pytorch_lightning.utilities.types import LRSchedulerTypeUnion
     from pytorch_lightning.utilities.types import OptimizerLRScheduler
     from torch.distributed.distributed_c10d import ProcessGroup
+    from torch_geometric.data import HeteroData
 
     from anemoi.models.data.sources.base import Source
     from anemoi.models.data_indices.collection import IndexCollection
@@ -150,7 +151,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     - `BaseLoss`
     - `IndexCollection`
     - `CosineLRScheduler`
-    - `create_scalers`, `grad_scaler`
+    - `create_scalers`, `with_loss_gradient_scaling`
 
     """
 
@@ -314,10 +315,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 data_indices[dataset_name],
             )
 
-        if config.training.loss_gradient_scaling:
-            # Multi-dataset: register hook for each loss
-            for loss_fn in self.loss.values():
-                loss_fn.register_full_backward_hook(grad_scaler, prepend=False)
+        # Rescales the per-channel loss gradients; applied to the prediction in _evaluate_loss.
+        self.loss_gradient_scaling = config.training.loss_gradient_scaling
 
         self.is_first_step = True
 
@@ -333,7 +332,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.reader_group_size = self.config.dataloader.read_group_size
 
-        self._validate_spatial_processor_target_grid(data_readers)
+        self._validate_spatial_processor_target_grid(self.model.graph_data)
 
         self.grid_dim = -2
 
@@ -707,13 +706,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         return y_pred_full, y_full, final_grid_shard_slice
 
     @staticmethod
-    def _evaluate_loss(loss: Callable, pred: Source, target: Source, **kwargs) -> torch.Tensor:
-        """Check training precision before promoting inputs and evaluating the loss."""
+    def _evaluate_loss(
+        loss: Callable,
+        pred: Source,
+        target: Source,
+        *,
+        gradient_scaling: bool = False,
+        **kwargs,
+    ) -> torch.Tensor:
+        """Check training precision before promoting inputs and evaluating the loss.
+
+        With gradient_scaling, the gradient of the loss with respect to pred is rescaled
+        per channel (see training.loss_gradient_scaling).
+        """
         assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
         assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
         pred = pred.apply_func(lambda data, **_: data.to(dtype), in_place=True)
         target = target.apply_func(lambda data, **_: data.to(dtype), in_place=True)
+        if gradient_scaling:
+            pred = with_loss_gradient_scaling(pred)
         with torch.autocast(device_type=pred.device.type, enabled=False):
             return loss(pred, target, **kwargs)
 
@@ -770,7 +782,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 grid_shard_sizes=self._grid_shard_sizes(y),
             )
 
-        return self._evaluate_loss(loss, y_pred, y, **loss_kwargs)
+        return self._evaluate_loss(loss, y_pred, y, gradient_scaling=self.loss_gradient_scaling, **loss_kwargs)
 
     def _compute_metrics(
         self,
@@ -1007,12 +1019,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Spatial preprocessing (e.g. CrossGridProjector for downscaling).
         # Owned by the model; applied before normalization so projectors see raw values.
-        for ds_name, projector in self.model.spatial_pre_processors.items():
-            if ds_name in batch:
-                batch[ds_name] = projector(
-                    batch[ds_name],
-                    model_comm_group=self.model_comm_group,
-                )
+        batch = self.model.apply_spatial_pre_processors(batch, model_comm_group=self.model_comm_group)
 
         # Debug-log the batch contents (per-dataset shape + layout) so that
         # layout/shape mismatches can be diagnosed from a real run.
@@ -1339,13 +1346,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         LOGGER.info("Optimizer initialized: %s", type(optimizer).__name__)
         LOGGER.info("Optimizer settings: %s", defaults_to_log)
 
-    def _validate_spatial_processor_target_grid(self, data_readers: dict) -> None:
+    def _validate_spatial_processor_target_grid(self, graph_data: HeteroData) -> None:
         """Check each spatial projector's target grid against its dataset's graph nodes."""
         for dataset_name, projector in self.model.spatial_pre_processors.items():
-            dataset_grid_size = data_readers[dataset_name].grid_size
-            if dataset_grid_size is None:
-                # Skip validation for datasets with variable number of samples (i.e. observations)
+            if dataset_name not in graph_data.node_types:
+                # Datasets on a dynamic graph (e.g. observations) have no static node set.
                 continue
+            dataset_grid_size = graph_data[dataset_name].num_nodes
 
             if projector.output_grid_size != dataset_grid_size:
                 msg = (

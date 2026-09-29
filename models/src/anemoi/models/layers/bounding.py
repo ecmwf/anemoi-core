@@ -152,7 +152,7 @@ class NormalizedReluBounding(BaseBounding):
 
     def forward(self, x: "Source") -> "Source":
         data_index = self._get_indices(x.name_to_index)
-        norm_min_val = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.data.device)
+        norm_min_val = self._compute_norm_min_val(x.name_to_index, x.statistics).to(x.device)
         x = x.apply_func(self.bound, indices=data_index, norm_min_val=norm_min_val)
         return x
 
