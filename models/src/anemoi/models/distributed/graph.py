@@ -73,15 +73,15 @@ def shard_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to shard
+        dimension along which to shard.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
     gather_in_backward : bool
-        perform gather in backward, default True
+        perform gather in backward, default True.
 
     Returns
     -------
@@ -99,13 +99,13 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -123,9 +123,9 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -149,13 +149,17 @@ def sync_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
+    gather_in_fwd : bool, optional
+        If True, gather the shards in the forward pass and split the gradient
+        again in the backward pass. If False, pass the input through unchanged
+        and only all-reduce the gradient. Default True.
 
     Returns
     -------
@@ -173,13 +177,13 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes.
     mgroup : ProcessGroup
-        model communication group
+        model communication group.
 
     Returns
     -------
@@ -449,7 +453,7 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Parameters
     ----------
     input_ : Tensor
-        Local node features, shape ``(num_local_nodes, ...)``.
+        Local source node features, shape ``(num_local_src_nodes, ...)``.
     halo_info : HaloInfo
         Per-rank halo exchange metadata (from :func:`build_halo_info`).
     mgroup : ProcessGroup
@@ -458,7 +462,7 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Returns
     -------
     Tensor
-        ``(num_local_nodes + num_halo_nodes, ...)`` — local + halo features.
+        ``(num_local_src_nodes + num_halo_nodes, ...)`` — local + halo features.
     """
     return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
 
@@ -477,7 +481,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
     def forward(ctx, input_, halo_info_, mgroup_):
         ctx.send_indices = halo_info_.send_indices
         ctx.recv_counts = halo_info_.recv_counts
-        ctx.num_local_nodes = halo_info_.num_local_nodes
+        ctx.num_local_src_nodes = halo_info_.num_local_src_nodes
         ctx.comm_group = mgroup_
         if mgroup_:
             return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
@@ -491,7 +495,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
                     grad_output,
                     ctx.send_indices,
                     ctx.recv_counts,
-                    ctx.num_local_nodes,
+                    ctx.num_local_src_nodes,
                     ctx.comm_group,
                 ),
                 None,
