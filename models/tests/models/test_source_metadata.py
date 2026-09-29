@@ -15,9 +15,10 @@ from anemoi.models.preprocessing.normalizer import InputNormalizer
 from tests.batch_builders import build_batch
 
 
-def _batch(variables):
+def _batch(variables, coordinates=None):
     return build_batch(
         data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+        coordinates={"grid": torch.zeros(3, 2)} if coordinates is None else coordinates,
         layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables=variables,
     )
@@ -30,13 +31,13 @@ def test_view_requires_matching_unique_variable_names(variables):
 
 
 def test_statistics_and_coordinates_are_required_by_the_consuming_operation():
+    # A source cannot be built without geometry: graph construction always needs it.
+    with pytest.raises(ValueError, match="requires coordinates"):
+        _batch({"grid": ["a", "b"]}, coordinates={})
     view = _batch({"grid": ["a", "b"]})["grid"]
     assert view.statistics == {}
-    assert view.coordinates is None
-    # Metadata-free arithmetic is legitimate; graph construction needs geometry.
+    # Metadata-free arithmetic is legitimate; normalization needs statistics.
     torch.testing.assert_close(view.apply_func(lambda data, **kwargs: data + 1).data, torch.ones_like(view.data))
-    with pytest.raises(ValueError, match="requires coordinates"):
-        view.flatten()
     normalizer = InputNormalizer({"default": "mean-std"})
     with pytest.raises(ValueError, match="requires statistics"):
         normalizer.get_norm_parameters(view.statistics, view.name_to_index, torch.device("cpu"))
@@ -89,8 +90,14 @@ def test_model_output_cast_and_variable_metadata_agree():
     torch.testing.assert_close(output.data, torch.ones(2, 1, 1, 3, 1))
 
 
-@pytest.mark.parametrize("shape", [(6,), (1, 2, 3, 2), (3, 3), (1, 3, 2)])
-def test_gridded_flatten_rejects_invalid_coordinate_rank_or_shape(shape):
-    view = _batch({"grid": ["a", "b"]})["grid"].clone(coordinates=torch.zeros(shape))
-    with pytest.raises(ValueError, match="coordinates must have shape"):
+@pytest.mark.parametrize("shape", [(6,), (1, 2, 3, 2), (1, 3, 2)])
+def test_gridded_source_rejects_coordinates_that_are_not_one_static_grid(shape):
+    view = _batch({"grid": ["a", "b"]})["grid"]
+    with pytest.raises(ValueError, match=r"coordinates must have shape \(grid, 2\)"):
+        view.clone(coordinates=torch.zeros(shape))
+
+
+def test_gridded_flatten_rejects_coordinates_without_latlon_pairs():
+    view = _batch({"grid": ["a", "b"]})["grid"].clone(coordinates=torch.zeros(3, 3))
+    with pytest.raises(ValueError, match=r"coordinates must have a shape of \(nodes, 2\)"):
         view.flatten()

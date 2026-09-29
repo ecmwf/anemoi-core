@@ -10,13 +10,18 @@
 import numpy as np
 import torch
 from omegaconf import DictConfig
+from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
+from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
+from tests.batch_builders import build_batch
+
+GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 
 
 def _idx_list(idx) -> list[int] | None:
@@ -104,6 +109,24 @@ def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
     return model
+
+
+def _configure_sampling_model(model: AnemoiTransportTendModelEncProcDec, grid_size: int) -> None:
+    """Attach the metadata ``_make_sampling_batch`` needs to build the sampling batches."""
+    model.statistics = {"data": {}}
+    model.is_dataset_static = {"data": True}
+    model._graph_data = HeteroData()
+    model._graph_data["data"].x = torch.zeros(grid_size, 2)
+
+
+def _gridded_batch(data: torch.Tensor, variables: list[str]):
+    return build_batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(data.shape[-2], 2)},
+        layouts={"data": GRIDDED_LAYOUT},
+        variables={"data": variables},
+        statistics={"data": {}},
+    )
 
 
 def test_compute_tendency_uses_expected_indices() -> None:
@@ -281,24 +304,26 @@ def test_apply_reference_state_truncation_without_shards() -> None:
 
 def test_before_sampling_keeps_reference_time_dimension() -> None:
     model = _make_model()
+    _configure_sampling_model(model, grid_size=3)
 
-    batch = {"data": torch.randn(2, 4, 3, 2)}
+    batch = {"data": torch.randn(2, 4, 3, 3)}
     pre_processors = {"data": IdentityProcessor()}
 
     (xs, x_t0s), grid_shard_sizes = model._before_sampling(
         batch,
         pre_processors,
-        n_step_input=3,
+        n_step_input={"data": 3},
         model_comm_group=None,
     )
 
     assert grid_shard_sizes is None
-    assert xs["data"].shape == (2, 3, 1, 3, 2)
-    assert x_t0s["data"].shape == (2, 1, 1, 3, 2)
+    assert xs["data"].data.shape == (2, 3, 1, 3, 3)
+    assert x_t0s["data"].data.shape == (2, 1, 1, 3, 3)
 
 
 def test_before_sampling_projects_input_and_reference_with_source_shards(monkeypatch) -> None:
     model = _make_model()
+    _configure_sampling_model(model, grid_size=2)
     comm_group = object()
     source_grid_shard_sizes = [4, 4]
     target_grid_shard_sizes = [2, 2]
@@ -322,22 +347,22 @@ def test_before_sampling_projects_input_and_reference_with_source_shards(monkeyp
     monkeypatch.setattr(transport_model_module, "shard_tensor", lambda tensor, *_args, **_kwargs: tensor)
 
     (xs, x_t0s), grid_shard_sizes = model._before_sampling(
-        {"data": torch.randn(1, 3, 8, 1)},
+        {"data": torch.randn(1, 3, 8, 3)},
         {"data": Processors([])},
-        n_step_input=2,
+        n_step_input={"data": 2},
         model_comm_group=comm_group,
         spatial_pre_processors=torch.nn.ModuleDict({"data": projector}),
     )
 
     assert projector.received_shard_sizes == [source_grid_shard_sizes, source_grid_shard_sizes]
     assert grid_shard_sizes == {"data": target_grid_shard_sizes}
-    assert xs["data"].shape[-2] == 2
-    assert x_t0s["data"].shape[-2] == 2
+    assert xs["data"].data.shape[-2] == 2
+    assert x_t0s["data"].data.shape[-2] == 2
 
 
 def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.n_step_output = 2
+    model.n_step_output = {"data": 2}
 
     # Two different reference timesteps; training-style behavior should always use the last one.
     ref = torch.zeros((1, 2, 1, 2, 1), dtype=torch.float32)
@@ -356,8 +381,9 @@ def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
     model.apply_reference_state_truncation = _mock_reference_state
     model.add_tendency_to_state = _spy_add_tendency
 
-    out = {"data": torch.ones((1, 2, 1, 2, 3), dtype=torch.float32)}
-    before_sampling_data = ({}, {"data": torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32)})
+    out = _gridded_batch(torch.ones((1, 2, 1, 2, 3), dtype=torch.float32), ["a", "b", "c"])
+    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32), ["a"])
+    before_sampling_data = (x_t0, x_t0)
     post_processors = torch.nn.ModuleDict({"data": IdentityProcessor()})
 
     post_tend = StepwiseProcessors(["6h", "12h"])
@@ -386,7 +412,7 @@ def test_after_sampling_reinserts_nans() -> None:
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
 
     def _identity_ref(x, *_args, **_kwargs):
         return x
@@ -397,8 +423,10 @@ def test_after_sampling_reinserts_nans() -> None:
     model.apply_reference_state_truncation = _identity_ref
     model.add_tendency_to_state = _passthrough_add_tendency
 
-    out = {"data": torch.ones((1, 1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)}
-    before_sampling_data = ({}, {"data": torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32)})
+    out_data = torch.ones((1, 1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
+    out = _gridded_batch(out_data, list(data_indices.model.output.ordered_names))
+    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32), ["a"])
+    before_sampling_data = (x_t0, x_t0)
 
     result = model._after_sampling(
         out,
@@ -410,6 +438,6 @@ def test_after_sampling_reinserts_nans() -> None:
         post_processors_tendencies={"data": Processors([["imputer", imputer]], inverse=True)},
     )["data"]
 
-    expected = imputer.inverse_transform(out["data"], in_place=False)
+    expected = imputer.inverse_transform(out_data, in_place=False)
 
     assert torch.allclose(result, expected, equal_nan=True)

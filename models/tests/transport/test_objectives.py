@@ -35,7 +35,8 @@ def test_edm_model_preconditioning_handles_sparse_targets() -> None:
     noised = build_batch(
         data={"obs": [torch.ones(2, 1), torch.full((3, 1), 2.0)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(3, 2)]},
-        metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
+        timedeltas={"obs": [torch.zeros(2), torch.zeros(3)]},
+        boundaries={"obs": [(slice(0, 2),), (slice(0, 3),)]},
         layouts={"obs": TensorLayout(grid=0, variables=1)},
         variables={"obs": ["x"]},
         statistics={"obs": {}},

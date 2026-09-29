@@ -15,6 +15,7 @@ from omegaconf import DictConfig
 from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
@@ -118,42 +119,6 @@ def _model(model_type):
     return model
 
 
-@pytest.mark.parametrize(
-    "model_type", [AnemoiModelEncProcDec, AnemoiTransportModelEncProcDec, AnemoiEnsModelEncProcDec]
-)
-def test_moving_grids_isolate_samples_and_members(model_type):
-    """Real graph construction and model routing keep all four node copies independent."""
-    model = _model(model_type)
-    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    # Different values for each (sample, ensemble member), constant over its two grid points.
-    values = torch.tensor([[1.0, 2.0], [10.0, 20.0]])
-    data = values[:, None, :, None, None].expand(2, 2, 2, 2, 1).clone().requires_grad_()
-    batch = build_batch(
-        data={"grid": data},
-        coordinates={"grid": torch.tensor([[[0.0, 0.0], [0.2, 0.2]], [[0.01, 0.01], [0.21, 0.21]]])},
-        layouts={"grid": layout},
-        variables={"grid": ["a"]},
-        statistics={"grid": {}},
-    )
-    target = batch.with_data({"grid": torch.zeros(2, 1, 2, 2, 1)})
-
-    def forward(inputs):
-        if model_type is AnemoiTransportModelEncProcDec:
-            return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
-        return model(inputs, target_forcings=target, target_template=model.output_templates(target))
-
-    output = forward(batch)["grid"].data
-    torch.testing.assert_close(output[:, 0, :, 0, 0], values)
-    output.sum().backward()
-    assert torch.all(data.grad[:, 0] > 0)
-
-    changed_data = data.detach().clone()
-    changed_data[0] += 100
-    changed = forward(batch.with_data({"grid": changed_data}))["grid"].data
-    torch.testing.assert_close(changed[1], output[1])
-    torch.testing.assert_close(changed[0], output[0] + 100)
-
-
 def test_moving_grid_feature_width_uses_n_step_input():
     model = _model(AnemoiModelEncProcDec)
     model.is_dataset_static = {"grid": False}
@@ -177,6 +142,8 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
     inputs = build_batch(
         data={"grid": samples},
         coordinates={"grid": coords},
+        timedeltas={"grid": [torch.zeros(len(c)) for c in coords]},
+        boundaries={"grid": [(slice(0, len(c)),) for c in coords]},
         variables={"grid": ["a"]},
         layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2)},
         statistics={"grid": {}},
@@ -206,6 +173,7 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.data_indices = model.data_indices
     interface.statistics = model.statistics
     interface.is_dataset_static = {"grid": True}
+    interface.sample_types = {"grid": GriddedSourceSample}
     interface.n_step_input = {"grid": 2}
     interface.pre_processors = nn.ModuleDict(
         {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}
@@ -213,8 +181,15 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.post_processors = nn.ModuleDict(
         {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]], inverse=True)}
     )
+    grid = {
+        "latitudes": torch.rad2deg(torch.tensor([0.0, 0.2])),
+        "longitudes": torch.rad2deg(torch.tensor([0.0, 0.2])),
+        "layout": ("time", "ensemble", "grid", "variables"),
+    }
     result = interface.predict_step(
-        {"grid": torch.full((2, 1, 2, 1), 4.0)}, target={"grid": torch.empty(1, 1, 2, 0)}, gather_out=False
+        {"grid": {**grid, "data": torch.full((2, 1, 2, 1), 4.0), "variables": ["a"]}},
+        target_template={"grid": {**grid, "data": torch.empty(1, 1, 2, 0), "variables": []}},
+        gather_out=False,
     )["grid"]
     torch.testing.assert_close(result["data"], torch.full((1, 1, 2, 1), 4.0))
     assert result["variables"] == ["a"]

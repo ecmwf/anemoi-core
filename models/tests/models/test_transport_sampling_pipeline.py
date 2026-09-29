@@ -114,10 +114,10 @@ def _target_template(model: AnemoiTransportModelEncProcDec, data: dict[str, torc
     template_data = {
         name: torch.empty(
             sample.shape[0],
-            model.n_step_output,
+            model.n_step_output[name],
             sample.shape[2],
             sample.shape[-2],
-            0,
+            len(model.data_indices[name].model.output.ordered_names),
             device=sample.device,
             dtype=sample.dtype,
         )
@@ -137,7 +137,8 @@ def _sparse_batch(
     return build_batch(
         data={name: data},
         coordinates={name: coordinates},
-        metadata={name: {"boundaries": [(slice(0, shape[0]),) for shape in data_shapes]}},
+        timedeltas={name: [torch.zeros(shape[0]) for shape in data_shapes]},
+        boundaries={name: [(slice(0, shape[0]),) for shape in data_shapes]},
         layouts={name: TensorLayout(grid=0, variables=1)},
         variables={name: variables},
         statistics={name: {}},
@@ -152,7 +153,7 @@ def _sparse_target_template(
 ) -> Batch:
     return _sparse_batch(
         name=name,
-        data_shapes=[(node_count, 0) for node_count in node_counts],
+        data_shapes=[(node_count, len(variables)) for node_count in node_counts],
         variables=variables,
     )
 
@@ -201,7 +202,8 @@ def test_transport_conditioning_uses_sparse_target_node_counts() -> None:
     target = build_batch(
         data={"obs": [torch.empty(2, 1), torch.empty(4, 1)]},
         coordinates={"obs": [torch.zeros(2, 2), torch.zeros(4, 2)]},
-        metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 4),)]}},
+        timedeltas={"obs": [torch.zeros(2), torch.zeros(4)]},
+        boundaries={"obs": [(slice(0, 2),), (slice(0, 4),)]},
         layouts={"obs": layout},
         variables={"obs": ["a"]},
         statistics={"obs": {}},
@@ -238,7 +240,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         statistics={},
         layout=layout,
         boundaries=[(slice(0, 3),)],
-        timedeltas=[torch.zeros(3)],
+        timedeltas=[torch.tensor([1.0, 2.0, 3.0])],
     )
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_input(
@@ -249,7 +251,7 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
     assert x_skip is None
     assert shard_sizes is None
     assert batch_sizes == (3,)
-    assert timedeltas is None
+    torch.testing.assert_close(timedeltas, y_noised.timedeltas[0])
     assert x_data_latent.shape == (3, 2 + 1 + 4)
     torch.testing.assert_close(x_data_latent[:, :2], torch.zeros(3, 2))
     torch.testing.assert_close(x_data_latent[:, 2:3], torch.full((3, 1), 5.0))
@@ -519,7 +521,8 @@ def test_transport_decoder_combines_corrupted_target_with_explicit_target_featur
     batch = build_batch(
         data={"obs": [torch.ones(3, 1)]},
         coordinates={"obs": [torch.zeros(3, 2)]},
-        metadata={"obs": {"boundaries": [(slice(0, 3),)]}},
+        timedeltas={"obs": [torch.zeros(3)]},
+        boundaries={"obs": [(slice(0, 3),)]},
         layouts={"obs": layout},
         variables={"obs": ["a"]},
         statistics={"obs": {}},
@@ -565,7 +568,7 @@ def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
     (xs,), grid_shard_sizes = model._before_sampling(
         batch,
         pre_processors,
-        n_step_input=3,
+        n_step_input={"data": 3},
         model_comm_group=None,
     )
 
@@ -576,6 +579,7 @@ def test_before_sampling_non_sharded_returns_none_grid_shapes() -> None:
 
 def test_before_sampling_replaces_source_grid_shard_sizes(monkeypatch) -> None:
     model = _transport_model_stub()
+    _configure_sampling_model(model, {"data": (1, 1, 2)})
     comm_group = object()
     source_grid_shard_sizes = [4, 4]
     target_grid_shard_sizes = [2, 2]
@@ -596,13 +600,13 @@ def test_before_sampling_replaces_source_grid_shard_sizes(monkeypatch) -> None:
     (xs,), grid_shard_sizes = model._before_sampling(
         {"data": torch.randn(1, 2, 8, 1)},
         {"data": IdentityProcessor()},
-        n_step_input=1,
+        n_step_input={"data": 1},
         model_comm_group=comm_group,
         spatial_pre_processors=torch.nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
     )
 
     assert grid_shard_sizes == {"data": target_grid_shard_sizes}
-    assert xs["data"].shape[-2] == 2
+    assert xs["data"].data.shape[-2] == 2
 
 
 def test_after_sampling_postprocesses_source_views_and_returns_data() -> None:
@@ -646,10 +650,10 @@ def test_make_sampling_batch_shards_full_template_coordinates_for_local_data(
 ) -> None:
     model = _transport_model_stub()
     _configure_sampling_model(model, {"data": (1, 1, 5)})
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
 
     template = build_batch(
-        data={"data": torch.empty(1, 1, 1, 5, 0)},
+        data={"data": torch.empty(1, 1, 1, 5, 1)},
         coordinates={"data": torch.arange(10, dtype=torch.float32).reshape(5, 2)},
         metadata={"static_coords": frozenset({"data"})},
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
@@ -699,7 +703,7 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
     }
     model = _transport_model_stub()
     _configure_sampling_model(model, {"ds_a": (2, 3, 4), "ds_b": (2, 3, 4)})
-    model.n_step_output = 2
+    model.n_step_output = {"ds_a": 2, "ds_b": 2}
 
     x_for_sampling_batch = _sampling_batch(model, x_for_sampling)
     target_template = _target_template(model, x_for_sampling)
@@ -733,7 +737,7 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
         batch=batch,
         pre_processors={"ds_a": IdentityProcessor(), "ds_b": IdentityProcessor()},
         post_processors={"ds_a": IdentityProcessor(), "ds_b": IdentityProcessor()},
-        n_step_input=2,
+        n_step_input={"ds_a": 2, "ds_b": 2},
         target_template=target_template,
     )
 
@@ -790,7 +794,7 @@ def test_sample_passes_zero_terminated_schedule_to_sampler(
         },
         "sampler": {"sampler": "dummy"},
     }
-    model.n_step_output = 2
+    model.n_step_output = {"ds_a": 2, "ds_b": 2}
     model.num_output_channels = {"ds_a": 3, "ds_b": 4}
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
@@ -835,7 +839,7 @@ def test_edm_sparse_sampling_uses_target_template_shapes(monkeypatch: pytest.Mon
         "sampling_schedule": {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.1, "num_steps": 2},
         "sampler": {"sampler": "spy"},
     }
-    model.n_step_output = 1
+    model.n_step_output = {"obs": 1}
     model.num_output_channels = {"obs": 1}
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
@@ -880,7 +884,7 @@ def test_stochastic_interpolant_sparse_sampling_uses_target_template_shapes(
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 2},
         "sampler": {"sampler": "spy_vector"},
     }
-    model.n_step_output = 1
+    model.n_step_output = {"obs": 1}
     model.num_output_channels = {"obs": 1}
     _configure_sampling_model(model, {"obs": (2, 1, 1)})
 
@@ -900,7 +904,7 @@ def test_transport_sampling_requires_target_template() -> None:
         "sampling_schedule": {"schedule_type": "linear", "sigma_max": 1.0, "sigma_min": 0.1, "num_steps": 2},
         "sampler": {"sampler": "heun"},
     }
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
     model.num_output_channels = {"data": 1}
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
@@ -945,7 +949,7 @@ def test_tendency_sparse_sampling_rejects_sparse_obs(monkeypatch: pytest.MonkeyP
         "sampler": {"sampler": "calling"},
     }
     model.edm = EdmSettings(sigma_data=1.0)
-    model.n_step_output = 1
+    model.n_step_output = {"obs": 1}
     model.num_output_channels = {"obs": 1}
     model._graph_name_hidden = "hidden"
     model.node_attributes = _EmptyNodeAttributes()
@@ -1003,14 +1007,14 @@ def test_sample_dispatches_stochastic_interpolant_to_default_heun_sampler(
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
         "sampler": {"sampler": "heun"},
     }
-    model.n_step_output = 2
+    model.n_step_output = {"ds_a": 2}
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
     model.build_sampling_source = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].data.shape[0],
-            model.n_step_output,
+            model.n_step_output["ds_a"],
             x["ds_a"].data.shape[2],
             x["ds_a"].data.shape[-2],
             model.num_output_channels["ds_a"],
@@ -1066,14 +1070,14 @@ def test_sample_can_use_deterministic_vector_field_sampler_for_stochastic_interp
         "sampling_schedule": {"schedule_type": "unit_time", "num_steps": 3},
         "sampler": {"sampler": "heun"},
     }
-    model.n_step_output = 2
+    model.n_step_output = {"ds_a": 2}
     model.num_output_channels = {"ds_a": 3}
     model._forward_transport_network = lambda _x, y, *_args, **_kwargs: y
     _configure_sampling_model(model, {"ds_a": (6, 3, 5)})
     model.build_sampling_source = lambda x, **_kwargs: {
         "ds_a": torch.zeros(
             x["ds_a"].data.shape[0],
-            model.n_step_output,
+            model.n_step_output["ds_a"],
             x["ds_a"].data.shape[2],
             x["ds_a"].data.shape[-2],
             model.num_output_channels["ds_a"],
@@ -1146,7 +1150,7 @@ def test_transport_source_builder_postprocesses_reference_source(monkeypatch: py
 def test_tendency_sampling_source_can_use_reference_state() -> None:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="reference_state"))
-    model.n_step_output = 2
+    model.n_step_output = {"ds_a": 2}
     model.num_output_channels = {"ds_a": 2}
     model.data_indices = {
         "ds_a": SimpleNamespace(
@@ -1167,7 +1171,7 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
         statistics={"ds_a": {}},
     )
 
-    source = model.build_sampling_source(x, target_template=x.with_data({"ds_a": x_data[..., :0]}))
+    source = model.build_sampling_source(x, target_template=x.select(variables={"ds_a": [0, 2]}))
 
     expected = x_data[:, -1:, :, :, :].index_select(-1, torch.tensor([0, 2])).expand(-1, 2, -1, -1, -1)
     torch.testing.assert_close(source["ds_a"], expected)
@@ -1232,7 +1236,7 @@ def test_sample_end_to_end_multi_dataset_real_sampler(
         },
         "sampler": {"sampler": sampler_name, **sampler_config},
     }
-    model.n_step_output = 2
+    model.n_step_output = {"dataset_a": 2, "dataset_b": 2}
     model.num_output_channels = {"dataset_a": 3, "dataset_b": 2}
     model.transport_model_objective = EDMDiffusionModelObjective()
     model.edm = EdmSettings(sigma_data=1.0)
@@ -1324,6 +1328,8 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
         data={"obs": [torch.empty(2, 3, 0), torch.empty(2, 2, 0)]},
         layouts={"obs": layout},
         coordinates={"obs": coordinates},
+        timedeltas={"obs": [torch.zeros(3), torch.zeros(2)]},
+        boundaries={"obs": [(slice(0, 3),), (slice(0, 2),)]},
         variables={"obs": []},
     )
     samples = [torch.ones(2, 3, 1), torch.full((2, 2, 1), 2.0)]
@@ -1332,6 +1338,6 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
 
     assert batch["obs"].layout == layout
     assert batch["obs"].ensemble_size == 2
-    assert batch["obs"].grid_size == 5
+    assert [coords.shape[0] for coords in batch["obs"].coordinates] == [3, 2]
     for actual, expected in zip(batch["obs"].data, samples, strict=True):
         torch.testing.assert_close(actual, expected)

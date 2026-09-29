@@ -67,7 +67,7 @@ class TestGNNBaseMapper:
     def graph_provider(self, fake_graph, device):
         provider = create_graph_provider(
             graph=fake_graph[("nodes", "to", "nodes")],
-            edge_attributes=["edge_attr1", "edge_attr2"],
+            edge_attribute_names=["edge_attr1", "edge_attr2"],
             src_size=self.NUM_SRC_NODES,
             dst_size=self.NUM_DST_NODES,
             trainable_size=6,

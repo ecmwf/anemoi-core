@@ -18,6 +18,7 @@ from anemoi.training.utils.time_indices import normalize_time_indices
 
 if TYPE_CHECKING:
     from anemoi.models.data import Batch
+    from anemoi.models.data import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -154,7 +155,7 @@ class BaseTask(ABC):
         batch: "Batch",
         data_indices: dict[str, IndexCollection],
         **kwargs,
-    ) -> tuple["Batch", "Batch"]:
+    ) -> tuple["Batch", dict[str, "Template"], "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
@@ -168,8 +169,10 @@ class BaseTask(ABC):
 
         Returns
         -------
-        tuple[Batch, Batch]: (target, target_forcing)
+        tuple[Batch, dict[str, Template], Batch]: (target, target_template, target_forcing)
             target holds the target tensors per dataset, shape (bs, num_outputs, ensemble, grid, full_nvar)).
+            target_template describes what the model predicts at the target nodes: the model's output
+            variables, in the model's output order, with their statistics, and no data.
             target_forcing contains the output-time forcing variables used to
             condition the decoder, preserving coordinates, timedeltas,
             metadata and layouts.
@@ -195,7 +198,24 @@ class BaseTask(ABC):
         }
         target_forcing = target_tensors.select(variables=var_indices)
 
-        return target_tensors, target_forcing
+        return target_tensors, self.get_target_template(target_tensors, data_indices), target_forcing
+
+    @staticmethod
+    def get_target_template(
+        targets: "Batch",
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, "Template"]:
+        """Return what the model predicts at the nodes of ``targets``, one template per dataset.
+
+        The targets carry every variable of a dataset; each template keeps the model's output
+        variables, in the model's output order, together with their statistics.
+        """
+        templates = {}
+        for dataset_name, source in targets.items():
+            output_names = data_indices[dataset_name].model.output.ordered_names
+            positions = [source.name_to_index[name] for name in output_names]
+            templates[dataset_name] = source.template().select_variables(positions)
+        return templates
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""

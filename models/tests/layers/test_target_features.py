@@ -18,6 +18,7 @@ import pytest
 import torch
 from torch import Tensor
 
+from anemoi.models.data import FlatSource
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.models.target_features import TARGET_FEATURE_REGISTRY
@@ -122,6 +123,11 @@ class TargetFeatureTestCase:
         encoded_shape = (self.BATCH_SIZE * self.ENSEMBLE_SIZE * model_init.num_nodes, spec.input_dim)
         return torch.rand(encoded_shape, dtype=torch.float32)
 
+    @pytest.fixture
+    def target_spec(self, x_input_data: GriddedSource) -> FlatSource:
+        """Flat target nodes the decoder is asked to predict at: the input grid."""
+        return x_input_data.template().flatten()
+
 
 class TestTargetFeatures(TargetFeatureTestCase):
     """Test the width each target feature contributes to the decoder target input."""
@@ -144,6 +150,7 @@ class TestTargetFeatures(TargetFeatureTestCase):
         model_init: FakeModelConfig,
         x_input_data: GriddedSource,
         x_encoded_data: Tensor,
+        target_spec: FlatSource,
     ) -> None:
         """Test that the target feature has the expected dimension and produces the correct tensor shape."""
         feature = create_decoding_target_features([feature_name], [self.DATASET], model)
@@ -153,7 +160,12 @@ class TestTargetFeatures(TargetFeatureTestCase):
 
         # Test feature shape
         out = feature.tensor(
-            x_input_data, x_encoded_data, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+            x_input_data,
+            x_encoded_data,
+            x_input_data,
+            target_spec,
+            batch_size=self.BATCH_SIZE,
+            dataset_name=self.DATASET,
         )
         ensemble_size, num_nodes, n_step_input = self.ENSEMBLE_SIZE, model_init.num_nodes, model_init.n_step_input
         var_idx = model_init.specs[self.DATASET].forcing_idx
@@ -161,7 +173,12 @@ class TestTargetFeatures(TargetFeatureTestCase):
         assert out.shape == (num_rows, feature.dim)
 
         out = feature.tensor(
-            x_input_data, x_encoded_data, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+            x_input_data,
+            x_encoded_data,
+            x_input_data,
+            target_spec,
+            batch_size=self.BATCH_SIZE,
+            dataset_name=self.DATASET,
         )
         if feature_name == "forcings":
             # Test forcing specific shape and content
@@ -179,12 +196,12 @@ class TestTargetFeatures(TargetFeatureTestCase):
             assert out is x_encoded_data
             with pytest.raises(ValueError, match="requires the encoder output for dataset 'data'"):
                 feature.tensor(
-                    x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+                    x_input_data, None, x_input_data, target_spec, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
                 )
         elif feature_name == "coordinates":
             # Test coordinates feature requires dataset_name to be provided
             with pytest.raises(AssertionError, match="dataset_name must be provided"):
-                feature.tensor(x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE)
+                feature.tensor(x_input_data, None, x_input_data, target_spec, batch_size=self.BATCH_SIZE)
 
     def test_composite_dim_is_the_sum_of_its_features(self, model: SimpleNamespace) -> None:
         """Test that the composite feature's dimension is the sum of its child features."""
@@ -200,12 +217,13 @@ class TestTargetFeatures(TargetFeatureTestCase):
         spec: DatasetSpec,
         model: SimpleNamespace,
         x_input_data: GriddedSource,
+        target_spec: FlatSource,
     ) -> None:
         """Test that a composite feature concatenates its child features in the declared order."""
         composite = create_decoding_target_features(["coordinates", "trainable_parameters"], [self.DATASET], model)
 
         out = composite.tensor(
-            x_input_data, None, x_input_data.flatten(), batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+            x_input_data, None, x_input_data, target_spec, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
         )
 
         num_nodes = model_init.num_nodes

@@ -637,9 +637,9 @@ def test_plot_loss_temporal_downscaler():
     outputs = _step_output(
         [{"data": torch.randn(batch_size, 1, 1, nlatlon, nvar)}],
     )
-    # get_targets returns (target, target_forcing); the callback keeps the target Source.
+    # get_targets returns (target, target_template, target_forcing); the callback keeps the target Source.
     target_batch = _make_gridded_batch(torch.randn(batch_size, 1, 1, nlatlon, nvar))
-    pl_module.task.get_targets = MagicMock(return_value=(target_batch, None))
+    pl_module.task.get_targets = MagicMock(return_value=(target_batch, None, None))
     pl_module.task.get_metric_name = MagicMock(return_value="")
     # The loss value is irrelevant here (we assert on the figure count); return a plain tensor
     # so ``reduce_to_last_dim`` yields a per-variable vector.
@@ -700,7 +700,7 @@ def test_plot_loss_single_step_transport():
     target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
     callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{}]
-    pl_module.task.get_targets.return_value = (target_batch, None)
+    pl_module.task.get_targets.return_value = (target_batch, None, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (
@@ -760,7 +760,7 @@ def test_plot_loss_forecaster():
     target_batch = _make_gridded_batch(torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))
     callback.loss = {"data": MagicMock(return_value=torch.randn(batch_size, n_step_output, 1, nlatlon, nvar))}
     pl_module.task.steps.return_value = [{"rollout_step": i} for i in range(output_times)]
-    pl_module.task.get_targets.return_value = (target_batch, None)
+    pl_module.task.get_targets.return_value = (target_batch, None, None)
     pl_module.task.get_metric_name.return_value = ""
 
     with (

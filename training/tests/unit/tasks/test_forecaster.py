@@ -328,8 +328,31 @@ def test_forecaster_get_targets_returns_correct_number_of_time_steps() -> None:
         layouts={"data": layout},
         variables={"data": list(_NAME_TO_INDEX)},
     )
-    y, _target = task.get_targets(batch, data_indices)
+    y, _template, _forcing = task.get_targets(batch, data_indices)
     assert y["data"].data.shape[1] == 1  # multistep_output=1
+
+
+def test_forecaster_get_targets_template_describes_model_outputs() -> None:
+    """The target template holds the model's output variables, in model order, at the target nodes."""
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    forcing = [next(iter(_NAME_TO_INDEX))]
+    data_indices = {"data": _make_minimal_index_collection(_NAME_TO_INDEX, forcing=forcing)}
+    b, e, g, v = 2, 1, 4, len(_NAME_TO_INDEX)
+    batch = build_batch(
+        data={"data": torch.randn(b, 3, e, g, v)},
+        coordinates={"data": torch.rand(g, 2)},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": list(_NAME_TO_INDEX)},
+    )
+    y, template, forcings = task.get_targets(batch, data_indices)
+
+    template = template["data"]
+    assert not hasattr(template, "data")
+    assert template.variables == data_indices["data"].model.output.ordered_names
+    assert forcing[0] not in template.variables
+    assert forcings["data"].variables == forcing
+    assert template.time_size == y["data"].time_size == 1
+    assert torch.equal(template.coordinates, y["data"].coordinates)
 
 
 def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> None:
@@ -346,7 +369,7 @@ def test_forecaster_get_targets_raises_when_batch_is_short_of_time_steps() -> No
         layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={"data": list(_NAME_TO_INDEX)},
     )
-    targets, _ = task.get_targets(batch, data_indices, rollout_step=0)
+    targets, _, _ = task.get_targets(batch, data_indices, rollout_step=0)
     assert targets["data"].data.shape[1] == 1
 
     task.rollout.increase(current_epoch=0)

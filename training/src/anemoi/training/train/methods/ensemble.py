@@ -179,8 +179,8 @@ class EnsembleTraining(BaseTrainingModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
 
-    def _member_template(self, targets: Batch) -> dict[str, Template]:
-        """What the model predicts for the tiled members of ``targets``.
+    def _member_template(self, templates: dict[str, Template]) -> dict[str, Template]:
+        """What the model predicts for the tiled members, given the task's target ``templates``.
 
         The decoder reads its target node count from the template, so it must describe as many
         members as the tiled input. Only the member count changes: the targets themselves keep
@@ -188,7 +188,7 @@ class EnsembleTraining(BaseTrainingModule):
         """
         return {
             name: template.with_ensemble_size(template.ensemble_size * self.nens_per_device)
-            for name, template in self.output_templates(targets).items()
+            for name, template in templates.items()
         }
 
     def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
@@ -305,9 +305,10 @@ class EnsembleTraining(BaseTrainingModule):
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
         for step_index, task_step_kwargs in enumerate(task_steps):
-            # get_targets returns (targets, target_forcings): the full target slice used for the
-            # loss, and the output-time forcing variables that condition the decoder.
-            raw_targets, target_forcings = self.task.get_targets(
+            # get_targets returns (targets, target_template, target_forcings): the full target slice
+            # used for the loss, what the model predicts at the target nodes, and the output-time
+            # forcing variables that condition the decoder.
+            raw_targets, target_template, target_forcings = self.task.get_targets(
                 batch,
                 data_indices=self.data_indices,
                 **task_step_kwargs,
@@ -320,7 +321,7 @@ class EnsembleTraining(BaseTrainingModule):
             y_pred = self(
                 x,
                 target_forcings=target_forcings,
-                target_template=self._member_template(y),
+                target_template=self._member_template(target_template),
                 **task_step_kwargs,
             )
 

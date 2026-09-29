@@ -76,7 +76,7 @@ class PerTimestepMetrics(Callback):
         """Compute metrics per timestep from the validation predictions, without another forward pass."""
         # Use the first (and typically only) task step's predictions, and the targets of that same step
         first_step_kwargs = next(iter(pl_module.task.steps("validation")))
-        raw_y, _ = pl_module.task.get_targets(batch, data_indices=pl_module.data_indices, **first_step_kwargs)
+        raw_y, _, _ = pl_module.task.get_targets(batch, data_indices=pl_module.data_indices, **first_step_kwargs)
         y_targets = pl_module.preprocess_targets(raw_y)
         y_preds = y_preds_list[0]
 

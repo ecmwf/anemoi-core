@@ -69,7 +69,7 @@ def test_forecaster_requires_timedeltas_when_node_encoding_is_configured() -> No
 
 def test_forecaster_input_dimensions_include_configured_timedelta_features() -> None:
     model = _model_with_timedelta_attributes()
-    model.is_dataset_static = {"obs": False}
+    model.n_step_input = {"obs": 1}  # tabular datasets embed a single step per node
     model.num_input_channels = {"obs": 5}
     model.node_attributes = SimpleNamespace(num_trainable_parameters={"obs": 4})
 
@@ -104,6 +104,7 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
         view,
         None,
         view,
+        view.template(),
         batch_size=1,
         dataset_name="obs",
     )
@@ -161,6 +162,7 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
         view,
         encoder_output,
         view,
+        view.template(),
         batch_size=1,
         dataset_name="obs",
     )
