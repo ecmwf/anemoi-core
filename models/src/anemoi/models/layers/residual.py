@@ -61,6 +61,28 @@ class BaseResidualConnection(nn.Module, ABC):
         return x.unsqueeze(1).expand(-1, n_step_output, -1, -1, -1)
 
 
+class NoOpResidualConnection(BaseResidualConnection):
+    """Disables the data-grid additive skip for every variable.
+
+    Returns zeros so ``x_out += x_skip`` in ``_assemble_output`` is a no-op, and
+    the network predicts absolute values instead of tendencies.
+    """
+
+    def __init__(self, **_) -> None:
+        super().__init__()
+        LOGGER.info("NoOpResidualConnection: data-grid residual disabled for all variables")
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes=None,
+        model_comm_group=None,
+        n_step_output: int | None = None,
+    ) -> torch.Tensor:
+        out = torch.zeros_like(x[:, 0, ...])
+        return self._expand_time(out, n_step_output)
+
+
 class SkipConnection(BaseResidualConnection):
     """Skip connection module
 
@@ -92,20 +114,17 @@ class SkipConnection(BaseResidualConnection):
         super().__init__()
         self.step = step
 
-        mask: torch.Tensor | None = None
-        hit_names: list[str] = []
+        # Only register the buffer when an exclusion is actually needed. This
+        # keeps old pickled checkpoints (without `_skip_mask`) working: forward
+        # uses `getattr(..., None)` so a missing attribute is treated as "no mask".
         if exclude and data_indices is not None:
             name_to_index = data_indices.model.input.name_to_index
             hit_names = [n for n in exclude if n in name_to_index]
             if hit_names:
                 mask = torch.ones(len(name_to_index))
                 mask[[name_to_index[n] for n in hit_names]] = 0.0
-        if mask is not None:
-            self.register_buffer("_skip_mask", mask, persistent=False)
-            LOGGER.info("SkipConnection: data-grid residual disabled for %s", hit_names)
-        else:
-            # Sentinel: no exclusion for this dataset.
-            self._skip_mask = None
+                self.register_buffer("_skip_mask", mask, persistent=False)
+                LOGGER.info("SkipConnection: data-grid residual disabled for %s", hit_names)
 
     def forward(
         self,
@@ -116,8 +135,10 @@ class SkipConnection(BaseResidualConnection):
     ) -> torch.Tensor:
         """Return the last timestep of the input sequence."""
         x_skip = x[:, self.step, ...]  # x shape: (batch, time, ens, nodes, features)
-        if self._skip_mask is not None:
-            x_skip = x_skip * self._skip_mask.to(x_skip.dtype)
+        # `getattr` handles old checkpoints where `_skip_mask` was never registered.
+        skip_mask = getattr(self, "_skip_mask", None)
+        if skip_mask is not None:
+            x_skip = x_skip * skip_mask.to(x_skip.dtype)
         return self._expand_time(x_skip, n_step_output)
 
 

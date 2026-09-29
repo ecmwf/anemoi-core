@@ -18,6 +18,12 @@ from pydantic import model_validator
 from anemoi.utils.schemas import BaseModel
 
 
+class NoOpResidualConnectionSchema(BaseModel):
+    """Schema for the no-op residual connection (disables the data-grid additive skip)."""
+
+    target_: Literal["anemoi.models.layers.residual.NoOpResidualConnection"] = Field(..., alias="_target_")
+
+
 class SkipConnectionSchema(BaseModel):
     """Schema for skip connection residuals."""
 
@@ -153,6 +159,7 @@ ResidualConnectionSchema = Annotated[
     SkipConnectionSchema
     | TruncatedConnectionSchema
     | ScalarOrnsteinConnectionSchema
-    | SpectralOrnsteinConnectionSchema,
+    | SpectralOrnsteinConnectionSchema
+    | NoOpResidualConnectionSchema,
     Field(discriminator="target_"),
 ]
