@@ -35,7 +35,7 @@ def reference_state_sampling_source(
     x: dict[str, Data],
     *,
     data_indices: dict[str, Any],
-    n_step_output: int,
+    n_step_output: dict[str, int],
 ) -> dict[str, Data]:
     """Use the latest input state as the source field, selecting model-output variables."""
     sources = {}
@@ -58,8 +58,8 @@ def reference_state_sampling_source(
             raise ValueError(msg) from exc
         input_idx = torch.as_tensor(input_positions, device=x_data.device, dtype=torch.long)
         source = x_data[:, -1:, :, :, :].index_select(-1, input_idx)
-        if n_step_output > 1:
-            source = source.expand(-1, n_step_output, -1, -1, -1)
+        if n_step_output[dataset_name] > 1:
+            source = source.expand(-1, n_step_output[dataset_name], -1, -1, -1)
         sources[dataset_name] = source
     return sources
 

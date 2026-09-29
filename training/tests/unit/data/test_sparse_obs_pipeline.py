@@ -26,8 +26,10 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.data import GriddedSourceSample
+from anemoi.models.data import TabularSourceSample
+from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.batch import TensorLayout
 from anemoi.training.data.data_reader import ObservationDataReader
 
 _DATASET_NAME = "npp_atms"
@@ -99,23 +101,22 @@ def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
     return reader
 
 
-def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> dict:
+def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> TabularSourceSample:
     """Build a sparse sample matching the ObservationDataReader contract."""
     return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(slice(0, n_times))
 
 
-def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> dict:
+def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> GriddedSourceSample:
     coords = torch.stack(
         [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],
         dim=-1,
     )
-    return {
-        "data": torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
-        "coordinates": coords,
-        "metadata": {},
-        "layout": TensorLayout(time=0, ensemble=1, grid=2, variables=3),
-        "variables": [f"v{i}" for i in range(vars_)],
-    }
+    return GriddedSourceSample(
+        data=torch.arange(t * e * grid * vars_, dtype=torch.float32).reshape(t, e, grid, vars_),
+        coordinates=coords,
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        variables=[f"v{i}" for i in range(vars_)],
+    )
 
 
 # ---------------------------------------------- ObservationDataReader.get_sample
@@ -129,10 +130,10 @@ def test_get_sample_returns_unified_contract() -> None:
     sample = reader.get_sample(slice(0, 2))
     reader.data.__getitem__.assert_called_once_with(slice(0, 2))
 
-    assert {"data", "layout", "coordinates", "timedeltas", "metadata"}.issubset(sample)
+    assert isinstance(sample, TabularSourceSample)
     # Each sample has one ensemble member and no explicit time axis.
     assert sample.data.shape == (1, n, v)
-    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+    assert sample.layout == TensorLayout(ensemble=0, grid=1, variables=2)
     assert sample.data.dtype == torch.float32
     np.testing.assert_allclose(sample.data[0].numpy(), payload.data)
 
@@ -219,9 +220,9 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
         assert all(isinstance(s, slice) for s in entry)
 
 
-def test_collate_rejects_sparse_dataset_in_static_set() -> None:
-    samples = [{"obs": _make_obs_sample()}, {"obs": _make_obs_sample(n=6)}]
-    with pytest.raises(ValueError, match="sparse"):
+def test_collate_rejects_mixed_sample_kinds_for_one_dataset() -> None:
+    samples = [{"obs": _make_obs_sample()}, {"obs": _make_grid_sample()}]
+    with pytest.raises(TypeError, match="single SourceSample subclass"):
         Batch.collate(samples)
 
 

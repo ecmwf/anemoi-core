@@ -18,6 +18,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sample import TabularSourceSample
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -36,8 +38,10 @@ class AnemoiModelInterface(torch.nn.Module):
         Configuration settings for the model.
     id : str
         A unique identifier for the model instance.
-    n_step_input : int
-        Number of input timesteps provided to the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     statistics : dict
         Statistics for the data.
     metadata : dict
@@ -60,8 +64,8 @@ class AnemoiModelInterface(torch.nn.Module):
         self,
         *,
         config: DictConfig,
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
         statistics: dict,
         data_indices: dict,
         metadata: dict,
@@ -79,8 +83,10 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
+
         self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
-        self.data_layouts = {name: reader.layout.with_batch_dim() for name, reader in data_readers.items()}
+        self.sample_types = {name: reader.sample_type for name, reader in data_readers.items()}
+
         self._build_model()
         self._update_metadata()
 
@@ -89,6 +95,7 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         statistics: dict,
         data_indices: dict,
+        dataset_name: str,
         statistics_tendencies: dict | None = None,
     ) -> tuple[
         Processors,
@@ -123,6 +130,7 @@ class AnemoiModelInterface(torch.nn.Module):
             processors_configs,
             data_indices,
             statistics_tendencies,
+            dataset_name,
         )
         return pre_processors, post_processors, pre_processors_tendencies, post_processors_tendencies
 
@@ -143,6 +151,7 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         data_indices: dict,
         statistics_tendencies: dict | None,
+        dataset_name: str,
     ) -> tuple[Processors | StepwiseProcessors | None, Processors | StepwiseProcessors | None]:
         if statistics_tendencies is None:
             return None, None
@@ -151,7 +160,7 @@ class AnemoiModelInterface(torch.nn.Module):
             return self._build_processor_pair(processors_configs, data_indices, statistics_tendencies)
 
         lead_times = list(statistics_tendencies.get("lead_times") or [])
-        if self.n_step_output == 1:
+        if self.n_step_output[dataset_name] == 1:
             step_stats = statistics_tendencies.get(lead_times[0]) if lead_times else None
             stats_for_tendencies = step_stats or statistics_tendencies
             return self._build_processor_pair(processors_configs, data_indices, stats_for_tendencies)
@@ -182,6 +191,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 data_config[dataset_name].processors,
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
+                dataset_name,
                 self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
             )
             self.pre_processors[dataset_name] = pre
@@ -203,7 +213,6 @@ class AnemoiModelInterface(torch.nn.Module):
             data_indices=self.data_indices,
             statistics=self.statistics,
             is_dataset_static=self.is_dataset_static,
-            data_layouts=self.data_layouts,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
@@ -274,7 +283,7 @@ class AnemoiModelInterface(torch.nn.Module):
         The payload carries ``data``, ``latitudes`` / ``longitudes`` (degrees), ``layout``
         (per-sample axis names, no batch axis) and ``variables``; tabular datasets also carry
         ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time window).
-        Statistics, ``time_in_grid`` and whether the grid is static come from the checkpoint.
+        Statistics and the dataset kind (the reader's ``sample_type``) come from the checkpoint.
         The payload is not modified.
         """
         for key in ("data", "latitudes", "longitudes", "layout", "variables"):
@@ -298,9 +307,7 @@ class AnemoiModelInterface(torch.nn.Module):
             raise ValueError(
                 f"Dataset {dataset_name!r}: data of shape {tuple(data.shape)} does not match the layout {layout_names}."
             )
-        # time_in_grid cannot be read off the axis names, so it comes from the dataset kind.
-        is_tabular = self.data_layouts[dataset_name].time_in_grid
-        layout = TensorLayout.from_tuple(*layout_names, time_in_grid=is_tabular)
+        layout = TensorLayout.from_tuple(*layout_names)
 
         variables = list(payload["variables"])
         if data.shape[layout.axis("variables", ndim=data.ndim)] != len(variables):
@@ -309,24 +316,24 @@ class AnemoiModelInterface(torch.nn.Module):
                 f"variables but {len(variables)} names were given."
             )
 
-        timedeltas = payload.get("timedeltas")
-        if timedeltas is not None:
-            timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32).reshape(-1).to(device=data.device)
+        common = {
+            "data": data,
+            "variables": variables,
+            "layout": layout,
+            "statistics": self._statistics_for(dataset_name, variables),
+            "coordinates": coordinates,
+        }
+        sample_type = self.sample_types[dataset_name]
+        if not issubclass(sample_type, TabularSourceSample):
+            return sample_type(**common, grid_size=coordinates.shape[0])
 
-        boundaries = payload.get("boundaries")
-        if boundaries is not None:
-            boundaries = tuple(slice(int(start), int(stop)) for start, stop in boundaries)
-
-        return SourceSample(
-            data=data,
-            variables=variables,
-            layout=layout,
-            statistics=self._statistics_for(dataset_name, variables),
-            grid_size=None if is_tabular else coordinates.shape[0],
-            coordinates_are_static=self.is_dataset_static[dataset_name] and not is_tabular,
-            coordinates=coordinates,
-            timedeltas=timedeltas,
-            boundaries=boundaries,
+        for key in ("timedeltas", "boundaries"):
+            if payload.get(key) is None:
+                raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the tabular sample.")
+        return sample_type(
+            **common,
+            timedeltas=torch.as_tensor(payload["timedeltas"], dtype=torch.float32).reshape(-1).to(device=data.device),
+            boundaries=tuple(slice(int(start), int(stop)) for start, stop in payload["boundaries"]),
         )
 
     def get_batch(self, data: dict[str, dict]) -> Batch:
@@ -342,10 +349,14 @@ class AnemoiModelInterface(torch.nn.Module):
         unwrapped = {}
         for dataset_name, sample in batch.items():
             data, coordinates, layout = sample.data, sample.coordinates, sample.layout
-            if layout.time_in_grid:
-                # Sparse payloads keep the batch as the outer list; unwrap the one sample.
+            if isinstance(sample, TabularSource):
+                # Tabular payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
-                coordinates = None if coordinates is None else coordinates[0]
+                coordinates = coordinates[0]
+                tabular_payload = {
+                    "timedeltas": sample.timedeltas[0],
+                    "boundaries": [(int(s.start), int(s.stop)) for s in sample.boundaries[0]],
+                }
             else:
                 batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
                 if batch_axis is not None:
@@ -364,15 +375,8 @@ class AnemoiModelInterface(torch.nn.Module):
                 "longitudes": coords_deg[:, 1],
                 "variables": sample.variables,
                 "layout": layout.axis_names,
+                **tabular_payload,
             }
-
-            if sample.timedeltas is not None:
-                payload["timedeltas"] = sample.timedeltas
-
-            if sample.boundaries is not None:
-                sample_bounds = sample.boundaries[0]
-                payload["boundaries"] = [(int(s.start), int(s.stop)) for s in sample_bounds]
-
             unwrapped[dataset_name] = payload
 
         return unwrapped

@@ -347,7 +347,6 @@ def _make_gridded_batch(tensor: torch.Tensor, *, dataset_name: str = "data") -> 
     return build_batch(
         data={dataset_name: tensor},
         coordinates={dataset_name: coordinates},
-        static_coords=frozenset({dataset_name}),
         layouts={dataset_name: TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
         variables={dataset_name: [f"v{i}" for i in range(num_vars)]},
         statistics={dataset_name: {}},
@@ -376,7 +375,7 @@ def _make_sparse_batch(
         coordinates={dataset_name: [coordinates]},
         boundaries={dataset_name: boundaries},
         timedeltas={dataset_name: [torch.arange(input_nodes + output_nodes, dtype=torch.float32)]},
-        layouts={dataset_name: TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={dataset_name: TensorLayout(grid=0, variables=1)},
         variables={dataset_name: [chr(ord("a") + i) for i in range(num_vars)]},
         statistics={dataset_name: {}},
     )

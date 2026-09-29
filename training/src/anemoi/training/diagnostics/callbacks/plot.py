@@ -32,6 +32,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.models.data import Batch
 from anemoi.models.data import Source
+from anemoi.models.data import TabularSource
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
@@ -93,7 +94,7 @@ def _allgather_view(
 
 
 def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
-    """Return whether ``dataset_name`` uses a sparse / tabular (``time_in_grid``) layout.
+    """Return whether ``dataset_name`` is a tabular (observation) source.
 
     The gridded sample / spectrum / histogram plots assume a single lat/lon grid
     shared by the input, target and prediction panels. That does not hold for
@@ -113,8 +114,7 @@ def _is_sparse_dataset(batch: "Batch | dict", dataset_name: str) -> bool:
         ``True`` for sparse/observation datasets, ``False`` otherwise.
     """
     if isinstance(batch, Batch):
-        layout = batch[dataset_name].layout if dataset_name in batch else None
-        return bool(layout is not None and layout.time_in_grid)
+        return dataset_name in batch and isinstance(batch[dataset_name], TabularSource)
     return False
 
 
@@ -630,7 +630,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         # convert back to physical space for plotting.
         feature_indices = pl_module.data_indices[dataset_name].data.output.full
         selected = batch.select(variables={dataset_name: feature_indices})
-        input_view = pl_module.preprocess_targets(selected)[dataset_name].apply_func(lambda t, **_: t.detach().cpu())
+        input_view = pl_module.preprocess_targets(selected)[dataset_name].map_data(lambda t: t.detach().cpu())
         data = self.post_processors[dataset_name](input_view, in_place=False).data[self.sample_idx]
 
         output_tensor = self.process_output_tensor(pl_module, dataset_name, outputs.predictions, members=members)
@@ -661,7 +661,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
                 Source,
             ), f"Expected a prediction of type Source, got {type(prediction)}."
             aligned = self._align_output_metadata(prediction, output_indices_full)
-            processed = post_processor(aligned.apply_func(lambda t, **_: t.detach().cpu()), in_place=False).data
+            processed = post_processor(aligned.map_data(lambda t: t.detach().cpu()), in_place=False).data
             # Gridded views wrap a single ``(batch, ...)`` tensor; tabular/obs views wrap a
             # list of per-sample tensors. Select the requested sample, keeping a leading
             # size-1 axis so per-step outputs can be concatenated along dim 0.
@@ -783,7 +783,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
             output_view = output[dataset_name] if isinstance(output, Batch) else output
             output_view = self._align_output_metadata(output_view, feature_indices)
             output_view = self.post_processors[dataset_name](
-                output_view.apply_func(lambda t, **_: t.detach().cpu()),
+                output_view.map_data(lambda t: t.detach().cpu()),
                 in_place=False,
             )
             return _select_pred_members(output_view.data[self.sample_idx], output_view).numpy()

@@ -22,12 +22,10 @@ import torch
 from rich.console import Console
 from rich.tree import Tree
 from torch.distributed import ProcessGroup
-from torch.utils.data import default_collate
 
-from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sources import make_source
 from anemoi.models.data.sources.base import Source
+from anemoi.models.data.sources.base import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -41,7 +39,7 @@ def _broadcast_to_dict(value, keys: Iterable[str]) -> dict[str, Any]:
     return {key: value for key in keys}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, eq=False, slots=True)
 class Batch:
     """A batch of per-dataset sources.
 
@@ -65,10 +63,9 @@ class Batch:
 
     sources: dict[str, Source]
 
-    def empty(self) -> "Batch":
-        """Return the same batch with no data, but coordinates preserved and boundaries preserved."""
-        empty_sources = {name: source.empty() for name, source in self.sources.items()}
-        return Batch(sources=empty_sources)
+    def template(self) -> dict[str, Template]:
+        """Return every source without its data, keyed by dataset name (see :meth:`Source.template`)."""
+        return {name: source.template() for name, source in self.sources.items()}
 
     @property
     def batch_size(self) -> int:
@@ -261,10 +258,6 @@ class Batch:
             },
         )
 
-    def apply(self, func: Callable, **kwargs) -> "Batch":
-        """Return a new batch with ``func`` applied to every source's data."""
-        return Batch(sources={name: source.apply_func(func, **kwargs) for name, source in self.sources.items()})
-
     def select(self, **kwargs) -> "Batch":
         """Return a new :class:`Batch` with per-dataset selection applied.
 
@@ -313,20 +306,10 @@ class Batch:
     def collate(samples: list[dict[str, SourceSample]] | dict[str, SourceSample]) -> "Batch":
         """Collate per-sample :class:`SourceSample` payloads into a :class:`Batch`.
 
-        Each sample is a mapping ``{dataset_name: SourceSample}``. The sample itself
-        says how it must be collated, so there is no side channel:
-
-        * **Gridded** (``layout.time_in_grid`` false) - every sample has the same
-          shape, so data and (non-static) coordinates are stacked along a new leading
-          batch axis via :func:`torch.utils.data.default_collate`, and the layout is
-          shifted with :meth:`TensorLayout.with_batch_dim`. A sample whose
-          ``coordinates_are_static`` is set reuses the first sample's coordinate
-          tensor by reference - no stacking, no copy.
-        * **Tabular** (``layout.time_in_grid`` true) - the grid extent varies per
-          sample, so data, coordinates, timedeltas, boundaries and shard sizes each
-          become a list of length ``B`` and the per-sample layout stands, the batch
-          axis being the list itself. Shard sizes stay ``None`` when no sample is
-          sharded, since ``None`` is what marks a source as replicated.
+        Each sample is a mapping ``{dataset_name: SourceSample}``. The class of each
+        dataset's sample decides how it is collated (see
+        :meth:`GriddedSourceSample.collate` and :meth:`TabularSourceSample.collate`),
+        so every sample of a dataset must be of the same class.
         """
         if isinstance(samples, dict):
             samples = [samples]
@@ -341,75 +324,14 @@ class Batch:
         sources: dict[str, Source] = {}
         for name, head in first.items():
             per_sample = [sample[name] for sample in samples]
+            sample_cls = type(head)
+            if not isinstance(head, SourceSample) or any(type(s) is not sample_cls for s in per_sample):
+                kinds = sorted({type(s).__name__ for s in per_sample})
+                msg = f"Dataset {name!r} must be collated from samples of a single SourceSample subclass; got {kinds}."
+                raise TypeError(msg)
 
-            if head.is_tabular:
-                data: Any = [s.data for s in per_sample]
-                coordinates = [s.coordinates for s in per_sample]
-                timedeltas = [s.timedeltas for s in per_sample]
-                boundaries = [s.boundaries for s in per_sample]
-                shard_sizes = _collate_tabular_shard_sizes(name, per_sample)
-                layout = head.layout
-            else:
-                data = default_collate([s.data for s in per_sample])
-                coordinates = head.coordinates
-                timedeltas = None
-                boundaries = None
-                shard_sizes = head.shard_sizes
-                layout = head.layout.with_batch_dim()
-
-            _validate_layout_against(name, layout, data)
-
-            sources[name] = make_source(
-                name=name,
-                variables=head.variables,
-                layout=layout,
-                statistics=head.statistics,
-                coordinates_are_static=head.coordinates_are_static,
-                data=data,
-                coordinates=coordinates,
-                timedeltas=timedeltas,
-                boundaries=boundaries,
-                shard_sizes=shard_sizes,
-            )
+            sources[name] = sample_cls.collate(name, per_sample)
 
         batch = Batch(sources)
         LOGGER.debug("Batch.collate produced:\n%r", batch)
         return batch
-
-
-def _collate_tabular_shard_sizes(name: str, per_sample: list[SourceSample]) -> list[Any] | None:
-    """Collate per-sample shard sizes, or ``None`` when no sample is sharded.
-
-    Sources treat ``shard_sizes is None`` as replicated, so a list of ``None``
-    entries would wrongly read as sharded. A mix of sharded and unsharded samples
-    cannot be gathered consistently and is rejected.
-    """
-    shard_sizes = [s.shard_sizes for s in per_sample]
-    n_unsharded = sum(sizes is None for sizes in shard_sizes)
-    if n_unsharded == len(shard_sizes):
-        return None
-    if n_unsharded:
-        msg = f"Dataset {name!r} mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
-        raise ValueError(msg)
-    return shard_sizes
-
-
-def _validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:
-    """Check every non-None axis position is a valid axis of the collated tensor.
-
-    Catches reader-side mistakes early instead of letting them surface as cryptic
-    errors deep inside model code.
-    """
-    ref = data[0] if isinstance(data, list) else data
-    ndim = ref.ndim
-    for axis_name in TensorLayout.AXES:
-        pos = getattr(layout, axis_name)
-        if pos is None:
-            continue
-        if not (-ndim <= pos < ndim):
-            msg = (
-                f"TensorLayout for dataset {name!r} declares {axis_name}={pos} but the "
-                f"collated tensor only has {ndim} dimensions (shape={tuple(ref.shape)}). "
-                f"Layout: {layout!r}."
-            )
-            raise ValueError(msg)

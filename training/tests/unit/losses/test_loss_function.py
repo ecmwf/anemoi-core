@@ -21,6 +21,7 @@ from pytest_mock import MockerFixture
 
 from anemoi.models.data import Source
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import CRPS
 from anemoi.training.losses import FourierCorrelationLoss
@@ -39,7 +40,6 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
-from anemoi.models.data.sources import make_source
 
 spectral_loss_kwargs: dict[type[BaseLoss], dict[str, object]] = {
     LogSpectralDistance: {"transform": "fft2d", "x_dim": 4, "y_dim": 4},
@@ -54,14 +54,13 @@ losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSEL
 
 def _gridded_source_view(data: torch.Tensor) -> Source:
     """Wrap a five-dimensional loss tensor in the current public loss input type."""
-    return make_source(
+    return GriddedSource(
         name="data",
         data=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2, device=data.device),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-        coordinates_are_static=True,
     )
 
 

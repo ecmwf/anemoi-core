@@ -13,11 +13,11 @@ import pytest
 import torch
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.models.base import split_graph_config
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.utils.config import DotDict
-from anemoi.models.data.sources import make_source
 
 
 def _model_with_timedelta_attributes(dtype: str = "float32") -> AnemoiModelEncProcDec:
@@ -70,7 +70,6 @@ def test_forecaster_requires_timedeltas_when_node_encoding_is_configured() -> No
 def test_forecaster_input_dimensions_include_configured_timedelta_features() -> None:
     model = _model_with_timedelta_attributes()
     model.is_dataset_static = {"obs": False}
-    model.data_layouts = {"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)}
     model.num_input_channels = {"obs": 5}
     model.node_attributes = SimpleNamespace(num_trainable_parameters={"obs": 4})
 
@@ -85,14 +84,15 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["coordinates"], ["obs"], model),
     }
-    view = make_source(
+    view = TabularSource(
         name="obs",
         data=[torch.ones(3, 1)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(3, 2)],
         timedeltas=[torch.tensor([-3600.0, 0.0, 3600.0])],
-        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+        layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 3),)],
     )
 
     input_coords, input_features, _, _, batch_sizes, input_timedeltas = model._assemble_input(
@@ -120,14 +120,15 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
     model = _model_with_timedelta_attributes(dtype="float64")
     model.residual = {}
     model.node_attributes = {}
-    view = make_source(
+    view = TabularSource(
         name="obs",
         data=[torch.ones(2, 1, dtype=torch.float32)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],
         timedeltas=[torch.tensor([0.0, 3600.0])],
-        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+        layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 2),)],
     )
 
     _, input_features, _, _, _, _ = model._assemble_input(view, batch_size=1, dataset_name="obs")
@@ -144,14 +145,15 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
     model.decoders_target_input = {
         "obs_decoder": create_decoding_target_features(["encoded_data"], ["obs"], model),
     }
-    view = make_source(
+    view = TabularSource(
         name="obs",
         data=[torch.ones(2, 1)],
         variables=["value"],
         statistics={},
         coordinates=[torch.zeros(2, 2)],
         timedeltas=[torch.tensor([0.0, 3600.0])],
-        layout=TensorLayout(grid=0, variables=1, time_in_grid=True),
+        layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 2),)],
     )
     encoder_output = torch.ones(2, 8)
 

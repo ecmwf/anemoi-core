@@ -58,7 +58,7 @@ def with_loss_gradient_scaling(pred: "Source") -> "Source":
     Predictions that do not require grad (validation) are returned unchanged.
     """
 
-    def alias_with_hook(data: torch.Tensor, **_kwargs) -> torch.Tensor:
+    def alias_with_hook(data: torch.Tensor) -> torch.Tensor:
         if not data.requires_grad:
             return data
         alias = data.view_as(data)
@@ -66,7 +66,7 @@ def with_loss_gradient_scaling(pred: "Source") -> "Source":
         alias.register_hook(lambda grad: grad_scaler(grad, grid_dim))
         return alias
 
-    return pred.apply_func(alias_with_hook, in_place=True)
+    return pred.map_data(alias_with_hook)
 
 
 def reshape_scaler(dims: tuple[str, ...], scaler: torch.Tensor, layout: TensorLayout) -> torch.Tensor:

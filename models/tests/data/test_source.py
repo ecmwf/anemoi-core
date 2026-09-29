@@ -13,34 +13,33 @@ import pytest
 import torch
 
 from anemoi.models.data import Batch
-from anemoi.models.data import SourceSample
+from anemoi.models.data import GriddedSourceSample
+from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import make_source
-from anemoi.models.data.sources.gridded import EmptyGriddedSource
 from anemoi.models.data.sources.gridded import GriddedSource
-from anemoi.models.data.sources.tabular import EmptyTabularSource
+from anemoi.models.data.sources.gridded import GriddedTemplate
 from anemoi.models.data.sources.tabular import TabularSource
+from anemoi.models.data.sources.tabular import TabularTemplate
 from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
-TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 
 
-def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> SourceSample:
+def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSample:
     n_vars = len(variables)
-    return SourceSample(
+    return GriddedSourceSample(
         data=torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
         variables=variables,
         statistics={"mean": torch.arange(n_vars, dtype=torch.float32)},
         layout=GRIDDED_LAYOUT,
         coordinates=torch.zeros(4, 2),
         grid_size=4,
-        coordinates_are_static=True,
     )
 
 
-def tabular_payload(n_points: int = 4) -> SourceSample:
-    return SourceSample(
+def tabular_payload(n_points: int = 4) -> TabularSourceSample:
+    return TabularSourceSample(
         data=torch.ones(1, n_points, 2),
         variables=["t2m", "sp"],
         statistics={"mean": torch.tensor([1.0, 2.0])},
@@ -59,14 +58,13 @@ def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
         layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
         variables={"grid": variables},
         statistics={"grid": {"mean": torch.arange(n_vars, dtype=torch.float32)}},
-        static_coords=("grid",),
     )
 
 
 class TestSourceMetadata:
     def test_rejects_duplicate_variable_names(self) -> None:
         with pytest.raises(ValueError, match="unique variable names"):
-            make_source(
+            GriddedSource(
                 name="grid",
                 variables=["a", "a"],
                 layout=GRIDDED_LAYOUT,
@@ -93,38 +91,71 @@ class TestSourceMetadata:
         assert renamed.name_to_index == {"x": 0, "y": 1, "z": 2}
 
     @pytest.mark.parametrize(
-        ("layout", "expected_type"),
-        [(GRIDDED_LAYOUT, GriddedSource), (TABULAR_LAYOUT, TabularSource)],
-    )
-    def test_make_source_dispatches_on_the_layout(self, layout, expected_type) -> None:
-        if layout.time_in_grid:
-            payload = {
-                "data": [torch.zeros(1, 4, 2)],
-                "coordinates": [torch.zeros(4, 2)],
-                "timedeltas": [torch.zeros(4)],
-                "boundaries": [(slice(0, 4),)],
-            }
-        else:
-            payload = {"data": torch.zeros(1, 1, 4, 2), "coordinates": torch.zeros(4, 2)}
-        view = make_source(name="src", variables=["a", "b"], layout=layout, coordinates_are_static=True, **payload)
-        assert isinstance(view, expected_type)
-        assert view.coordinates_are_static is True
-
-    @pytest.mark.parametrize(
         ("payload", "expected_type"),
-        [(gridded_payload, EmptyGriddedSource), (tabular_payload, EmptyTabularSource)],
+        [(gridded_payload, GriddedTemplate), (tabular_payload, TabularTemplate)],
     )
-    def test_empty_keeps_the_metadata(self, payload, expected_type) -> None:
+    def test_template_keeps_everything_but_the_data(self, payload, expected_type) -> None:
         view = Batch.collate([{"src": payload()}])["src"]
-        empty = view.empty()
+        template = view.template()
 
-        assert isinstance(empty, expected_type)
-        assert empty.data is None
-        assert empty.name == view.name
-        assert empty.variables == view.variables
-        assert empty.layout == view.layout
-        assert empty.statistics is view.statistics
-        assert empty.coordinates_are_static == view.coordinates_are_static
+        assert isinstance(template, expected_type)
+        assert not hasattr(template, "data")
+        assert (template.name, template.variables, template.layout) == (view.name, view.variables, view.layout)
+        assert template.statistics is view.statistics
+        assert template.coordinates is view.coordinates
+        assert (template.batch_size, template.ensemble_size, template.time_size) == (
+            view.batch_size,
+            view.ensemble_size,
+            view.time_size,
+        )
+        assert template.coordinates_are_static == view.coordinates_are_static
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_unflatten_inverts_flatten(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}, {"src": payload()}])["src"]
+        rebuilt = view.template().unflatten(view.flatten().data)
+
+        assert type(rebuilt) is type(view)
+        assert rebuilt.variables == view.variables
+        data, expected = (rebuilt.data, view.data) if isinstance(view.data, list) else ([rebuilt.data], [view.data])
+        assert all(torch.equal(a, b) for a, b in zip(data, expected, strict=True))
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_flatten_matches_the_source_nodes(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}])["src"]
+        flat, nodes = view.flatten(), view.template().flatten()
+
+        assert nodes.data is None
+        torch.testing.assert_close(nodes.coordinates, flat.coordinates)
+        assert nodes.batch_sizes == flat.batch_sizes
+        assert nodes.shard_sizes == flat.shard_sizes
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_template_unflatten_rejects_a_wrong_shape(self, payload) -> None:
+        template = Batch.collate([{"src": payload()}])["src"].template()
+        with pytest.raises(ValueError, match="expects flat data of shape"):
+            template.unflatten(torch.zeros(1, 1))
+
+    def test_template_decodes_its_own_variables(self) -> None:
+        view = gridded_batch()["grid"]
+        template = view.template().with_variables(["z"], {"mean": torch.tensor([5.0])})
+        rows = view.batch_size * view.ensemble_size * view.grid_size
+        out = template.unflatten(torch.ones(rows, view.time_size * 1))
+
+        assert out.variables == ["z"]
+        torch.testing.assert_close(out.statistics["mean"], torch.tensor([5.0]))
+        assert out.data.shape[out.layout.variables] == 1
+
+    def test_template_with_ensemble_size_tiles_the_members(self) -> None:
+        template = Batch.collate([{"obs": tabular_payload()}])["obs"].template().with_ensemble_size(3)
+        assert template.ensemble_size == 3
+        assert template.flatten().batch_sizes == (4, 4, 4)
+
+    @pytest.mark.parametrize("payload", [gridded_payload, tabular_payload])
+    def test_sources_require_data(self, payload) -> None:
+        view = Batch.collate([{"src": payload()}])["src"]
+        with pytest.raises(ValueError, match="requires data"):
+            view.clone(data=None)
 
 
 class TestSourceTransformations:
@@ -178,6 +209,29 @@ class TestSourceTransformations:
         assert selected.statistics["mean"].tolist() == [2.0]
         assert all(sample.shape[selected.layout.variables] == 1 for sample in selected.data)
 
+    def test_map_data_applies_a_tensor_function_and_keeps_metadata(self) -> None:
+        view = gridded_batch()["grid"]
+        mapped = view.map_data(lambda t: t.to(torch.float64))
+        assert mapped.dtype == torch.float64
+        torch.testing.assert_close(mapped.data, view.data.to(torch.float64))
+        assert (mapped.name, mapped.variables, mapped.layout) == (view.name, view.variables, view.layout)
+        assert mapped.coordinates is view.coordinates
+        # the receiver is not mutated
+        assert view.dtype == torch.float32
+
+    def test_map_data_does_not_clone_the_data(self) -> None:
+        view = gridded_batch()["grid"]
+        assert view.map_data(lambda t: t).data is view.data
+
+    def test_map_data_applies_per_sample_on_a_tabular_source(self) -> None:
+        view = Batch.collate([{"obs": tabular_payload(4)}, {"obs": tabular_payload(6)}])["obs"]
+        seen = []
+        mapped = view.map_data(lambda t: seen.append(tuple(t.shape)) or t * 2)
+        assert seen == [(1, 4, 2), (1, 6, 2)]
+        assert all(torch.equal(new, old * 2) for new, old in zip(mapped.data, view.data))
+        assert mapped.timedeltas is view.timedeltas
+        assert mapped.boundaries is view.boundaries
+
 
 class TestCollate:
     def test_unsharded_tabular_samples_collate_to_replicated(self) -> None:
@@ -197,6 +251,34 @@ class TestCollate:
         sharded = replace(tabular_payload(), shard_sizes=[[1, 1], [1, 1]])
         with pytest.raises(ValueError, match="mixes sharded and unsharded"):
             Batch.collate([{"obs": sharded}, {"obs": tabular_payload()}])
+
+    @pytest.mark.parametrize(
+        ("payload", "expected_type"),
+        [(gridded_payload, GriddedSource), (tabular_payload, TabularSource)],
+    )
+    def test_sample_class_decides_the_source_type(self, payload, expected_type) -> None:
+        assert isinstance(Batch.collate([{"src": payload()}])["src"], expected_type)
+
+    def test_mixed_sample_kinds_are_rejected(self) -> None:
+        with pytest.raises(TypeError, match="single SourceSample subclass"):
+            Batch.collate([{"src": gridded_payload()}, {"src": tabular_payload()}])
+
+    def test_plain_dicts_are_rejected(self) -> None:
+        with pytest.raises(TypeError, match="single SourceSample subclass"):
+            Batch.collate([{"src": {"data": torch.zeros(1)}}])
+
+    @pytest.mark.parametrize(
+        ("sample_cls", "layout", "extra"),
+        [
+            (GriddedSourceSample, TABULAR_LAYOUT, {}),
+            (TabularSourceSample, GRIDDED_LAYOUT, {"timedeltas": torch.zeros(4), "boundaries": (slice(0, 4),)}),
+        ],
+    )
+    def test_sample_rejects_a_layout_of_the_other_kind(self, sample_cls, layout, extra) -> None:
+        with pytest.raises(ValueError, match="requires a layout"):
+            sample_cls(
+                data=torch.zeros(1, 4, 2), variables=["a", "b"], layout=layout, coordinates=torch.zeros(4, 2), **extra
+            )
 
 
 class TestBatchTransformations:

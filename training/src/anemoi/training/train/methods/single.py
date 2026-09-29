@@ -53,7 +53,7 @@ class SingleTraining(BaseTrainingModule):
             # the input processors (so NaNs get imputed, etc.)
             target_forcings = self.preprocess_inputs(target_forcings)
 
-            y_pred = self(x, target_forcings=target_forcings, target_template=y.empty())
+            y_pred = self(x, target_forcings=target_forcings, target_template=self.output_templates(y))
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,

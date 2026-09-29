@@ -22,7 +22,9 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
@@ -258,14 +260,14 @@ class BaseAnemoiReader(ABC):
         whether to share coordinate tensors by reference across the batch.
         """
 
+    #: The :class:`~anemoi.models.data.SourceSample` subclass returned by :meth:`get_sample`.
+    #: This is the only record of whether the dataset is gridded or tabular.
+    sample_type: type[SourceSample]
+
     @property
     def is_tabular(self) -> bool:
-        """Return whether the dataset is tabular (2D backing array).
-
-        Kept for backward compatibility with consumers that branched on the
-        legacy flag; new code should use :attr:`is_static_grid` instead.
-        """
-        return len(self.data.shape) == 2
+        """Return whether the reader produces tabular (observation) samples."""
+        return issubclass(self.sample_type, TabularSourceSample)
 
     @property
     def variables(self) -> list[str]:
@@ -328,23 +330,14 @@ class BaseAnemoiReader(ABC):
     def get_sample(
         self,
         time_indices: TimeIndices,
-    ) -> dict:
+    ) -> SourceSample:
         """Return a single per-sample payload.
 
-        Subclasses must return a dict with the unified contract:
-
-        * ``"data"`` — :class:`torch.Tensor`. For gridded datasets the shape
-          is ``(T, E, N, V)``; for sparse observation datasets the shape is
-          ``(E=1, N, V)`` (no leading time axis; per-time structure lives in
-          ``metadata["boundaries"]``).
-        * ``"coordinates"`` — :class:`torch.Tensor` of shape ``(N, 2)`` where
-          the trailing dimension stacks ``(latitude, longitude)`` in
-          **radians**.
-        * ``"timedeltas"`` — *(sparse only)* :class:`torch.Tensor` of shape
-          ``(N,)`` carrying the per-point time offset in seconds. Omitted on
-          gridded datasets, where the time axis is intrinsic to ``"data"``.
-        * ``"metadata"`` — ``dict[str, Any]`` of non-tensor per-sample
-          metadata (empty for gridded; carries ``"boundaries"`` for sparse).
+        Gridded readers return a :class:`GriddedSourceSample` with data of shape
+        ``(T, E, N, V)``. Observation readers return a :class:`TabularSourceSample`
+        with data of shape ``(E=1, N, V)``, per-point ``timedeltas`` and the time
+        windows in ``boundaries``. Coordinates are ``(N, 2)`` ``(latitude, longitude)``
+        in **radians**.
         """
         msg = "Subclasses must implement get_sample() method."
         raise NotImplementedError(msg)
@@ -366,6 +359,8 @@ class BaseAnemoiReader(ABC):
 
 class GriddedDataReader(BaseAnemoiReader, ABC):
     """Gridded dataset reader with static grid."""
+
+    sample_type = GriddedSourceSample
 
     @property
     def layout(self) -> TensorLayout:
@@ -491,15 +486,14 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def get_sample(
         self,
         time_indices: TimeIndices,
-    ) -> dict:
+    ) -> GriddedSourceSample:
         """Return the per-sample payload in the unified contract."""
-        return SourceSample(
+        return GriddedSourceSample(
             data=self.get_data(time_indices),
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
             grid_size=self.grid_size,
-            coordinates_are_static=self.is_static_grid,
             coordinates=self.get_coordinates(time_indices),
             shard_sizes=self.grid_shard_sizes,
         )
@@ -520,10 +514,12 @@ class ObservationDataReader(BaseAnemoiReader):
     :attr:`Batch.metadata` rather than being moved to device.
     """
 
+    sample_type = TabularSourceSample
+
     @property
     def layout(self) -> TensorLayout:
         """Return the tabular per-sample layout."""
-        return TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)
+        return TensorLayout(ensemble=0, grid=1, variables=2)
 
     @property
     def is_static_grid(self) -> bool:
@@ -562,7 +558,7 @@ class ObservationDataReader(BaseAnemoiReader):
     def get_sample(
         self,
         time_indices: TimeIndices,
-    ) -> dict:
+    ) -> TabularSourceSample:
         """Get a sample from the observation dataset.
 
         Parameters
@@ -572,20 +568,10 @@ class ObservationDataReader(BaseAnemoiReader):
 
         Returns
         -------
-        dict
-            ``
-            {
-                "data": (1, N, V) tensor,   # leading size-1 ensemble axis
-                "coordinates": (N, 2) tensor,
-                "timedeltas": (N,) tensor,
-                "metadata": {
-                    "boundaries": ...
-                }
-            }
-            ``
-            with latitudes/longitudes in **radians** to match the gridded reader convention.
-            ``timedeltas`` are kept separate from ``coordinates`` so the model layer can route
-            them independently.
+        TabularSourceSample
+            Data of shape ``(1, N, V)`` (leading size-1 ensemble axis), ``(N, 2)``
+            coordinates in **radians** to match the gridded reader convention, ``(N,)``
+            timedeltas and the per-window ``boundaries``.
         """
         # should return list(window_shard_sizes)
         x = self.data[time_indices]
@@ -607,13 +593,11 @@ class ObservationDataReader(BaseAnemoiReader):
             reader_group_size=self.reader_group_size,
         )
 
-        return SourceSample(
+        return TabularSourceSample(
             data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
-            grid_size=self.grid_size,
-            coordinates_are_static=self.is_static_grid,
             coordinates=coordinates,
             timedeltas=timedeltas,
             boundaries=boundaries,

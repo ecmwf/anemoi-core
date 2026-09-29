@@ -25,7 +25,6 @@ from anemoi.models.models.target_features import CompositeTargetFeature
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
 from anemoi.models.models.target_features import register_target_feature
-from anemoi.models.data.sources import make_source
 
 
 @dataclass
@@ -54,7 +53,7 @@ class FakeModelConfig:
         node_attributes = SimpleNamespace(trainable_tensors={}, num_trainable_parameters={})
         model = SimpleNamespace(
             node_attributes=node_attributes,
-            n_step_input=self.n_step_input,
+            n_step_input={name: self.n_step_input for name in self.specs},
             num_input_channels_forcings={},
             num_input_channels_prognostic={},
             _forcing_input_idx={},
@@ -108,14 +107,13 @@ class TargetFeatureTestCase:
             model_init.num_nodes,
             model_init.num_vars,
         )
-        return make_source(
+        return GriddedSource(
             name=self.DATASET,
             data=torch.rand(shape, dtype=torch.float32),
             coordinates=torch.zeros(model_init.num_nodes, 2),
             variables=[f"v{i}" for i in range(model_init.num_vars)],
             statistics={},
             layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-            coordinates_are_static=True,
         )
 
     @pytest.fixture

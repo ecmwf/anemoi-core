@@ -16,6 +16,7 @@ from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.layers.graph_provider import DynamicGraphProvider
@@ -23,7 +24,6 @@ from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from tests.batch_builders import build_batch
-from anemoi.models.data.sources import make_source
 
 
 class _NearestEdges:
@@ -140,7 +140,7 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     def forward(inputs):
         if model_type is AnemoiTransportModelEncProcDec:
             return model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
-        return model(inputs, target_forcings=target, target_template=target.empty())
+        return model(inputs, target_forcings=target, target_template=model.output_templates(target))
 
     output = forward(batch)["grid"].data
     torch.testing.assert_close(output[:, 0, :, 0, 0], values)
@@ -154,11 +154,10 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     torch.testing.assert_close(changed[0], output[0] + 100)
 
 
-def test_moving_grid_feature_width_uses_time_layout():
+def test_moving_grid_feature_width_uses_n_step_input():
     model = _model(AnemoiModelEncProcDec)
     model.is_dataset_static = {"grid": False}
-    model.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    model.n_step_input = 3
+    model.n_step_input = {"grid": 3}
     model.num_input_channels = {"grid": 2}
     model.dynamic_node_attribute_dims = {}
     # Three timesteps of two variables plus four coordinate features.
@@ -179,7 +178,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         data={"grid": samples},
         coordinates={"grid": coords},
         variables={"grid": ["a"]},
-        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True)},
+        layouts={"grid": TensorLayout(ensemble=0, grid=1, variables=2)},
         statistics={"grid": {}},
     )
     if model_type is AnemoiTransportModelEncProcDec:
@@ -187,7 +186,7 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         output = model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
     else:
         target = inputs.select(variables=[])
-        output = model(inputs, target_forcings=target, target_template=target.empty())
+        output = model(inputs, target_forcings=target, target_template=model.output_templates(target))
     for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
     sum(sample.sum() for sample in output["grid"].data).backward()
@@ -207,8 +206,7 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.data_indices = model.data_indices
     interface.statistics = model.statistics
     interface.is_dataset_static = {"grid": True}
-    interface.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    interface.n_step_input = 2
+    interface.n_step_input = {"grid": 2}
     interface.pre_processors = nn.ModuleDict(
         {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}
     )
@@ -228,13 +226,15 @@ def test_inference_forcing_only_target_preserves_output_metadata():
 def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
 
     samples = [torch.zeros(members, nodes, 1) for nodes in [2, 3]]
-    view = make_source(
+    view = TabularSource(
         name="obs",
         data=samples,
         variables=["a"],
         statistics={},
         coordinates=[torch.zeros(nodes, 2) for nodes in [2, 3]],
-        layout=TensorLayout(ensemble=0, grid=1, variables=2, time_in_grid=True),
+        layout=TensorLayout(ensemble=0, grid=1, variables=2),
+        timedeltas=[torch.zeros(nodes) for nodes in [2, 3]],
+        boundaries=[(slice(0, nodes),) for nodes in [2, 3]],
     )
     noise = torch.arange(1.0, 2 * members + 1).reshape(2, 1, members, 1, 1).requires_grad_()
     model = _model(AnemoiTransportModelEncProcDec)

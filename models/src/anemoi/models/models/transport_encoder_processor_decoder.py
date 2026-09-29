@@ -22,7 +22,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -62,9 +63,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
 
         model_config = DotDict(model_config)
@@ -86,7 +86,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             is_dataset_static=is_dataset_static,
-            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -180,8 +179,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
 
     def _assemble_output(self, x_out: torch.Tensor, x_skip, target: "Source", dtype: torch.dtype, dataset_name: str):
+        # The transport network predicts the conditioned target itself, so the output takes its shape and variables.
         del x_skip
-        pred = target.unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
+        pred = target.template().unflatten(x_out.to(dtype=torch.promote_types(dtype, torch.float32)))
         pred = self.boundings[dataset_name](pred)
 
         return pred
@@ -552,7 +552,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
@@ -565,8 +565,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Input batch after pre-processing.
         pre_processors : dict[str, nn.Module]
             Pre-processing module (already applied).
-        n_step_input : int
-            Number of input timesteps.
+        n_step_input : dict[str, int]
+            Number of input timesteps per node for each dataset.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         spatial_pre_processors : Optional[nn.ModuleDict]
@@ -588,7 +588,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x = x[:, 0 : n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
 
             if model_comm_group is not None:
                 shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
@@ -705,7 +705,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             dataset_grid_shard_sizes = grid_shard_sizes.get(dataset_name) if grid_shard_sizes is not None else None
             if dataset_grid_shard_sizes is None:
                 return coordinates
-            if layout.time_in_grid:
+            if template[dataset_name].is_tabular:
                 raise NotImplementedError("Grid sharding is not supported for sparse transport sampling templates.")
 
             coordinates = coordinates.to(dataset_data.device)
@@ -735,7 +735,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             raise ValueError(msg)
 
-        if layout.time_in_grid:
+        # Without a template the payload is all there is: a list means per-sample (tabular) data.
+        if isinstance(dataset_data, list):
             msg = (
                 "Sparse transport sampling requires a Batch template carrying per-sample coordinates. "
                 f"Dataset '{dataset_name}' has sparse data but no template coordinates."
@@ -771,15 +772,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> Batch:
+        # Without a template the sampling inputs are the raw gridded tensors of predict_step,
+        # which _before_sampling lays out as (batch, time, ensemble, grid, variables).
+        gridded_layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
         source_layouts = (
             {name: template[name].layout for name in template.dataset_names}
             if template is not None
-            else self.data_layouts
-        )
-        static_coords = (
-            template.static_coord_datasets & set(data)
-            if template is not None
-            else frozenset(name for name in data if self.is_dataset_static.get(name, False))
+            else {name: gridded_layout for name in data}
         )
 
         sources = {}
@@ -787,14 +786,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             layout = source_layouts[dataset_name]
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            sources[dataset_name] = make_source(
-                name=dataset_name,
-                variables=self._sampling_variables(dataset_name, variable_space),
-                layout=layout,
-                statistics=self._sampling_statistics(dataset_name, variable_space),
-                coordinates_are_static=dataset_name in static_coords,
-                data=dataset_data,
-                coordinates=self._sampling_coordinates(
+            common = {
+                "name": dataset_name,
+                "variables": self._sampling_variables(dataset_name, variable_space),
+                "layout": layout,
+                "statistics": self._sampling_statistics(dataset_name, variable_space),
+                "data": dataset_data,
+                "coordinates": self._sampling_coordinates(
                     dataset_name,
                     dataset_data,
                     layout=layout,
@@ -802,10 +800,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                     model_comm_group=model_comm_group,
                     grid_shard_sizes=grid_shard_sizes,
                 ),
-                timedeltas=None if template_source is None else template_source.timedeltas,
-                boundaries=None if template_source is None else template_source.boundaries,
-                shard_sizes=None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name),
-            )
+                "shard_sizes": None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name),
+            }
+            # Only a tabular template can supply the timedeltas and boundaries a tabular source needs.
+            if isinstance(template_source, TabularSource):
+                sources[dataset_name] = TabularSource(
+                    **common,
+                    timedeltas=template_source.timedeltas,
+                    boundaries=template_source.boundaries,
+                )
+            else:
+                sources[dataset_name] = GriddedSource(**common)
 
         return Batch(sources)
 
@@ -877,7 +882,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: dict[str, int],
         target_template: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
@@ -899,8 +904,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             Pre-processing module.
         post_processors : dict[str, nn.Module]
             Post-processing module.
-        n_step_input : int
-            Number of input timesteps.
+        n_step_input : dict[str, int]
+            Number of input timesteps to embed per node for each dataset.
         target_template : Batch
             Output Batch template carrying the coordinates, sparse observation
             boundaries, timedeltas and layouts to sample onto.
@@ -1024,7 +1029,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset in self.input_dim.keys():
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self.n_step_input[dataset],
                 "ensemble": 1,
                 "grid": None,  # grid size is dynamic
             }
@@ -1044,9 +1049,8 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         data_indices: dict,
         statistics: dict,
         is_dataset_static: dict[str, bool],
-        data_layouts: dict[str, TensorLayout],
-        n_step_input: int,
-        n_step_output: int,
+        n_step_input: dict[str, int],
+        n_step_output: dict[str, int],
     ) -> None:
         model_config = DotDict(model_config)
 
@@ -1057,7 +1061,6 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             is_dataset_static=is_dataset_static,
-            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -1065,7 +1068,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def _calculate_input_dim(self, dataset_name: str) -> int:
         input_dim = super()._calculate_input_dim(dataset_name)
         if self.condition_on_residual:
-            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
+            input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output[dataset_name]
         return input_dim
 
     @staticmethod
@@ -1108,7 +1111,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 x.data,
                 shard_sizes_data,
                 model_comm_group,
-                n_step_output=self.n_step_output,
+                n_step_output=self.n_step_output[dataset_name],
             )[..., self._internal_input_idx[dataset_name]]
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
@@ -1269,7 +1272,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         self,
         batch: dict[str, torch.Tensor],
         pre_processors: dict[str, nn.Module],
-        n_step_input: int,
+        n_step_input: dict[str, int],
         model_comm_group: Optional[ProcessGroup] = None,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
@@ -1286,7 +1289,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x_in = x[:, 0:n_step_input, None, ...]  # add dummy ensemble dimension as 3rd index
+            x_in = x[:, 0 : n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
             if model_comm_group is not None:
@@ -1359,7 +1362,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
                 # Processors object. Treat it as the only output-step processor.
                 # Multi-output models need an explicit processor for each lead time.
                 assert (
-                    self.n_step_output == 1
+                    self.n_step_output[dataset_name] == 1
                 ), "Per-step tendency processors must be provided for multiple output steps."
                 post_tend = [post_tend]
             assert (
@@ -1421,7 +1424,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         for dataset_name, in_x in x.items():
             grid_shard_sizes_i = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
             x_skip = self.residual[dataset_name](
-                in_x, grid_shard_sizes_i, model_comm_group, n_step_output=self.n_step_output
+                in_x, grid_shard_sizes_i, model_comm_group, n_step_output=self.n_step_output[dataset_name]
             )
             assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
             # Keep only prognostic input variables, matching the tendency reference state.

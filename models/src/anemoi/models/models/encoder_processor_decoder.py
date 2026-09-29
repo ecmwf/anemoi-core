@@ -41,6 +41,7 @@ from anemoi.utils.config import DotDict
 if TYPE_CHECKING:
     from anemoi.models.data.flat import FlatSource
     from anemoi.models.data.sources.base import Source
+    from anemoi.models.data.sources.base import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -334,7 +335,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x.data,
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
-                n_step_output=self.n_step_output,
+                n_step_output=self.n_step_output[dataset_name],
             )
         else:
             x_skip = None
@@ -368,7 +369,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target_forcing: "Source",
-        target_spec: "Source",
+        target_spec: "Template",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -387,8 +388,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Encoder-updated source features, when requested by the decoder configuration.
         x_target_forcing : Source
             Target-side forcing data and coordinates used by decoder target features.
-        target_spec : Source
-            Target-side specification data and coordinates used by decoder target features.
+        target_spec : Template
+            What to decode for this dataset: its nodes (coordinates, timedeltas, sizes) and variables.
         batch_size : int
             Flattened batch size used to assemble target features.
         grid_shard_sizes : DatasetShardSizes or None, optional
@@ -453,7 +454,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             target_coords,
             x_target_node_features,
             grid_shard_sizes,
-            x_target_forcing.flatten().batch_sizes,
+            flat_target_spec.batch_sizes,
             target_timedeltas,
         )
 
@@ -461,24 +462,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x_out: torch.Tensor,
         x_skip: torch.Tensor | None,
-        target: "Source",
+        template: "Template",
         dtype: torch.dtype,
         dataset_name: str,
     ) -> "Source":
         # residual connection (just for the prognostic variables)
         assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
 
-        # clone to make sure we return a copy, not a view
-        # a view cannot be modified in-place by the residual add below without breaking autograd!
-        output_names = self.data_indices[dataset_name].model.output.ordered_names
-        output_positions = [self.data_indices[dataset_name].name_to_index[name] for name in output_names]
-        output_statistics = {name: values[output_positions] for name, values in self.statistics[dataset_name].items()}
-        output_dtype = torch.promote_types(dtype, torch.float32)
-        pred = target.unflatten(
-            x_out.to(output_dtype),
-            variables=output_names,
-            statistics=output_statistics,
-        )
+        # The decoder output becomes a source shaped and named like the template.
+        pred = template.unflatten(x_out.to(torch.promote_types(dtype, torch.float32)))
 
         if x_skip is not None:
             assert (
@@ -719,7 +711,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         batch: Batch,
         target_forcings: Batch,
-        target_template: Batch,
+        target_template: dict[str, "Template"],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -911,17 +903,10 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
                 x_skip_dict.get(dataset_name, None),
-                target_forcings[dataset_name],
+                target_dataset_template,
                 dtype=x_out.dtype,
                 dataset_name=dataset_name,
             )
-
-        # The reconstructed output metadata should match the decoded metadata.
-        for dataset_name in x_out_dict.keys():
-            do_coords_match = target_template[dataset_name].coordinates == x_out_dict[dataset_name].coordinates
-            assert (
-                do_coords_match if isinstance(do_coords_match, bool) else torch.all(do_coords_match)
-            ), "Target and output coordinates must match."
 
         return Batch(x_out_dict)
 
@@ -941,7 +926,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_md = md_dict["metadata_inference"][dataset]
             shapes = {
                 "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
+                "input_timesteps": self.n_step_input[dataset],
                 "ensemble": 1,
                 "grid": dataset_md.get("grid_size"),  # None for tabular data
             }

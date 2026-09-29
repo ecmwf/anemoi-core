@@ -14,14 +14,14 @@ import torch
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.transport.settings import TransportSourceSettings
 from anemoi.models.transport.sources import TransportSourceBuilder
 from anemoi.models.transport.sources import TransportSourceRequest
 from anemoi.models.transport.sources import reference_state_sampling_source
 
-OBS_LAYOUT = TensorLayout.from_tuple("grid", "variables", time_in_grid=True)
+OBS_LAYOUT = TensorLayout.from_tuple("grid", "variables")
 
 
 def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
@@ -29,7 +29,7 @@ def _obs_batch(samples: list[torch.Tensor], variables: list[str]) -> Batch:
     nodes = [sample.shape[0] for sample in samples]
     return Batch(
         {
-            "obs": make_source(
+            "obs": TabularSource(
                 name="obs",
                 variables=variables,
                 layout=OBS_LAYOUT,
@@ -60,7 +60,7 @@ def test_reference_state_sampling_source_selects_latest_input_and_output_variabl
     x = {"data": x_data}
     data_indices = _data_indices_with_positions(("a", "b"), [0, 3])
 
-    source = reference_state_sampling_source(x, data_indices=data_indices, n_step_output=2)
+    source = reference_state_sampling_source(x, data_indices=data_indices, n_step_output={"data": 2})
 
     expected = x_data[:, -1:, :, :, :].index_select(-1, torch.tensor([0, 3])).expand(-1, 2, -1, -1, -1)
     torch.testing.assert_close(source["data"], expected)
@@ -81,7 +81,7 @@ def test_reference_state_sampling_source_rejects_missing_input_variables() -> No
     x = {"data": torch.zeros(1, 2, 1, 3, 4)}
 
     with pytest.raises(ValueError, match="reference_state transport sources require all model-output variables"):
-        reference_state_sampling_source(x, data_indices=data_indices, n_step_output=1)
+        reference_state_sampling_source(x, data_indices=data_indices, n_step_output={"data": 1})
 
 
 def test_reference_state_sampling_source_rejects_sparse_obs() -> None:
@@ -89,7 +89,7 @@ def test_reference_state_sampling_source_rejects_sparse_obs() -> None:
     x = {"obs": [torch.zeros(2, 1)]}
 
     with pytest.raises(NotImplementedError, match="reference_state.*sparse observation"):
-        reference_state_sampling_source(x, data_indices=data_indices, n_step_output=1)
+        reference_state_sampling_source(x, data_indices=data_indices, n_step_output={"obs": 1})
 
 
 def test_sampling_template_supports_sparse_obs_shapes() -> None:

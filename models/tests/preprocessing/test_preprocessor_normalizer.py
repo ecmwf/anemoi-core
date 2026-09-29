@@ -14,8 +14,9 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing.normalizer import InputNormalizer
-from anemoi.models.data.sources import make_source
 
 VARIABLES = ["x", "y", "z", "q", "other"]
 
@@ -36,29 +37,28 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return make_source(
+    return GriddedSource(
         name="gridded",
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(points, 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
     """Wrap a (points, variables) payload in a TabularSource (single tensor)."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return make_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload]],
     )
 
 
@@ -229,18 +229,18 @@ def test_parameter_caching(input_normalizer, make_view, base_payload) -> None:
 
 
 def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     payload_a = torch.Tensor([[1.0, 2.0, 3.0, 4.0, 5.0], [6.0, 7.0, 8.0, 9.0, 10.0]])
     payload_b = payload_a.clone()
-    view = make_source(
+    view = TabularSource(
         name="tabular",
         data=[payload_a, payload_b],
         variables=list(VARIABLES),
         statistics=STATISTICS,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload_a, payload_b]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload_a, payload_b]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload_a, payload_b]],
     )
     out = input_normalizer(view, in_place=False)
     assert len(out.data) == 2

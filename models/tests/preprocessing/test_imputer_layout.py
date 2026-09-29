@@ -20,7 +20,7 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data.batch import TensorLayout
+from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.imputer import ConstantImputer
 
@@ -61,7 +61,7 @@ def test_get_nans_sparse_with_layout():
     x = torch.zeros(4, 3)
     x[1, 0] = float("nan")
     x[2, 1] = float("nan")
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
 
     mask = imputer.get_nans(x, layout=layout)
     assert mask.shape == (4, 3)
@@ -91,7 +91,7 @@ def test_transform_inverse_sparse_roundtrip():
             [0.0, 0.0, 0.0],
         ]
     )
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     transformed = imputer.transform(x.clone(), layout=layout)
     # NaNs replaced by configured constants (1 for "a", 2 for "b").
     assert transformed[0, 0].item() == pytest.approx(1.0)
@@ -130,7 +130,7 @@ def test_loss_mask_training_sparse_has_singleton_batch_dim():
     # (N=4, V=3) with a NaN to ensure the mask is built.
     x = torch.zeros(4, 3)
     x[1, 0] = float("nan")
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
 
     imputer.transform(x.clone(), layout=layout)
     # Expect (1, N, n_outputs) — n_outputs = number of model output vars.

@@ -456,7 +456,7 @@ def test_advance_input_preserves_sparse_batch_data_payload() -> None:
         data={"obs": data},
         coordinates={"obs": coordinates},
         metadata={"obs": {"boundaries": [(slice(0, 2),), (slice(0, 3),)]}},
-        layouts={"obs": TensorLayout(grid=0, variables=1, time_in_grid=True)},
+        layouts={"obs": TensorLayout(grid=0, variables=1)},
         variables={"obs": ["a"]},
         statistics={"obs": {}},
     )

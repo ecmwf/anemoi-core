@@ -14,10 +14,11 @@ import torch
 from omegaconf import DictConfig
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing.imputer import ConstantImputer
 from anemoi.models.preprocessing.imputer import CopyImputer
 from anemoi.models.preprocessing.imputer import InputImputer
-from anemoi.models.data.sources import make_source
 
 VARIABLES = ["x", "y", "z", "q", "other", "prog"]
 
@@ -34,29 +35,28 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
     points, num_vars = payload.shape
     data = payload.reshape(1, 1, points, num_vars).clone()
     layout = TensorLayout(batch=0, time=1, grid=2, variables=3)
-    return make_source(
+    return GriddedSource(
         name="gridded",
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(points, 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 
 def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STATISTICS):
     """Wrap a (points, variables) payload in a TabularSource (single tensor)."""
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    return make_source(
+    layout = TensorLayout(grid=0, variables=1)
+    return TabularSource(
         name="tabular",
         data=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload]],
     )
 
 
@@ -230,18 +230,18 @@ def test_input_imputer_uses_view_statistics(non_default_input_imputer, make_view
 
 
 def test_tabular_multiple_tensors(default_constant_imputer) -> None:
-    layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
+    layout = TensorLayout(grid=0, variables=1)
     base = torch.tensor([[1.0, 2.0, 3.0, np.nan, 5.0, 1.0], [6.0, np.nan, 8.0, 9.0, np.nan, 1.0]])
     expected = torch.tensor([[1.0, 2.0, 3.0, 22.7, 5.0, 1.0], [6.0, 22.7, 8.0, 9.0, 22.7, 1.0]])
-    view = make_source(
+    view = TabularSource(
         name="tabular",
         data=[base.clone(), base.clone()],
         variables=list(VARIABLES),
         statistics=STATISTICS,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [base, base]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [base, base]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [base, base]],
     )
     out = default_constant_imputer.transform(view, in_place=False)
     assert len(out.data) == 2

@@ -169,7 +169,7 @@ class BaseForecaster(BaseTask):
 
         Missing predictions are passed as None to the forecasting task. The
         regular Forecaster rotates these input windows without updating them.
-        Sparse observation datasets (``layout.time_in_grid=True``) pass through unchanged.
+        Tabular (observation) datasets pass through unchanged.
         """
         del rollout_step
         new_data = {}

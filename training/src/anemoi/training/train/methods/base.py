@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     from torch_geometric.data import HeteroData
 
     from anemoi.models.data.sources.base import Source
+    from anemoi.models.data.sources.base import Template
     from anemoi.models.data_indices.collection import IndexCollection
     from anemoi.models.distributed.shapes import DatasetShardSizes
     from anemoi.models.distributed.shapes import ShardSizes
@@ -126,10 +127,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Mapping of variable groups for which to calculate validation metrics.
     output_mask : nn.Module
         Masking module that filters outputs during inference.
-    n_step_input : int
-        Number of input timesteps provided to the model.
-    n_step_output : int
-        Number of output timesteps predicted by the model.
+    n_step_input : dict[str, int]
+        Number of input timesteps provided to the model for each dataset and location.
+    n_step_output : dict[str, int]
+        Number of output timesteps predicted by the model for each dataset and location.
     keep_batch_sharded : bool
         Whether to keep input batches split across GPUs instead of gathering them.
 
@@ -206,8 +207,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         for dataset_name, mask in self.output_mask.items():
             combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
-        self.n_step_input = self.task.num_input_timesteps
-        self.n_step_output = self.task.num_output_timesteps
+        # Define number of input/output timesteps per node for each dataset
+        self.n_step_input = dict.fromkeys(self.dataset_names, self.task.num_input_timesteps)
+        self.n_step_output = dict.fromkeys(self.dataset_names, self.task.num_output_timesteps)
 
         self.model = AnemoiModelInterface(
             config=config,
@@ -351,8 +353,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # set flag if loss and metrics support sharding
         self._check_sharding_support()
-
-        LOGGER.debug("n_step_input: %d", self.n_step_input)
 
         # lazy init model and reader group info, will be set by the DDPGroupStrategy:
         self.model_comm_group_id = 0
@@ -720,8 +720,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
         assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
-        pred = pred.apply_func(lambda data, **_: data.to(dtype), in_place=True)
-        target = target.apply_func(lambda data, **_: data.to(dtype), in_place=True)
+        pred = pred.map_data(lambda data: data.to(dtype))
+        target = target.map_data(lambda data: data.to(dtype))
         if gradient_scaling:
             pred = with_loss_gradient_scaling(pred)
         with torch.autocast(device_type=pred.device.type, enabled=False):
@@ -957,6 +957,19 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def preprocess_inputs(self, batch: Batch) -> Batch:
         """Transform selected model inputs into model-input space."""
         return self._map_dataset_processors(batch, self.model.pre_processors)
+
+    def output_templates(self, targets: Batch) -> dict[str, Template]:
+        """Return what the model predicts at the nodes of ``targets``, one template per dataset.
+
+        The targets carry every variable of a dataset; each template keeps the model's output
+        variables, in the model's output order, together with their statistics.
+        """
+        templates = {}
+        for dataset_name, source in targets.items():
+            output_names = self.data_indices[dataset_name].model.output.ordered_names
+            positions = [source.name_to_index[name] for name in output_names]
+            templates[dataset_name] = source.template().select_variables(positions)
+        return templates
 
     def preprocess_targets(self, batch: Batch) -> Batch:
         """Normalize selected targets while preserving missing values."""

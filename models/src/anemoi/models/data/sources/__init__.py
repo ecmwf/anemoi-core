@@ -7,26 +7,18 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.data.layout import TensorLayout
-
 from .base import Source
+from .base import Template
 from .gridded import GriddedSource
+from .gridded import GriddedTemplate
 from .tabular import TabularSource
+from .tabular import TabularTemplate
 
 __all__ = [
     "GriddedSource",
+    "GriddedTemplate",
     "TabularSource",
+    "TabularTemplate",
     "Source",
-    "make_source",
+    "Template",
 ]
-
-
-def make_source(layout: TensorLayout, **kwargs) -> Source:
-    """Build a source of the kind ``layout`` describes.
-
-    >>> make_source(name="era5", variables=["t"], layout=layout, data=x, coordinates=coords)
-    """
-    if layout.time_in_grid:
-        return TabularSource(layout=layout, **kwargs)
-
-    return GriddedSource(layout=layout, **kwargs)

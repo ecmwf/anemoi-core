@@ -268,7 +268,7 @@ def test_add_tendency_to_state_without_output_pre_processor() -> None:
 def test_apply_reference_state_truncation_without_shards() -> None:
     model = _make_model()
     torch.nn.Module.__init__(model)
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
     model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
 
     x = {"data": torch.arange(1 * 1 * 1 * 2 * 4, dtype=torch.float32).reshape(1, 1, 1, 2, 4)}

@@ -13,7 +13,7 @@ Production code builds a :class:`~anemoi.models.data.batch.Batch` through
 :meth:`Batch.collate` from reader :class:`~anemoi.models.data.sample.SourceSample`
 objects. Tests frequently need the *result* of collation directly - a batch whose
 tensors already carry a batch axis. :func:`build_batch` takes per-dataset dicts
-and assembles the sources with :func:`~anemoi.models.data.sources.make_source`.
+and builds a :class:`TabularSource` for list payloads and a :class:`GriddedSource` otherwise.
 
 An identical copy lives under each package's ``tests/`` directory, since the two
 suites are collected in separate pytest processes and neither package's tests are
@@ -28,7 +28,8 @@ import torch
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sources import make_source
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
@@ -44,7 +45,6 @@ def build_batch(
     variables: Mapping[str, list[str]] | None = None,
     statistics: Mapping[str, Any] | None = None,
     boundaries: Mapping[str, Any] | None = None,
-    static_coords: frozenset[str] | set[str] | tuple[str, ...] = (),
 ) -> Batch:
     """Build an already-collated batch from per-dataset dicts.
 
@@ -59,7 +59,6 @@ def build_batch(
     variables = variables or {}
     statistics = statistics or {}
     boundaries = boundaries or {}
-    static = frozenset(static_coords)
 
     sources: dict[str, Source] = {}
     for name, payload in data.items():
@@ -70,17 +69,22 @@ def build_batch(
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
 
-        sources[name] = make_source(
-            name=name,
-            variables=variables[name],
-            layout=layouts[name],
-            statistics=statistics.get(name, {}),
-            coordinates_are_static=name in static,
-            data=payload,
-            coordinates=coordinates.get(name),
-            timedeltas=timedeltas.get(name),
-            boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
-            shard_sizes=shard_sizes.get(name),
-        )
+        common = {
+            "name": name,
+            "variables": variables[name],
+            "layout": layouts[name],
+            "statistics": statistics.get(name, {}),
+            "data": payload,
+            "coordinates": coordinates.get(name),
+            "shard_sizes": shard_sizes.get(name),
+        }
+        if isinstance(payload, list):
+            sources[name] = TabularSource(
+                **common,
+                timedeltas=timedeltas.get(name),
+                boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
+            )
+        else:
+            sources[name] = GriddedSource(**common)
 
     return Batch(sources)

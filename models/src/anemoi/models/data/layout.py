@@ -22,27 +22,23 @@ class TensorLayout:
     ----------
     batch : int or None
         Position of the batch dimension (``None`` before collation, or for
-        sparse datasets where the batch is the outer ``list[Tensor]``).
+        tabular datasets where the batch is the outer ``list[Tensor]``).
     time : int or None
-        Position of the explicit time dimension. ``None`` when time is
-        folded into the grid axis (sparse observation datasets).
+        Position of the explicit time dimension. ``None`` for tabular datasets,
+        whose time windows are stacked along the grid axis.
     ensemble : int or None
         Position of the ensemble dimension (``None`` when absent).
     grid : int
         Position of the grid / spatial-points dimension.
     variables : int
         Position of the variable (channel) dimension.
-    time_in_grid : bool
-        ``True`` when the time axis is encoded within the grid dimension
-        via ``boundaries`` metadata (sparse observations). ``False`` for
-        gridded datasets that carry an explicit time axis.
 
     Notes
     -----
-    For sparse observation datasets (``time_in_grid=True``) the per-sample
-    inner tensor has shape ``(grid, variables)`` and the batch dimension is
-    represented by the outer Python list (one tensor per sample). ``batch``
-    therefore stays ``None`` even after collation.
+    A layout only describes the axes of a tensor, not the kind of data. Whether a
+    dataset is gridded or tabular is given by its sample and source classes (see
+    :mod:`anemoi.models.data.sample`), which also decide how the layout changes on
+    collation.
     """
 
     batch: int | None = None
@@ -50,23 +46,18 @@ class TensorLayout:
     ensemble: int | None = None
     grid: int = -2
     variables: int = -1
-    time_in_grid: bool = False
 
     #: Logical axis names, in canonical order.
     AXES = ("batch", "time", "ensemble", "grid", "variables")
 
     @classmethod
-    def from_tuple(cls, *args, time_in_grid: bool = False) -> "TensorLayout":
+    def from_tuple(cls, *args) -> "TensorLayout":
         """Create a TensorLayout from a tuple of axis names.
 
         Parameters
         ----------
         *args : str
             Logical axis names in the order they appear in the tensor.
-        time_in_grid : bool, default False
-            True when the time axis is encoded within the grid dimension
-            (sparse observations). False for gridded datasets that carry an
-            explicit time axis.
 
         Returns
         -------
@@ -80,7 +71,6 @@ class TensorLayout:
             ensemble=axis_positions.get("ensemble"),
             grid=axis_positions.get("grid", -2),
             variables=axis_positions.get("variables", -1),
-            time_in_grid=time_in_grid,
         )
 
     @property
@@ -108,11 +98,9 @@ class TensorLayout:
     def with_batch_dim(self) -> "TensorLayout":
         """Return a new layout shifted by +1 to account for a leading batch dim.
 
-        For sparse datasets (``time_in_grid=True``) the batch is
-        represented by the outer ``list[Tensor]`` rather than a tensor
-        dimension; the layout is returned unchanged.
+        Returns the layout unchanged when it already has a batch axis.
         """
-        if self.batch is not None or self.time_in_grid:
+        if self.batch is not None:
             return self
 
         return TensorLayout(
@@ -121,7 +109,6 @@ class TensorLayout:
             ensemble=self.ensemble + 1 if self.ensemble is not None else None,
             grid=self.grid + 1 if self.grid >= 0 else self.grid,
             variables=self.variables + 1 if self.variables >= 0 else self.variables,
-            time_in_grid=self.time_in_grid,
         )
 
     def without_batch_dim(self) -> "TensorLayout":
@@ -138,7 +125,6 @@ class TensorLayout:
             ensemble=self.ensemble - 1 if self.ensemble is not None and self.ensemble > 0 else self.ensemble,
             grid=self.grid - 1 if self.grid > 0 else self.grid,
             variables=self.variables - 1 if self.variables > 0 else self.variables,
-            time_in_grid=self.time_in_grid,
         )
 
     def axis(self, name: str, *, ndim: int | None = None) -> int:
@@ -150,7 +136,7 @@ class TensorLayout:
         ------
         :class:`ValueError`
             if the requested axis is not defined for this layout (e.g.
-            ``time`` on a ``time_in_grid=True`` layout).
+            ``time`` on a tabular layout).
         """
         pos = getattr(self, name, None)
         if pos is None:
@@ -169,7 +155,7 @@ class TensorLayout:
         positions = {name: self.axis(name, ndim=ndim) for name in self.AXES if self.has_axis(name)}
         if len(positions) != ndim or set(positions.values()) != set(range(ndim)):
             raise ValueError(f"Layout {self!r} must describe each of the {ndim} tensor axes exactly once.")
-        return TensorLayout(**positions, time_in_grid=self.time_in_grid)
+        return TensorLayout(**positions)
 
     def __repr__(self) -> str:
         parts = []
@@ -177,6 +163,4 @@ class TensorLayout:
             value = getattr(self, name)
             if value is not None:
                 parts.append(f"{name}={value}")
-        if self.time_in_grid:
-            parts.append("time_in_grid=True")
         return f"TensorLayout({', '.join(parts)})"
