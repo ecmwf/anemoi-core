@@ -45,6 +45,7 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
@@ -139,6 +140,7 @@ class TransformerProcessorBlock(BaseBlock):
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[GridNeighbourhood] = None,
     ):
         super().__init__()
 
@@ -159,6 +161,7 @@ class TransformerProcessorBlock(BaseBlock):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
         )
 
         self.mlp = MLP(
@@ -215,6 +218,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[GridNeighbourhood] = None,
     ):
         super().__init__(
             num_channels=num_channels,
@@ -230,6 +234,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
         )
 
         self.attention = MultiHeadCrossAttention(
@@ -246,6 +251,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
         )
 
         LayerNorm = layer_kernels.LayerNorm
@@ -417,13 +423,13 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         out_channels : int
             Number of output channels.
         num_chunks : int
-            Number of chunks
+            Number of chunks.
         mlp_extra_layers : int, optional
-            Extra layers in MLP, by default 0
+            Extra layers in MLP, by default 0.
         update_src_nodes : bool, optional
-            Update src if src and dst nodes are given, by default True
+            Update src if src and dst nodes are given, by default True.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear".
         kwargs : dict
             Additional arguments for the base class.
         """

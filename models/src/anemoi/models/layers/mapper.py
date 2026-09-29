@@ -36,6 +36,7 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -1290,6 +1291,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
         use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        neighbourhood: Optional[dict] = None,
+        src_node_coords: Optional[Tensor] = None,
+        dst_node_coords: Optional[Tensor] = None,
         **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
@@ -1331,6 +1335,13 @@ class TransformerBaseMapper(BaseMapper, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        neighbourhood : dict, optional
+            Grid family, kernel size and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        src_node_coords : Tensor, optional
+            Latitude and longitude of the source nodes (keys) in radians, used by neighbourhood attention
+        dst_node_coords : Tensor, optional
+            Latitude and longitude of the destination nodes (queries) in radians, used by neighbourhood attention
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1357,6 +1368,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=build_grid_neighbourhood(
+                attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
+            ),
         )
 
         self.offload_layers(cpu_offload)

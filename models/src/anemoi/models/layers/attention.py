@@ -30,6 +30,8 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -44,6 +46,7 @@ class MultiHeadSelfAttention(nn.Module):
     allows for three different attention implementations:
     - scaled dot product attention, see https://pytorch.org/docs/stable/generated/torch.nn.functional.scaled_dot_product_attention.html
     - flash attention, see https://github.com/Dao-AILab/flash-attention
+    - neighbourhood attention on a global grid, see :mod:`anemoi.models.layers.neighbourhood_attention`
 
     The config parameter "model.processor.attention_implementation" is used to control which attention implementation is used.
 
@@ -58,6 +61,12 @@ class MultiHeadSelfAttention(nn.Module):
         the full requirements.
         You have to install flash attention yourself. If you are running on an x86 system, there are prebuilt
         wheels available on the GitHub repo. On an aarch64 system, you have to build flash attention from source.
+
+    "neighbourhood"
+        Each query attends only to the keys around it on a registered grid family, such as octahedral
+        or HEALPix grids. The grids and the neighbourhood size come from ``neighbourhood``. The
+        ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND environment variable does not change it, as the
+        other implementations attend to different keys.
     """
 
     def __init__(
@@ -75,6 +84,7 @@ class MultiHeadSelfAttention(nn.Module):
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[GridNeighbourhood] = None,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -111,6 +121,8 @@ class MultiHeadSelfAttention(nn.Module):
             Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool, optional
             Adds bias
+        neighbourhood : GridNeighbourhood, optional
+            Query and key grids and neighbourhood size, needed for the "neighbourhood" implementation
         """
         super().__init__()
 
@@ -132,6 +144,7 @@ class MultiHeadSelfAttention(nn.Module):
         self.qk_norm = qk_norm
         self.softcap = softcap
         self.use_rotary_embeddings = use_rotary_embeddings
+        self.neighbourhood = neighbourhood
 
         self.set_attention_function()
 
@@ -156,10 +169,11 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
+            "neighbourhood": NeighbourhoodAttentionWrapper,
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
-        if ATTENTION_BACKEND:
+        if ATTENTION_BACKEND and self.attention_implementation != "neighbourhood":
             if ATTENTION_BACKEND == self.attention_implementation:
                 # Attention backend has already been updated, return early
                 return
@@ -178,6 +192,10 @@ class MultiHeadSelfAttention(nn.Module):
             self.attention = attn_funcs[self.attention_implementation](
                 use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
             )
+        elif self.attention_implementation == "neighbourhood":
+            if self.neighbourhood is None:
+                raise ValueError("The 'neighbourhood' attention implementation needs a GridNeighbourhood.")
+            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
@@ -255,7 +273,11 @@ class MultiHeadSelfAttention(nn.Module):
         value = self.lin_v(x)
 
         # Check once at runtime if the Attention backend env var has been set, and update attention backend accordingly
-        if ATTENTION_BACKEND and not self._attention_backend_applied:
+        if (
+            ATTENTION_BACKEND
+            and not self._attention_backend_applied
+            and self.attention_implementation != "neighbourhood"
+        ):
             self.set_attention_function()
             self._attention_backend_applied = True
 
@@ -286,22 +308,22 @@ class SDPAAttentionWrapper(nn.Module):
         Parameters
         ----------
         B : int
-            Batch size
+            Batch size.
         H : int
-            Number of heads
+            Number of heads.
         Q_LEN : int
-            Query sequence length
+            Query sequence length.
         KV_LEN : int
-            Key/value sequence length
+            Key/value sequence length.
         window_size : tuple
             Tuple of (left_window, right_window). Use -1 for unlimited.
         device : str
-            Device for the mask tensor
+            Device for the mask tensor.
 
         Returns
         -------
         Tensor
-            2D attention mask
+            2D attention mask.
         """
         window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
         window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
@@ -548,12 +570,12 @@ def get_alibi_slopes(num_heads: int) -> Tensor:
     Parameters
     ----------
     num_heads : int
-        number of attention heads
+        Number of attention heads.
 
     Returns
     -------
     Tensor
-        aLiBi slopes
+        aLiBi slopes.
     """
     n = 2 ** math.floor(math.log2(num_heads))
     slope_0 = 2 ** (-8 / n)

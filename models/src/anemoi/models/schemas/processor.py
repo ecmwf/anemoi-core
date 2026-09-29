@@ -9,6 +9,7 @@
 
 from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -18,8 +19,10 @@ from pydantic import NonNegativeInt
 from pydantic import model_validator
 
 from .common_components import GNNModelComponent
+from .common_components import NeighbourhoodSchema
 from .common_components import PointWiseModelComponent
 from .common_components import TransformerModelComponent
+from .common_components import check_neighbourhood_attention
 
 
 class NoOpProcessorSchema(PydanticBaseModel):
@@ -96,6 +99,8 @@ class TransformerProcessorSchema(TransformerModelComponent):
     "Softcap value for attention. Default to 0.0."
     use_alibi_slopes: bool = Field(example=False)
     "Use alibi slopes for attention implementation. Default to False."
+    neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
+    "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
 
     @model_validator(mode="after")
     def check_valid_extras(self) -> Any:
@@ -112,6 +117,10 @@ class TransformerProcessorSchema(TransformerModelComponent):
                 raise TypeError(msg)
 
         return self
+
+    @model_validator(mode="after")
+    def check_neighbourhood(self) -> Any:
+        return check_neighbourhood_attention(self)
 
 
 class PointWiseMLPProcessorSchema(PointWiseModelComponent):

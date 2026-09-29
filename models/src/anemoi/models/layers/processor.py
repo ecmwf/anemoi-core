@@ -27,6 +27,7 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -222,6 +223,8 @@ class TransformerProcessor(BaseProcessor):
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        neighbourhood: Optional[dict] = None,
+        node_coords: Optional[Tensor] = None,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -263,6 +266,11 @@ class TransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        neighbourhood : dict, optional
+            Grid family, kernel size and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        node_coords : Tensor, optional
+            Latitude and longitude of the processor nodes in radians, used by neighbourhood attention
         """
         super().__init__(
             num_layers=num_layers,
@@ -291,6 +299,7 @@ class TransformerProcessor(BaseProcessor):
             mlp_implementation=mlp_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
+            neighbourhood=build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords),
         )
 
         self.offload_layers(cpu_offload)

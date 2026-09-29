@@ -1,0 +1,172 @@
+num_channels: 1024
+cpu_offload: False
+
+keep_batch_sharded: True
+
+model:
+  _target_: anemoi.models.models.AnemoiModelEncProcDec
+  hidden_nodes_name: "hidden"
+  latent_skip: True
+
+layer_kernels:
+  # The layer_kernels can be adjusted per model component, but are defined here for convenience.
+  LayerNorm:
+    _target_: torch.nn.LayerNorm
+  Linear:
+    _target_: torch.nn.Linear
+  Activation:
+    _target_: torch.nn.GELU
+  QueryNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+  KeyNorm:
+    _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    bias: False
+
+# Neighbourhood attention: every query attends only to the nodes around it on a global grid.
+# The encoder, processor and decoder name the grid family of their nodes, which selects the
+# attention kernels (see GRID_KERNELS in anemoi.models.layers.neighbourhood_attention):
+#   octahedral  octahedral reduced Gaussian grids, e.g. O96 data with O48 hidden nodes
+#   healpix     HEALPix grids, in ring or nested ordering; build HEALPixNodes with
+#               nest_ordering: False, as nodes in nested order are reordered in every layer
+# The node coordinates of the graph fix the resolution and the order of the points, so the
+# hidden nodes must lie on a grid of the same family, e.g. graph=encoder_decoder_only with
+# hidden nodes from ReducedGaussianGridNodes (grid: o48).
+# kernel_size is [latitude rows, points per row], both odd. backend is "triton" (GPU),
+# "flex" or "sdpa" (dense mask, small grids only).
+
+processor:
+  _target_: anemoi.models.layers.processor.TransformerProcessor
+  num_channels: ${model.num_channels}
+  num_layers: 16
+  num_chunks: 4
+  mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+  mlp_implementation: mlp
+  num_heads: 16 # GraphTransformer or Transformer only
+  window_size: null
+  dropout_p: 0.0
+  attention_implementation: neighbourhood
+  neighbourhood:
+    grid: octahedral
+    kernel_size: [7, 13]
+    backend: triton
+  qk_norm: False # Transformer and GraphTransformer only
+  softcap: 0.0 # Transformer only
+  use_alibi_slopes: False # Transformer only
+  cpu_offload: ${model.cpu_offload}
+  gradient_checkpointing: True
+  use_rotary_embeddings: False
+  layer_kernels: ${model.layer_kernels}
+
+encoders:
+  "0":
+    source_datasets: [ "data" ]
+    dataset_fusing_strategy:  "not_supported" # Options: "not_supported" (only option now)
+    mapper:
+      _target_: anemoi.models.layers.mapper.TransformerForwardMapper
+      num_channels: ${model.num_channels}
+      num_chunks: 1
+      mlp_hidden_ratio: 4 # use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16
+      window_size: null
+      dropout_p: 0.0
+      attention_implementation: neighbourhood
+      neighbourhood:
+        grid: octahedral
+        kernel_size: [5, 5] # hidden node rows attend to key rows of the finer data grid
+        backend: triton
+      softcap: 0.0
+      use_alibi_slopes: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
+decoders:
+  "0":
+    target_datasets: [ "data" ]
+    target_node_features: [ "encoded_data" ] # options: coordinates, forcings, encoded_data
+    mapper:
+      _target_: anemoi.models.layers.mapper.TransformerBackwardMapper
+      num_channels: ${model.num_channels}
+      num_chunks: 1
+      mlp_hidden_ratio: 4 # use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
+      mlp_implementation: mlp
+      num_heads: 16
+      window_size: null
+      dropout_p: 0.0
+      attention_implementation: neighbourhood
+      neighbourhood:
+        grid: octahedral
+        kernel_size: [3, 5]
+        backend: triton
+      softcap: 0.0
+      use_alibi_slopes: False
+      use_rotary_embeddings: False
+      qk_norm: False
+      cpu_offload: ${model.cpu_offload}
+      gradient_checkpointing: True
+      layer_kernels: ${model.layer_kernels}
+
+residual:
+  datasets:
+    data:
+      _target_: anemoi.models.layers.residual.SkipConnection # options: SkipConnection, TruncatedConnection
+      step: -1 # use the latest step as skip connection
+
+output_mask:
+  datasets:
+    data:
+      _target_: anemoi.training.utils.masks.NoOutputMask
+
+node_trainable_parameters:
+  data: 8
+  hidden: 8
+
+edge_trainable_parameters:
+  data2hidden: 8
+  hidden2data: 8
+
+attributes:
+  edges: []
+  nodes: []
+
+
+# Bounding configuration
+bounding: #These are applied in order
+  datasets:
+    data:
+      # Bound tp (total precipitation) with a Relu bounding layer
+      # ensuring a range of [0, infinity) to avoid negative precipitation values.
+      - _target_: anemoi.models.layers.bounding.ReluBounding #[0, infinity)
+        variables:
+          - tp
+
+      # [OPTIONAL] Bound cp (convective precipitation) as a fraction of tp.
+      # This guarantees that cp is physically consistent with tp by restricting cp
+      # to a fraction of tp [0 to 1]. Uncomment the lines below to apply.
+      # NOTE: If this bounding strategy is used, the normalization of cp must be
+      # changed to "std" normalization, and the "cp" statistics should be remapped
+      # to those of tp to ensure consistency.
+
+      # - _target_: anemoi.models.layers.bounding.FractionBounding # fraction of tp
+      #   variables:
+      #   - cp
+      #   min_val: 0
+      #   max_val: 1
+      #   total_var: tp
+
+      # [OPTIONAL] NormalizedReluBounding
+      # This is an extension of the Relu bounding in case the thrshold to be used
+      # is not 0. For example, in case of the sea surface temperature we don't use
+      # [0, infinity), buth rather [-2C, infinity). We do not want the water
+      # temperature to be below the freezing temperature.
+
+      # - _target_: anemoi.models.layers.bounding.NormalizedReluBounding
+      #   variables: [sst]
+      #   min_val: [-2]
+      #   normalizer: ['mean-std']
