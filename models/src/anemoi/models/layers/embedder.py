@@ -333,3 +333,70 @@ class HierarchicalEmbedder(nn.Module):
             grid=grid,
         )
         return torch.cat((node_embedding, node_attributes_data), dim=-1)
+
+
+class LinearGroupedEmbedder(nn.Module):
+    """Turns a node's raw per-variable values into a single vector via a plain Linear per
+    pressure level (assuming every level has the same fixed variable set, in a fixed order -
+    no attention, no padding/masking needed for that part) plus a separate Linear for the
+    surface/single-level group, then attention-pools the resulting tokens (one per level, plus
+    the surface token) into the final embedding.
+    """
+
+    def __init__(self, feature_names, d_model, nhead):
+        super().__init__()
+        self.feature_names = feature_names
+        tokenizer = Tokenizer(feature_names)
+
+        groups: dict[float, list[int]] = {}
+        for i, level in enumerate(tokenizer.levels):
+            groups.setdefault(level, []).append(i)
+        surface_group = groups.pop(0, [])
+        level_groups = [group for _level, group in sorted(groups.items())]
+        group_levels = torch.tensor(sorted(groups.keys()), dtype=torch.float32)
+
+        level_sizes = {len(group) for group in level_groups}
+        if len(level_sizes) != 1:
+            msg = (
+                "LinearGroupedEmbedder assumes every pressure level has the same variable "
+                f"count - got sizes {sorted(level_sizes)} across levels."
+            )
+            raise ValueError(msg)
+        n_vars_per_level = level_sizes.pop()
+
+        self.register_buffer("level_idx", torch.tensor(level_groups, dtype=torch.long))
+        self.register_buffer("surface_idx", torch.tensor(surface_group, dtype=torch.long))
+        self.register_buffer("level_pe", sinusoidal_positional_encoding(group_levels, d_model))
+
+        self.level_proj = nn.Linear(n_vars_per_level, d_model)
+        self.surface_proj = nn.Linear(len(surface_group), d_model)
+        self.pool = ClsSelfAttentionPool(d_model, nhead)
+        self.output_dim = d_model
+
+    def forward(self, x, node_attributes_data, feature_names=None):
+        """x: (batch, time, ensemble, grid, vars) -> (batch ensemble grid, time d_model + attrs)"""
+        if feature_names is not None:
+            msg = "LinearGroupedEmbedder does not support a reduced feature_names subset yet."
+            raise NotImplementedError(msg)
+
+        batch, n_time, ensemble, grid, _n_vars = x.shape
+        x_vars = einops.rearrange(x, "batch time ensemble grid vars -> (batch time ensemble grid) vars")
+
+        level_values = x_vars[:, self.level_idx]
+        level_tokens = self.level_proj(level_values) + self.level_pe.unsqueeze(0)
+
+        surface_values = x_vars[:, self.surface_idx]
+        surface_token = self.surface_proj(surface_values).unsqueeze(1)
+
+        tokens = torch.cat([level_tokens, surface_token], dim=1)
+        node_embedding = self.pool(tokens)
+
+        node_embedding = einops.rearrange(
+            node_embedding,
+            "(batch time ensemble grid) d -> (batch ensemble grid) (time d)",
+            batch=batch,
+            time=n_time,
+            ensemble=ensemble,
+            grid=grid,
+        )
+        return torch.cat((node_embedding, node_attributes_data), dim=-1)

@@ -11,14 +11,21 @@ import re
 
 
 def parse_feature_name(name, variable_only=False):
-    """'q_850' -> ('q', 850, True), '10u' -> ('u', 10, True), 'lsm' -> ('lsm', 0, False).
+    """'q_850' -> ('q', 850, True), '10u' -> ('u', 0, False), 'lsm' -> ('lsm', 0, False).
 
-    With variable_only=True, returns just the physical variable name (e.g. 'q_850' -> 'q').
+    With variable_only=True, returns just the physical variable name (e.g. 'q_850' -> 'q',
+    '10u' -> 'u').
+
+    A leading-digit name like '10u' or '2t' is a near-surface diagnostic (metres above
+    ground - 10u is 10m wind, 2t is 2m temperature), not a position on the pressure-level
+    axis '_850' names use (hPa) - has_level=False groups it with the other single-level
+    variables (lsm, etc.) instead of colliding with an unrelated pressure level that happens
+    to share the same number (e.g. '2t' and 't_2' would otherwise both claim level 2).
     """
     match = re.match(r"^(\d+)([a-z]+)$", name)
     if match:
-        level, variable = match.groups()
-        return variable if variable_only else (variable, int(level), True)
+        _height, variable = match.groups()
+        return variable if variable_only else (variable, 0, False)
     match = re.match(r"^([a-z]+)_(\d+)$", name)
     if match:
         variable, level = match.groups()
