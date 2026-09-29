@@ -197,8 +197,8 @@ inputs.
 that we want to predict and appear as both inputs and outputs.
 
 The user can specify the routing of the data for each dataset separately
-by setting the ``config.data.datasets.your_dataset_name.forcings`` and
-``config.data.datasets.your_dataset_name.diagnostics``. These are
+by setting the ``config.data.datasets.your_dataset_name.forcing`` and
+``config.data.datasets.your_dataset_name.diagnostic``. These are
 named strings, as Anemoi datasets enables us to address variables by
 name. Any variable in the dataset which is not listed as either forcing
 or diagnostic (or dropped, see :ref:`Dataloader <Dataloader>` below),
@@ -209,10 +209,10 @@ will be classed as a prognostic variable.
    data:
       datasets:
          your_dataset_name:
-            forcings:
+            forcing:
                - solar_insolation
                - land_sea_mask
-            diagnostics:
+            diagnostic:
                - total_precipitation
 
 ************
@@ -341,16 +341,22 @@ and the proportional distance from this point is retained,
 
 The user can specify the normalisation strategy by choosing a default
 method, and additionally specifying specific cases for certain variables
-within ``config.data.datasets.your_dataset_name.normaliser``:
+under ``config.data.datasets.your_dataset_name.processors.normalizer.config``:
 
 .. code:: yaml
 
-   normaliser:
-      default: mean-std
-      none:
-         - land_sea_mask
-      max:
-         - geopotential_height
+   data:
+      datasets:
+         your_dataset_name:
+            processors:
+               normalizer:
+                  _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+                  config:
+                     default: mean-std
+                     none:
+                        - land_sea_mask
+                     max:
+                        - geopotential_height
 
 An additional option in the normaliser overwrites statistics of specific
 variables onto others. This is primarily used for convective
@@ -361,9 +367,14 @@ that this is a design choice.
 
 .. code:: yaml
 
-   normaliser:
-      remap:
-        cp: tp
+   data:
+      datasets:
+         your_dataset_name:
+            processors:
+               normalizer:
+                  config:
+                     remap:
+                        cp: tp
 
 *********
  Imputer
@@ -469,10 +480,13 @@ level has a weighting less than 0.2), defined in class
 
 The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
-an attribute in the graph object. The configuration option
-``config.training.datasets.your_dataset_name.node_weights`` is used to
-specify the node attribute used as weights in the loss function. By default
-anemoi-training uses area weighting, where each node is weighted
+an attribute in the graph object. Node weighting is applied via the
+``node_weights`` scaler defined under
+``config.training.scalers.<dataset_name>.node_weights``; set
+``nodes_attribute_name`` to the graph attribute to use as weights, and
+reference the scaler from a loss by including ``node_weights`` in its
+``scalers:`` list. By default anemoi-training uses area weighting
+(``nodes_attribute_name: area_weight``), where each node is weighted
 according to the size of the geographical area it represents.
 
 It is also possible to rescale the weight of a subset of nodes after
@@ -484,26 +498,30 @@ they are loaded from the graph using the class
  Learning rate
 ***************
 
-Anemoi training uses the ``CosineLRScheduler`` from PyTorch as it's
-learning rate scheduler. Docs for this scheduler can be found here
+Anemoi training uses the ``CosineLRScheduler`` from ``timm`` as its
+default learning rate scheduler. Docs for this scheduler can be found here
 https://github.com/huggingface/pytorch-image-models/blob/main/timm/scheduler/cosine_lr.py
 The user can configure the maximum learning rate by setting
-``config.training.lr.rate``. Note that this learning rate is scaled by
-the number of GPUs with:
+``config.training.optimization.lr``. Note that this learning rate is
+the local (per-GPU) rate; it is scaled by the number of GPUs at
+runtime with:
 
 .. code:: yaml
 
-   global_learning_rate = config.training.lr.rate * num_gpus_per_node * num_nodes / gpus_per_model
+   global_learning_rate = config.training.optimization.lr * num_gpus_per_node * num_nodes / gpus_per_model
 
 The user can also control the rate at which the learning rate decreases
-by setting the total number of iterations -
-``config.training.lr.iterations`` and the minimum learning rate reached
-- ``config.training.lr.min``. Note that the minimum learning rate is not
-scaled by the number of GPUs. The user can also control the warmup
-period by setting ``config.training.lr.warmup_t``. If the warmup period
-is set to 0, the learning rate will start at the maximum learning rate.
-If no warmup period is defined, a default warmup period of 1000
-iterations is used.
+by setting the total number of scheduler steps -
+``config.training.optimization.lr_scheduler.t_initial`` and the minimum
+learning rate reached -
+``config.training.optimization.lr_scheduler.lr_min``. Note that the
+minimum learning rate is not scaled by the number of GPUs. The user can
+also control the warmup period by setting
+``config.training.optimization.lr_scheduler.warmup_t``. If the warmup
+period is set to 0, the learning rate will start at the maximum
+learning rate. The default (see
+``config/training/optimization/lr_scheduler/cosine_scheduler.yaml``)
+uses a warmup period of 1000 steps.
 
 **************************
  Restarting a training run
@@ -592,7 +610,7 @@ stage of training.
 Note, for many purposes, it may make sense for the rollout stage (stage
 two) to be performed at the minimum learning rate throughout and for the
 number of batches to be reduced (using
-``config.dataloader.training.limit_batches``) to prevent overfitting to
+``config.dataloader.limit_batches.training``) to prevent overfitting to
 specific timesteps.
 
 Restarting rollout training
