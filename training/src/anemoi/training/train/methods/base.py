@@ -248,6 +248,9 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         scalers_configs = get_multiple_datasets_config(config.training.scalers)
         val_metrics_configs = get_multiple_datasets_config(config.training.validation_metrics)
         metrics_to_log = get_multiple_datasets_config(config.training.metrics)
+        # Losses that declare needs_graph_data (spectral projections, on-the-fly multiscale
+        # smoothers, graph scores) read the model graph.
+        graph_data = self.model.graph_data
         for dataset_name in self.dataset_names:
             if dataset_name not in loss_configs or loss_configs[dataset_name] is None:
                 LOGGER.warning("Dataset %s is skipped for loss & metric computation.", dataset_name)
@@ -255,9 +258,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
             self.target_dataset_names.append(dataset_name)
 
-            # Graph ownership remains unresolved; dataset-specific node names are assumed here.
-            fused = True
-            data_node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+            # The model graph has one node group per dataset (see BaseGraphModel).
+            data_node_name = dataset_name
 
             # Create dataset-specific metadata extractor
             metadata_extractor = ExtractVariableGroupAndLevel(
@@ -269,7 +271,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 scalers_configs[dataset_name],
                 data_indices=data_indices[dataset_name],
                 task=self.task,
-                graph_data=self.model.model._graph_data,
+                graph_data=graph_data,
                 statistics=statistics[dataset_name],
                 statistics_tendencies=(
                     statistics_tendencies[dataset_name] if statistics_tendencies is not None else None
@@ -291,6 +293,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 loss_configs[dataset_name],
                 dataset_scalers,
                 data_indices[dataset_name],
+                graph_data=graph_data,
                 data_node_name=data_node_name,
             )
 
@@ -302,6 +305,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 val_metrics_configs[dataset_name],
                 scalers=dataset_scalers,
                 data_indices=data_indices[dataset_name],
+                graph_data=graph_data,
                 data_node_name=data_node_name,
             )
             self._initialise_updating_scalers(
