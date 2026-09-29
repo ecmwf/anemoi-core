@@ -55,6 +55,90 @@ def _normalize_dataset_config(dataset_config: str | dict | DictConfig) -> str | 
     return {key: value for key, value in dataset_config.items() if value is not None}
 
 
+_TENDENCY_LOOKUP_ERRORS = (KeyError, AttributeError, NotImplementedError)
+
+
+def _tendency_statistics(dataset: object, timestep: str) -> dict | None:
+    """Return the tendency statistics of `dataset`, or None if it has none."""
+    try:
+        return dataset.statistics_tendencies(timestep)
+    except _TENDENCY_LOOKUP_ERRORS:
+        return None
+
+
+def _tendency_statistics_by_variable(dataset: object, timestep: str) -> dict[str, dict]:
+    """Map variable name to its tendency statistics, querying each source separately.
+
+    ``Join.statistics_tendencies`` concatenates the statistics of every source, so
+    a single source without tendency statistics (typically a static auxiliary
+    dataset) makes the whole lookup fail. Descend into the sources so the
+    variables that do have tendency statistics can still be used.
+    """
+    statistics = _tendency_statistics(dataset, timestep)
+    variables = list(getattr(dataset, "variables", None) or [])
+
+    if statistics and variables and all(len(values) == len(variables) for values in statistics.values()):
+        return {
+            name: {key: values[index] for key, values in statistics.items()}
+            for index, name in enumerate(variables)
+        }
+
+    collected: dict[str, dict] = {}
+    for source in getattr(dataset, "datasets", None) or []:
+        collected.update(_tendency_statistics_by_variable(source, timestep))
+
+    # Wrappers such as select/subset expose the dataset they wrap as `forward`.
+    forward = getattr(dataset, "forward", None)
+    if forward is not None:
+        for name, entry in _tendency_statistics_by_variable(forward, timestep).items():
+            collected.setdefault(name, entry)
+
+    return collected
+
+
+def _merge_tendency_statistics(
+    variables: list[str],
+    statistics: dict,
+    by_variable: dict[str, dict],
+) -> dict | None:
+    """Assemble full-length tendency statistics aligned with `variables`.
+
+    Variables without tendency statistics fall back to their plain statistics.
+    The tendency scalers divide the plain statistic by the tendency one, so the
+    fallback leaves those variables unscaled instead of disabling the scaler for
+    every variable.
+    """
+    if not by_variable:
+        return None
+
+    keys = {key for entry in by_variable.values() for key in entry} & set(statistics)
+    if not keys:
+        return None
+
+    missing = [name for name in variables if name not in by_variable]
+    if missing:
+        shown = ", ".join(missing[:5])
+        LOGGER.warning(
+            "No tendency statistics for %d of %d variables (%s%s). "
+            "Falling back to their plain statistics, leaving them unscaled by the tendency scalers.",
+            len(missing),
+            len(variables),
+            shown,
+            ", ..." if len(missing) > 5 else "",
+        )
+
+    merged = {}
+    for key in sorted(keys):
+        reference = statistics[key]
+        merged[key] = np.array(
+            [
+                by_variable[name][key] if key in by_variable.get(name, {}) else reference[index]
+                for index, name in enumerate(variables)
+            ],
+        )
+    return merged
+
+
 def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
     """Validate and normalize reader configuration."""
     normalized = dict(dataset_config)
@@ -219,10 +303,18 @@ class BaseAnemoiReader:
         if timestep is None:
             msg = "timestep must be provided to compute tendency statistics."
             raise ValueError(msg)
-        try:
-            return self.data.statistics_tendencies(timestep)
-        except (KeyError, AttributeError):
-            return None
+        statistics = _tendency_statistics(self.data, timestep)
+        if statistics is not None:
+            return statistics
+
+        # Fall back to the sources that do have tendency statistics, so that a
+        # joined auxiliary dataset without them does not silently disable the
+        # tendency scalers for every variable.
+        return _merge_tendency_statistics(
+            list(self.data.variables),
+            self.data.statistics,
+            _tendency_statistics_by_variable(self.data, timestep),
+        )
 
     @property
     def variables(self) -> list[str]:
