@@ -25,8 +25,8 @@ def _sparse_view(data: list[torch.Tensor]) -> Source:
         statistics={},
         coordinates=[torch.zeros(sample.shape[0], 2) for sample in data],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        boundaries=[(slice(0, sample.shape[0]),) for sample in data],
+        timedeltas=[torch.zeros(sample.shape[0]) for sample in data],
     )
 
 

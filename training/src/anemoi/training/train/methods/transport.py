@@ -72,11 +72,11 @@ class StatePredictionMode(PredictionMode):
         for dataset_name, state_view in reference_state.items():
             var_idx = self.module.data_indices[dataset_name].data.output.full.tolist()
             reference_step = state_view.select(variables=var_idx).data
-            if self.module.n_step_output > 1:
+            if self.module.n_step_output[dataset_name] > 1:
                 if isinstance(reference_step, list):
                     msg = "Multi-step reference-state transport sources are not supported for sparse datasets."
                     raise NotImplementedError(msg)
-                reference_step = reference_step.expand(-1, self.module.n_step_output, -1, -1, -1)
+                reference_step = reference_step.expand(-1, self.module.n_step_output[dataset_name], -1, -1, -1)
             reference_data[dataset_name] = reference_step
         return self.module.reduce_data_output_target_to_model_output(reference_state.with_data(reference_data))
 
@@ -159,7 +159,7 @@ class TendencyPredictionMode(PredictionMode):
             # here iterate over per-step processors. Multi-output models
             # need an explicit processor for each lead time.
             assert (
-                self.module.n_step_output == 1
+                self.module.n_step_output[dataset_name] == 1
             ), "Per-step tendency processors are required for multi-output tendency-based transport models."
             lead_time = lead_times[0]
             wrapped = StepwiseProcessors([lead_time])
@@ -177,8 +177,8 @@ class TendencyPredictionMode(PredictionMode):
             lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
             assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
             assert (
-                len(lead_times) == self.module.n_step_output
-            ), f"Expected {self.module.n_step_output} tendency statistics entries, got {len(lead_times)}."
+                len(lead_times) == self.module.n_step_output[dataset_name]
+            ), f"Expected {self.module.n_step_output[dataset_name]} tendency statistics entries, got {len(lead_times)}."
             assert all(
                 lead_time in dataset_stats for lead_time in lead_times
             ), "Missing tendency statistics for one or more output steps."
@@ -195,7 +195,7 @@ class TendencyPredictionMode(PredictionMode):
             pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
             post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
             assert (
-                len(pre_tend) == self.module.n_step_output and len(post_tend) == self.module.n_step_output
+                len(pre_tend) == self.module.n_step_output[dataset_name] and len(post_tend) == self.module.n_step_output[dataset_name]
             ), "Per-step tendency processors must match n_step_output."
             assert all(
                 proc is not None for proc in pre_tend

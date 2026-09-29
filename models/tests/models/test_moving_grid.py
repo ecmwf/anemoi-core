@@ -154,11 +154,10 @@ def test_moving_grids_isolate_samples_and_members(model_type):
     torch.testing.assert_close(changed[0], output[0] + 100)
 
 
-def test_moving_grid_feature_width_uses_time_layout():
+def test_moving_grid_feature_width_uses_n_step_input():
     model = _model(AnemoiModelEncProcDec)
     model.is_dataset_static = {"grid": False}
-    model.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    model.n_step_input = 3
+    model.n_step_input = {"grid": 3}
     model.num_input_channels = {"grid": 2}
     model.dynamic_node_attribute_dims = {}
     # Three timesteps of two variables plus four coordinate features.
@@ -207,8 +206,7 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.data_indices = model.data_indices
     interface.statistics = model.statistics
     interface.is_dataset_static = {"grid": True}
-    interface.data_layouts = {"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)}
-    interface.n_step_input = 2
+    interface.n_step_input = {"grid": 2}
     interface.pre_processors = nn.ModuleDict(
         {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}
     )
@@ -235,6 +233,8 @@ def test_sparse_transport_noise_embeddings_follow_member_node_order(members):
         statistics={},
         coordinates=[torch.zeros(nodes, 2) for nodes in [2, 3]],
         layout=TensorLayout(ensemble=0, grid=1, variables=2),
+        timedeltas=[torch.zeros(nodes) for nodes in [2, 3]],
+        boundaries=[(slice(0, nodes),) for nodes in [2, 3]],
     )
     noise = torch.arange(1.0, 2 * members + 1).reshape(2, 1, members, 1, 1).requires_grad_()
     model = _model(AnemoiTransportModelEncProcDec)

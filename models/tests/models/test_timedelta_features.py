@@ -93,6 +93,7 @@ def test_forecaster_assembles_timedelta_features_for_both_mappers() -> None:
         coordinates=[torch.zeros(3, 2)],
         timedeltas=[torch.tensor([-3600.0, 0.0, 3600.0])],
         layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 3),)],
     )
 
     input_coords, input_features, _, _, batch_sizes, input_timedeltas = model._assemble_input(
@@ -128,6 +129,7 @@ def test_forecaster_casts_configured_node_dtype_to_mapper_input_dtype() -> None:
         coordinates=[torch.zeros(2, 2)],
         timedeltas=[torch.tensor([0.0, 3600.0])],
         layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 2),)],
     )
 
     _, input_features, _, _, _, _ = model._assemble_input(view, batch_size=1, dataset_name="obs")
@@ -152,6 +154,7 @@ def test_forecaster_reuses_encoder_output_without_duplicate_node_features() -> N
         coordinates=[torch.zeros(2, 2)],
         timedeltas=[torch.tensor([0.0, 3600.0])],
         layout=TensorLayout(grid=0, variables=1),
+        boundaries=[(slice(0, 2),)],
     )
     encoder_output = torch.ones(2, 8)
 

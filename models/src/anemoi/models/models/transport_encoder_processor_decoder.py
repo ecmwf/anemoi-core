@@ -89,7 +89,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             data_indices=data_indices,
             statistics=statistics,
             is_dataset_static=is_dataset_static,
-            data_layouts=data_layouts,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )
@@ -594,7 +593,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x = x[:, 0:n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
+            x = x[:, 0 : n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
 
             if model_comm_group is not None:
                 shard_sizes = get_shard_sizes(x, -2, model_comm_group=model_comm_group)
@@ -794,16 +793,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             layout = source_layouts[dataset_name]
             template_source = template[dataset_name] if template is not None and dataset_name in template else None
 
-            # Only a tabular template can supply the timedeltas and boundaries a tabular source needs.
-            source_cls = TabularSource if isinstance(template_source, TabularSource) else GriddedSource
-            sources[dataset_name] = source_cls(
-                name=dataset_name,
-                variables=self._sampling_variables(dataset_name, variable_space),
-                layout=layout,
-                statistics=self._sampling_statistics(dataset_name, variable_space),
-                coordinates_are_static=dataset_name in static_coords,
-                data=dataset_data,
-                coordinates=self._sampling_coordinates(
+            common = {
+                "name": dataset_name,
+                "variables": self._sampling_variables(dataset_name, variable_space),
+                "layout": layout,
+                "statistics": self._sampling_statistics(dataset_name, variable_space),
+                "data": dataset_data,
+                "coordinates": self._sampling_coordinates(
                     dataset_name,
                     dataset_data,
                     layout=layout,
@@ -811,10 +807,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                     model_comm_group=model_comm_group,
                     grid_shard_sizes=grid_shard_sizes,
                 ),
-                timedeltas=None if template_source is None else template_source.timedeltas,
-                boundaries=None if template_source is None else template_source.boundaries,
-                shard_sizes=None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name),
-            )
+                "shard_sizes": None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name),
+            }
+            # Only a tabular template can supply the timedeltas and boundaries a tabular source needs.
+            if isinstance(template_source, TabularSource):
+                sources[dataset_name] = TabularSource(
+                    **common,
+                    timedeltas=template_source.timedeltas,
+                    boundaries=template_source.boundaries,
+                )
+            else:
+                sources[dataset_name] = GriddedSource(**common, coordinates_are_static=dataset_name in static_coords)
 
         return Batch(sources)
 
@@ -1261,7 +1264,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
         for dataset_name, x in batch.items():
             # Dimensions are batch, timesteps, grid, variables
-            x_in = x[:, 0:n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
+            x_in = x[:, 0 : n_step_input[dataset_name], None, ...]  # add dummy ensemble dimension as 3rd index
             x_t0 = x[:, -1:, None, ...]  # keep time dim and add dummy ensemble dimension
 
             if model_comm_group is not None:

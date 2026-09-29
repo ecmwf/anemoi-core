@@ -42,7 +42,7 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(points, 2),
         layout=layout,
         coordinates_are_static=True,
     )
@@ -56,10 +56,10 @@ def make_tabular_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         data=[payload.clone()],
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload]],
     )
 
 
@@ -238,10 +238,10 @@ def test_tabular_multiple_tensors(input_normalizer, normalized_payload) -> None:
         data=[payload_a, payload_b],
         variables=list(VARIABLES),
         statistics=STATISTICS,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in [payload_a, payload_b]],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in [payload_a, payload_b]],
+        boundaries=[(slice(0, t.shape[0]),) for t in [payload_a, payload_b]],
     )
     out = input_normalizer(view, in_place=False)
     assert len(out.data) == 2

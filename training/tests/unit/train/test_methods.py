@@ -1378,7 +1378,7 @@ def _gridded_view(
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=torch.zeros(data.shape[layout.grid], 2),
         layout=layout,
         coordinates_are_static=True,
     )
@@ -1456,10 +1456,10 @@ def _tabular_view(
         data=data,
         variables=list(variables),
         statistics=statistics,
-        coordinates=None,
+        coordinates=[torch.zeros(t.shape[0], 2) for t in data],
         layout=layout,
-        coordinates_are_static=False,
-        boundaries=None,
+        timedeltas=[torch.zeros(t.shape[0]) for t in data],
+        boundaries=[(slice(0, t.shape[0]),) for t in data],
     )
 
 

@@ -70,18 +70,22 @@ def build_batch(
             raise ValueError(msg)
 
         per_dataset_meta = metadata.get(name) if isinstance(metadata.get(name), dict) else None
-        source_cls = TabularSource if isinstance(payload, list) else GriddedSource
-        sources[name] = source_cls(
-            name=name,
-            variables=variables[name],
-            layout=layouts[name],
-            statistics=statistics.get(name, {}),
-            coordinates_are_static=name in static,
-            data=payload,
-            coordinates=coordinates.get(name),
-            timedeltas=timedeltas.get(name),
-            boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
-            shard_sizes=shard_sizes.get(name),
-        )
+        common = {
+            "name": name,
+            "variables": variables[name],
+            "layout": layouts[name],
+            "statistics": statistics.get(name, {}),
+            "data": payload,
+            "coordinates": coordinates.get(name),
+            "shard_sizes": shard_sizes.get(name),
+        }
+        if isinstance(payload, list):
+            sources[name] = TabularSource(
+                **common,
+                timedeltas=timedeltas.get(name),
+                boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
+            )
+        else:
+            sources[name] = GriddedSource(**common, coordinates_are_static=name in static)
 
     return Batch(sources)

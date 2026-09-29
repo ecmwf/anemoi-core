@@ -26,7 +26,6 @@ from rich.console import Console
 from rich.tree import Tree
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.distributed.shapes import ShardSizes
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -119,15 +118,20 @@ def _index_list(indices: slice | Sequence[int] | torch.Tensor | int, size: int) 
     return [int(i) for i in indices]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class Source(ABC):
     """Per-dataset view returned by :meth:`Batch.view`.
 
-    Bundles the per-dataset payload (data, coordinates, timedeltas) with the
-    metadata that describes it (name, variables, layout, statistics) so callers
-    can index logical axes (``time``, ``variables``) without hard-coded dimension
-    positions. The same API works for gridded and tabular (observation) datasets;
-    the subclass decides how each operation maps onto the payload.
+    Bundles the per-dataset payload with the metadata that describes it (name,
+    variables, layout, statistics) so callers can index logical axes (``time``,
+    ``variables``) without hard-coded dimension positions. The same API works for
+    gridded and tabular (observation) datasets; the subclass decides how each
+    operation maps onto the payload.
+
+    This base class only holds the metadata. The payload fields are declared by each
+    subclass with its own types: every subclass has ``data``, ``coordinates``,
+    ``shard_sizes`` and ``coordinates_are_static``, and may add more (e.g. the
+    ``timedeltas`` and ``boundaries`` of :class:`TabularSource`).
 
     Parameters
     ----------
@@ -138,15 +142,10 @@ class Source(ABC):
         unique.
     layout : TensorLayout
         Mapping from logical axes to physical dimension positions.
-    data : torch.Tensor or list[torch.Tensor] or None
-        The payload, laid out per ``layout``.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis (``mean``, ``stdev``, ...), as
         produced by ``anemoi-datasets``. Values are normally :class:`numpy.ndarray`
         but torch tensors are accepted.
-    coordinates_are_static : bool, optional
-        Whether this dataset's coordinate tensor is fixed for the whole run and so
-        may be shared by reference rather than transferred per batch.
     metadata : Mapping[str, Any], optional
         Free-form per-source metadata (e.g. ``dataset.metadata``, per-variable
         metadata). Not interpreted here.
@@ -155,15 +154,12 @@ class Source(ABC):
     name: str
     variables: list[str]
     layout: TensorLayout
-    data: torch.Tensor | list[torch.Tensor] | None
-    coordinates: torch.Tensor | list[torch.Tensor] = None
-    timedeltas: torch.Tensor | list[torch.Tensor] | None = None
-    boundaries: list[tuple[slice, ...]] | None = None
-    shard_sizes: ShardSizes | list[ShardSizes] = None
     statistics: Mapping[str, Any] = field(default_factory=dict)
-    coordinates_are_static: bool = False
     metadata: Mapping[str, Any] = field(default_factory=dict)
     _name_to_index: dict[str, int] = field(init=False, repr=False, compare=False)
+
+    # Tensor fields, besides ``coordinates``, that :meth:`to` moves and :meth:`pin_memory` pins.
+    _PAYLOAD_FIELDS = ("data",)
 
     def __post_init__(self) -> None:
         """Validate the metadata and the payload it describes."""
@@ -245,7 +241,6 @@ class Source(ABC):
             "variables": self.variables,
             "layout": self.layout,
             "statistics": self.statistics,
-            "coordinates_are_static": self.coordinates_are_static,
             "metadata": self.metadata,
         }
 
@@ -288,7 +283,7 @@ class Source(ABC):
     ) -> "Source":
         """Return a copy of this source with every tensor on ``device``.
 
-        Data, coordinates and timedeltas move together; consumers rely on that, since
+        All tensor fields move together; consumers rely on that, since
         :meth:`allgather` gathers coordinates alongside data in one collective and
         does not move them itself.
 
@@ -307,13 +302,10 @@ class Source(ABC):
             else:
                 coordinates = _to_device(coordinates, device, non_blocking=non_blocking)
 
-        return self.clone(
-            data=_to_device(self.data, device, non_blocking=non_blocking),
-            coordinates=coordinates,
-            timedeltas=(
-                None if self.timedeltas is None else _to_device(self.timedeltas, device, non_blocking=non_blocking)
-            ),
-        )
+        payload = {
+            name: _to_device(getattr(self, name), device, non_blocking=non_blocking) for name in self._PAYLOAD_FIELDS
+        }
+        return self.clone(coordinates=coordinates, **payload)
 
     def pin_memory(self) -> "Source":
         """Return a copy with host memory pinned. Static coordinates are left untouched.
@@ -325,11 +317,8 @@ class Source(ABC):
         if coordinates is not None and not self.coordinates_are_static:
             coordinates = _pin(coordinates)
 
-        return self.clone(
-            data=_pin(self.data),
-            coordinates=coordinates,
-            timedeltas=None if self.timedeltas is None else _pin(self.timedeltas),
-        )
+        payload = {name: _pin(getattr(self, name)) for name in self._PAYLOAD_FIELDS}
+        return self.clone(coordinates=coordinates, **payload)
 
     @abstractmethod
     def flatten(self) -> "FlatSource":

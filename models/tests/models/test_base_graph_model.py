@@ -16,7 +16,6 @@ from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.base as base_model_module
-from anemoi.models.data import TensorLayout
 from anemoi.models.models.base import BaseGraphModel
 
 
@@ -115,11 +114,10 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
-        n_step_input=1,
-        n_step_output=1,
+        n_step_input={"data": 1},
+        n_step_output={"data": 1},
         model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
         is_dataset_static={"data": True},
-        data_layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
     )
 
     assert model.seen_hidden_name == "hidden"
@@ -168,11 +166,10 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
-        n_step_input=1,
-        n_step_output=1,
+        n_step_input={"data": 1},
+        n_step_output={"data": 1},
         model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
         is_dataset_static={"data": True},
-        data_layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
     )
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
@@ -217,8 +214,8 @@ def _make_minimal_model():
         model_config=model_config,
         data_indices=_make_data_indices(),
         statistics={"data": None},
-        n_step_input=1,
-        n_step_output=1,
+        n_step_input={"data": 1},
+        n_step_output={"data": 1},
         graph_data=_make_graph(),
     )
 

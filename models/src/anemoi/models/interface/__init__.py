@@ -92,8 +92,8 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         statistics: dict,
         data_indices: dict,
-        statistics_tendencies: dict | None = None,
         dataset_name: str,
+        statistics_tendencies: dict | None = None,
     ) -> tuple[
         Processors,
         Processors,
@@ -188,8 +188,8 @@ class AnemoiModelInterface(torch.nn.Module):
                 data_config[dataset_name].processors,
                 self.statistics[dataset_name],
                 self.data_indices[dataset_name],
-                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
                 dataset_name,
+                self.statistics_tendencies[dataset_name] if self.statistics_tendencies is not None else None,
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post
@@ -284,12 +284,16 @@ class AnemoiModelInterface(torch.nn.Module):
         """
         unwrapped = {}
         for dataset_name, sample in batch.items():
-
-            data, coordinates, layout = sample.data, sample.coordinates, layout = sample.layout
+            data, coordinates, layout = sample.data, sample.coordinates, sample.layout
+            tabular_payload = {}
             if isinstance(sample, TabularSource):
-                # Sparse payloads keep the batch as the outer list; unwrap the one sample.
+                # Tabular payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
-                coordinates = None if coordinates is None else coordinates[0]
+                coordinates = coordinates[0]
+                tabular_payload = {
+                    "timedeltas": sample.timedeltas[0],
+                    "boundaries": [(int(s.start), int(s.stop)) for s in sample.boundaries[0]],
+                }
             else:
                 batch_axis = sample.layout.axis("batch", ndim=data.ndim) if sample.layout.batch is not None else None
                 if batch_axis is not None:
@@ -308,15 +312,8 @@ class AnemoiModelInterface(torch.nn.Module):
                 "longitudes": coords_deg[:, 1],
                 "variables": sample.variables,
                 "layout": layout.axis_names,
+                **tabular_payload,
             }
-
-            if sample.timedeltas is not None:
-                payload["timedeltas"] = sample.timedeltas
-
-            if sample.boundaries is not None:
-                sample_bounds = sample.boundaries[0]
-                payload["boundaries"] = [(int(s.start), int(s.stop)) for s in sample_bounds]
-
             unwrapped[dataset_name] = payload
 
         return unwrapped

@@ -22,6 +22,7 @@ from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -29,8 +30,29 @@ from anemoi.models.distributed.utils import model_is_distributed
 LOGGER = logging.getLogger(__name__)
 
 
+# No slots=True: it rebuilds the class, which breaks the zero-argument super() in __post_init__.
+@dataclass(frozen=True, kw_only=True)
 class GriddedSource(Source):
-    """Gridded data source."""
+    """Gridded data source: every sample of the batch shares one grid.
+
+    Parameters
+    ----------
+    data : torch.Tensor or None
+        ``(batch, time, ensemble, grid, variables)``, laid out per ``layout``.
+        ``None`` only for :class:`EmptyGriddedSource`.
+    coordinates : torch.Tensor
+        ``(grid, 2)`` latitudes and longitudes in radians, shared by the whole batch.
+    shard_sizes : ShardSizes, optional
+        Per-rank grid sizes when the source is sharded, ``None`` when it is replicated.
+    coordinates_are_static : bool, optional
+        Whether the grid is fixed for the whole run, so the coordinate tensor may be
+        shared by reference rather than transferred per batch.
+    """
+
+    data: torch.Tensor | None
+    coordinates: torch.Tensor
+    shard_sizes: ShardSizes | None = None
+    coordinates_are_static: bool = False
 
     # How a source's axes collapse into ``(nodes, features)``.
     FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
@@ -114,6 +136,7 @@ class GriddedSource(Source):
             data=None,
             coordinates=self.coordinates,
             shard_sizes=self.shard_sizes,
+            coordinates_are_static=self.coordinates_are_static,
             _device=self.device,
             _dtype=self.dtype,
             _grid_size=self.grid_size,
@@ -152,10 +175,7 @@ class GriddedSource(Source):
         # already on device; see Batch.to()
 
         return FlatSource(
-            data=flattened_data,
-            coordinates=flattened_coords,
-            shard_sizes=self.shard_sizes,
-            device=self.device
+            data=flattened_data, coordinates=flattened_coords, shard_sizes=self.shard_sizes, device=self.device
         )
 
     def unflatten(self, data: torch.Tensor, **kwargs) -> "GriddedSource":
@@ -318,7 +338,7 @@ class GriddedSource(Source):
         return tree
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EmptyGriddedSource(GriddedSource):
     """A :class:`GriddedSource` with no data, produced by :meth:`GriddedSource.empty`.
 

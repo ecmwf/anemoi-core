@@ -228,9 +228,9 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         coordinates=[torch.tensor([[0.0, 0.0], [0.1, 0.1]])],
         variables=["a", "b"],
         statistics={},
-        coordinates_are_static=False,
         layout=layout,
         boundaries=[(slice(0, 2),)],
+        timedeltas=[torch.zeros(2)],
     )
     y_noised = TabularSource(
         name="obs",
@@ -238,9 +238,9 @@ def test_transport_assemble_input_uses_sparse_target_coordinates_when_obs_do_not
         coordinates=[torch.tensor([[0.2, 0.2], [0.3, 0.3], [0.4, 0.4]])],
         variables=["a"],
         statistics={},
-        coordinates_are_static=False,
         layout=layout,
         boundaries=[(slice(0, 3),)],
+        timedeltas=[torch.zeros(3)],
     )
 
     data_coords, x_data_latent, x_skip, shard_sizes, batch_sizes, timedeltas = model._assemble_input(
@@ -261,7 +261,7 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.node_attributes = _EmptyNodeAttributes()
     model.condition_on_residual = True
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
     model._internal_input_idx = {"data": torch.tensor([0, 2])}
 
     class _Residual:
@@ -333,9 +333,9 @@ def test_tendency_transport_assemble_input_rejects_sparse_obs() -> None:
         coordinates=[torch.zeros(2, 2)],
         variables=["a"],
         statistics={},
-        coordinates_are_static=False,
         layout=layout,
         boundaries=[(slice(0, 2),)],
+        timedeltas=[torch.zeros(2)],
     )
 
     with pytest.raises(NotImplementedError, match="Tendency transport.*sparse"):
@@ -348,7 +348,7 @@ def test_tendency_transport_forward_network_uses_dense_source_view_override() ->
     model._graph_name_hidden = "hidden"
     model.node_attributes = _EmptyNodeAttributes()
     model.condition_on_residual = True
-    model.n_step_output = 1
+    model.n_step_output = {"data": 1}
     model._internal_input_idx = {"data": torch.tensor([0, 1])}
     model.latent_skip = False
     model.input_datasets = ["data"]
@@ -441,7 +441,7 @@ def test_transport_target_dim_combines_corrupted_target_and_decoding_forcings() 
             features=[SimpleNamespace(name="coordinates"), SimpleNamespace(name="target_forcings")],
         ),
     }
-    model.n_step_output = 1
+    model.n_step_output = {"obs": 1}
     model.num_output_channels = {"obs": 3}
 
     coords_dim = 4

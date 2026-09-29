@@ -53,7 +53,7 @@ class FakeModelConfig:
         node_attributes = SimpleNamespace(trainable_tensors={}, num_trainable_parameters={})
         model = SimpleNamespace(
             node_attributes=node_attributes,
-            n_step_input=self.n_step_input,
+            n_step_input={name: self.n_step_input for name in self.specs},
             num_input_channels_forcings={},
             num_input_channels_prognostic={},
             _forcing_input_idx={},

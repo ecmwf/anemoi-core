@@ -22,6 +22,7 @@ from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.utils import model_is_distributed
 
@@ -49,14 +50,49 @@ def _fold_members(source: "TabularSource", sample: torch.Tensor) -> torch.Tensor
     return sample.flatten(ensemble_axis, grid_axis)
 
 
+# No slots=True: it rebuilds the class, which breaks the zero-argument super() in __post_init__.
+@dataclass(frozen=True, kw_only=True)
 class TabularSource(Source):
-    """Tabular data source."""
+    """Tabular data source: points that change from sample to sample (e.g. observations).
+
+    Every payload field is a list with one entry per sample, since the number of
+    points differs between samples.
+
+    Parameters
+    ----------
+    data : list[torch.Tensor] or None
+        One ``(ensemble, grid_i, variables)`` tensor per sample, laid out per
+        ``layout``. ``None`` only for :class:`EmptyTabularSource`.
+    coordinates : list[torch.Tensor]
+        One ``(grid_i, 2)`` tensor of latitudes and longitudes in radians per sample.
+    timedeltas : list[torch.Tensor]
+        One ``(grid_i,)`` tensor of per-point time offsets per sample.
+    boundaries : list[tuple[slice, ...]]
+        The time windows of each sample, as slices along the grid axis.
+    shard_sizes : list[list[ShardSizes]], optional
+        Per sample and per time window, the per-rank point counts from read-time
+        sharding. ``None`` when the source is replicated.
+    """
+
+    data: list[torch.Tensor] | None
+    coordinates: list[torch.Tensor]
+    timedeltas: list[torch.Tensor]
+    boundaries: list[tuple[slice, ...]]
+    shard_sizes: list[list[ShardSizes]] | None = None
+
+    _PAYLOAD_FIELDS = ("data", "timedeltas")
+
+    @property
+    def coordinates_are_static(self) -> bool:
+        """Always ``False``: tabular points change from sample to sample."""
+        return False
 
     def __post_init__(self):
         super().__post_init__()
-        if self.timedeltas is None:
-            msg = f"{self.__class__.__name__} requires timedeltas to be provided; got None."
-            raise ValueError(msg)
+        for field_name in ("timedeltas", "boundaries"):
+            if getattr(self, field_name) is None:
+                msg = f"{self.__class__.__name__} {self.name!r} requires {field_name}; got None."
+                raise ValueError(msg)
 
         ts = tuple(len(t) for t in self.timedeltas)
         cs = tuple(len(c) for c in self.coordinates)
@@ -178,18 +214,16 @@ class TabularSource(Source):
         folded = [_fold_members(self, sample) for sample in self.data]
         # coordinates and timedeltas are repeated per member to line up with the folded data
         repeated_coords = [c.repeat(self.ensemble_size, 1) for c in self.coordinates]
-        repeated_timedeltas = (
-            None if self.timedeltas is None else [td.repeat(self.ensemble_size) for td in self.timedeltas]
-        )
+        repeated_timedeltas = [td.repeat(self.ensemble_size) for td in self.timedeltas]
 
         if len(folded) > 1:
             data = torch.cat(folded, dim=0)
             coordinates = torch.cat(repeated_coords, dim=0)
-            timedeltas = None if repeated_timedeltas is None else torch.cat(repeated_timedeltas, dim=0)
+            timedeltas = torch.cat(repeated_timedeltas, dim=0)
         else:
             data = folded[0]
             coordinates = repeated_coords[0]
-            timedeltas = None if repeated_timedeltas is None else repeated_timedeltas[0]
+            timedeltas = repeated_timedeltas[0]
 
         # Flatten per-window shard sizes into one list for the concatenated data.
         # NOTE this changes the order of observations when gathering:
@@ -216,7 +250,7 @@ class TabularSource(Source):
         return FlatSource(
             data=data,
             coordinates=coordinates.to(device),
-            timedeltas=None if timedeltas is None else timedeltas.to(device),
+            timedeltas=timedeltas.to(device),
             device=device,
             shard_sizes=flat_shard_sizes,
             batch_sizes=batch_sizes,
@@ -307,7 +341,6 @@ class TabularSource(Source):
                 )
                 gathered_data[-1].append(gathered_window_data)
 
-                # TODO(Jan): coordinates/td/boundaries is None?
                 window_coords = coords[window_slice]
                 gathered_window_coords = gather_tensor(
                     window_coords,
@@ -369,10 +402,6 @@ class TabularSource(Source):
             A new view with the same :class:`TensorLayout` but reduced
             time extent.
         """
-        if self.boundaries is None:
-            msg = f"{self.__class__.__name__} has no 'boundaries' metadata; cannot select_time."
-            raise ValueError(msg)
-
         idx_list = _index_list(indices, self.time_size)
 
         new_data = []
@@ -391,21 +420,15 @@ class TabularSource(Source):
                 else sample_data.narrow(self.layout.grid, 0, 0)
             )
 
-            if new_coords is not None and self.coordinates is not None:
-                sample_coords = self.coordinates[sample_idx]
-                coord_pieces = [sample_coords[s.start : s.stop] for s in selected_slices]
-                new_coords.append(
-                    torch.cat(coord_pieces, dim=0) if coord_pieces else sample_coords[:0],
-                )
+            sample_coords = self.coordinates[sample_idx]
+            coord_pieces = [sample_coords[s.start : s.stop] for s in selected_slices]
+            new_coords.append(torch.cat(coord_pieces, dim=0) if coord_pieces else sample_coords[:0])
 
-            if new_timedeltas is not None and self.timedeltas is not None:
-                sample_td = self.timedeltas[sample_idx]
-                td_pieces = [sample_td[s.start : s.stop] for s in selected_slices]
-                new_timedeltas.append(
-                    torch.cat(td_pieces, dim=0) if td_pieces else sample_td[:0],
-                )
+            sample_td = self.timedeltas[sample_idx]
+            td_pieces = [sample_td[s.start : s.stop] for s in selected_slices]
+            new_timedeltas.append(torch.cat(td_pieces, dim=0) if td_pieces else sample_td[:0])
 
-            if new_shard_sizes is not None and self.shard_sizes is not None:
+            if new_shard_sizes is not None:
                 sample_shard_sizes = self.shard_sizes[sample_idx]
                 new_shard_sizes.append([sample_shard_sizes[t] for t in idx_list])
 
@@ -419,8 +442,8 @@ class TabularSource(Source):
 
         return self.clone(
             data=new_data,
-            coordinates=new_coords if new_coords else self.coordinates,
-            timedeltas=new_timedeltas if new_timedeltas else self.timedeltas,
+            coordinates=new_coords,
+            timedeltas=new_timedeltas,
             boundaries=new_boundaries,
             shard_sizes=new_shard_sizes,
         )
@@ -461,7 +484,7 @@ class TabularSource(Source):
         return tree
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class EmptyTabularSource(TabularSource):
     """A :class:`TabularSource` with no data."""
 
@@ -493,16 +516,14 @@ class EmptyTabularSource(TabularSource):
     def flatten(self) -> "FlatSource":
         # coordinates and timedeltas are repeated per member to line up with the folded data
         repeated_coords = [c.repeat(self.ensemble_size, 1) for c in self.coordinates]
-        repeated_timedeltas = (
-            None if self.timedeltas is None else [td.repeat(self.ensemble_size) for td in self.timedeltas]
-        )
+        repeated_timedeltas = [td.repeat(self.ensemble_size) for td in self.timedeltas]
 
         if len(repeated_coords) > 1:
             coordinates = torch.cat(repeated_coords, dim=0)
-            timedeltas = None if repeated_timedeltas is None else torch.cat(repeated_timedeltas, dim=0)
+            timedeltas = torch.cat(repeated_timedeltas, dim=0)
         else:
             coordinates = repeated_coords[0]
-            timedeltas = None if repeated_timedeltas is None else repeated_timedeltas[0]
+            timedeltas = repeated_timedeltas[0]
 
         # Flatten per-window shard sizes into one list for the concatenated data.
         # NOTE this changes the order of observations when gathering:
@@ -526,7 +547,7 @@ class EmptyTabularSource(TabularSource):
         return FlatSource(
             data=None,
             coordinates=coordinates.to(self.device),
-            timedeltas=None if timedeltas is None else timedeltas.to(self.device),
+            timedeltas=timedeltas.to(self.device),
             device=self.device,
             shard_sizes=flat_shard_sizes,
             batch_sizes=batch_sizes,

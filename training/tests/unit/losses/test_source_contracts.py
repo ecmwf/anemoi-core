@@ -131,6 +131,8 @@ def _observations() -> TabularSource:
         statistics={},
         coordinates=[torch.zeros(2, 2), torch.zeros(3, 2)],
         layout=TensorLayout(grid=0, variables=1),
+        timedeltas=[torch.zeros(2), torch.zeros(3)],
+        boundaries=[(slice(0, 2),), (slice(0, 3),)],
     )
 
 
@@ -163,6 +165,8 @@ def test_sparse_pairwise_ignores_empty_samples_and_preserves_zero_gradients() ->
         statistics={},
         coordinates=[torch.zeros(0, 2), torch.zeros(2, 2)],
         layout=TensorLayout(grid=0, variables=1),
+        timedeltas=[torch.zeros(0), torch.zeros(2)],
+        boundaries=[(slice(0, 0),), (slice(0, 2),)],
     )
     target = pred.clone(data=[torch.zeros_like(empty), torch.zeros_like(non_empty)])
     result = apply_pairwise(pred, target, lambda p, t, **_: (p - t).sum())
@@ -216,6 +220,8 @@ def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
         statistics={},
         coordinates=[torch.zeros(2, 2)],
         layout=TensorLayout(ensemble=0, grid=1, variables=2),
+        timedeltas=[torch.zeros(2)],
+        boundaries=[(slice(0, 2),)],
     )
     target = pred.clone(data=[torch.tensor([[[0.0], [float("nan")]]])])
     result = CRPS(alpha=0.0, backend=backend, ignore_nans=True)(pred, target)
