@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from anemoi.models.data.sources import TabularSource
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.utils.enums import TensorDim
 
@@ -83,7 +84,7 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         torch.Tensor
             Accumulated loss across all aggregation types.
         """
-        if pred.layout.time_in_grid:
+        if isinstance(pred, TabularSource):
             msg = "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
             raise NotImplementedError(msg)
         assert (

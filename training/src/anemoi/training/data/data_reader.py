@@ -494,7 +494,6 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
             layout=self.layout,
             statistics=self.statistics,
             grid_size=self.grid_size,
-            coordinates_are_static=self.is_static_grid,
             coordinates=self.get_coordinates(time_indices),
             shard_sizes=self.grid_shard_sizes,
         )

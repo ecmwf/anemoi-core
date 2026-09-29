@@ -55,29 +55,17 @@ def test_normalizer_requires_only_statistics_used_by_its_method():
     torch.testing.assert_close(offset, torch.zeros(2))
 
 
-def test_update_source_preserves_layout_and_coordinate_staticness():
-    batch = _batch({"grid": ["a", "b"]})
-    view = batch["grid"].clone(
-        coordinates=torch.zeros(3, 2),
-        coordinates_are_static=True,
+def test_replacing_a_gridded_source_keeps_its_coordinates_static():
+    batch = build_batch(
+        data={"grid": torch.zeros(2, 1, 1, 3, 2)},
+        coordinates={"grid": torch.zeros(3, 2)},
+        layouts={"grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"grid": ["a", "b"]},
     )
-    fixed = batch.replace("grid", view)
+    fixed = batch.replace("grid", batch["grid"].clone(coordinates=torch.ones(3, 2)))
     assert fixed.is_static_coords("grid")
     assert fixed["grid"].coordinates_are_static
     assert fixed["grid"].flatten().batch_sizes is None
-
-    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=-2, variables=-1)
-    moving = view.clone(
-        coordinates=torch.zeros(2, 3, 2),
-        layout=layout,
-        coordinates_are_static=False,
-    )
-    updated = fixed.replace("grid", moving)
-    assert not updated.is_static_coords("grid")
-    assert not updated["grid"].coordinates_are_static
-    assert updated["grid"].layout == layout
-    assert updated["grid"].flatten().batch_sizes == (3, 3)
-    assert fixed.is_static_coords("grid")
 
 
 def test_model_output_cast_and_variable_metadata_agree():

@@ -35,7 +35,6 @@ def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSamp
         layout=GRIDDED_LAYOUT,
         coordinates=torch.zeros(4, 2),
         grid_size=4,
-        coordinates_are_static=True,
     )
 
 
@@ -59,7 +58,6 @@ def gridded_batch(variables: list[str] = ["a", "b", "c"]) -> Batch:
         layouts={"grid": GRIDDED_LAYOUT.with_batch_dim()},
         variables={"grid": variables},
         statistics={"grid": {"mean": torch.arange(n_vars, dtype=torch.float32)}},
-        static_coords=("grid",),
     )
 
 

@@ -37,7 +37,6 @@ def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSour
         statistics={},
         coordinates=torch.zeros(3, 2),
         layout=layout or TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-        coordinates_are_static=True,
     )
 
 

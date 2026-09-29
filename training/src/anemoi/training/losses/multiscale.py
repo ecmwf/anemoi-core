@@ -22,6 +22,7 @@ from anemoi.graphs.builders import _expand_smoother_config
 from anemoi.graphs.builders import build_smoother_subgraph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.graph import all_to_all_transpose
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -336,7 +337,7 @@ class MultiscaleLossWrapper(BaseLossWrapper):
         **kwargs,
     ) -> torch.Tensor:
         """Smooth gridded tensors and evaluate each scale with the source metadata."""
-        if y_pred_ens.layout.time_in_grid:
+        if isinstance(y_pred_ens, TabularSource):
             msg = (
                 f"{self.__class__.__name__} smooths over a fixed grid and does not support tabular "
                 f"datasets such as {y_pred_ens.name!r}. Use a pointwise loss."

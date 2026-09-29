@@ -777,15 +777,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
     ) -> Batch:
+        # Without a template the sampling inputs are the raw gridded tensors of predict_step,
+        # which _before_sampling lays out as (batch, time, ensemble, grid, variables).
+        gridded_layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
         source_layouts = (
             {name: template[name].layout for name in template.dataset_names}
             if template is not None
-            else self.data_layouts
-        )
-        static_coords = (
-            template.static_coord_datasets & set(data)
-            if template is not None
-            else frozenset(name for name in data if self.is_dataset_static.get(name, False))
+            else {name: gridded_layout for name in data}
         )
 
         sources = {}
@@ -817,7 +815,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                     boundaries=template_source.boundaries,
                 )
             else:
-                sources[dataset_name] = GriddedSource(**common, coordinates_are_static=dataset_name in static_coords)
+                sources[dataset_name] = GriddedSource(**common)
 
         return Batch(sources)
 

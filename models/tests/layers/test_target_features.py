@@ -114,7 +114,6 @@ class TargetFeatureTestCase:
             variables=[f"v{i}" for i in range(model_init.num_vars)],
             statistics={},
             layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-            coordinates_are_static=True,
         )
 
     @pytest.fixture

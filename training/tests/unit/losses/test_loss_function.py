@@ -61,7 +61,6 @@ def _gridded_source_view(data: torch.Tensor) -> Source:
         statistics={},
         coordinates=torch.zeros(data.shape[3], 2, device=data.device),
         layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-        coordinates_are_static=True,
     )
 
 

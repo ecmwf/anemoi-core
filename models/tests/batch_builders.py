@@ -45,7 +45,6 @@ def build_batch(
     variables: Mapping[str, list[str]] | None = None,
     statistics: Mapping[str, Any] | None = None,
     boundaries: Mapping[str, Any] | None = None,
-    static_coords: frozenset[str] | set[str] | tuple[str, ...] = (),
 ) -> Batch:
     """Build an already-collated batch from per-dataset dicts.
 
@@ -60,7 +59,6 @@ def build_batch(
     variables = variables or {}
     statistics = statistics or {}
     boundaries = boundaries or {}
-    static = frozenset(static_coords)
 
     sources: dict[str, Source] = {}
     for name, payload in data.items():
@@ -87,6 +85,6 @@ def build_batch(
                 boundaries=boundaries.get(name) or (per_dataset_meta or {}).get("boundaries"),
             )
         else:
-            sources[name] = GriddedSource(**common, coordinates_are_static=name in static)
+            sources[name] = GriddedSource(**common)
 
     return Batch(sources)

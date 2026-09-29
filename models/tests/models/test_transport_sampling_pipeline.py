@@ -91,7 +91,6 @@ def _configure_sampling_model(
     ``specs`` maps dataset name to ``(num_input_channels, num_output_channels, grid_size)``.
     """
     model.data_indices = {}
-    model.data_layouts = {}
     model.statistics = {}
     model.is_dataset_static = {}
     model._graph_data = HeteroData()
@@ -99,7 +98,6 @@ def _configure_sampling_model(
         input_names = tuple(f"in_{idx}" for idx in range(num_inputs))
         output_names = tuple(f"out_{idx}" for idx in range(num_outputs))
         model.data_indices[dataset_name] = _data_indices(input_names, output_names)
-        model.data_layouts[dataset_name] = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
         model.statistics[dataset_name] = {
             "mean": torch.zeros(num_inputs + num_outputs),
             "stdev": torch.ones(num_inputs + num_outputs),
@@ -287,7 +285,6 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         coordinates=coordinates,
         variables=["a", "b", "c", "d"],
         statistics={},
-        coordinates_are_static=True,
         layout=layout,
     )
     y_noised = GriddedSource(
@@ -296,7 +293,6 @@ def test_tendency_transport_assemble_input_uses_dense_source_views_with_residual
         coordinates=coordinates,
         variables=["a", "c"],
         statistics={},
-        coordinates_are_static=True,
         layout=layout,
     )
 
@@ -1316,20 +1312,6 @@ def test_sampling_requires_graph_coordinates_without_template(missing: str) -> N
         del model._graph_data["data"].x
     with pytest.raises(ValueError, match="Cannot infer sampling coordinates for dataset 'data'"):
         model._make_sampling_batch({"data": torch.zeros(1, 1, 1, 3, 1)}, variable_space="output")
-
-
-def test_sampling_batch_uses_declared_model_layout() -> None:
-    model = _transport_model_stub()
-    _configure_sampling_model(model, {"data": (1, 1, 3)})
-    layout = TensorLayout(batch=0, grid=1, time=2, ensemble=3, variables=4)
-    model.data_layouts["data"] = layout
-    data = torch.arange(6, dtype=torch.float32).reshape(1, 3, 2, 1, 1)
-
-    batch = model._make_sampling_batch({"data": data}, variable_space="output")
-
-    assert batch["data"].layout == layout
-    assert batch["data"].grid_size == 3
-    torch.testing.assert_close(batch["data"].select_time(1).data, data[:, :, 1:2])
 
 
 def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:

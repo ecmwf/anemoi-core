@@ -70,7 +70,6 @@ def test_forecaster_requires_timedeltas_when_node_encoding_is_configured() -> No
 def test_forecaster_input_dimensions_include_configured_timedelta_features() -> None:
     model = _model_with_timedelta_attributes()
     model.is_dataset_static = {"obs": False}
-    model.data_layouts = {"obs": TensorLayout(grid=0, variables=1)}
     model.num_input_channels = {"obs": 5}
     model.node_attributes = SimpleNamespace(num_trainable_parameters={"obs": 4})
 

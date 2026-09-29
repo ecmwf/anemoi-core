@@ -48,7 +48,6 @@ def _gridded_batch(data: torch.Tensor, layout: TensorLayout = _LAYOUT) -> Batch:
         coordinates={"data": torch.zeros(data.shape[layout.grid], 2)},
         layouts={"data": layout},
         variables={"data": [f"v{i}" for i in range(data.shape[layout.variables])]},
-        static_coords={"data"},
     )
 
 

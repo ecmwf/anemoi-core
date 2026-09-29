@@ -1380,7 +1380,6 @@ def _gridded_view(
         statistics=statistics,
         coordinates=torch.zeros(data.shape[layout.grid], 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 

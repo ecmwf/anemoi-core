@@ -21,7 +21,6 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.shapes import ShardSizes
@@ -337,10 +336,7 @@ class BaseGraphModel(nn.Module):
     def _calculate_input_dim_latent(self) -> int:
         """Calculate the latent input dimension."""
         nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return (
-            COORDS_DIM
-            + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
-        )
+        return COORDS_DIM + self.node_attributes.num_trainable_parameters.get(nodes_name, 0)
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -453,8 +449,8 @@ class BaseGraphModel(nn.Module):
         sparse_projector_num_chunks = sparse_projector_config.get("num_chunks", 1)
         for dataset_name, residual_config in residual_configs.items():
             assert residual_config is not None, f"Residual config for dataset '{dataset_name}' is None."
-            layout = self.data_layouts.get(dataset_name)
-            if layout is not None and layout.time_in_grid:
+            # Only gridded datasets have a static grid, so a dynamic one is tabular.
+            if not self.is_dataset_static.get(dataset_name, True):
                 msg = (
                     f"model.residual configures a residual connection for dataset '{dataset_name}', which is "
                     "tabular. Residual connections need a gridded dataset with an explicit "

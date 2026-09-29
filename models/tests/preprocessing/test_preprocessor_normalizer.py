@@ -44,7 +44,6 @@ def make_gridded_view(payload: torch.Tensor, variables=VARIABLES, statistics=STA
         statistics=statistics,
         coordinates=torch.zeros(points, 2),
         layout=layout,
-        coordinates_are_static=True,
     )
 
 

@@ -92,16 +92,11 @@ class GriddedSourceSample(SourceSample):
     ----------
     grid_size : int or None, optional
         Full grid size before any distributed sharding.
-    coordinates_are_static : bool, optional
-        Whether this dataset's grid is fixed for the whole run (the reader's
-        ``is_static_grid``). Static coordinates are shared by reference across the
-        batch instead of being stacked, and skipped by pinning.
     shard_sizes : ShardSizes, optional
         Read-time sharding descriptor over the grid axis.
     """
 
     grid_size: int | None = None
-    coordinates_are_static: bool = False
     shard_sizes: ShardSizes | None = None
 
     def __post_init__(self) -> None:
@@ -130,7 +125,6 @@ class GriddedSourceSample(SourceSample):
             variables=head.variables,
             layout=layout,
             statistics=head.statistics,
-            coordinates_are_static=head.coordinates_are_static,
             data=data,
             coordinates=head.coordinates,
             shard_sizes=head.shard_sizes,

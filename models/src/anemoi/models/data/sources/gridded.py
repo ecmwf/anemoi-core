@@ -44,15 +44,20 @@ class GriddedSource(Source):
         ``(grid, 2)`` latitudes and longitudes in radians, shared by the whole batch.
     shard_sizes : ShardSizes, optional
         Per-rank grid sizes when the source is sharded, ``None`` when it is replicated.
-    coordinates_are_static : bool, optional
-        Whether the grid is fixed for the whole run, so the coordinate tensor may be
-        shared by reference rather than transferred per batch.
     """
 
     data: torch.Tensor | None
     coordinates: torch.Tensor
     shard_sizes: ShardSizes | None = None
-    coordinates_are_static: bool = False
+
+    @property
+    def coordinates_are_static(self) -> bool:
+        """Always ``True``: a gridded dataset keeps one grid for the whole run.
+
+        The coordinate tensor is therefore shared by reference across batches rather
+        than transferred each time (see :meth:`Source.to`).
+        """
+        return True
 
     # How a source's axes collapse into ``(nodes, features)``.
     FLATTEN_PATTERN = "(batch ensemble grid) (time variables)"
@@ -136,7 +141,6 @@ class GriddedSource(Source):
             data=None,
             coordinates=self.coordinates,
             shard_sizes=self.shard_sizes,
-            coordinates_are_static=self.coordinates_are_static,
             _device=self.device,
             _dtype=self.dtype,
             _grid_size=self.grid_size,

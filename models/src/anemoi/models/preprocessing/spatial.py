@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import ShardSizes
 
@@ -101,7 +102,7 @@ class SpatialPreprocessor(nn.Module):
             The source on the target grid: projected data, target coordinates and target-grid
             shard sizes (coordinates are sharded like the data). Variables and statistics are unchanged.
         """
-        if source.layout.time_in_grid:
+        if isinstance(source, TabularSource):
             raise TypeError(f"{self.__class__.__name__} only projects gridded sources, got {source.name!r}.")
         pattern = source.layout.normalized(source.data.ndim).pattern
         if pattern != "batch time ensemble grid variables":

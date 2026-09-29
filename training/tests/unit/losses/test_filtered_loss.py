@@ -500,7 +500,6 @@ class TestScalerIndicesRemapping:
                 statistics={},
                 coordinates=torch.zeros(8, 2),
                 layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
-                coordinates_are_static=True,
             )
 
         # Global index 3 is outside the filtered set ["var_0"].
