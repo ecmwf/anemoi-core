@@ -14,7 +14,8 @@ from dataclasses import FrozenInstanceError
 import pytest
 import torch
 
-from anemoi.models.data import SourceSample
+from anemoi.models.data import GriddedSourceSample
+from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources.base import Source
@@ -37,12 +38,12 @@ def _sample_layout() -> TensorLayout:
 
 def _gridded_payload(
     data: torch.Tensor,
-    coordinates: torch.Tensor | None = None,
+    coordinates: torch.Tensor,
     *,
     static: bool = False,
-) -> SourceSample:
+) -> GriddedSourceSample:
     """A gridded sample in the reader contract."""
-    return SourceSample(
+    return GriddedSourceSample(
         data=data,
         layout=_sample_layout(),
         variables=[f"v{i}" for i in range(data.shape[_sample_layout().variables])],
@@ -427,7 +428,7 @@ def test_source_view_returns_sparse_coordinate_lists() -> None:
 
 
 def test_tensor_layout_with_batch_dim_shifts_positive_axes() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     shifted = layout.with_batch_dim()
@@ -439,7 +440,7 @@ def test_tensor_layout_with_batch_dim_shifts_positive_axes() -> None:
 
 
 def test_tensor_layout_without_batch_dim_is_inverse() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3, time_in_grid=False)
     roundtrip = layout.with_batch_dim().without_batch_dim()
@@ -447,7 +448,7 @@ def test_tensor_layout_without_batch_dim_is_inverse() -> None:
 
 
 def test_tensor_layout_without_batch_dim_sparse_roundtrip() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
     roundtrip = layout.with_batch_dim().without_batch_dim()
@@ -455,14 +456,14 @@ def test_tensor_layout_without_batch_dim_sparse_roundtrip() -> None:
 
 
 def test_tensor_layout_without_batch_dim_noop_when_already_unset() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     layout = TensorLayout(ensemble=0, grid=1, variables=2)
     assert layout.without_batch_dim() is layout
 
 
 def test_tensor_layout_repr_elides_none_fields() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     r = repr(TensorLayout(grid=0, variables=1, time_in_grid=True))
     assert "grid=0" in r
@@ -474,7 +475,7 @@ def test_tensor_layout_repr_elides_none_fields() -> None:
 
 
 def test_batch_repr_summarises_per_dataset() -> None:
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     batch = build_batch(
         data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(5, 3), torch.zeros(7, 3)]},
@@ -495,14 +496,15 @@ def test_batch_repr_summarises_per_dataset() -> None:
 
 def test_batch_collate_rejects_invalid_layout_position() -> None:
     """Layouts that point at a non-existent axis must be rejected by collate."""
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     samples = [
         {
-            "a": SourceSample(
+            "a": GriddedSourceSample(
                 data=torch.zeros(2, 3),
                 layout=TensorLayout(grid=0, variables=5),
                 variables=["x", "y", "z"],
+                coordinates=torch.zeros(2, 2),
             ),
         },
     ]
@@ -517,28 +519,21 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
     keeps its per-sample shape ``(N_i, V)``), so the batch dim is the list
     itself — no new tensor axis is added.
     """
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     sample_layout = TensorLayout(grid=0, variables=1, time_in_grid=True)
-    # Sparse samples are recognised by ``layout.time_in_grid``; that is also what
-    # makes ``boundaries`` mandatory, since they carry the time axis.
     samples = [
         {
-            "obs": SourceSample(
-                data=torch.zeros(5, 3),
+            "obs": TabularSourceSample(
+                data=torch.zeros(n, 3),
                 layout=sample_layout,
                 variables=["x", "y", "z"],
-                boundaries=(slice(0, 5),),
+                coordinates=torch.zeros(n, 2),
+                timedeltas=torch.zeros(n),
+                boundaries=(slice(0, n),),
             ),
-        },
-        {
-            "obs": SourceSample(
-                data=torch.zeros(7, 3),
-                layout=sample_layout,
-                variables=["x", "y", "z"],
-                boundaries=(slice(0, 7),),
-            ),
-        },
+        }
+        for n in (5, 7)
     ]
     batch = Batch.collate(samples)
     assert isinstance(batch["obs"].data, list)
@@ -548,13 +543,16 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
 
 def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
     """Gridded (stacked) datasets get their layout shifted by ``with_batch_dim``."""
-    from anemoi.models.data.batch import TensorLayout
+    from anemoi.models.data import TensorLayout
 
     sample_layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
-    samples = [
-        {"grid": SourceSample(data=torch.zeros(1, 1, 4, 3), layout=sample_layout, variables=["x", "y", "z"])},
-        {"grid": SourceSample(data=torch.zeros(1, 1, 4, 3), layout=sample_layout, variables=["x", "y", "z"])},
-    ]
+    sample = GriddedSourceSample(
+        data=torch.zeros(1, 1, 4, 3),
+        layout=sample_layout,
+        variables=["x", "y", "z"],
+        coordinates=torch.zeros(4, 2),
+    )
+    samples = [{"grid": sample}, {"grid": sample}]
     batch = Batch.collate(samples)
     assert isinstance(batch["grid"].data, torch.Tensor)
     assert batch["grid"].data.shape == (2, 1, 1, 4, 3)

@@ -20,7 +20,7 @@ import pytest
 import torch
 from omegaconf import DictConfig
 
-from anemoi.models.data.batch import TensorLayout
+from anemoi.models.data import TensorLayout
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing.imputer import ConstantImputer
 

@@ -11,7 +11,9 @@
 from .batch import Batch
 from .flat import FlatSource
 from .layout import TensorLayout
+from .sample import GriddedSourceSample
 from .sample import SourceSample
+from .sample import TabularSourceSample
 from .sources import GriddedSource
 from .sources import Source
 from .sources import TabularSource
@@ -19,6 +21,8 @@ from .sources import TabularSource
 __all__ = [
     "Batch",
     "SourceSample",
+    "GriddedSourceSample",
+    "TabularSourceSample",
     "TensorLayout",
     "GriddedSource",
     "TabularSource",

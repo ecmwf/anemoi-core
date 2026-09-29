@@ -16,7 +16,8 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -249,8 +250,13 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
-    def get_batch(self, data: dict[str, SourceSample]) -> Batch:
-        """Collate the per-dataset samples into a single-sample Batch."""
+    def _is_tabular(self, dataset_name: str) -> bool:
+        """Whether ``dataset_name`` holds tabular (observation) data."""
+        return self.data_layouts[dataset_name].time_in_grid
+
+    def get_batch(self, data: dict[str, dict]) -> Batch:
+        """Collate the per-dataset payload dicts into a single-sample Batch."""
+        samples = {}
         for dataset_name, sample in data.items():
             assert (
                 "latitudes" in sample and "longitudes" in sample
@@ -266,7 +272,10 @@ class AnemoiModelInterface(torch.nn.Module):
             assert "layout" in sample, f"Dataset {dataset_name!r}: missing 'layout' in the sample."
             assert "variables" in sample, f"Dataset {dataset_name!r}: missing 'variables' in the sample."
 
-        return Batch.collate(data)
+            sample_cls = TabularSourceSample if self._is_tabular(dataset_name) else GriddedSourceSample
+            samples[dataset_name] = sample_cls(**sample)
+
+        return Batch.collate(samples)
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.

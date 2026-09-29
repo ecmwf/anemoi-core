@@ -20,6 +20,7 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
+from anemoi.models.data import SourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_data_indices
@@ -345,16 +346,13 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, dict]:
+    def get_sample(self, index: int) -> dict[str, SourceSample]:
         """Return per-dataset samples for ``index``.
 
-        Each value is a dict ``{"data": tensor, "coordinates": (N, 2) tensor,
-        ...}`` so that the dataloader's collate function can build a
-        :class:`anemoi.models.data.Batch`. Sparse observation
-        readers additionally include a ``"timedeltas"`` tensor and a
-        ``"metadata": {"boundaries": ...}`` entry.
+        Each value is the reader's :class:`~anemoi.models.data.SourceSample`, so that
+        the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
         """
-        x: dict[str, dict[str, torch.Tensor]] = {}
+        x: dict[str, SourceSample] = {}
         for name, dataset in self.data_readers.items():
             time_steps = offset_time_indices(index, self.relative_date_indices[name])
             x[name] = dataset.get_sample(time_steps)
