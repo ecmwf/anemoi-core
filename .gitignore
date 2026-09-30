@@ -162,6 +162,7 @@ o96_baseline_small.slurm
 o96_embedder_small.slurm
 o96_deepset_embedder_small.slurm
 o96_hierarchical_embedder_small.slurm
+o96_linear_grouped_embedder_small.slurm
 training/src/anemoi/training/config/experiment/o96_era5_baseline.yaml
 training/src/anemoi/training/config/experiment/o96_era5_embedder.yaml
 training/src/anemoi/training/config/experiment/o96_era5_hierarchical_embedder.yaml
@@ -170,4 +171,5 @@ training/src/anemoi/training/config/experiment/o96_baseline_small.yaml
 training/src/anemoi/training/config/experiment/o96_embedder_small.yaml
 training/src/anemoi/training/config/experiment/o96_deepset_embedder_small.yaml
 training/src/anemoi/training/config/experiment/o96_hierarchical_embedder_small.yaml
+training/src/anemoi/training/config/experiment/o96_linear_grouped_embedder_small.yaml
 training/src/anemoi/training/config/experiment/o96_graph/graph.yaml
