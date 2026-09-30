@@ -17,7 +17,6 @@ from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.normalise import NormaliserMixin
-from anemoi.graphs.utils import camel_to_snake
 from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
@@ -29,7 +28,7 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     norm_by_group: bool = False
 
     def __init__(self, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
-        self.name = name or camel_to_snake(self.__class__.__name__)
+        self.name = name
         self.norm = norm
         self.dtype = getattr(torch, dtype)
         self.device = get_distributed_device()

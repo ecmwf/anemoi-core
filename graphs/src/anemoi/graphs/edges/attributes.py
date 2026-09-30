@@ -157,6 +157,8 @@ class EdgeLength(BasePositionalBuilder):
     Computes the haversine distance between the source and target nodes.
     """
 
+    name: str = "edge_length"
+
     def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_length = haversine_distance(x_i, x_j)
         return edge_length
@@ -167,6 +169,8 @@ class EdgeDirection(BasePositionalBuilder):
 
     Computes the direction vectors from the source to the target nodes for each edge.
     """
+
+    name: str = "edge_direction"
 
     def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
@@ -193,6 +197,8 @@ class DirectionalHarmonics(EdgeDirection):
     _compute_edge_attribute(x_i, x_j)
         Compute directional harmonics from edge directions.
     """
+
+    name: str = "directional_harmonics"
 
     def __init__(self, order: int = 3, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         self.order = order
@@ -237,6 +243,8 @@ class Azimuth(BasePositionalBuilder):
     - https://www.movable-type.co.uk/scripts/latlong.html
     """
 
+    name: str = "azimuth"
+
     def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Forward bearing. x_i, x_j must be radians.
         a11 = torch.cos(x_i[:, self._idx_lat]) * torch.sin(x_j[:, self._idx_lat])
@@ -266,6 +274,8 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
 
     def __init__(self, node_attr_name: str, name: str | None = None) -> None:
         self.node_attr_name = node_attr_name
+        if name is None:
+            name = f"{self.nodes_axis.name.lower()}_{self.node_attr_name}"
         super().__init__(name=name)
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
@@ -349,6 +359,7 @@ class RadialBasisFeatures(EdgeLength):
     - Farther edges → higher values at high-distance centers (0.75, 1.0)
     """
 
+    name: str = "rbf_lengths"
     norm_by_group: bool = True  # normalise the RBF features per destination node
 
     def __init__(
@@ -455,6 +466,7 @@ class GaussianDistanceWeights(EdgeLength):
         Normalization method for the edge attribute.
     """
 
+    name: str = "gauss_weights"
     norm_by_group: bool = True  # normalise the gaussian weights by target node
 
     def __init__(self, sigma: float = 1.0, name: str | None = None, norm: str = "l1") -> None:

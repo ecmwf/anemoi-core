@@ -36,6 +36,8 @@ TRUST_FACTOR = 1.2
 class BaseAreaWeights(BaseNodeAttribute, ABC):
     """Base class for area weights of the nodes."""
 
+    name: str = "area_weights"
+
     def get_latlon_coordinates(self, nodes: NodeStorage) -> torch.Tensor:
         return nodes.x.to(torch.float64)
 

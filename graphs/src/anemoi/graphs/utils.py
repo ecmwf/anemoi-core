@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from enum import Enum
 from importlib.util import find_spec
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -23,6 +24,7 @@ from packaging import version
 from scipy.sparse import coo_matrix
 from sklearn.neighbors import NearestNeighbors
 from torch_geometric import __version__ as PYG_VERSION
+from torch_geometric.data.hetero_data import HeteroData
 
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 
@@ -48,22 +50,25 @@ You can install it using:
     pip install torch-cluster -f https://data.pyg.org/whl/torch-${TORCH_VERSION}.html
 """
 
+LOGGER = logging.getLogger(__name__)
 
-def camel_to_snake(name: str) -> str:
-    """Convert camel case to snake case.
 
-    Parameters
-    ----------
-    name : str
-        Camel case string.
+def load_graph_from_file(graph_filename: Path | str) -> HeteroData:
+    """Load a serialized graph on the currently active distributed device."""
+    map_location = get_distributed_device()
+    LOGGER.info("Loading graph data (%s) from %s", map_location, graph_filename)
+    return torch.load(graph_filename, map_location=map_location, weights_only=False)
 
-    Returns
-    -------
-    str
-        Snake case string.
-    """
-    name = re.sub("(.)([A-Z][a-z]+)", r"\1_\2", name)
-    return re.sub("([a-z0-9])([A-Z])", r"\1_\2", name).lower()
+
+def validate_loaded_graph(graph_data: HeteroData, required_dataset_names: list[str]) -> None:
+    """Ensure the loaded graph contains the required dataset nodes names."""
+    missing = [n for n in required_dataset_names if n not in graph_data.node_types]
+    if missing:
+        msg = (
+            "Loaded graph is missing dataset node types required by the dataloader. "
+            f"Missing {missing}; available nodes are {graph_data.node_types}."
+        )
+        raise ValueError(msg)
 
 
 def get_distributed_device() -> torch.device:
