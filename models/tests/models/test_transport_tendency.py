@@ -8,45 +8,23 @@
 # nor does it submit to any jurisdiction.
 
 import numpy as np
+import pytest
 import torch
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
+from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.preprocessing.imputer import InputImputer
+from anemoi.models.preprocessing.normalizer import InputNormalizer
 from tests.batch_builders import build_batch
 
 GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-
-
-def _idx_list(idx) -> list[int] | None:
-    if idx is None:
-        return None
-    if torch.is_tensor(idx):
-        return idx.tolist()
-    return list(idx)
-
-
-class SequenceProcessor(torch.nn.Module):
-    def __init__(self, offset: float, expected_indices: list[object]) -> None:
-        super().__init__()
-        self.offset = offset
-        self.expected_indices = [_idx_list(idx) for idx in expected_indices]
-        self.calls = 0
-
-    def forward(self, x: torch.Tensor, in_place: bool = True, inverse: bool = False, data_index=None, **kwargs):
-        del kwargs, inverse
-        expected = self.expected_indices[self.calls]
-        assert _idx_list(data_index) == expected
-        self.calls += 1
-        if not in_place:
-            x = x.clone()
-        return x + self.offset
 
 
 class IdentityProcessor(torch.nn.Module):
@@ -76,6 +54,14 @@ def _make_index_collection() -> IndexCollection:
     return IndexCollection(data_config, name_to_index)
 
 
+IMPUTER_STATISTICS = {
+    "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0, 1.0]),
+    "stdev": np.array([0.5, 0.5, 0.5, 1.0, 14.0, 1.0]),
+    "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
+    "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
+}
+
+
 def _make_imputer_settings() -> tuple[InputImputer, IndexCollection]:
     config = DictConfig(
         {
@@ -93,15 +79,9 @@ def _make_imputer_settings() -> tuple[InputImputer, IndexCollection]:
             },
         },
     )
-    statistics = {
-        "mean": np.array([1.0, 2.0, 3.0, 4.5, 3.0, 1.0]),
-        "stdev": np.array([0.5, 0.5, 0.5, 1.0, 14.0, 1.0]),
-        "minimum": np.array([1.0, 1.0, 1.0, 1.0, 1.0, 0.0]),
-        "maximum": np.array([11.0, 10.0, 10.0, 10.0, 10.0, 2.0]),
-    }
     name_to_index = {"x": 0, "y": 1, "z": 2, "q": 3, "other": 4, "prog": 5}
     data_indices = IndexCollection(data_config=config.data, name_to_index=name_to_index)
-    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=statistics)
+    imputer = InputImputer(config=config.data.imputer, data_indices=data_indices, statistics=IMPUTER_STATISTICS)
     return imputer, data_indices
 
 
@@ -129,105 +109,171 @@ def _gridded_batch(data: torch.Tensor, variables: list[str]):
     )
 
 
-def test_compute_tendency_uses_expected_indices() -> None:
+# Full variable order of the dataset: prognostic prog0/prog1, forcing force, diagnostic diag.
+STATE_STATISTICS = {"mean": np.array([1.0, 2.0, 3.0, 4.0]), "stdev": np.array([2.0, 4.0, 1.0, 0.5])}
+TENDENCY_STATISTICS = {
+    "lead_times": ["6h", "12h"],
+    "6h": {"mean": np.array([0.1, 0.2, 9.0, 9.0]), "stdev": np.array([0.5, 0.25, 9.0, 9.0])},
+    "12h": {"mean": np.array([0.3, 0.4, 9.0, 9.0]), "stdev": np.array([1.0, 0.5, 9.0, 9.0])},
+}
+
+
+def _source(data: torch.Tensor, variables: list[str], statistics: dict = STATE_STATISTICS) -> GriddedSource:
+    name_to_index = {"prog0": 0, "prog1": 1, "force": 2, "diag": 3}
+    positions = [name_to_index[name] for name in variables]
+    return GriddedSource(
+        name="data",
+        variables=variables,
+        layout=GRIDDED_LAYOUT,
+        data=data,
+        coordinates=torch.zeros(data.shape[GRIDDED_LAYOUT.grid], 2),
+        statistics={key: value[positions] for key, value in statistics.items()},
+    )
+
+
+def _normalizer_processors() -> tuple[Processors, Processors]:
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    return Processors([["normalizer", normalizer]]), Processors([["normalizer", normalizer]], inverse=True)
+
+
+def _tendency_model(n_step_output: int = 2) -> AnemoiTransportTendModelEncProcDec:
     model = _make_model()
-    indices = model.data_indices["data"]
+    torch.nn.Module.__init__(model)
+    model.n_step_output = {"data": n_step_output}
+    return model
 
-    x_t1 = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])
-    x_t0 = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
 
-    input_post = SequenceProcessor(
-        0.0,
-        [indices.data.output.full, indices.data.input.prognostic],
+def test_tendency_statistics_follow_lead_times() -> None:
+    model = _tendency_model()
+
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+
+    assert per_step == [TENDENCY_STATISTICS["6h"], TENDENCY_STATISTICS["12h"]]
+
+
+def test_tendency_statistics_accepts_flat_statistics_for_single_output() -> None:
+    model = _tendency_model(n_step_output=1)
+
+    assert model.tendency_statistics("data", STATE_STATISTICS) == [STATE_STATISTICS]
+
+
+@pytest.mark.parametrize(
+    ("statistics", "message"),
+    [
+        (None, "Tendency statistics are required"),
+        (STATE_STATISTICS, "per lead time"),
+        ({"lead_times": ["6h"], "6h": STATE_STATISTICS}, "Expected 2 tendency statistics"),
+        ({"lead_times": ["6h", "12h"], "6h": STATE_STATISTICS}, "Missing tendency statistics"),
+    ],
+)
+def test_tendency_statistics_rejects_incomplete_statistics(statistics, message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        _tendency_model().tendency_statistics("data", statistics)
+
+
+def test_compute_tendency_normalises_each_step_with_its_tendency_statistics() -> None:
+    model = _tendency_model()
+    pre_processors, post_processors = _normalizer_processors()
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+
+    state = _source(torch.randn(2, 2, 1, 3, 3), ["prog0", "prog1", "diag"])
+    reference = _source(torch.randn(2, 1, 1, 3, 2), ["prog0", "prog1"])
+
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+
+    def _prognostic(statistics: dict, key: str) -> torch.Tensor:
+        return torch.as_tensor(statistics[key][:2], dtype=torch.float32)
+
+    mean, stdev = _prognostic(STATE_STATISTICS, "mean"), _prognostic(STATE_STATISTICS, "stdev")
+    physical_state = state.data[..., :2] * stdev + mean
+    physical_reference = reference.data * stdev + mean
+    for step, lead_time in enumerate(["6h", "12h"]):
+        statistics = TENDENCY_STATISTICS[lead_time]
+        expected = (physical_state[:, step] - physical_reference[:, 0] - _prognostic(statistics, "mean")) / _prognostic(
+            statistics, "stdev"
+        )
+        torch.testing.assert_close(tendency.data[:, step, ..., :2], expected)
+    # Diagnostics are predicted as states and keep their normalisation.
+    torch.testing.assert_close(tendency.data[..., 2], state.data[..., 2])
+    # The payload is normalised per lead time; the source keeps the state statistics of its variables.
+    assert tendency.variables == state.variables
+    assert all(np.array_equal(tendency.statistics[key], state.statistics[key]) for key in state.statistics)
+
+
+def test_add_tendency_to_state_inverts_compute_tendency() -> None:
+    model = _tendency_model()
+    pre_processors, post_processors = _normalizer_processors()
+    per_step = model.tendency_statistics("data", TENDENCY_STATISTICS)
+
+    state = _source(torch.randn(2, 2, 1, 3, 3), ["prog0", "prog1", "diag"])
+    reference = _source(torch.randn(2, 1, 1, 3, 2), ["prog0", "prog1"])
+    tendency = model.compute_tendency("data", state, reference, per_step, pre_processors, post_processors)
+
+    normalised = model.add_tendency_to_state(
+        "data", reference, tendency, per_step, post_processors, pre_processors=pre_processors
     )
-    state_proc = SequenceProcessor(100.0, [indices.data.output.diagnostic])
-    tend_proc = SequenceProcessor(10.0, [indices.data.output.prognostic])
+    physical = model.add_tendency_to_state("data", reference, tendency, per_step, post_processors)
 
-    out = model.compute_tendency(
-        {"data": x_t1},
-        {"data": x_t0},
-        {"data": state_proc},
-        {"data": tend_proc},
-        {"data": input_post},
-        skip_imputation=True,
-    )
-
-    assert input_post.calls == 2
-    assert state_proc.calls == 1
-    assert tend_proc.calls == 1
-
-    expected = x_t1.clone()
-    expected[..., indices.model.output.prognostic] = (x_t1[..., indices.model.output.prognostic] - x_t0) + 10.0
-    expected[..., indices.model.output.diagnostic] = x_t1[..., indices.model.output.diagnostic] + 100.0
-
-    assert torch.allclose(out["data"], expected)
-
-
-def test_add_tendency_to_state_uses_expected_indices() -> None:
-    model = _make_model()
-    indices = model.data_indices["data"]
-
-    tendency = torch.tensor([[[0.5, 1.5, 2.5], [3.5, 4.5, 5.5]]])
-    state_inp = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
-
-    post_tend = SequenceProcessor(1.0, [indices.data.output.full])
-    post_state = SequenceProcessor(10.0, [indices.data.output.diagnostic, indices.data.input.prognostic])
-
-    out = model.add_tendency_to_state(
-        {"data": state_inp},
-        {"data": tendency},
-        {"data": post_state},
-        {"data": post_tend},
-        {"data": None},
-        skip_imputation=True,
-    )
-
-    expected = tendency + 1.0
-    expected[..., indices.model.output.diagnostic] = tendency[..., indices.model.output.diagnostic] + 10.0
-    expected[..., indices.model.output.prognostic] += state_inp + 10.0
-
-    assert post_tend.calls == 1
-    assert post_state.calls == 2
-    assert torch.allclose(out["data"], expected)
+    torch.testing.assert_close(normalised.data, state.data)
+    torch.testing.assert_close(physical.data, post_processors(state, in_place=False).data)
+    assert normalised.variables == state.variables
 
 
 def test_tendency_roundtrip_skips_imputation() -> None:
     imputer, data_indices = _make_imputer_settings()
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    torch.nn.Module.__init__(model)
     model.data_indices = {"data": data_indices}
-    indices = data_indices
+    model.n_step_output = {"data": 1}
 
-    input_post = Processors([["imputer", imputer]], inverse=True)
-    identity = IdentityProcessor()
+    statistics = IMPUTER_STATISTICS
+    normalizer = InputNormalizer(config=DictConfig({"default": "mean-std"}))
+    pre_processors = Processors([["imputer", imputer], ["normalizer", normalizer]])
+    post_processors = Processors([["imputer", imputer], ["normalizer", normalizer]], inverse=True)
 
-    x_t1 = torch.tensor([[[[10.0, 20.0, 30.0, 40.0], [50.0, 60.0, 70.0, 80.0]]]])
-    x_t0 = torch.tensor([[[[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]]])
+    output_names = list(data_indices.data.output.ordered_names)
+    input_prognostic = [data_indices.name_to_index[name] for name in data_indices.prognostic]
+    full_positions = [data_indices.name_to_index[name] for name in output_names]
 
-    tendency = model.compute_tendency(
-        {"data": x_t1},
-        {"data": x_t0},
-        {"data": identity},
-        {"data": identity},
-        {"data": input_post},
-        skip_imputation=True,
-    )["data"]
+    data = torch.randn(1, 1, 1, 2, len(output_names))
+    data[0, 0, 0, 0, 0] = float("nan")
+    state = GriddedSource(
+        name="data",
+        variables=output_names,
+        layout=GRIDDED_LAYOUT,
+        data=data,
+        coordinates=torch.zeros(2, 2),
+        statistics={key: value[full_positions] for key, value in statistics.items()},
+    )
+    reference = GriddedSource(
+        name="data",
+        variables=list(data_indices.prognostic),
+        layout=GRIDDED_LAYOUT,
+        data=torch.randn(1, 1, 1, 2, len(input_prognostic)),
+        coordinates=torch.zeros(2, 2),
+        statistics={key: value[input_prognostic] for key, value in statistics.items()},
+    )
+    tendency_statistics = [{key: value * 0.5 for key, value in statistics.items()}]
 
-    expected_tendency = x_t1.clone()
-    expected_tendency[..., indices.model.output.prognostic] = x_t1[..., indices.model.output.prognostic] - x_t0
-    expected_tendency[..., indices.model.output.diagnostic] = x_t1[..., indices.model.output.diagnostic]
+    tendency = model.compute_tendency("data", state, reference, tendency_statistics, pre_processors, post_processors)
+    assert torch.isnan(tendency.data[0, 0, 0, 0, 0]), "Missing values must not be imputed."
 
-    assert torch.allclose(tendency, expected_tendency, equal_nan=True)
+    roundtrip = model.add_tendency_to_state(
+        "data", reference, tendency, tendency_statistics, post_processors, pre_processors=pre_processors
+    )
+    torch.testing.assert_close(roundtrip.data, state.data, equal_nan=True)
 
-    state = model.add_tendency_to_state(
-        {"data": x_t0},
-        {"data": tendency},
-        {"data": identity},
-        {"data": identity},
-        {"data": None},
-        skip_imputation=True,
-    )["data"]
 
-    assert torch.allclose(state, x_t1, equal_nan=True)
+def test_reference_state_is_latest_prognostic_input_with_its_statistics() -> None:
+    model = _tendency_model(n_step_output=1)
+    model.residual = torch.nn.ModuleDict({"data": DummyResidual()})
+    inputs = _source(torch.randn(1, 2, 1, 3, 3), ["prog0", "prog1", "force"])
+
+    reference = model.reference_state(Batch({"data": inputs}), grid_shard_sizes=None, model_comm_group=None)["data"]
+
+    assert reference.variables == ["prog0", "prog1"]
+    torch.testing.assert_close(reference.data, inputs.data[:, -1:, ..., :2])
+    assert all(np.array_equal(reference.statistics[key], STATE_STATISTICS[key][:2]) for key in STATE_STATISTICS)
 
 
 def test_apply_imputer_inverse_reinserts_nans() -> None:
@@ -242,50 +288,6 @@ def test_apply_imputer_inverse_reinserts_nans() -> None:
     result = model._apply_imputer_inverse(post_processors, "data", out)
 
     assert torch.allclose(result, expected, equal_nan=True)
-
-
-def test_compute_tendency_without_input_post_processor() -> None:
-    model = _make_model()
-    indices = model.data_indices["data"]
-
-    x_t1 = torch.tensor([[[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]])
-    x_t0 = torch.tensor([[[1.0, 2.0], [3.0, 4.0]]])
-
-    out = model.compute_tendency(
-        {"data": x_t1},
-        {"data": x_t0},
-        {"data": IdentityProcessor()},
-        {"data": IdentityProcessor()},
-        input_post_processor=None,
-        skip_imputation=True,
-    )
-
-    expected = x_t1.clone()
-    expected[..., indices.model.output.prognostic] = x_t1[..., indices.model.output.prognostic] - x_t0
-    expected[..., indices.model.output.diagnostic] = x_t1[..., indices.model.output.diagnostic]
-    assert torch.allclose(out["data"], expected)
-
-
-def test_add_tendency_to_state_without_output_pre_processor() -> None:
-    model = _make_model()
-    indices = model.data_indices["data"]
-
-    tendency = torch.tensor([[[0.5, 1.5, 2.5], [3.5, 4.5, 5.5]]])
-    state_inp = torch.tensor([[[10.0, 20.0], [30.0, 40.0]]])
-
-    out = model.add_tendency_to_state(
-        {"data": state_inp},
-        {"data": tendency},
-        {"data": IdentityProcessor()},
-        {"data": IdentityProcessor()},
-        output_pre_processor=None,
-        skip_imputation=True,
-    )
-
-    expected = tendency.clone()
-    expected[..., indices.model.output.diagnostic] = tendency[..., indices.model.output.diagnostic]
-    expected[..., indices.model.output.prognostic] += state_inp
-    assert torch.allclose(out["data"], expected)
 
 
 def test_apply_reference_state_truncation_without_shards() -> None:
@@ -360,50 +362,41 @@ def test_before_sampling_projects_input_and_reference_with_source_shards(monkeyp
     assert x_t0s["data"].data.shape[-2] == 2
 
 
-def test_after_sampling_uses_single_step_reference_per_output_step() -> None:
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
-    model.n_step_output = {"data": 2}
+def test_after_sampling_uses_latest_reference_and_per_step_statistics() -> None:
+    model = _tendency_model()
 
     # Two different reference timesteps; training-style behavior should always use the last one.
-    ref = torch.zeros((1, 2, 1, 2, 1), dtype=torch.float32)
+    ref = torch.zeros((1, 2, 1, 2, 2), dtype=torch.float32)
     ref[:, 0] = 1.0
     ref[:, 1] = 2.0
+    model.apply_reference_state_truncation = lambda *_args, **_kwargs: {"data": ref}
 
-    def _mock_reference_state(*_args, **_kwargs):
-        return {"data": ref}
+    captured = []
 
-    captured_state_inputs = []
-
-    def _spy_add_tendency(state_inp, tendency, *_args, **_kwargs):
-        captured_state_inputs.append(state_inp["data"].clone())
+    def _spy_add_tendency(dataset_name, reference, tendency, tendency_statistics, *_args, **_kwargs):
+        captured.append((dataset_name, reference.data.clone(), tendency_statistics))
         return tendency
 
-    model.apply_reference_state_truncation = _mock_reference_state
     model.add_tendency_to_state = _spy_add_tendency
 
-    out = _gridded_batch(torch.ones((1, 2, 1, 2, 3), dtype=torch.float32), ["a", "b", "c"])
-    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32), ["a"])
-    before_sampling_data = (x_t0, x_t0)
-    post_processors = torch.nn.ModuleDict({"data": IdentityProcessor()})
-
-    post_tend = StepwiseProcessors(["6h", "12h"])
-    post_tend.set("6h", IdentityProcessor())
-    post_tend.set("12h", IdentityProcessor())
+    out = _gridded_batch(torch.ones((1, 2, 1, 2, 3), dtype=torch.float32), ["prog0", "prog1", "diag"])
+    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, 3), dtype=torch.float32), ["prog0", "prog1", "force"])
 
     model._after_sampling(
         out,
-        post_processors,
-        before_sampling_data,
+        torch.nn.ModuleDict({"data": IdentityProcessor()}),
+        (x_t0, x_t0),
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,
-        post_processors_tendencies={"data": post_tend},
+        statistics_tendencies={"data": TENDENCY_STATISTICS},
     )
 
-    assert len(captured_state_inputs) == 2
-    expected_ref = ref[:, -1:].clone()
-    assert torch.allclose(captured_state_inputs[0], expected_ref)
-    assert torch.allclose(captured_state_inputs[1], expected_ref)
+    assert len(captured) == 1
+    dataset_name, reference, tendency_statistics = captured[0]
+    assert dataset_name == "data"
+    torch.testing.assert_close(reference, ref[:, -1:])
+    assert tendency_statistics == [TENDENCY_STATISTICS["6h"], TENDENCY_STATISTICS["12h"]]
 
 
 def test_after_sampling_reinserts_nans() -> None:
@@ -412,30 +405,28 @@ def test_after_sampling_reinserts_nans() -> None:
     post_processors = torch.nn.ModuleDict({"data": Processors([["imputer", imputer]], inverse=True)})
 
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model.data_indices = {"data": data_indices}
     model.n_step_output = {"data": 1}
 
-    def _identity_ref(x, *_args, **_kwargs):
-        return x
-
-    def _passthrough_add_tendency(_state_inp, tendency, *_args, **_kwargs):
+    def _passthrough_add_tendency(_dataset_name, _reference, tendency, *_args, **_kwargs):
         return tendency
 
-    model.apply_reference_state_truncation = _identity_ref
+    model.reference_state = lambda x_t0, *_args, **_kwargs: x_t0
     model.add_tendency_to_state = _passthrough_add_tendency
 
     out_data = torch.ones((1, 1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
     out = _gridded_batch(out_data, list(data_indices.model.output.ordered_names))
-    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, 1), dtype=torch.float32), ["a"])
-    before_sampling_data = (x_t0, x_t0)
+    input_names = list(data_indices.model.input.ordered_names)
+    x_t0 = _gridded_batch(torch.zeros((1, 1, 1, 2, len(input_names)), dtype=torch.float32), input_names)
 
     result = model._after_sampling(
         out,
         post_processors,
-        before_sampling_data,
+        (x_t0, x_t0),
         model_comm_group=None,
         grid_shard_sizes={"data": None},
         gather_out=False,
-        post_processors_tendencies={"data": Processors([["imputer", imputer]], inverse=True)},
+        statistics_tendencies={"data": {"mean": np.zeros(6), "stdev": np.ones(6)}},
     )["data"]
 
     expected = imputer.inverse_transform(out_data, in_place=False)

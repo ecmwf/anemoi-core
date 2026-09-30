@@ -444,7 +444,7 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
         if self.grid_shard_slice is not None:
             x = self.data[time_indices, :, :, self.grid_shard_slice]
         else:
-            x = self.data[time_indices]
+            x = self.data[time_indices, :, :, :]
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)

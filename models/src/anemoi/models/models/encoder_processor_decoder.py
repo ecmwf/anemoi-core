@@ -50,6 +50,37 @@ def latlons_to_sincos(latlon: torch.Tensor) -> torch.Tensor:
     return torch.cat([torch.sin(latlon), torch.cos(latlon)], dim=-1)
 
 
+def gathered_batch_sizes(batch_sizes: tuple[int, ...] | None, shard_sizes: ShardSizes) -> tuple[int, ...] | None:
+    """Return per-(sample, member) node counts for coordinates gathered across ``shard_sizes``.
+
+    Dynamic graphs are built on the gathered coordinates, so their per-sample blocks must count
+    all the gathered nodes, not just this rank's shard.
+
+    Parameters
+    ----------
+    batch_sizes : tuple[int, ...] or None
+        This rank's node count per ``(sample, member)``; ``None`` for gridded sources.
+    shard_sizes : ShardSizes
+        Per-rank node counts, or ``None`` when the source is not sharded. The observation
+        reader sets them even for a single rank, where nothing is gathered.
+
+    Returns
+    -------
+    tuple[int, ...] or None
+        Node count per ``(sample, member)`` in the gathered coordinates.
+    """
+    if batch_sizes is None or shard_sizes is None or len(shard_sizes) == 1:
+        return batch_sizes  # nothing is gathered
+    if len(batch_sizes) != 1:
+        msg = (
+            "A sharded tabular source supports one sample with one ensemble member, but this one has "
+            f"{len(batch_sizes)} (sample, member) blocks. Gathered rows are ordered by rank, so the "
+            "nodes of one member are not contiguous and no per-member graph can be built on them."
+        )
+        raise NotImplementedError(msg)
+    return (sum(shard_sizes),)
+
+
 def _format_dims(dims: dict[str, int]) -> str:
     """Helper function. Prints one dataset per line, widths aligned, widest first so the odd one out stands out."""
     pad = max(len(name) for name in dims)
@@ -329,6 +360,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         x_flat: "FlatSource" = x.flatten()  # flatten data to (nodes, features)
         grid_shard_sizes = x_flat.shard_sizes
+        batch_sizes = gathered_batch_sizes(x_flat.batch_sizes, grid_shard_sizes)
 
         if dataset_name in self.residual:
             x_skip = self.residual[dataset_name](
@@ -362,7 +394,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             if timedeltas is not None:
                 timedeltas = gather_tensor(timedeltas, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
 
-        return coordinates, x_data_latent, x_skip, grid_shard_sizes, x_flat.batch_sizes, timedeltas
+        return coordinates, x_data_latent, x_skip, grid_shard_sizes, batch_sizes, timedeltas
 
     def _assemble_target(
         self,
@@ -431,6 +463,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         target_coords = flat_target_spec.coordinates
         target_timedeltas = flat_target_spec.timedeltas
         grid_shard_sizes = flat_target_spec.shard_sizes
+        target_batch_sizes = gathered_batch_sizes(flat_target_spec.batch_sizes, grid_shard_sizes)
         if grid_shard_sizes is not None:
             target_coords = gather_tensor(target_coords, dim=0, sizes=grid_shard_sizes, mgroup=model_comm_group)
             if target_timedeltas is not None:
@@ -454,7 +487,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             target_coords,
             x_target_node_features,
             grid_shard_sizes,
-            flat_target_spec.batch_sizes,
+            target_batch_sizes,
             target_timedeltas,
         )
 

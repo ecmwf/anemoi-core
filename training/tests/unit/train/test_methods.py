@@ -3029,6 +3029,7 @@ def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
         data={"obs": [torch.zeros(2, 1)]},
         coordinates={"obs": [torch.zeros(2, 2)]},
         metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
+        timedeltas={"obs": [torch.zeros(2)]},
         layouts={"obs": TensorLayout(grid=0, variables=1)},
         variables={"obs": ["a"]},
         statistics={"obs": {}},
@@ -3038,137 +3039,90 @@ def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
         mode.prepare_target(sparse_batch, sparse_batch)
 
 
-def test_tendency_prediction_mode_compute_tendency_target_uses_step_processors() -> None:
-    """TendencyPredictionMode builds each tendency step with the matching step processor."""
+def _tendency_mode_with_spy_model() -> tuple[TendencyPredictionMode, list[dict[str, Any]], SimpleNamespace]:
+    """TendencyPredictionMode wired to a tendency model that records its calls."""
     calls: list[dict[str, Any]] = []
-    state_pre_processor = object()
-    state_post_processor = object()
-    tendency_pre_processors = [object(), object()]
 
-    class _DummyInner:
-        def compute_tendency(
-            self,
-            y: dict[str, torch.Tensor],
-            x_ref: dict[str, torch.Tensor],
-            pre_processors: dict[str, Any],
-            pre_processors_tendencies: dict[str, Any],
-            *,
-            input_post_processor: dict[str, Any],
-            skip_imputation: bool,
-        ) -> dict[str, torch.Tensor]:
-            calls.append(
-                {
-                    "y": y["data"],
-                    "x_ref": x_ref["data"],
-                    "pre_processor": pre_processors["data"],
-                    "tendency_pre_processor": pre_processors_tendencies["data"],
-                    "input_post_processor": input_post_processor["data"],
-                    "skip_imputation": skip_imputation,
-                },
-            )
-            return {"data": torch.full_like(y["data"], 10.0 * len(calls))}
-
-    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
-    mode.module = SimpleNamespace(
-        model=SimpleNamespace(
-            model=_DummyInner(),
-            pre_processors={"data": state_pre_processor},
-            post_processors={"data": state_post_processor},
-        ),
-    )
-    mode._tendency_pre_processors = {"data": tendency_pre_processors}
-
-    y = {"data": torch.tensor([[[[[3.0]]], [[[4.0]]]]])}
-    x_ref = {"data": torch.tensor([[[[9.0]]]])}
-
-    tendency = mode._compute_tendency_target(y, x_ref)
-
-    expected = torch.tensor([[[[[10.0]]], [[[20.0]]]]])
-    torch.testing.assert_close(tendency["data"], expected)
-    assert len(calls) == 2
-    torch.testing.assert_close(calls[0]["y"], y["data"][:, 0:1])
-    torch.testing.assert_close(calls[1]["y"], y["data"][:, 1:2])
-    torch.testing.assert_close(calls[0]["x_ref"], x_ref["data"].unsqueeze(1))
-    assert calls[0]["pre_processor"] is state_pre_processor
-    assert calls[0]["input_post_processor"] is state_post_processor
-    assert calls[0]["tendency_pre_processor"] is tendency_pre_processors[0]
-    assert calls[1]["tendency_pre_processor"] is tendency_pre_processors[1]
-    assert calls[0]["skip_imputation"] is True
-    assert calls[1]["skip_imputation"] is True
-
-
-def test_tendency_prediction_mode_reconstruct_state_uses_step_processors_and_imputer_inverse() -> None:
-    """TendencyPredictionMode reconstructs each state step and applies imputer inverse once."""
-    calls: list[dict[str, Any]] = []
-    captured: dict[str, Any] = {}
-    state_pre_processor = object()
-    state_post_processor = object()
-    tendency_post_processors = [object(), object()]
-
-    class _DummyInner:
+    class _SpyTendencyModel:
         def add_tendency_to_state(
             self,
-            x_ref: dict[str, torch.Tensor],
-            tendency: dict[str, torch.Tensor],
-            post_processors: dict[str, Any],
-            post_processors_tendencies: dict[str, Any],
-            *,
-            output_pre_processor: dict[str, Any],
-            skip_imputation: bool,
-        ) -> dict[str, torch.Tensor]:
+            dataset_name: str,
+            reference: Source,
+            tendency: Source,
+            tendency_statistics: list[dict[str, Any]],
+            post_processors: object,
+            pre_processors: object | None = None,
+        ) -> Source:
             calls.append(
                 {
-                    "x_ref": x_ref["data"],
-                    "tendency": tendency["data"],
-                    "post_processor": post_processors["data"],
-                    "tendency_post_processor": post_processors_tendencies["data"],
-                    "output_pre_processor": output_pre_processor["data"],
-                    "skip_imputation": skip_imputation,
+                    "dataset_name": dataset_name,
+                    "reference": reference,
+                    "statistics": tendency_statistics,
+                    "post_processors": post_processors,
+                    "pre_processors": pre_processors,
                 },
             )
-            return {"data": torch.full_like(tendency["data"], 100.0 * len(calls))}
+            return tendency.map_data(lambda data: data + 100.0)
 
-        def _apply_imputer_inverse(
-            self,
-            post_processors: dict[str, Any],
-            dataset_name: str,
-            x: torch.Tensor,
-        ) -> torch.Tensor:
-            captured["post_processors"] = post_processors
-            captured["dataset_name"] = dataset_name
-            captured["before_imputer_inverse"] = x
+        def _apply_imputer_inverse(self, post_processors: object, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
+            del post_processors, dataset_name
             return x + 1.0
 
+    processors = SimpleNamespace(pre={"data": object()}, post={"data": object()})
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace(
         model=SimpleNamespace(
-            model=_DummyInner(),
-            pre_processors={"data": state_pre_processor},
-            post_processors={"data": state_post_processor},
+            model=_SpyTendencyModel(),
+            pre_processors=processors.pre,
+            post_processors=processors.post,
         ),
     )
-    mode._tendency_post_processors = {"data": tendency_post_processors}
+    mode._tendency_statistics = {"data": [{"mean": 1.0}, {"mean": 2.0}]}
+    return mode, calls, processors
 
-    x_ref = {"data": torch.tensor([[[[9.0]]]])}
-    tendency = {"data": torch.tensor([[[[[3.0]]], [[[4.0]]]]])}
 
-    state = mode._reconstruct_state(x_ref, tendency)
+def _gridded_tendency_batch(data: torch.Tensor) -> Batch:
+    return build_batch(
+        data={"data": data},
+        coordinates={"data": torch.zeros(data.shape[3], 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": [f"v{i}" for i in range(data.shape[-1])]},
+        statistics={"data": {}},
+    )
 
-    expected_before_imputer = torch.tensor([[[[[100.0]]], [[[200.0]]]]])
-    torch.testing.assert_close(captured["before_imputer_inverse"], expected_before_imputer)
-    torch.testing.assert_close(state["data"], expected_before_imputer + 1.0)
-    assert captured["dataset_name"] == "data"
-    assert captured["post_processors"] == mode.module.model.post_processors
-    assert len(calls) == 2
-    torch.testing.assert_close(calls[0]["x_ref"], x_ref["data"].unsqueeze(1))
-    torch.testing.assert_close(calls[0]["tendency"], tendency["data"][:, 0:1])
-    torch.testing.assert_close(calls[1]["tendency"], tendency["data"][:, 1:2])
-    assert calls[0]["post_processor"] is state_post_processor
-    assert calls[0]["output_pre_processor"] is state_pre_processor
-    assert calls[0]["tendency_post_processor"] is tendency_post_processors[0]
-    assert calls[1]["tendency_post_processor"] is tendency_post_processors[1]
-    assert calls[0]["skip_imputation"] is True
-    assert calls[1]["skip_imputation"] is True
+
+def test_tendency_prediction_mode_reconstruct_prediction_uses_step_statistics_and_imputer_inverse() -> None:
+    """Predicted tendencies become normalised states with the per-step statistics, then the imputer inverse."""
+    mode, calls, processors = _tendency_mode_with_spy_model()
+    reference = _gridded_tendency_batch(torch.zeros(1, 1, 1, 2, 3))
+    prediction = _gridded_tendency_batch(torch.ones(1, 2, 1, 2, 3))
+    prepared = PreparedPredictionTarget(
+        model_target=prediction,
+        loss_target=prediction,
+        loss_target_layout=IndexSpace.DATA_OUTPUT,
+        metric_target=prediction,
+        aux={"reference": reference},
+    )
+
+    state = mode.reconstruct_prediction(prediction, prepared)
+
+    torch.testing.assert_close(state["data"].data, prediction["data"].data + 101.0)
+    assert state["data"].variables == prediction["data"].variables
+    (call,) = calls
+    assert call["dataset_name"] == "data"
+    assert call["reference"] is reference["data"]
+    assert call["statistics"] == [{"mean": 1.0}, {"mean": 2.0}]
+    assert call["post_processors"] is processors.post["data"]
+    assert call["pre_processors"] is processors.pre["data"]
+
+
+def test_tendency_prediction_mode_requires_tendency_model() -> None:
+    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
+    mode.module = SimpleNamespace(model=SimpleNamespace(model=object()), statistics_tendencies={})
+
+    with pytest.raises(TypeError, match="requires a tendency transport model"):
+        mode._resolve_tendency_statistics()
 
 
 def test_stochastic_interpolant_training_compute_dataset_loss_metrics_uses_data_full_state(

@@ -17,7 +17,6 @@ import einops
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.data.utils import apply_pairwise
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.utils.enums import TensorDim
@@ -184,7 +183,7 @@ class CRPS(BaseLoss):
         squash_mode: Squash_mode = "avg",
         **kwargs,
     ) -> torch.Tensor:
-        return apply_pairwise(
+        return self._apply_pairwise(
             pred,
             target,
             self._evaluate_loss_tensor,
@@ -208,6 +207,7 @@ class CRPS(BaseLoss):
         grid_shard_slice: slice | None = None,
         group: ProcessGroup | None = None,
         squash_mode: Squash_mode = "sum",
+        valid_counts: torch.Tensor | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         is_sharded = grid_shard_slice is not None
@@ -238,6 +238,7 @@ class CRPS(BaseLoss):
             squash=squash,
             squash_mode=squash_mode,
             group=group if is_sharded else None,
+            valid_counts=self._counts_like(valid_counts, crps, layout, scaler_indices),
         )
 
     @property

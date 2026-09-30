@@ -120,16 +120,35 @@ def test_norm_parameters_cache_is_device_aware(input_normalizer) -> None:
     assert add_cpu.device.type == "cpu"
 
     # The cache key must encode the device so a different device cannot reuse these tensors.
-    assert (tuple(name_to_index.keys()), "cpu") in input_normalizer._param_cache
+    assert any(key[:2] == (tuple(name_to_index.keys()), "cpu") for key in input_normalizer._param_cache)
 
     if torch.cuda.is_available():
         mul_gpu, add_gpu = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cuda:0"))
         assert mul_gpu.device.type == "cuda"
         assert add_gpu.device.type == "cuda"
-        assert (tuple(name_to_index.keys()), "cuda:0") in input_normalizer._param_cache
+        assert any(key[:2] == (tuple(name_to_index.keys()), "cuda:0") for key in input_normalizer._param_cache)
         # The original CPU entry is preserved, not clobbered by the GPU call.
         mul_cpu_again, _ = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
         assert mul_cpu_again.device.type == "cpu"
+
+
+def test_norm_parameters_cache_is_statistics_aware(input_normalizer) -> None:
+    """Sources of the same variables with other statistics (another reader, a tendency) get their own parameters."""
+    name_to_index = {name: idx for idx, name in enumerate(VARIABLES)}
+    other_statistics = {key: np.asarray(value) * 2.0 for key, value in STATISTICS.items()}
+
+    mul, add = input_normalizer.get_norm_parameters(STATISTICS, name_to_index, torch.device("cpu"))
+    other_mul, other_add = input_normalizer.get_norm_parameters(other_statistics, name_to_index, torch.device("cpu"))
+
+    assert len(input_normalizer._param_cache) == 2
+    assert not torch.equal(mul, other_mul)
+    # The second set's parameters are computed from its own statistics, as without a cache.
+    input_normalizer.reset_cache()
+    expected_mul, expected_add = input_normalizer.get_norm_parameters(
+        other_statistics, name_to_index, torch.device("cpu")
+    )
+    torch.testing.assert_close(other_mul, expected_mul)
+    torch.testing.assert_close(other_add, expected_add)
 
 
 def test_normalizer_not_inplace(input_normalizer, make_view, base_payload) -> None:

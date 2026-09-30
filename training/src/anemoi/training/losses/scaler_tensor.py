@@ -243,6 +243,10 @@ class ScaleTensor(nn.Module):
         """Check if there is a scaler for the given dimension."""
         return len(self.subset_by_dim(dim.value).tensors) > 0
 
+    def has_dim(self, dimension: int | str) -> bool:
+        """Whether any scaler applies along ``dimension`` (an axis number or a `TensorDim`)."""
+        return any(dimension in dims for dims, _ in self._tensors.values())
+
     def validate_scaler(self, dimension: int | tuple[int], scaler: torch.Tensor) -> None:
         """Check if the scaler is compatible with the given dimension.
 
@@ -262,7 +266,7 @@ class ScaleTensor(nn.Module):
             dimension = [dimension]
 
         for scaler_dim, dim in enumerate(dimension):
-            if dim not in self or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.GRID:
+            if not self.has_dim(dim) or scaler.shape[scaler_dim] == 1 or self.shape[dim] == 1 or dim == TensorDim.GRID:
                 continue
 
             if self.shape[dim] != scaler.shape[scaler_dim]:
@@ -465,7 +469,8 @@ class ScaleTensor(nn.Module):
         Parameters
         ----------
         scaler_identifier : str | Sequence[str] | int | Sequence[int]
-            Name/s or dimension/s of the scalers to get
+            Name/s or dimension/s of the scalers to get. Axis numbers and `TensorDim`
+            members are dimensions; any other string is a scaler name.
 
         Returns
         -------
@@ -474,7 +479,7 @@ class ScaleTensor(nn.Module):
         """
         if isinstance(scaler_identifier, str | int):
             scaler_identifier = [scaler_identifier]
-        if any(isinstance(scaler, int) for scaler in scaler_identifier):
+        if any(isinstance(scaler, int | TensorDim) for scaler in scaler_identifier):
             return self.subset_by_dim(scaler_identifier)
         return self.subset_by_str(scaler_identifier)
 
@@ -735,16 +740,12 @@ class ScaleTensor(nn.Module):
         )
 
     def __contains__(self, dimension: int | tuple[int] | str) -> bool:
-        """Check if either scaler by name or dimension by int/tuple is being scaled."""
+        """Check if a scaler name, or a dimension (axis number, `TensorDim` or tuple of them) is being scaled."""
         if isinstance(dimension, tuple):
             return dimension in self.specified_dimensions.values()
-        if isinstance(dimension, str):
-            return dimension in self._tensors
-
-        result = False
-        for dim_assign, _ in self._tensors.values():
-            result = dimension in dim_assign or result
-        return result
+        if isinstance(dimension, int | TensorDim):
+            return self.has_dim(dimension)
+        return dimension in self._tensors
 
     def __len__(self):
         return len(self._tensors)

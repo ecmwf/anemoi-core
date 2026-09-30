@@ -16,7 +16,7 @@ import torch
 from torch.utils.checkpoint import checkpoint
 
 from anemoi.models.data import Batch
-from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -28,6 +28,8 @@ from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
     from anemoi.models.data.sources import Source
 
 LOGGER = logging.getLogger(__name__)
@@ -133,139 +135,37 @@ class StatePredictionMode(PredictionMode):
 
 
 class TendencyPredictionMode(PredictionMode):
-    """Prediction mode where the model learns changes from the latest input state."""
+    """Prediction mode where the model learns changes from the latest input state.
+
+    A tendency is normalised like any other source, by the state processors, as a source
+    carrying the tendency statistics of its lead time; see
+    ``AnemoiTransportTendModelEncProcDec.compute_tendency``.
+    """
 
     def __init__(self, module: BaseTransportTraining) -> None:
         super().__init__(module)
-        self._tendency_pre_processors: dict[str, object] = {}
-        self._tendency_post_processors: dict[str, object] = {}
-        self._validate_tendency_processors()
+        self._tendency_statistics = self._resolve_tendency_statistics()
 
-    def _validate_tendency_processors(self) -> None:
-        stats = self.module.statistics_tendencies
-        assert stats is not None, "Tendency statistics are required for tendency-based transport models."
+    @property
+    def _tendency_model(self) -> AnemoiTransportTendModelEncProcDec:
+        return self.module.model.model
 
-        pre_processors_tendencies = getattr(self.module.model, "pre_processors_tendencies", None)
-        post_processors_tendencies = getattr(self.module.model, "post_processors_tendencies", None)
-        assert (
-            pre_processors_tendencies is not None and post_processors_tendencies is not None
-        ), "Per-step tendency processors are required for multi-output tendency-based transport models."
-
-        def _wrap_if_needed(
-            kind: str,
-            proc: object,
-            dataset_name: str,
-            lead_times: list[str],
-        ) -> StepwiseProcessors:
-            if isinstance(proc, StepwiseProcessors):
-                return proc
-            # Single-output tendency models may still provide one flat
-            # Processors object. We wrap it so the rest so we can always
-            # here iterate over per-step processors. Multi-output models
-            # need an explicit processor for each lead time.
-            assert (
-                self.module.n_step_output[dataset_name] == 1
-            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
-            lead_time = lead_times[0]
-            wrapped = StepwiseProcessors([lead_time])
-            wrapped.set(lead_time, proc)
-            LOGGER.warning(
-                "Wrapping flat tendency %s-processor for dataset '%s' into stepwise (single-step).",
-                kind,
-                dataset_name,
+    def _resolve_tendency_statistics(self) -> dict[str, list[Mapping]]:
+        """Return the tendency statistics of each output step, per dataset."""
+        if not isinstance(self._tendency_model, AnemoiTransportTendModelEncProcDec):
+            msg = (
+                "training.transport.prediction_mode='tendency' requires a tendency transport model "
+                f"(AnemoiTransportTendModelEncProcDec), got {type(self._tendency_model).__name__}."
             )
-            return wrapped
-
-        for dataset_name in self.module.dataset_names:
-            dataset_stats = stats.get(dataset_name) if isinstance(stats, dict) else None
-            assert dataset_stats is not None, f"Tendency statistics are required for dataset '{dataset_name}'."
-            lead_times = dataset_stats.get("lead_times") if isinstance(dataset_stats, dict) else None
-            assert isinstance(lead_times, list), "Tendency statistics must include 'lead_times'."
-            assert (
-                len(lead_times) == self.module.n_step_output[dataset_name]
-            ), f"Expected {self.module.n_step_output[dataset_name]} tendency statistics entries, got {len(lead_times)}."
-            assert all(
-                lead_time in dataset_stats for lead_time in lead_times
-            ), "Missing tendency statistics for one or more output steps."
-
-            assert (
-                dataset_name in pre_processors_tendencies
-            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
-            assert (
-                dataset_name in post_processors_tendencies
-            ), "Per-step tendency processors are required for multi-output tendency-based transport models."
-
-            pre_tend = pre_processors_tendencies[dataset_name]
-            post_tend = post_processors_tendencies[dataset_name]
-            pre_tend = _wrap_if_needed("pre", pre_tend, dataset_name, lead_times)
-            post_tend = _wrap_if_needed("post", post_tend, dataset_name, lead_times)
-            assert (
-                len(pre_tend) == self.module.n_step_output[dataset_name]
-                and len(post_tend) == self.module.n_step_output[dataset_name]
-            ), "Per-step tendency processors must match n_step_output."
-            assert all(
-                proc is not None for proc in pre_tend
-            ), "Missing tendency pre-processors for one or more output steps."
-            assert all(
-                proc is not None for proc in post_tend
-            ), "Missing tendency post-processors for one or more output steps."
-
-            self._tendency_pre_processors[dataset_name] = pre_tend
-            self._tendency_post_processors[dataset_name] = post_tend
-
-    def _compute_tendency_target(
-        self,
-        y: dict[str, torch.Tensor],
-        x_ref: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        tendencies: dict[str, torch.Tensor] = {}
-        for dataset_name, y_dataset in y.items():
-            pre_tend = self._tendency_pre_processors[dataset_name]
-            tendency_steps = []
-            for step, pre_proc in enumerate(pre_tend):
-                y_step = y_dataset[:, step : step + 1]
-                x_ref_step = x_ref[dataset_name].unsqueeze(1)
-                tendency_step = self.module.model.model.compute_tendency(
-                    {dataset_name: y_step},
-                    {dataset_name: x_ref_step},
-                    {dataset_name: self.module.model.pre_processors[dataset_name]},
-                    {dataset_name: pre_proc},
-                    input_post_processor={dataset_name: self.module.model.post_processors[dataset_name]},
-                    skip_imputation=True,
-                )[dataset_name]
-                tendency_steps.append(tendency_step)
-            tendencies[dataset_name] = torch.cat(tendency_steps, dim=1)
-        return tendencies
-
-    def _reconstruct_state(
-        self,
-        x_ref: dict[str, torch.Tensor],
-        tendency: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        states: dict[str, torch.Tensor] = {}
-        for dataset_name, tendency_dataset in tendency.items():
-            post_tend = self._tendency_post_processors[dataset_name]
-            state_steps = []
-            for step, post_proc in enumerate(post_tend):
-                x_ref_step = x_ref[dataset_name].unsqueeze(1)
-                tendency_step = tendency_dataset[:, step : step + 1]
-                state_step = self.module.model.model.add_tendency_to_state(
-                    {dataset_name: x_ref_step},
-                    {dataset_name: tendency_step},
-                    {dataset_name: self.module.model.post_processors[dataset_name]},
-                    {dataset_name: post_proc},
-                    output_pre_processor={dataset_name: self.module.model.pre_processors[dataset_name]},
-                    skip_imputation=True,
-                )[dataset_name]
-                state_steps.append(state_step)
-            out_dataset = torch.cat(state_steps, dim=1)
-            out_dataset = self.module.model.model._apply_imputer_inverse(
-                self.module.model.post_processors,
-                dataset_name,
-                out_dataset,
-            )
-            states[dataset_name] = out_dataset
-        return states
+            raise TypeError(msg)
+        statistics = self.module.statistics_tendencies
+        if statistics is None:
+            msg = "Tendency statistics are required for tendency-based transport models."
+            raise ValueError(msg)
+        return {
+            dataset_name: self._tendency_model.tendency_statistics(dataset_name, statistics.get(dataset_name))
+            for dataset_name in self.module.dataset_names
+        }
 
     def prepare_target(
         self,
@@ -285,36 +185,35 @@ class TendencyPredictionMode(PredictionMode):
         state_target = self.module.preprocess_inputs(raw_state_target)
         y_data_output = self.module.get_data_output_target(state_target)
 
-        pre_processors_tendencies = getattr(self.module.model, "pre_processors_tendencies", None)
-        if pre_processors_tendencies is None or len(pre_processors_tendencies) == 0:
-            msg = (
-                "pre_processors_tendencies not found. This is required for tendency-based transport models. "
-                "Ensure that statistics_tendencies is provided during model initialization."
-            )
-            raise AttributeError(msg)
-
-        # The tendency path is dense-only (rejected above), so it works on the payload tensors.
-        x_data = {name: source.data for name, source in x.items()}
-        x_ref = self.module.model.model.apply_reference_state_truncation(
-            x_data,
+        # The latest input state, which turns states into tendencies and tendencies back into states.
+        reference = self._tendency_model.reference_state(
+            x,
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
-        x_ref = {dataset_name: (ref[:, -1] if ref.ndim == 5 else ref) for dataset_name, ref in x_ref.items()}
-
-        tendency_target_data_output = y_data_output.with_data(
-            self._compute_tendency_target({name: source.data for name, source in y_data_output.items()}, x_ref),
+        tendency_target_data_output = y_data_output.with_sources(
+            {
+                dataset_name: self._tendency_model.compute_tendency(
+                    dataset_name,
+                    state,
+                    reference[dataset_name],
+                    self._tendency_statistics[dataset_name],
+                    self.module.model.pre_processors[dataset_name],
+                    self.module.model.post_processors[dataset_name],
+                )
+                for dataset_name, state in y_data_output.items()
+            },
         )
         tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
+        # The tendency path is dense-only (rejected above), so the reference source works on payload tensors.
+        x_data = {name: source.data for name, source in x.items()}
         return PreparedPredictionTarget(
             model_target=tendency_target,
             loss_target=tendency_target_data_output,
             loss_target_layout=IndexSpace.DATA_OUTPUT,
             metric_target=state_target,
             aux={
-                # x_ref is the latest input state used to turn states into
-                # tendencies and tendencies back into states.
-                "x_ref": x_ref,
+                "reference": reference,
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
@@ -332,11 +231,25 @@ class TendencyPredictionMode(PredictionMode):
         prediction: Batch,
         prepared: PreparedPredictionTarget,
     ) -> Batch:
-        reconstructed = self._reconstruct_state(
-            prepared.aux["x_ref"],
-            {name: source.data for name, source in prediction.items()},
-        )
-        return prepared.metric_target.with_data(reconstructed)
+        """Convert predicted (normalised) tendencies into normalised states."""
+        states = {}
+        for dataset_name, tendency in prediction.items():
+            state = self._tendency_model.add_tendency_to_state(
+                dataset_name,
+                prepared.aux["reference"][dataset_name],
+                tendency,
+                self._tendency_statistics[dataset_name],
+                self.module.model.post_processors[dataset_name],
+                pre_processors=self.module.model.pre_processors[dataset_name],
+            )
+            states[dataset_name] = state.clone(
+                data=self._tendency_model._apply_imputer_inverse(
+                    self.module.model.post_processors,
+                    dataset_name,
+                    state.data,
+                ),
+            )
+        return prediction.with_sources(states)
 
     def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:
         metric_data = {

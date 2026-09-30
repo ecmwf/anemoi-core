@@ -493,14 +493,17 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_timedeltas: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj]:
         """Build one dynamic graph without batch offsets."""
+        device = src_coords.device
         if src_coords.shape[0] == 0 or dst_coords.shape[0] == 0:
-            attribute_device = next(
-                (attribute.device for attribute in self.attributes_config.values() if hasattr(attribute, "device")),
-                src_coords.device,
-            )
-            edge_attr = torch.empty((0, self._edge_dim), dtype=torch.float32, device=attribute_device)
-            edge_index = torch.empty((2, 0), dtype=torch.long, device=attribute_device)
+            edge_attr = torch.empty((0, self._edge_dim), dtype=torch.float32, device=device)
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
             return edge_attr, edge_index
+
+        # anemoi-graphs attribute builders move their inputs to the device they were built on. Here
+        # the graph follows the data instead, so a model built on CPU and moved to GPU stays on GPU.
+        for attribute in self.attributes_config.values():
+            if hasattr(attribute, "device"):
+                attribute.device = device
 
         source_cartesian = latlon_rad_to_cartesian(src_coords).to(dtype=torch.float32)
         target_cartesian = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
@@ -584,11 +587,17 @@ class DynamicGraphProvider(BaseGraphProvider):
             raise ValueError("src_batch_sizes and dst_batch_sizes must be provided together.")
         if len(src_batch_sizes) != len(dst_batch_sizes):
             raise ValueError("src_batch_sizes and dst_batch_sizes must contain the same number of samples.")
-        # these checks don't work with sharding since coords may be gathered:
-        # if sum(src_batch_sizes) != src_coords.shape[0]:
-        #     raise ValueError("src_batch_sizes must sum to the number of source coordinates.")
-        # if sum(dst_batch_sizes) != dst_coords.shape[0]:
-        #     raise ValueError("dst_batch_sizes must sum to the number of destination coordinates.")
+        # Under sharding the coordinates are gathered, and so are the batch sizes
+        # a block count that misses nodes would leave them without edges.
+        if sum(src_batch_sizes) != src_coords.shape[0]:
+            raise ValueError(
+                f"src_batch_sizes sum to {sum(src_batch_sizes)}, but there are {src_coords.shape[0]} source coordinates."
+            )
+        if sum(dst_batch_sizes) != dst_coords.shape[0]:
+            raise ValueError(
+                f"dst_batch_sizes sum to {sum(dst_batch_sizes)}, but there are {dst_coords.shape[0]} destination "
+                "coordinates."
+            )
 
         edge_attrs = []
         edge_indices = []

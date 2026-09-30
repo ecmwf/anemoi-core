@@ -224,8 +224,8 @@ def test_sparse_crps_ensemble_axis_and_nan_gradients(backend: str) -> None:
     )
     target = pred.clone(data=[torch.tensor([[[0.0], [float("nan")]]])])
     result = CRPS(alpha=0.0, backend=backend, ignore_nans=True)(pred, target)
-    # Standard CRPS is 0.5 at the valid node; the masked node contributes zero.
-    torch.testing.assert_close(result, torch.tensor(0.25))
+    # Standard CRPS is 0.5 at the valid node; the masked node is left out of the mean.
+    torch.testing.assert_close(result, torch.tensor(0.5))
     result.backward()
     assert torch.isfinite(data.grad).all()
     assert torch.count_nonzero(data.grad[:, 1]) == 0
