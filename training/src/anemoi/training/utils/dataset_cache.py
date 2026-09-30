@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import pickle
 import shutil
 import socket
 import threading
@@ -156,6 +157,12 @@ class DatasetCache(pl.LightningDataModule):
         self.total_fetches = Value("q", 0)
         self.cache_full = Value("b", False)
         self.cache_writes_skipped = Value("q", 0)
+        # update_global_view() runs in the training process, but check_cache() runs in dataloader
+        # workers, which are forked once and persist across epochs. The view is therefore published
+        # to a file and workers reload it whenever this shared version counter changes.
+        self._view_version = Value("q", 0)
+        self._view_loaded = 0
+        self._view_path = self.cache_root / f"global-view-{os.getpid()}.pkl"
         self._writer = None
         self._pending_write = None
 
@@ -274,7 +281,28 @@ class DatasetCache(pl.LightningDataModule):
         with counter.get_lock():
             counter.value += amount
 
+    def _publish_view(self, locations):
+        """Make a new global view visible to this process and its dataloader workers."""
+        temporary = self._view_path.with_suffix(".tmp")
+        with temporary.open("wb") as target:
+            pickle.dump(locations, target, protocol=pickle.HIGHEST_PROTOCOL)
+        os.replace(temporary, self._view_path)
+        with self._view_version.get_lock():
+            self._view_version.value += 1
+            self._view_loaded = self._view_version.value
+        self._locations = locations
+
+    def _refresh_view(self):
+        """Reload the global view if the training process published a newer one."""
+        version = self._view_version.value
+        if version == self._view_loaded:
+            return
+        with self._view_path.open("rb") as source:
+            self._locations = pickle.load(source)
+        self._view_loaded = version
+
     def check_cache(self, dataset_id, sequence, positions, grid_indices=None):
+        self._refresh_view()
         namespace = self.namespaces[dataset_id]
         positions = self._positions(namespace, sequence, positions)
         if not positions:
@@ -380,7 +408,7 @@ class DatasetCache(pl.LightningDataModule):
         for entries in gathered:
             for dataset_id, sequence, position, grid_id, node in entries:
                 locations.setdefault(CacheKey(dataset_id, sequence, position, grid_id), set()).add(node)
-        self._locations = locations
+        self._publish_view(locations)
         LOGGER.info("Rank %d had %d fetches (%d local hits, %d remote hits, %d misses)", self.global_rank, self.total_fetches.value, self.cache_hits_local.value, self.cache_hits_remote.value, self.cache_misses.value)
 
     def teardown(self, stage=None):
@@ -389,4 +417,5 @@ class DatasetCache(pl.LightningDataModule):
             connection.close()
         if self.is_node_leader:
             self.server.close()
+        self._view_path.unlink(missing_ok=True)
         self.ds.teardown(stage)
