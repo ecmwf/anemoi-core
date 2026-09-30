@@ -17,7 +17,6 @@ from torch_geometric.data.storage import NodeStorage
 from torch_geometric.nn.conv import MessagePassing
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
-from torch_geometric.typing import Size
 from torch_geometric.utils import scatter
 
 from anemoi.graphs.edges.directional import compute_directions
@@ -54,8 +53,13 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
         - "l2": normalizes the edge attribute using the L2 norm.
         - None: no normalization is applied.
 
-    The `compute_edge_attribute` method must be implemented by subclasses to define how the edge attribute
-    is computed from the specified node attributes.
+    The `_compute_edge_attribute` method must be implemented by subclasses to define how the edge attribute
+    is computed from the specified node features.
+
+    Methods
+    -------
+    forward(x: tuple[NodeStorage, NodeStorage], edge_index: Adj) -> torch.Tensor
+        Computes the edge attribute for the given source and target node features.
 
     Example
     -------
@@ -63,7 +67,7 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             name = "distance"
             node_attr_name = "x"
 
-            def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+            def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
                 return haversine_distance(x_i[:, 0], x_i[:, 1], x_j[:, 0], x_j[:, 1])
     """
 
@@ -85,7 +89,8 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
             error_msg = f"Class {self.__class__.__name__} must define 'node_attr_name' either as a class attribute or in __init__"
             raise ValueError(error_msg)
 
-    def subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+    def _subset_node_information(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> PairTensor:
+        """Subset the relevant source and target node features needed for the edge attribute computation."""
         if self.node_attr_name in source_nodes:
             source_nodes_data = source_nodes[self.node_attr_name].to(self.device)
         else:
@@ -100,15 +105,30 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
         return source_nodes_data, target_nodes_data
 
-    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj, size: Size = None) -> torch.Tensor:
-        x = self.subset_node_information(*x)
-        return self.propagate(edge_index.to(self.device), x=x, size=size)
+    def forward(self, x: tuple[NodeStorage, NodeStorage], edge_index: Adj) -> torch.Tensor:
+        """Compute the edge attribute for the given source and target node features.
+
+        Arguments
+        ---------
+        x: tuple[NodeStorage, NodeStorage]
+            A tuple containing the source and target node storages. These can be obtained by indexing a
+            :class:`HeteroData` object with the nodes name.
+        edge_index: Adj
+            The edge indices for which to compute the edge attributes.
+
+        Returns
+        -------
+        torch.Tensor (num_edges, num_edge_features)
+            The computed edge attributes for the given edges.
+        """
+        x = self._subset_node_information(*x)
+        return self.propagate(edge_index.to(self.device), x=x)
 
     @abstractmethod
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor: ...
 
     def message(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        edge_features = self.compute_edge_attribute(x_i, x_j)
+        edge_features = self._compute_edge_attribute(x_i, x_j)
 
         if edge_features.ndim == 1:
             edge_features = edge_features.unsqueeze(-1)
@@ -137,7 +157,7 @@ class EdgeLength(BasePositionalBuilder):
     Computes the haversine distance between the source and target nodes.
     """
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_length = haversine_distance(x_i, x_j)
         return edge_length
 
@@ -148,7 +168,7 @@ class EdgeDirection(BasePositionalBuilder):
     Computes the direction vectors from the source to the target nodes for each edge.
     """
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
         return edge_dirs
 
@@ -170,7 +190,7 @@ class DirectionalHarmonics(EdgeDirection):
 
     Methods
     -------
-    compute_edge_attribute(x_i, x_j)
+    _compute_edge_attribute(x_i, x_j)
         Compute directional harmonics from edge directions.
     """
 
@@ -178,7 +198,7 @@ class DirectionalHarmonics(EdgeDirection):
         self.order = order
         super().__init__(name=name, norm=norm, dtype=dtype)
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Get the 2D direction vectors [dx, dy]
         edge_dirs = compute_directions(source_coords=x_j, target_coords=x_i)
 
@@ -209,7 +229,7 @@ class Azimuth(BasePositionalBuilder):
 
     Methods
     -------
-    compute_edge_attribute(x_i, x_j)
+    _compute_edge_attribute(x_i, x_j)
         Compute edge lengths attributes.
 
     References
@@ -217,7 +237,7 @@ class Azimuth(BasePositionalBuilder):
     - https://www.movable-type.co.uk/scripts/latlong.html
     """
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         # Forward bearing. x_i, x_j must be radians.
         a11 = torch.cos(x_i[:, self._idx_lat]) * torch.sin(x_j[:, self._idx_lat])
         a12 = (
@@ -250,7 +270,7 @@ class BaseEdgeAttributeFromNodeBuilder(BaseBooleanEdgeAttributeBuilder, ABC):
         if self.nodes_axis is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'nodes_axis' attribute.")
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
         node_attr = (x_j, x_i)[self.nodes_axis.value]
         assert (
             node_attr is not None
@@ -307,7 +327,7 @@ class RadialBasisFeatures(EdgeLength):
 
     Methods
     -------
-    compute_edge_attribute(x_i, x_j)
+    _compute_edge_attribute(x_i, x_j)
         Compute raw edge distances (RBF computation happens in aggregate).
     aggregate(edge_features, index, ptr, dim_size)
         Compute RBF features with adaptive scaling and per-target-node normalization.
@@ -421,15 +441,27 @@ class RadialBasisFeatures(EdgeLength):
 
 
 class GaussianDistanceWeights(EdgeLength):
-    """Gaussian distance weights."""
+    """Gaussian distance weights.
+
+    These weight are normalized per target node.
+    
+    Parameters
+    ----------
+    sigma : float
+        Standard deviation of the Gaussian function.
+    name : str | None, optional
+        Name of the edge attribute.
+    norm : str, optional
+        Normalization method for the edge attribute.
+    """
 
     norm_by_group: bool = True  # normalise the gaussian weights by target node
 
-    def __init__(self, sigma: float = 1.0, norm: str = "l1", **kwargs) -> None:
+    def __init__(self, sigma: float = 1.0, name: str | None = None, norm: str = "l1") -> None:
         self.sigma = sigma
-        super().__init__(norm=norm)
+        super().__init__(name=name, norm=norm)
 
-    def compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
-        dists = super().compute_edge_attribute(x_i, x_j)
+    def _compute_edge_attribute(self, x_i: torch.Tensor, x_j: torch.Tensor) -> torch.Tensor:
+        dists = super()._compute_edge_attribute(x_i, x_j)
         gaussian_weights = torch.exp(-(dists**2) / (2 * self.sigma**2))
         return gaussian_weights
