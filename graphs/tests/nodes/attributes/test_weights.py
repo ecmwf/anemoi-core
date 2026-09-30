@@ -112,18 +112,18 @@ def test_planar_area_weights_exact_on_lattices():
     for dx, dy in [(0.1, 0.1), (0.5, 0.1), (1.0, 0.1)]:
         x, y = np.meshgrid(np.arange(40) * dx, np.arange(30) * dy)
         latlons = np.column_stack([x.ravel(), y.ravel()])
-        areas = PlanarAreaWeights().compute_area_weights(latlons)
+        areas = PlanarAreaWeights()._compute_area_weights(latlons)
         np.testing.assert_allclose(areas, dx * dy, rtol=1e-9)
 
 
 def test_planar_area_weights_degenerate_inputs():
     """Collinear nodes fall back to uniform weights; duplicated nodes stay finite."""
     collinear = np.column_stack([np.arange(50) * 0.1, np.zeros(50)])
-    np.testing.assert_array_equal(PlanarAreaWeights().compute_area_weights(collinear), 1.0)
+    np.testing.assert_array_equal(PlanarAreaWeights()._compute_area_weights(collinear), 1.0)
 
     x, y = np.meshgrid(np.arange(20) * 0.1, np.arange(20) * 0.1)
     duplicated = np.vstack([np.column_stack([x.ravel(), y.ravel()]), [[0.5, 0.5]]])
-    areas = PlanarAreaWeights().compute_area_weights(duplicated)
+    areas = PlanarAreaWeights()._compute_area_weights(duplicated)
     assert np.isfinite(areas).all() and (areas > 0).all()
 
 
