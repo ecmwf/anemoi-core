@@ -194,7 +194,7 @@ data:
             - sin_julian_day
             - sin_local_time
             - lsm
-            - cos_sza    
+            - cos_sza
     combined_mhs:
       forcing:
       - cos_latitude
@@ -1119,7 +1119,7 @@ model:
     combined_gpsro_notrop: 0
     combined_mhs: 0
     amsr2: 0
-    combined_amsua: 0    
+    combined_amsua: 0
     hidden: 8
   # - module: anemoi.models.layers.conv.GraphTransformerConv
 task:
