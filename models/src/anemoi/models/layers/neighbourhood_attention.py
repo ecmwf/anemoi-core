@@ -377,14 +377,11 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
-        alibi_slopes: Optional[Tensor] = None,
     ) -> Tensor:
         if causal or window_size is not None:
             raise ValueError("Neighbourhood attention sets its own mask; causal and window_size must not be used.")
         if softcap is not None and softcap > 0:
             raise NotImplementedError("Softcap is not supported by neighbourhood attention.")
-        if alibi_slopes is not None:
-            raise NotImplementedError("Alibi slopes are not supported by neighbourhood attention.")
         n_q = self.neighbourhood.query_grid.num_points
         n_k = self.neighbourhood.key_grid.num_points
         if query.shape[-2] != n_q or key.shape[-2] != n_k:

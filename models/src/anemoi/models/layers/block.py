@@ -139,7 +139,6 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         neighbourhood: Optional[GridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
@@ -160,7 +159,6 @@ class TransformerProcessorBlock(BaseBlock):
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             neighbourhood=neighbourhood,
             rotary=rotary,
         )
@@ -217,7 +215,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         neighbourhood: Optional[GridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
@@ -233,7 +230,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             attention_implementation=attention_implementation,
             mlp_implementation=mlp_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             neighbourhood=neighbourhood,
             rotary=rotary,
         )
@@ -250,7 +246,6 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             neighbourhood=neighbourhood,
             rotary=rotary,
         )

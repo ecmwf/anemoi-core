@@ -17,7 +17,6 @@ from typing import Optional
 from typing import Union
 
 import einops
-import torch
 from torch import Tensor
 from torch import nn
 from torch import where
@@ -82,18 +81,13 @@ class MultiHeadSelfAttention(nn.Module):
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         neighbourhood: Optional[GridNeighbourhood] = None,
         rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         """Initialize MultiHeadSelfAttention.
 
-        For the flash attention implementation, two additional parameters are available: softcap, use_alibi_slopes
-
-        softcap: Softcapping prevents the logits from growing excessively large
-
-        use_alibi_slopes: Adds bias of `(-alibi_slope * |i + seqlen_k - seqlen_q - j|)` to the attention score of
-        query i and key j, where alibi_slope is calculated using get_alibi_slopes
+        For the flash attention implementation, softcapping is available: it prevents the logits from
+        growing excessively large.
 
         Parameters
         ----------
@@ -119,8 +113,6 @@ class MultiHeadSelfAttention(nn.Module):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default None
-        use_alibi_slopes : bool, optional
-            Adds bias
         neighbourhood : GridNeighbourhood, optional
             Query and key grids and neighbourhood size, needed for the "neighbourhood" implementation
         rotary : SphericalRotaryEmbedding, optional
@@ -137,7 +129,6 @@ class MultiHeadSelfAttention(nn.Module):
 
         self.attention_implementation = attention_implementation
         self._attention_backend_applied = False
-        self.use_alibi_slopes = use_alibi_slopes
 
         self.num_heads = num_heads
         self.head_dim = self.attn_channels // num_heads  # q k v
@@ -150,12 +141,6 @@ class MultiHeadSelfAttention(nn.Module):
         self.rotary = rotary
 
         self.set_attention_function()
-
-        if self.use_alibi_slopes:
-            self.alibi_slopes = get_alibi_slopes(num_heads)
-            assert self.alibi_slopes.shape[0] == num_heads, "Error: Number of alibi_slopes must match number of heads"
-        else:
-            self.alibi_slopes = None
 
         linear = layer_kernels.Linear
         self.lin_q = nn.Linear(embed_dim, self.attn_channels, bias=qkv_bias)
@@ -251,7 +236,6 @@ class MultiHeadSelfAttention(nn.Module):
             window_size=self.window_size,
             dropout_p=dropout_p,
             softcap=self.softcap,
-            alibi_slopes=self.alibi_slopes,
         )
 
         # Shard sequence: split along sequence/grid (dim -2), gather along heads (dim -3)
@@ -351,15 +335,10 @@ class SDPAAttentionWrapper(nn.Module):
         window_size=None,
         dropout_p=0.0,
         softcap=None,
-        alibi_slopes=None,
     ):
         if softcap is not None and softcap > 0:
             raise NotImplementedError(
                 "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
-            )
-        if alibi_slopes is not None:
-            raise NotImplementedError(
-                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
             )
         if window_size is not None and self.attn_mask is None:
             # build the attention mask for sliding window attention. We build the mask once and reuse it,
@@ -387,10 +366,7 @@ class SDPAAttentionWrapper(nn.Module):
 class FlashAttentionWrapper(nn.Module):
     """Wrapper for Flash attention.
 
-    Either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
-    what is installed.
-    flash attention v3 does not support alibi slopes. To use them, you should downgrade to
-    flash attention v2.
+    Either flash attn v2, v3 (optimised for hoppers and newer) or v4, based on what is installed.
 
     """
 
@@ -461,18 +437,10 @@ class FlashAttentionWrapper(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         softcap: Optional[float] = None,
-        alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
-
-        if alibi_slopes is not None and self.use_flash_attn_v3:
-            raise NotImplementedError(
-                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
-            )
-
-        alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
         if self.use_flash_attn_v4:
             out = self.attention(
@@ -505,7 +473,6 @@ class FlashAttentionWrapper(nn.Module):
                 window_size=(window_size, window_size) if window_size is not None else (-1, -1),
                 dropout_p=dropout_p,
                 softcap=softcap,
-                alibi_slopes=alibi_slopes,
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
@@ -531,26 +498,3 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
 
         return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
-
-
-def get_alibi_slopes(num_heads: int) -> Tensor:
-    """Calculates linearly decreasing slopes for alibi attention.
-
-    Parameters
-    ----------
-    num_heads : int
-        Number of attention heads.
-
-    Returns
-    -------
-    Tensor
-        aLiBi slopes.
-    """
-    n = 2 ** math.floor(math.log2(num_heads))
-    slope_0 = 2 ** (-8 / n)
-    alibi_slopes = torch.pow(slope_0, torch.arange(1, 1 + n))
-    if n < num_heads:
-        slope_hat_0 = 2 ** (-4 / n)
-        alibi_slopes_hat = torch.pow(slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2))
-        alibi_slopes = torch.cat([alibi_slopes, alibi_slopes_hat])
-    return alibi_slopes

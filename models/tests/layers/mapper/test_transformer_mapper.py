@@ -48,7 +48,6 @@ class MapperConfig:
     dropout_p: float = 0.0
     attention_implementation: str = "scaled_dot_product_attention"
     softcap: Optional[float] = None
-    use_alibi_slopes: bool = False
     cpu_offload: bool = False
     window_size: Optional[int] = None
     layer_kernels: field(default_factory=DotDict) = None

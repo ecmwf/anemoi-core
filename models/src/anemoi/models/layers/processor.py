@@ -220,7 +220,6 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
@@ -259,8 +258,6 @@ class TransformerProcessor(BaseProcessor):
             Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default None
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -304,7 +301,6 @@ class TransformerProcessor(BaseProcessor):
             attention_implementation=attention_implementation,
             mlp_implementation=mlp_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             neighbourhood=build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords),
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )

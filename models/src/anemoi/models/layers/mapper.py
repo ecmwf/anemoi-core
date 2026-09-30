@@ -1288,7 +1288,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         neighbourhood: Optional[dict] = None,
@@ -1327,8 +1326,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1372,7 +1369,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             neighbourhood=build_grid_neighbourhood(
                 attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
             ),
@@ -1467,7 +1463,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         layer_kernels: DotDict,
@@ -1503,8 +1498,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1530,7 +1523,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             **kwargs,
         )
 
@@ -1588,7 +1580,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
         layer_kernels: DotDict,
@@ -1624,8 +1615,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1651,7 +1640,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
             **kwargs,
         )
 

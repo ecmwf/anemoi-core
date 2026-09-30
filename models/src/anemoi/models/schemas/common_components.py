@@ -65,8 +65,8 @@ def check_neighbourhood_attention(component: Any) -> Any:
         raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' section.")
     if component.window_size is not None:
         raise ValueError("Neighbourhood attention sets its own mask; window_size must be null.")
-    if component.softcap or component.use_alibi_slopes:
-        raise ValueError("Neighbourhood attention supports neither softcap nor alibi slopes.")
+    if component.softcap:
+        raise ValueError("Neighbourhood attention does not support softcap.")
     return component
 
 

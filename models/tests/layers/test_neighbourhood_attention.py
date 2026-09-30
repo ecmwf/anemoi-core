@@ -306,7 +306,6 @@ def _processor_schema(**kwargs):
         attention_implementation="neighbourhood",
         qk_norm=False,
         softcap=0.0,
-        use_alibi_slopes=False,
         **kwargs,
     )
 
@@ -353,7 +352,6 @@ def test_decoder_schema_accepts_neighbourhood_settings():
         dropout_p=0.0,
         attention_implementation="neighbourhood",
         softcap=0.0,
-        use_alibi_slopes=False,
         neighbourhood={"grid": "octahedral", "kernel_size": [3, 5]},
     )
     assert schema.neighbourhood.kernel_size == (3, 5)

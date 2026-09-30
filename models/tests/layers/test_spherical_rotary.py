@@ -344,7 +344,6 @@ COMMON = dict(
     dropout_p=0.0,
     attention_implementation="scaled_dot_product_attention",
     softcap=0.0,
-    use_alibi_slopes=False,
 )
 
 

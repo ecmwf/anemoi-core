@@ -52,7 +52,6 @@ processor:
     backend: triton
   qk_norm: False # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}
@@ -79,7 +78,6 @@ encoders:
         kernel_size: [5, 5] # hidden node rows attend to key rows of the finer data grid
         backend: triton
       softcap: 0.0
-      use_alibi_slopes: False
       qk_norm: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True
@@ -110,7 +108,6 @@ decoders:
         kernel_size: [3, 5]
         backend: triton
       softcap: 0.0
-      use_alibi_slopes: False
       qk_norm: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True

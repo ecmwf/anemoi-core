@@ -36,7 +36,6 @@ processor:
   attention_implementation: flash_attention # Possible values:  scaled_dot_product_attention, flash_attention
   qk_norm: False # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
   layer_kernels: ${model.layer_kernels}

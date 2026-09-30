@@ -35,7 +35,6 @@ TRANSFORMER = {
     "dropout_p": 0.0,
     "attention_implementation": "neighbourhood",
     "softcap": 0.0,
-    "use_alibi_slopes": False,
     "cpu_offload": False,
     "gradient_checkpointing": False,
     "layer_kernels": {},

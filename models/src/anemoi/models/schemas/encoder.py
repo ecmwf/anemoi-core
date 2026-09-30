@@ -82,8 +82,6 @@ class TransformerEncoderSchema(TransformerModelComponent):
     "Attention implementation to use. Default to 'flash_attention'."
     softcap: NonNegativeFloat = Field(example=0.0)
     "Softcap value for attention. Default to 0.0."
-    use_alibi_slopes: bool = Field(example=False)
-    "Use alibi slopes for attention implementation. Default to False."
     neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
     "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
     rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
