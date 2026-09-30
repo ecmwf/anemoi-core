@@ -98,9 +98,12 @@ class BaseEdgeBuilder(ABC):
             List of instantiated attribute objects.
         """
         for attr_obj in attributes:
+            if attr_obj.name in graph[self.name]:
+                raise ValueError(f"Attribute '{attr_obj.name}' already exists in graph[{self.name}].")
+
             edge_index = graph[self.name].edge_index
             graph[self.name][attr_obj.name] = attr_obj(
-                x=(graph[self.name[0]], graph[self.name[2]]), edge_index=edge_index
+                x=(graph[self.source_name], graph[self.target_name]), edge_index=edge_index
             )
 
     def update_graph(
