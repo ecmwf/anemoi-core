@@ -55,7 +55,6 @@ processor:
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
-  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
 encoders:

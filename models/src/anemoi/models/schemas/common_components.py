@@ -9,7 +9,6 @@
 
 from typing import Any
 from typing import Literal
-from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -29,8 +28,6 @@ class NeighbourhoodSchema(BaseModel):
     "Latitude rows and points per row each query attends to; both odd."
     backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
     "Kernels to use: 'triton' (GPU), 'flex' (flex attention) or 'sdpa' (dense mask, small grids). Default to 'triton'."
-    rotary_max_frequency: Optional[float] = Field(default=None, ge=1.0, example=100.0)
-    "Rotary position embeddings from the 3D positions of the points, with frequencies from 1 to this value in radians per Earth radius (about pi over the grid spacing in radians, e.g. 100 for O48). Off when null."
 
     @field_validator("grid")
     @classmethod
@@ -49,6 +46,13 @@ class NeighbourhoodSchema(BaseModel):
         if any(k % 2 == 0 for k in kernel_size):
             raise ValueError(f"kernel_size entries must be odd, got {kernel_size}.")
         return kernel_size
+
+
+class RotaryEmbeddingsSchema(BaseModel):
+    max_frequency: float = Field(ge=1.0, example=100.0)
+    "Highest frequency of the rotary embeddings in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
+    backend: Literal["triton", "torch"] = Field(default="triton")
+    "Computes the turn with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
 
 
 def check_neighbourhood_attention(component: Any) -> Any:

@@ -18,7 +18,6 @@ from typing import Union
 
 import einops
 import torch
-from packaging import version
 from torch import Tensor
 from torch import nn
 from torch import where
@@ -32,6 +31,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
+from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
@@ -83,8 +83,8 @@ class MultiHeadSelfAttention(nn.Module):
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
         neighbourhood: Optional[GridNeighbourhood] = None,
+        rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         """Initialize MultiHeadSelfAttention.
 
@@ -123,6 +123,9 @@ class MultiHeadSelfAttention(nn.Module):
             Adds bias
         neighbourhood : GridNeighbourhood, optional
             Query and key grids and neighbourhood size, needed for the "neighbourhood" implementation
+        rotary : SphericalRotaryEmbedding, optional
+            Rotary position embeddings that turn queries and keys by the positions of their nodes,
+            shared by the attention layers of a model component; works with every implementation
         """
         super().__init__()
 
@@ -143,8 +146,8 @@ class MultiHeadSelfAttention(nn.Module):
         self.is_causal = is_causal
         self.qk_norm = qk_norm
         self.softcap = softcap
-        self.use_rotary_embeddings = use_rotary_embeddings
         self.neighbourhood = neighbourhood
+        self.rotary = rotary
 
         self.set_attention_function()
 
@@ -188,14 +191,10 @@ class MultiHeadSelfAttention(nn.Module):
               Please change model.processor.attention_implementation to one of: {attn_funcs.keys()}"
 
         # initalise the attn func here
-        if self.attention_implementation == "flash_attention":
-            self.attention = attn_funcs[self.attention_implementation](
-                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
-            )
-        elif self.attention_implementation == "neighbourhood":
+        if self.attention_implementation == "neighbourhood":
             if self.neighbourhood is None:
                 raise ValueError("The 'neighbourhood' attention implementation needs a GridNeighbourhood.")
-            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood, head_dim=self.head_dim)
+            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 
@@ -238,6 +237,10 @@ class MultiHeadSelfAttention(nn.Module):
         if self.qk_norm:
             query = self.q_norm(query)
             key = self.k_norm(key)
+
+        # Every node is present here (the heads are split across GPUs, not the nodes), in node order.
+        if self.rotary is not None:
+            query, key = self.rotary(query, key)
 
         out = self.attention(
             query,
@@ -386,39 +389,15 @@ class FlashAttentionWrapper(nn.Module):
 
     Either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
     what is installed.
-    flash attention v3 does not support rotary embeddings or alibi slopes. To use these
-    features, you should downgrade to flash attention v2.
+    flash attention v3 does not support alibi slopes. To use them, you should downgrade to
+    flash attention v2.
 
     """
 
-    def __init__(self, use_rotary_embeddings: bool = False, head_dim: int = None):
+    def __init__(self):
         super().__init__()
 
-        flash_attn_func = self._import_flash_attn()
-
-        self._init_rotary_embeddings(use_rotary_embeddings, head_dim)
-
-        self.attention = flash_attn_func
-
-    def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int) -> None:
-        """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
-        self.use_rotary_embeddings = False
-        if use_rotary_embeddings:
-            if self.use_flash_attn_v4 or self.use_flash_attn_v3:
-                raise RuntimeError(
-                    "Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings."
-                )
-
-            # import flash attn v2 to check the version
-            import flash_attn
-
-            if flash_attn.__version__ <= version.parse("2.6"):
-                raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
-
-            from flash_attn.layers.rotary import RotaryEmbedding
-
-            self.use_rotary_embeddings = True
-            self.rotary_emb = RotaryEmbedding(dim=head_dim)
+        self.attention = self._import_flash_attn()
 
     def _import_flash_attn(self) -> tuple:
         """imports either flash attention v2, v3 or v4, based on what is installed. prioritising v4, then v3, then v2. if none are installed, raises an error.
@@ -494,16 +473,6 @@ class FlashAttentionWrapper(nn.Module):
             )
 
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
-
-        if self.use_rotary_embeddings:
-            key = key.unsqueeze(-3)
-            value = value.unsqueeze(-3)
-            keyvalue = torch.cat((key, value), dim=-3)
-            query, keyvalue = self.rotary_emb(
-                query, keyvalue, max_seqlen=max(keyvalue.shape[1], query.shape[1])
-            )  # assumption seq const
-            key = keyvalue[:, :, 0, ...]
-            value = keyvalue[:, :, 1, ...]
 
         if self.use_flash_attn_v4:
             out = self.attention(

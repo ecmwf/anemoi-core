@@ -50,12 +50,15 @@ processor:
     grid: octahedral
     kernel_size: [7, 13]
     backend: triton
+  # Rotary position embeddings from the positions of the nodes on the sphere, so that the scores also
+  # depend on where each key lies relative to its query; they work with every attention_implementation.
+  # e.g. {max_frequency: 100, backend: triton}; max_frequency 100 repeats every ~400 km (40,000 km / 100).
+  rotary_embeddings: null
   qk_norm: False # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
-  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
 
 encoders:
@@ -106,7 +109,6 @@ decoders:
         backend: triton
       softcap: 0.0
       use_alibi_slopes: False
-      use_rotary_embeddings: False
       qk_norm: False
       cpu_offload: ${model.cpu_offload}
       gradient_checkpointing: True

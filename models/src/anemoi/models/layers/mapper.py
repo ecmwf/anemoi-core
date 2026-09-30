@@ -37,6 +37,7 @@ from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -1288,10 +1289,10 @@ class TransformerBaseMapper(BaseMapper, ABC):
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         neighbourhood: Optional[dict] = None,
+        rotary_embeddings: Optional[dict] = None,
         src_node_coords: Optional[Tensor] = None,
         dst_node_coords: Optional[Tensor] = None,
         **kwargs,
@@ -1338,10 +1339,15 @@ class TransformerBaseMapper(BaseMapper, ABC):
         neighbourhood : dict, optional
             Grid family, kernel size and backend for attention_implementation "neighbourhood",
             see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        rotary_embeddings : dict, optional
+            Highest frequency and backend of rotary position embeddings,
+            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
         src_node_coords : Tensor, optional
             Latitude and longitude of the source nodes (keys) in radians, used by neighbourhood attention
+            and rotary embeddings
         dst_node_coords : Tensor, optional
-            Latitude and longitude of the destination nodes (queries) in radians, used by neighbourhood attention
+            Latitude and longitude of the destination nodes (queries) in radians, used by neighbourhood
+            attention and rotary embeddings
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1367,9 +1373,11 @@ class TransformerBaseMapper(BaseMapper, ABC):
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
             neighbourhood=build_grid_neighbourhood(
                 attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
+            ),
+            rotary=build_spherical_rotary(
+                rotary_embeddings, (attn_channels or num_channels) // num_heads, dst_node_coords, src_node_coords
             ),
         )
 
@@ -1462,7 +1470,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
-        use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -1524,7 +1531,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
             **kwargs,
         )
 
@@ -1585,7 +1591,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
-        use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -1647,7 +1652,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             attention_implementation=attention_implementation,
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
             **kwargs,
         )
 

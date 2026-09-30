@@ -20,6 +20,7 @@ from pydantic import model_validator
 from .common_components import GNNModelComponent
 from .common_components import NeighbourhoodSchema
 from .common_components import PointWiseMapperComponent
+from .common_components import RotaryEmbeddingsSchema
 from .common_components import TransformerModelComponent
 from .common_components import check_neighbourhood_attention
 
@@ -87,8 +88,8 @@ class TransformerDecoderSchema(TransformerModelComponent):
     "Use alibi slopes for attention implementation. Default to False."
     neighbourhood: Optional[NeighbourhoodSchema] = Field(default=None)
     "Grid and neighbourhood size for attention_implementation 'neighbourhood'. Default to None."
-    use_rotary_embeddings: bool = Field(example=False)
-    "Use rotary embeddings for attention implementation. Default to False."
+    rotary_embeddings: Optional[RotaryEmbeddingsSchema] = Field(default=None)
+    "Rotary position embeddings from the positions of the nodes on the sphere; off when None. Default to None."
 
     @model_validator(mode="after")
     def check_neighbourhood(self) -> Any:

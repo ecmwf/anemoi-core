@@ -25,17 +25,14 @@ A model component names the grid family in its configuration, for example::
 
 and the node coordinates of the graph fix the resolution and the order of the points.
 
-The kernels compare queries and keys by content only. ``rotary_max_frequency`` in the
-``neighbourhood`` section adds rotary position embeddings built from the 3D positions of the points
-on the unit sphere (see :func:`rotary_angles`), so that the scores also depend on where each key
-lies relative to its query.
+The kernels compare queries and keys by content only; rotary position embeddings
+(:mod:`anemoi.models.layers.spherical_rotary`) add where each key lies relative to its query.
 """
 
 from __future__ import annotations
 
 import importlib
 import logging
-import math
 from dataclasses import dataclass
 from typing import Callable
 from typing import Optional
@@ -51,84 +48,6 @@ from anemoi.models.layers.reduced_grid import ReducedGridNeighbourhoodMask
 LOGGER = logging.getLogger(__name__)
 
 BACKENDS = ("triton", "flex", "sdpa")
-
-
-def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor:
-    """Rotation angles of rotary position embeddings from the 3D positions of points on the sphere.
-
-    Each point's position on the unit sphere, ``(x, y, z) = (cos lat cos lon, cos lat sin lon, sin lat)``,
-    turns ``n = head_dim // 6`` channel pairs by ``w * x``, ``n`` pairs by ``w * y`` and ``n`` pairs by
-    ``w * z``, with the same ``n`` frequencies ``w`` spread evenly on a log scale from 1 to
-    ``max_frequency``. After rotating queries and keys, the score of a pair depends on the straight
-    line from the query to the key, ``(x_q - x_k, y_q - y_k, z_q - z_k)``, at every frequency; the
-    channels left over are not rotated. A frequency ``w`` tells apart points about ``pi / w`` Earth
-    radii apart, so ``max_frequency`` of about ``pi`` over the grid spacing in radians (about 100 for
-    O48) reaches down to neighbouring points. The frequencies do not depend on the grid, so a model
-    keeps its embeddings when it is moved to another resolution.
-
-    Parameters
-    ----------
-    coords : Tensor
-        Latitude and longitude of each point in radians, shape ``(num_points, 2)``.
-    head_dim : int
-        Number of channels per head; at least 6.
-    max_frequency : float
-        Highest frequency, in radians per Earth radius; at least 1.
-
-    Returns
-    -------
-    Tensor
-        Angles in radians, shape ``(num_points, 3 * (head_dim // 6))``: the ``x`` angles first,
-        then ``y``, then ``z``.
-    """
-    per_axis = head_dim // 6
-    if per_axis == 0:
-        raise ValueError(f"Rotary embeddings need a head dimension of at least 6, got {head_dim}.")
-    lat, lon = coords[:, 0].double(), coords[:, 1].double()
-    xyz = torch.stack([torch.cos(lat) * torch.cos(lon), torch.cos(lat) * torch.sin(lon), torch.sin(lat)], dim=1)
-    frequencies = torch.logspace(0.0, math.log10(max_frequency), per_axis, dtype=torch.float64)
-    return (xyz[:, :, None] * frequencies[None, None, :]).flatten(1)
-
-
-def apply_rotary(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
-    """Turn channel ``i`` and channel ``head_dim // 2 + i`` of every point by the angle whose cosine and sine are given.
-
-    ``x`` has shape ``(..., points, head_dim)``; ``cos`` and ``sin`` have shape ``(points, n)`` for the
-    first ``n`` pairs; the other channels pass through unchanged. The turn is worked out in float32.
-    """
-    n = cos.shape[-1]
-    half = x.shape[-1] // 2
-    x = x.float()
-    first, second = x[..., :n], x[..., half : half + n]
-    turned_first = first * cos - second * sin
-    turned_second = first * sin + second * cos
-    return torch.cat([turned_first, x[..., n:half], turned_second, x[..., half + n :]], dim=-1)
-
-
-class SphericalRotaryEmbedding(nn.Module):
-    """Turns queries and keys by the rotary angles of their points (see :func:`rotary_angles`).
-
-    Holds the cosines and sines of the angles of the query grid and of the key grid, in grid order.
-    They move with the module to the GPU but are not part of the saved weights. A small module of
-    its own so that it can be listed in the ``compile`` section of the model configuration, which
-    joins its steps into one pass over the queries and one over the keys.
-    """
-
-    def __init__(self, query_grid: ReducedGrid, key_grid: ReducedGrid, head_dim: int, max_frequency: float) -> None:
-        super().__init__()
-        self.shared = query_grid is key_grid
-        grids = {"query": query_grid} if self.shared else {"query": query_grid, "key": key_grid}
-        for name, grid in grids.items():
-            angles = rotary_angles(grid.coords, head_dim, max_frequency)
-            self.register_buffer(f"{name}_cos", torch.cos(angles).float(), persistent=False)
-            self.register_buffer(f"{name}_sin", torch.sin(angles).float(), persistent=False)
-
-    def forward(self, query: Tensor, key: Tensor) -> tuple[Tensor, Tensor]:
-        """Queries and keys, shape ``(..., points, head_dim)`` in grid order, turned and in their own dtype."""
-        key_cos, key_sin = (self.query_cos, self.query_sin) if self.shared else (self.key_cos, self.key_sin)
-        turned_query = apply_rotary(query, self.query_cos, self.query_sin).to(query.dtype)
-        turned_key = apply_rotary(key, key_cos, key_sin).to(key.dtype)
-        return turned_query, turned_key
 
 
 def _is_octahedral(grid: ReducedGrid) -> bool:
@@ -279,7 +198,6 @@ class GridNeighbourhood:
     query_order: Optional[Tensor] = None
     key_order: Optional[Tensor] = None
     is_self_attention: bool = False
-    rotary_max_frequency: Optional[float] = None
 
     @classmethod
     def from_config(
@@ -295,8 +213,7 @@ class GridNeighbourhood:
         config : dict
             ``grid`` (a key of :data:`GRID_KERNELS`), ``kernel_size`` (two odd numbers: latitude
             rows and points per row) and optionally ``backend`` (``"triton"``, the default,
-            ``"flex"`` or ``"sdpa"``) and ``rotary_max_frequency`` (turns on rotary position
-            embeddings, see :func:`rotary_angles`; off when left out or None).
+            ``"flex"`` or ``"sdpa"``).
         key_coords : Tensor
             Coordinates of the key nodes in radians, shape ``(num_keys, 2)``.
         query_coords : Tensor, optional
@@ -311,12 +228,9 @@ class GridNeighbourhood:
             raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
         if key_coords is None:
             raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
-        unknown = set(config) - {"grid", "kernel_size", "backend", "rotary_max_frequency"}
+        unknown = set(config) - {"grid", "kernel_size", "backend"}
         if unknown:
-            raise ValueError(
-                f"Unknown neighbourhood settings {sorted(unknown)}; use grid, kernel_size, backend and "
-                "rotary_max_frequency."
-            )
+            raise ValueError(f"Unknown neighbourhood settings {sorted(unknown)}; use grid, kernel_size and backend.")
         family = config["grid"]
         kernel_size = tuple(int(k) for k in config["kernel_size"])
         backend = config.get("backend", "triton")
@@ -324,37 +238,13 @@ class GridNeighbourhood:
             raise ValueError(f"kernel_size must be two positive odd numbers, got {config['kernel_size']}.")
         if backend not in BACKENDS:
             raise ValueError(f"Neighbourhood attention backend must be one of {BACKENDS}, got '{backend}'.")
-        rotary_max_frequency = config.get("rotary_max_frequency")
-        if rotary_max_frequency is not None:
-            rotary_max_frequency = float(rotary_max_frequency)
-            if rotary_max_frequency < 1:
-                raise ValueError(f"rotary_max_frequency must be at least 1, got {rotary_max_frequency}.")
 
         key_grid, key_order = grid_from_coords(family, key_coords)
         if query_coords is None:
-            return cls(
-                family,
-                kernel_size,
-                backend,
-                key_grid,
-                key_grid,
-                key_order,
-                key_order,
-                is_self_attention=True,
-                rotary_max_frequency=rotary_max_frequency,
-            )
+            return cls(family, kernel_size, backend, key_grid, key_grid, key_order, key_order, is_self_attention=True)
         query_grid, query_order = grid_from_coords(family, query_coords)
         check_every_key_attended(query_grid, key_grid, kernel_size)
-        return cls(
-            family,
-            kernel_size,
-            backend,
-            query_grid,
-            key_grid,
-            query_order,
-            key_order,
-            rotary_max_frequency=rotary_max_frequency,
-        )
+        return cls(family, kernel_size, backend, query_grid, key_grid, query_order, key_order)
 
     @property
     def kernels(self) -> GridKernels:
@@ -400,18 +290,10 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         anywhere; the mask takes one byte per query-key pair, so it suits small grids and tests.
     """
 
-    def __init__(self, neighbourhood: GridNeighbourhood, head_dim: Optional[int] = None) -> None:
+    def __init__(self, neighbourhood: GridNeighbourhood) -> None:
         super().__init__()
         self.neighbourhood = neighbourhood
         self.backend = neighbourhood.backend
-
-        self.rotary = None
-        if neighbourhood.rotary_max_frequency is not None:
-            if head_dim is None:
-                raise ValueError("Rotary embeddings need the head dimension of the attention layer.")
-            self.rotary = SphericalRotaryEmbedding(
-                neighbourhood.query_grid, neighbourhood.key_grid, head_dim, neighbourhood.rotary_max_frequency
-            )
 
         # The point orders move with the module to the GPU but are not part of the saved weights.
         self._reorder_queries = neighbourhood.query_order is not None
@@ -516,9 +398,6 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         if self._reorder_keys:
             key = _ReorderPoints.apply(key, self.key_order, self.key_inverse)
             value = _ReorderPoints.apply(value, self.key_order, self.key_inverse)
-
-        if self.rotary is not None:
-            query, key = self.rotary(query, key)
 
         out = self._attend(query, key, value, dropout_p)
 

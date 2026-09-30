@@ -51,7 +51,6 @@ class MapperConfig:
     use_alibi_slopes: bool = False
     cpu_offload: bool = False
     window_size: Optional[int] = None
-    use_rotary_embeddings: bool = False
     layer_kernels: field(default_factory=DotDict) = None
 
     def __post_init__(self):

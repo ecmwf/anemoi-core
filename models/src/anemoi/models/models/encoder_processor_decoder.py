@@ -70,7 +70,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_src=encoder_in_channels_src[0],
                 in_channels_dst=self.input_dim_latent,
                 edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
-                **self._neighbourhood_coords(
+                **self._node_coords(
                     encoder_config.mapper,
                     src_node_coords=encoder_config.source_datasets,
                     dst_node_coords=[self._graph_name_hidden],
@@ -93,7 +93,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
-            **self._neighbourhood_coords(model_config.processor, node_coords=[self._graph_name_hidden]),
+            **self._node_coords(model_config.processor, node_coords=[self._graph_name_hidden]),
         )
 
         assert (
@@ -142,20 +142,24 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_dst=decoder_in_channels_dst[0],
                 out_channels_dst=decoder_output_channels_dst[0],
                 edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
-                **self._neighbourhood_coords(
+                **self._node_coords(
                     decoder_config.mapper,
                     src_node_coords=[self._graph_name_hidden],
                     dst_node_coords=decoder_config.target_datasets,
                 ),
             )
 
-    def _neighbourhood_coords(self, component_config: DotDict, **node_names: list[str]) -> dict[str, Tensor]:
-        """Node coordinates for a model component, which only neighbourhood attention needs.
+    def _node_coords(self, component_config: DotDict, **node_names: list[str]) -> dict[str, Tensor]:
+        """Node coordinates for a model component, which neighbourhood attention and rotary embeddings need.
 
         Each keyword names the graph nodes whose coordinates the component receives under that
         keyword. Several names, for datasets sharing an encoder or decoder, must share one grid.
         """
-        if component_config.get("attention_implementation") != "neighbourhood":
+        uses_positions = (
+            component_config.get("attention_implementation") == "neighbourhood"
+            or component_config.get("rotary_embeddings") is not None
+        )
+        if not uses_positions:
             return {}
         node_coords = {}
         for keyword, names in node_names.items():
@@ -164,7 +168,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 other = self._graph_data[name].x
                 if other.shape != coords.shape or not torch.equal(other, coords):
                     raise ValueError(
-                        f"Nodes {list(names)} share a neighbourhood attention component, so they must be on the same grid."
+                        f"Nodes {list(names)} share a model component that uses node positions, so they must be the same nodes."
                     )
             node_coords[keyword] = coords
         return node_coords

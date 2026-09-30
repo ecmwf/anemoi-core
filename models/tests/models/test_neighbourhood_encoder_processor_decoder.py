@@ -97,7 +97,6 @@ def _model_config(neighbourhood: dict) -> DictConfig:
                         "mapper": {
                             "_target_": "anemoi.models.layers.mapper.TransformerBackwardMapper",
                             "neighbourhood": {**neighbourhood, "kernel_size": [3, 5]},
-                            "use_rotary_embeddings": False,
                             **TRANSFORMER,
                         },
                     },
@@ -179,3 +178,30 @@ def test_data_nodes_in_another_order_give_the_same_forecast():
 def test_rejects_nodes_that_do_not_form_the_configured_grid():
     with pytest.raises(InstantiationException, match="do not form one of the HEALPix"):
         _build(neighbourhood={"grid": "healpix", "backend": "sdpa"})
+
+
+def test_rotary_embeddings_reach_encoder_processor_and_decoder():
+    from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
+
+    config = _model_config({"grid": "octahedral", "backend": "sdpa"})
+    for part in (config.model.processor, config.model.encoders["0"].mapper, config.model.decoders["0"].mapper):
+        part.rotary_embeddings = {"max_frequency": 30.0, "backend": "torch"}
+    BaseModelSchema(**OmegaConf.to_container(config.model))
+    model = AnemoiModelEncProcDec(
+        model_config=config,
+        data_indices=_data_indices(),
+        statistics={"data": None},
+        n_step_input=2,
+        n_step_output=1,
+        graph_data=_graph(),
+    )
+    encoder, decoder = model.encoder["0"].proc.attention.rotary, model.decoder["0"].proc.attention.rotary
+    processor = {layer.attention.rotary for layer in model.processor.proc}
+    assert len(processor) == 1 and isinstance(next(iter(processor)), SphericalRotaryEmbedding)
+    # The encoder turns hidden queries and data keys; the decoder the other way round.
+    assert (encoder.query_cos.shape[0], encoder.key_cos.shape[0]) == (HIDDEN_GRID.num_points, DATA_GRID.num_points)
+    assert (decoder.query_cos.shape[0], decoder.key_cos.shape[0]) == (DATA_GRID.num_points, HIDDEN_GRID.num_points)
+
+    out = model(_inputs())["data"]
+    out.pow(2).mean().backward()
+    assert all(p.grad is not None for name, p in model.named_parameters() if ".attention.lin_" in name)

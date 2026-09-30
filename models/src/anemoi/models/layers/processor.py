@@ -28,6 +28,7 @@ from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -224,6 +225,7 @@ class TransformerProcessor(BaseProcessor):
         cpu_offload: bool = False,
         layer_kernels: DotDict,
         neighbourhood: Optional[dict] = None,
+        rotary_embeddings: Optional[dict] = None,
         node_coords: Optional[Tensor] = None,
         **kwargs,
     ) -> None:
@@ -269,8 +271,12 @@ class TransformerProcessor(BaseProcessor):
         neighbourhood : dict, optional
             Grid family, kernel size and backend for attention_implementation "neighbourhood",
             see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        rotary_embeddings : dict, optional
+            Highest frequency and backend of rotary position embeddings, shared by all layers,
+            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
         node_coords : Tensor, optional
             Latitude and longitude of the processor nodes in radians, used by neighbourhood attention
+            and rotary embeddings
         """
         super().__init__(
             num_layers=num_layers,
@@ -300,6 +306,7 @@ class TransformerProcessor(BaseProcessor):
             softcap=softcap,
             use_alibi_slopes=use_alibi_slopes,
             neighbourhood=build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords),
+            rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
 
         self.offload_layers(cpu_offload)
