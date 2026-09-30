@@ -195,7 +195,7 @@ class MultiHeadSelfAttention(nn.Module):
         elif self.attention_implementation == "neighbourhood":
             if self.neighbourhood is None:
                 raise ValueError("The 'neighbourhood' attention implementation needs a GridNeighbourhood.")
-            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood)
+            self.attention = attn_funcs[self.attention_implementation](self.neighbourhood, head_dim=self.head_dim)
         else:
             self.attention = attn_funcs[self.attention_implementation]()
 

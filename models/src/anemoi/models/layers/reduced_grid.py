@@ -177,6 +177,18 @@ class ReducedGrid:
         positions = torch.arange(self.num_points) - self.row_starts[rows]
         return rows, positions
 
+    @cached_property
+    def coords(self) -> Tensor:
+        """Latitude and longitude of every point in radians, in grid order, shape ``(num_points, 2)``."""
+        if self.row_latitudes is None:
+            raise ValueError("The coordinates of a grid need the latitudes of its rows.")
+        rows, positions = self.rows_and_positions
+        lat = torch.deg2rad(torch.tensor(self.row_latitudes, dtype=torch.float64))[rows]
+        lengths = torch.tensor(self.row_lengths, dtype=torch.float64)[rows]
+        shifts = torch.tensor(self.shifts, dtype=torch.float64)[rows]
+        lon = 2 * math.pi * (positions + shifts / 2) / lengths
+        return torch.stack([lat, lon], dim=1)
+
     def nearest_rows(self, other: ReducedGrid) -> Tensor:
         """For each row of this grid, the row of ``other`` nearest in latitude."""
         if self.row_latitudes is None or other.row_latitudes is None:

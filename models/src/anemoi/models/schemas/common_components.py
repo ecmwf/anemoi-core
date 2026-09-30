@@ -9,6 +9,7 @@
 
 from typing import Any
 from typing import Literal
+from typing import Optional
 from typing import Union
 
 from pydantic import BaseModel as PydanticBaseModel
@@ -28,6 +29,8 @@ class NeighbourhoodSchema(BaseModel):
     "Latitude rows and points per row each query attends to; both odd."
     backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
     "Kernels to use: 'triton' (GPU), 'flex' (flex attention) or 'sdpa' (dense mask, small grids). Default to 'triton'."
+    rotary_max_frequency: Optional[float] = Field(default=None, ge=1.0, example=100.0)
+    "Rotary position embeddings from the 3D positions of the points, with frequencies from 1 to this value in radians per Earth radius (about pi over the grid spacing in radians, e.g. 100 for O48). Off when null."
 
     @field_validator("grid")
     @classmethod

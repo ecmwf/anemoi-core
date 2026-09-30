@@ -24,9 +24,12 @@ from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.neighbourhood_attention import GRID_KERNELS
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
+from anemoi.models.layers.neighbourhood_attention import SphericalRotaryEmbedding
+from anemoi.models.layers.neighbourhood_attention import apply_rotary
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
 from anemoi.models.layers.neighbourhood_attention import check_every_key_attended
 from anemoi.models.layers.neighbourhood_attention import grid_from_coords
+from anemoi.models.layers.neighbourhood_attention import rotary_angles
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.utils import load_layer_kernels
@@ -105,6 +108,7 @@ def test_nodes_in_any_order_are_sorted_into_the_grid():
         ({"grid": "octahedral", "kernel_size": [3, 5, 7]}, "two positive odd numbers"),
         ({"grid": "octahedral", "kernel_size": [3, 5], "backend": "natten"}, "backend must be one of"),
         ({"grid": "octahedral", "kernel_size": [3, 5], "radius": 2}, "Unknown neighbourhood settings"),
+        ({"grid": "octahedral", "kernel_size": [3, 5], "rotary_max_frequency": 0.5}, "at least 1"),
     ],
 )
 def test_invalid_settings_are_rejected(config, message):
@@ -318,6 +322,7 @@ def test_schema_accepts_neighbourhood_settings():
         "grid": "healpix",
         "kernel_size": (7, 13),
         "backend": "triton",
+        "rotary_max_frequency": None,
     }
 
 
@@ -358,3 +363,163 @@ def test_decoder_schema_accepts_neighbourhood_settings():
         neighbourhood={"grid": "octahedral", "kernel_size": [3, 5]},
     )
     assert schema.neighbourhood.kernel_size == (3, 5)
+
+
+ROTARY = {**NEIGHBOURHOOD, "rotary_max_frequency": 30.0}
+
+
+def unit_vectors(coords: torch.Tensor) -> torch.Tensor:
+    lat, lon = coords[:, 0].double(), coords[:, 1].double()
+    return torch.stack([torch.cos(lat) * torch.cos(lon), torch.cos(lat) * torch.sin(lon), torch.sin(lat)], dim=1)
+
+
+def test_rotary_angles_turn_by_every_frequency_along_each_axis():
+    coords = grid_coords(ReducedGrid.octahedral(4))
+    angles = rotary_angles(coords, head_dim=16, max_frequency=30.0)
+    xyz = unit_vectors(coords)
+    frequencies = torch.tensor([1.0, 30.0], dtype=torch.float64)
+    assert angles.shape == (coords.shape[0], 6)
+    for axis in range(3):
+        torch.testing.assert_close(angles[:, 2 * axis : 2 * axis + 2], xyz[:, axis : axis + 1] * frequencies)
+
+
+def test_rotary_angles_need_six_channels_per_head():
+    with pytest.raises(ValueError, match="at least 6"):
+        rotary_angles(grid_coords(ReducedGrid.octahedral(4)), head_dim=4, max_frequency=10.0)
+
+
+def test_rotated_scores_depend_on_the_straight_line_from_query_to_key():
+    """Turning the query by a and the key by b scores like turning the query alone by a - b."""
+    query_coords, key_coords = grid_coords(ReducedGrid.octahedral(4)), grid_coords(ReducedGrid.octahedral(8))
+    q_angles = rotary_angles(query_coords, 16, 30.0)[:1]
+    k_angles = rotary_angles(key_coords, 16, 30.0)[:5]
+    # The difference of the angles is the frequency times the straight line between the points.
+    offset = unit_vectors(query_coords)[:1] - unit_vectors(key_coords)[:5]
+    frequencies = torch.tensor([1.0, 30.0], dtype=torch.float64)
+    torch.testing.assert_close(q_angles - k_angles, (offset[:, :, None] * frequencies).flatten(1))
+
+    generator = torch.Generator().manual_seed(0)
+    q, k = torch.randn(1, 16, generator=generator), torch.randn(5, 16, generator=generator)
+    turned_q = apply_rotary(q, torch.cos(q_angles).float(), torch.sin(q_angles).float())
+    turned_k = apply_rotary(k, torch.cos(k_angles).float(), torch.sin(k_angles).float())
+    relative = (q_angles - k_angles).float()
+    by_offset = (apply_rotary(q.expand(5, -1), torch.cos(relative), torch.sin(relative)) * k).sum(-1)
+    torch.testing.assert_close((turned_q * turned_k).sum(-1), by_offset, rtol=1e-5, atol=1e-5)
+
+
+def test_rotary_leaves_the_channels_beyond_the_turned_pairs_alone():
+    x = torch.randn(3, 16)
+    angles = torch.rand(3, 6)
+    turned = apply_rotary(x, torch.cos(angles), torch.sin(angles))
+    assert torch.equal(turned[:, 6:8], x[:, 6:8]) and torch.equal(turned[:, 14:], x[:, 14:])
+    torch.testing.assert_close(turned.norm(dim=-1), x.norm(dim=-1))
+
+
+def test_rotary_turns_queries_and_keys_before_attending():
+    key_grid, query_grid = ReducedGrid.octahedral(8), ReducedGrid.octahedral(4)
+    rotary = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(ROTARY, grid_coords(key_grid), grid_coords(query_grid)), head_dim=16
+    )
+    plain = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(NEIGHBOURHOOD, grid_coords(key_grid), grid_coords(query_grid))
+    )
+    generator = torch.Generator().manual_seed(0)
+    q = torch.randn(2, 3, query_grid.num_points, 16, generator=generator)
+    k, v = (torch.randn(2, 3, key_grid.num_points, 16, generator=generator) for _ in range(2))
+    q_angles = rotary_angles(query_grid.coords, 16, 30.0).float()
+    k_angles = rotary_angles(key_grid.coords, 16, 30.0).float()
+    turned_q = apply_rotary(q, torch.cos(q_angles), torch.sin(q_angles))
+    turned_k = apply_rotary(k, torch.cos(k_angles), torch.sin(k_angles))
+    torch.testing.assert_close(rotary(q, k, v, 2), plain(turned_q, turned_k, v, 2), rtol=1e-5, atol=1e-6)
+    assert not torch.allclose(rotary(q, k, v, 2), plain(q, k, v, 2))
+
+
+def test_rotary_follows_the_node_order():
+    key_grid, query_grid = ReducedGrid.healpix(4), ReducedGrid.healpix(2)
+    config = {**ROTARY, "grid": "healpix"}
+    in_order = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(config, grid_coords(key_grid), grid_coords(query_grid)), head_dim=16
+    )
+    key_coords, key_perm = shuffled(grid_coords(key_grid), seed=1)
+    query_coords, query_perm = shuffled(grid_coords(query_grid), seed=2)
+    out_of_order = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(config, key_coords, query_coords), head_dim=16
+    )
+
+    generator = torch.Generator().manual_seed(0)
+    q = torch.randn(1, 2, query_grid.num_points, 16, generator=generator)
+    k, v = (torch.randn(1, 2, key_grid.num_points, 16, generator=generator) for _ in range(2))
+    expected = in_order(q, k, v, 1)[:, :, query_perm]
+    got = out_of_order(q[:, :, query_perm], k[:, :, key_perm], v[:, :, key_perm], 1)
+    torch.testing.assert_close(got, expected, rtol=1e-5, atol=1e-6)
+    assert out_of_order.state_dict() == {}
+
+
+def test_schema_accepts_rotary_settings():
+    settings = {"grid": "octahedral", "kernel_size": [3, 5], "rotary_max_frequency": 100}
+    schema = TransformerDecoderSchema(
+        _target_="anemoi.models.layers.mapper.TransformerBackwardMapper",
+        cpu_offload=False,
+        num_chunks=1,
+        mlp_hidden_ratio=4,
+        num_heads=16,
+        num_channels=512,
+        window_size=None,
+        dropout_p=0.0,
+        attention_implementation="neighbourhood",
+        softcap=0.0,
+        use_alibi_slopes=False,
+        use_rotary_embeddings=False,
+        neighbourhood=settings,
+    )
+    assert schema.neighbourhood.rotary_max_frequency == 100.0
+    with pytest.raises(ValidationError):
+        TransformerDecoderSchema(**{**schema.model_dump(), "neighbourhood": {**settings, "rotary_max_frequency": 0.5}})
+
+
+def test_rotary_attention_in_bfloat16_matches_float64():
+    """Angles of up to 100 radians are turned into cosines and sines before any rounding to bfloat16."""
+    key_grid, query_grid = ReducedGrid.octahedral(16), ReducedGrid.octahedral(8)
+    config = {**NEIGHBOURHOOD, "kernel_size": [5, 5], "rotary_max_frequency": 100.0}
+    wrapper = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(config, grid_coords(key_grid), grid_coords(query_grid)), head_dim=32
+    )
+    generator = torch.Generator().manual_seed(0)
+    q = torch.randn(2, 4, query_grid.num_points, 32, generator=generator, dtype=torch.float64)
+    k, v = (torch.randn(2, 4, key_grid.num_points, 32, generator=generator, dtype=torch.float64) for _ in range(2))
+    exact = wrapper(q, k, v, 2)
+    low = wrapper(q.bfloat16(), k.bfloat16(), v.bfloat16(), 2)
+    assert low.dtype == torch.bfloat16
+    torch.testing.assert_close(low.double(), exact, rtol=0, atol=3e-2)
+    # The turn itself stays as close to exact as rounding the inputs to bfloat16 does.
+    angles = rotary_angles(query_grid.coords, 32, 100.0)
+    turned_low = apply_rotary(q.bfloat16(), torch.cos(angles).float(), torch.sin(angles).float()).bfloat16()
+    turned_exact = apply_rotary(q, torch.cos(angles), torch.sin(angles))
+    rounding = (q.bfloat16().double() - q).abs().max()
+    assert (turned_low.double() - turned_exact).abs().max() <= 3 * rounding
+
+
+def test_rotary_needs_the_head_dimension():
+    grid = ReducedGrid.octahedral(4)
+    with pytest.raises(ValueError, match="head dimension"):
+        NeighbourhoodAttentionWrapper(GridNeighbourhood.from_config(ROTARY, grid_coords(grid)))
+
+
+def test_rotary_tables_are_shared_in_self_attention_and_not_saved():
+    wrapper = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(ROTARY, grid_coords(ReducedGrid.octahedral(4))), head_dim=16
+    )
+    assert wrapper.rotary.shared
+    assert not hasattr(wrapper.rotary, "key_cos")
+    assert wrapper.state_dict() == {}
+
+
+def test_rotary_module_can_be_listed_for_compilation():
+    from anemoi.models.utils.compile import _get_compile_entry
+
+    wrapper = NeighbourhoodAttentionWrapper(
+        GridNeighbourhood.from_config(ROTARY, grid_coords(ReducedGrid.octahedral(4))), head_dim=16
+    )
+    entry = {"module": "anemoi.models.layers.neighbourhood_attention.SphericalRotaryEmbedding"}
+    assert isinstance(wrapper.rotary, SphericalRotaryEmbedding)
+    assert _get_compile_entry(wrapper.rotary, [entry]) is entry

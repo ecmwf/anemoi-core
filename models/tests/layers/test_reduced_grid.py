@@ -339,3 +339,11 @@ def test_keys_left_between_the_queries_of_a_coarser_grid(n_key, kernel_size, eve
         ReducedGrid.octahedral(48), ReducedGrid.octahedral(n_key), kernel_size
     ).times_attended()
     assert bool((counts > 0).all()) == every_key_read
+
+
+@pytest.mark.parametrize("grid", [ReducedGrid.octahedral(8), ReducedGrid.healpix(4)], ids=["octahedral", "healpix"])
+def test_coords_are_the_positions_the_grid_is_recognised_from(grid):
+    assert ReducedGrid.from_coords(grid.coords) == grid
+    rows, _ = grid.rows_and_positions
+    expected_lat = torch.tensor(grid.row_latitudes, dtype=torch.float64)[rows]
+    torch.testing.assert_close(torch.rad2deg(grid.coords[:, 0]), expected_lat)
