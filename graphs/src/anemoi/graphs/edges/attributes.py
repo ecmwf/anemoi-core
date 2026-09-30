@@ -200,7 +200,9 @@ class DirectionalHarmonics(EdgeDirection):
 
     name: str = "directional_harmonics"
 
-    def __init__(self, order: int = 3, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
+    def __init__(
+        self, order: int = 3, name: str | None = None, norm: str | None = None, dtype: str = "float32"
+    ) -> None:
         self.order = order
         super().__init__(name=name, norm=norm, dtype=dtype)
 
@@ -455,7 +457,7 @@ class GaussianDistanceWeights(EdgeLength):
     """Gaussian distance weights.
 
     These weight are normalized per target node.
-    
+
     Parameters
     ----------
     sigma : float

@@ -15,12 +15,12 @@ import torch
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.utils import load_graph_from_file
 from anemoi.graphs.edges import CutOffEdges
 from anemoi.graphs.edges.attributes import EdgeDirection
 from anemoi.graphs.edges.attributes import EdgeLength
 from anemoi.graphs.nodes import LatLonNodes
 from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.utils import load_graph_from_file
 
 
 def assert_graph_tensors(graph: HeteroData) -> None:
