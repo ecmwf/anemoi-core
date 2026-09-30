@@ -130,6 +130,9 @@ class BaseMapper(nn.Module, ABC):
             is expected to already have the right edges for its local destination nodes.
         **kwargs : dict
             Additional keyword arguments passed to the mapper implementation.
+            When supported, ``cond=(cond_src, cond_dst)`` must have the same node
+            ordering and sharding as ``x``. The mapper transforms conditioning
+            alongside its corresponding node features.
 
         Returns
         -------
@@ -395,6 +398,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         model_comm_group: Optional[ProcessGroup] = None,
         keep_x_dst_sharded: bool = False,
         edges_are_dst_sorted: bool = True,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> PairTensor:
         x_src, x_dst = x
@@ -412,6 +416,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
         x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
         edge_attr, shard_sizes_edges = ensure_sharded(edge_attr, 0, shard_sizes_edges, model_comm_group)
+        if cond is not None:
+            cond_src, _ = ensure_sharded(cond[0], 0, shard_info.src_nodes, model_comm_group)
+            cond_dst, _ = ensure_sharded(cond[1], 0, shard_info.dst_nodes, model_comm_group)
+            cond = (cond_src, cond_dst)
         size = (sum(shard_sizes_src), sum(shard_sizes_dst))
 
         # update ShardInfo
@@ -432,6 +440,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             size=size,
             model_comm_group=model_comm_group,
             edges_are_dst_sorted=edges_are_dst_sorted,
+            cond=cond,
             **kwargs,
         )
 
@@ -1378,6 +1387,10 @@ class TransformerBaseMapper(BaseMapper, ABC):
         # Ensure src and dst are sharded
         x_src, shard_sizes_src = ensure_sharded(x_src, 0, shard_sizes_src, model_comm_group)
         x_dst, shard_sizes_dst = ensure_sharded(x_dst, 0, shard_sizes_dst, model_comm_group)
+        if cond is not None:
+            cond_src, _ = ensure_sharded(cond[0], 0, shard_info.src_nodes, model_comm_group)
+            cond_dst, _ = ensure_sharded(cond[1], 0, shard_info.dst_nodes, model_comm_group)
+            cond = (cond_src, cond_dst)
 
         shard_info = BipartiteGraphShardInfo(
             src_nodes=shard_sizes_src,

@@ -172,6 +172,7 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.model = model
     interface.data_indices = model.data_indices
     interface.statistics = model.statistics
+    interface.statistics_tendencies = None
     interface.is_dataset_static = {"grid": True}
     interface.sample_types = {"grid": GriddedSourceSample}
     interface.n_step_input = {"grid": 2}
