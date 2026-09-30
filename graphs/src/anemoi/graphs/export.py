@@ -17,6 +17,7 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.config import DotDict
 
 
@@ -36,7 +37,7 @@ class GraphExporter:
         elif isinstance(graph, (Path, str)):
             graph_path = Path(graph)
             if graph_path.suffix == ".pt":
-                self.graph = torch.load(graph_path, weights_only=False, map_location="cpu")
+                self.graph = load_graph_from_file(graph_path)
             elif graph_path.suffix in (".yaml", ".yml"):
                 self.graph = GraphCreator(graph).create(save_path=None).to("cpu")
             else:
