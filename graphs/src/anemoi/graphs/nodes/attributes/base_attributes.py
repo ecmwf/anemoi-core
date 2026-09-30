@@ -69,7 +69,7 @@ class BaseNodeAttribute(ABC, NormaliserMixin):
     def __init__(self, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         if name is not None:
             self.name = name
-        
+
         if self.name is None:
             error_msg = f"Node attribute builder {self.__class__.__name__} must define 'name' either as a class attribute or in __init__"
             raise ValueError(error_msg)
