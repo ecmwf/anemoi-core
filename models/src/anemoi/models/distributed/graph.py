@@ -22,7 +22,9 @@ from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
+from anemoi.models.distributed.shapes import validate_dim
+from anemoi.models.distributed.shapes import validate_shard_sizes
+from anemoi.models.distributed.utils import model_is_distributed
 
 
 def ensure_sharded(
@@ -51,12 +53,16 @@ def ensure_sharded(
     tuple[Tensor, ShardSizes]
         The (possibly sharded) tensor and the shard sizes.
     """
+    validate_dim(x, dim)
     if shard_sizes is not None:
+        if model_is_distributed(model_comm_group):
+            validate_shard_sizes(shard_sizes, model_comm_group)
         my_rank = model_comm_group.rank() if model_comm_group is not None else 0
-        assert shard_sizes[my_rank] == x.shape[dim], (
-            f"Error, expected shard size {shard_sizes[my_rank]} along dimension {dim} "
-            f"for rank {my_rank}, but got {x.shape[dim]}"
-        )
+        if shard_sizes[my_rank] != x.size(dim):
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match shard_sizes[{my_rank}] "
+                f"({shard_sizes[my_rank]}), but got {x.size(dim)}"
+            )
         return x, shard_sizes
 
     # x not sharded: get sizes and shard tensor accordingly
@@ -94,7 +100,7 @@ def _validate_shard_sizes(op: str, sizes: ShardSizes, mgroup: ProcessGroup | Non
 
 
 def shard_tensor(
-    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup, gather_in_backward: bool = True
+    input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
 ) -> Tensor:
     """Shard tensor.
 
@@ -103,15 +109,16 @@ def shard_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to shard
+        dimension along which to shard.
     sizes : ShardSizes
         Per-rank shard sizes. Must not be ``None`` when ``mgroup`` spans multiple ranks.
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
     gather_in_backward : bool
-        perform gather in backward, default True
+        perform gather in backward, default True.
 
     Returns
     -------
@@ -127,10 +134,20 @@ def shard_tensor(
     if not model_is_distributed(mgroup):
         return input_  # 1-rank / absent group: _split would return input_ unchanged
     _validate_shard_sizes("shard_tensor", sizes, mgroup)
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        input_size = input_.size(dim)
+        total_size = sum(sizes)
+        if total_size != input_size:
+            raise ValueError(
+                f"sizes must sum exactly to {input_size} "
+                f"(input tensor's size at dimension {dim}), but got {total_size}"
+            )
     return _ShardParallelSection.apply(input_, dim, sizes, gather_in_backward, mgroup)
 
 
-def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Gather tensor.
 
     Gathers tensor shards from ranks.
@@ -138,13 +155,14 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
         Per-rank shard sizes. Must not be ``None`` when ``mgroup`` spans multiple ranks.
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
@@ -160,10 +178,20 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     if not model_is_distributed(mgroup):
         return input_  # 1-rank / absent group: _gather would return input_ unchanged
     _validate_shard_sizes("gather_tensor", sizes, mgroup)
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        rank = mgroup.rank()
+        input_size = input_.size(dim)
+        if input_size != sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
+                f"({sizes[rank]}), but got {input_size}"
+            )
     return _GatherParallelSection.apply(input_, dim, sizes, mgroup)
 
 
-def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
+def reduce_tensor(input_: Tensor, mgroup: ProcessGroup | None) -> Tensor:
     """Reduce tensor.
 
     Reduces tensor across ranks.
@@ -172,8 +200,9 @@ def reduce_tensor(input_: Tensor, mgroup: ProcessGroup) -> Tensor:
     ----------
     input_ : Tensor
         Input
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
@@ -187,7 +216,7 @@ def sync_tensor(
     input_: Tensor,
     dim: int,
     sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
     gather_in_fwd: bool = True,
 ) -> Tensor:
     """Sync tensor.
@@ -197,16 +226,21 @@ def sync_tensor(
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
         Per-rank shard sizes, or ``None`` when the input is replicated. Unlike
         :func:`gather_tensor`, ``None`` is legal here: the forward gather is skipped while
         the backward all-reduce still happens (see
         :func:`anemoi.models.distributed.khop_edges.shard_graph_to_local`).
-    mgroup : ProcessGroup
-        model communication group
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
+    gather_in_fwd : bool, optional
+        If True, gather the shards in the forward pass and split the gradient
+        again in the backward pass. If False, pass the input through unchanged
+        and only all-reduce the gradient. Default True.
 
     Returns
     -------
@@ -214,10 +248,20 @@ def sync_tensor(
         Synced tensor.
     """
     check_shard_sizes_match_group(sizes, mgroup, context="sync_tensor")
+    if model_is_distributed(mgroup) and gather_in_fwd and sizes is not None:
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        rank = mgroup.rank()
+        input_size = input_.size(dim)
+        if input_size != sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim} must match sizes[{rank}] "
+                f"({sizes[rank]}), but got {input_size}"
+            )
     return _SyncParallelSection.apply(input_, dim, sizes, mgroup, gather_in_fwd)
 
 
-def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup) -> Tensor:
+def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None) -> Tensor:
     """Reduces and then shards tensor.
 
     Perform an allreduce followed by a split in the forward pass and a gather in the backward pass.
@@ -225,19 +269,30 @@ def reduce_shard_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: Pro
     Parameters
     ----------
     input_ : Tensor
-        Input
+        Input.
     dim : int
-        dimension along which to gather
+        dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
-    mgroup : ProcessGroup
-        model communication group
+        Per-rank shard sizes.
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Reduced sharded tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim)
+        validate_shard_sizes(sizes, mgroup)
+        input_size = input_.size(dim)
+        total_size = sum(sizes)
+        if total_size != input_size:
+            raise ValueError(
+                f"sizes must sum exactly to {input_size} "
+                f"(input tensor's size at dimension {dim}), but got {total_size}"
+            )
     return _ReduceShardParallelSection.apply(input_, dim, sizes, mgroup)
 
 
@@ -247,7 +302,7 @@ def all_to_all_transpose(
     split_sizes: ShardSizes,
     dim_concat: int,
     concat_sizes: ShardSizes,
-    mgroup: ProcessGroup,
+    mgroup: ProcessGroup | None,
 ) -> Tensor:
     """All-to-all transpose.
 
@@ -265,14 +320,39 @@ def all_to_all_transpose(
         Dimension along which to concatenate the transposed tensors.
     concat_sizes : ShardSizes
         Shapes of the concatenated tensors.
-    mgroup : ProcessGroup
-        Model communication group.
+    mgroup : ProcessGroup or None
+        Model communication group. If ``None`` or of size 1, no communication is performed and this operation
+        leaves the tensor unchanged.
 
     Returns
     -------
     Tensor
         Transposed tensor.
     """
+    if model_is_distributed(mgroup):
+        validate_dim(input_, dim_split)
+        validate_dim(input_, dim_concat)
+        ndim = input_.dim()
+        if dim_split % ndim == dim_concat % ndim:
+            raise ValueError(f"dim_split and dim_concat can not be the same, got {dim_split} and {dim_concat}")
+
+        validate_shard_sizes(split_sizes, mgroup)
+        validate_shard_sizes(concat_sizes, mgroup)
+        split_size = input_.size(dim_split)
+        total_split_size = sum(split_sizes)
+        if total_split_size != split_size:
+            raise ValueError(
+                f"split_sizes must sum exactly to {split_size} "
+                f"(input tensor's size at dimension {dim_split}), but got {total_split_size}"
+            )
+        rank = mgroup.rank()
+        concat_size = input_.size(dim_concat)
+        if concat_size != concat_sizes[rank]:
+            raise ValueError(
+                f"input tensor's size at dimension {dim_concat} must match concat_sizes[{rank}] "
+                f"({concat_sizes[rank]}), but got {concat_size}"
+            )
+
     return _AllToAllParallelSection.apply(input_, dim_split, split_sizes, dim_concat, concat_sizes, mgroup)
 
 
@@ -501,7 +581,7 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Parameters
     ----------
     input_ : Tensor
-        Local node features, shape ``(num_local_nodes, ...)``.
+        Local source node features, shape ``(num_local_src_nodes, ...)``.
     halo_info : HaloInfo
         Per-rank halo exchange metadata (from :func:`build_halo_info`).
     mgroup : ProcessGroup
@@ -510,7 +590,7 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Returns
     -------
     Tensor
-        ``(num_local_nodes + num_halo_nodes, ...)`` — local + halo features.
+        ``(num_local_src_nodes + num_halo_nodes, ...)`` — local + halo features.
     """
     return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
 
@@ -529,7 +609,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
     def forward(ctx, input_, halo_info_, mgroup_):
         ctx.send_indices = halo_info_.send_indices
         ctx.recv_counts = halo_info_.recv_counts
-        ctx.num_local_nodes = halo_info_.num_local_nodes
+        ctx.num_local_src_nodes = halo_info_.num_local_src_nodes
         ctx.comm_group = mgroup_
         if mgroup_:
             return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
@@ -543,7 +623,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
                     grad_output,
                     ctx.send_indices,
                     ctx.recv_counts,
-                    ctx.num_local_nodes,
+                    ctx.num_local_src_nodes,
                     ctx.comm_group,
                 ),
                 None,

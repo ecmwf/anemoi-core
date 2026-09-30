@@ -85,7 +85,7 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
         """
         if pred.is_tabular:
             raise NotImplementedError(
-                "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
+                "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources.",
             )
         assert (
             pred.time_size > 1

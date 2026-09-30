@@ -238,7 +238,7 @@ def plot_graph_edge_features(
     q_extreme_limit : float, optional
         Plot top & bottom quantile of edges trainable values, by default 0.05 (5%).
     node_coordinates: dict[str, torch.Tensor]
-        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2). 
+        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2).
 
     Returns
     -------
