@@ -272,6 +272,7 @@ class AnemoiModelInterface(torch.nn.Module):
         unwrapped = {}
         for dataset_name, sample in batch.items():
             data, coordinates, layout = sample.data, sample.coordinates, sample.layout
+            tabular_payload = {}
             if isinstance(sample, TabularSource):
                 # Tabular payloads keep the batch as the outer list; unwrap the one sample.
                 data = data[0]
