@@ -141,11 +141,13 @@ def test_module_backends_agree_between_two_grids():
     generator = torch.Generator("cuda").manual_seed(0)
     q = torch.randn(2, 8, data.num_points, 128, device="cuda", dtype=torch.bfloat16, generator=generator)
     k = torch.randn(2, 8, hidden.num_points, 128, device="cuda", dtype=torch.bfloat16, generator=generator)
+    # Both backends get the same gradient from above, so their gradients differ only by their own rounding.
+    grad_q, grad_k = torch.randn_like(q), torch.randn_like(k)
     results = {}
     for backend, module in modules.items():
         qq, kk = q.clone().requires_grad_(), k.clone().requires_grad_()
         tq, tk = module(qq, kk)
-        (tq.float().square().sum() + tk.float().sum()).backward()
+        torch.autograd.backward((tq, tk), (grad_q, grad_k))
         results[backend] = (tq, tk, qq.grad, kk.grad)
     for got, expected in zip(results["triton"], results["torch"]):
         torch.testing.assert_close(got, expected, **TOLERANCE[torch.bfloat16])
