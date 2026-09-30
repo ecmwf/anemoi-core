@@ -17,6 +17,7 @@ from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 class ExtendedBaseNodeAttribute(BaseNodeAttribute):
     """Test implementation of BaseNodeAttribute."""
+    name = "my_name"
 
     def _get_raw_values(self, nodes, **_kwargs) -> torch.Tensor:
         return torch.from_numpy(np.array(list(range(nodes.num_nodes))))

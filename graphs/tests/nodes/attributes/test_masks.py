@@ -22,7 +22,7 @@ def test_cutout_mask(mocker, graph_with_nodes: HeteroData, mock_anemoi_dataset_c
     graph_with_nodes["test_nodes"]["_dataset"] = {}
 
     mocker.patch("anemoi.datasets.open_dataset", return_value=mock_anemoi_dataset_cutout)
-    mask = CutOutMask().compute(graph_with_nodes, "test_nodes")
+    mask = CutOutMask(name="my_mask").compute(graph_with_nodes, "test_nodes")
 
     assert mask is not None
     assert isinstance(mask, torch.Tensor)
@@ -49,6 +49,6 @@ def test_get_mask_from_grid_size():
 @pytest.mark.parametrize("mask_class", [CutOutMask, GridsMask])
 def test_combined_datasets_mask_missing_dataset(graph_with_nodes: HeteroData, mask_class):
     """Test CutOutMask fails when dataset attribute is missing."""
-    node_attr_builder = mask_class()
+    node_attr_builder = mask_class(name="my_mask")
     with pytest.raises(AssertionError):
         node_attr_builder.compute(graph_with_nodes, "test_nodes")

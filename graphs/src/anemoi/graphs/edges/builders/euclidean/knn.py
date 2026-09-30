@@ -265,6 +265,7 @@ class MutualKNNEdges(BaseDistanceEdgeBuilders):
         target_coords: torch.Tensor,
         num_nearest_neighbours: int,
         reversed_num_nearest_neighbours: int,
+        **_kwargs,
     ) -> torch.Tensor:
         # Forward: for each target node, its nearest source nodes.
         # knn(x=source, y=target) -> rows (target_idx, source_idx); flip -> (source, target).
