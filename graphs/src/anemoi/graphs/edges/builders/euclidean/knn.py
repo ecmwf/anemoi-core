@@ -137,7 +137,7 @@ class KNNEdges(BaseKNNEdges):
     """
 
 
-class KNNEdges(BaseKNNEdges):
+class ReversedKNNEdges(BaseKNNEdges):
     """Computes KNN based edges and adds them to the graph.
 
     It uses as reference the target nodes.
