@@ -76,7 +76,8 @@ class BaseEdgeAttributeBuilder(MessagePassing, NormaliserMixin, ABC):
 
     def __init__(self, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__()
-        self.name = name
+        if name is not None:
+            self.name = name
         self.norm = norm
         self.dtype = dtype
         self.device = get_distributed_device()
