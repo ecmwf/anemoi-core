@@ -40,6 +40,9 @@ processor:
   gradient_checkpointing: True
   qk_norm: False
   layer_kernels: ${model.layer_kernels}
+  rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+    max_frequency: 100 # shortest wavelength ~ 40,000 km / max_frequency = 400 km
+    backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 encoders:
   "0":
@@ -61,6 +64,9 @@ encoders:
       qk_norm: False
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
+      rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+        max_frequency: 100 # shortest wavelength ~ 40,000 km / max_frequency = 400 km
+        backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 
 latent_aggregator:
@@ -87,6 +93,9 @@ decoders:
       qk_norm: False
       layer_kernels: ${model.layer_kernels}
       shard_strategy: "edges"
+      rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+        max_frequency: 100 # shortest wavelength ~ 40,000 km / max_frequency = 400 km
+        backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 residual:
   datasets:

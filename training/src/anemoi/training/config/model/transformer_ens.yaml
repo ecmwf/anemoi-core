@@ -66,6 +66,9 @@ processor:
       _target_: torch.nn.Linear # These reflect the defaults, but are shown here for clarity
     Activation:
       _target_: torch.nn.GELU
+  rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+    max_frequency: 100 # shortest wavelength ~ 40,000 km / max_frequency = 400 km
+    backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 encoders:
   "0":

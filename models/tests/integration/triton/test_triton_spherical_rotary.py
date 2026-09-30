@@ -217,6 +217,7 @@ def test_sliding_window_flash_attention_with_either_backend():
             layer_kernels=load_layer_kernels(),
             attention_implementation="flash_attention",
             window_size=64,
+            softcap=0.0,
         ),
     }
     layers = _layers(
