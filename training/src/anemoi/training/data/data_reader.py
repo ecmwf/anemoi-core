@@ -501,9 +501,28 @@ class TrajectoryDataset(BaseAnemoiReader):
         return tree
 
 
-def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
-    """Factory function to create a data reader based on the dataset configuration."""
+def _strip_date_metadata(dataset_config: dict) -> dict:
+    """Drop start, end and frequency so open_dataset indexes over the entire dataset."""
+    dataset_config.pop("start", None)
+    dataset_config.pop("end", None)
+    inner = _as_dict(dataset_config["dataset_config"])
+    if isinstance(inner, dict):
+        inner = {key: value for key, value in inner.items() if key != "frequency"}
+    dataset_config["dataset_config"] = inner
+    return dataset_config
+
+
+def create_dataset(dataset_config: dict, ignore_metadata: bool = False, **_kwargs) -> BaseAnemoiReader:
+    """Factory function to create a data reader based on the dataset configuration.
+
+    If ``ignore_metadata`` is True, ``start``, ``end`` and ``frequency`` are dropped
+    before calling ``open_dataset`` so the reader indexes over the entire dataset
+    (e.g. for cloned datasets whose dates do not match the original metadata).
+    """
     dataset_config = _normalize_reader_config(dataset_config)
+    if ignore_metadata:
+        LOGGER.info("dataloader.ignore_metadata is set: ignoring start, end and frequency.")
+        dataset_config = _strip_date_metadata(dataset_config)
     trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
 
     if trajectory_config is not None:

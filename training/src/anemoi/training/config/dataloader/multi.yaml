@@ -1,5 +1,8 @@
 prefetch_factor: 2
 pin_memory: True
+# If True, drop start, end and frequency before calling open_dataset so the
+# full dataset is indexed regardless of dates (e.g. for cloned datasets).
+ignore_metadata: False
 
 # ============
 # read_group_size:
