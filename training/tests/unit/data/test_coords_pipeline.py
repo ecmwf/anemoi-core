@@ -17,8 +17,10 @@ import numpy as np
 import pytest
 import torch
 
+from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
 
 if TYPE_CHECKING:
@@ -27,37 +29,43 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------- Reader API
 
 
-def _make_reader(grid: int = 5, mocker: MockFixture | None = None) -> NativeGridDataset:
-    """Build a NativeGridDataset with a mocked underlying anemoi.datasets payload."""
+def _make_reader(grid: int = 5, mocker: MockFixture | None = None) -> GriddedDataReader:
+    """Build a GriddedDataReader with a mocked underlying anemoi.datasets payload."""
     mock_data = mocker.MagicMock()
     mock_data.latitudes = np.linspace(-90.0, 90.0, grid)
     mock_data.longitudes = np.linspace(0.0, 360.0, grid, endpoint=False)
     mock_data.grids = (grid,)
-    reader = NativeGridDataset.__new__(NativeGridDataset)
+    mock_data.shape = (1, 1, 1, grid)
+    reader = GriddedDataReader.__new__(GriddedDataReader)
     reader.data = mock_data
+    reader.reader_group_rank = 0
+    reader.reader_group_size = 1
+    reader.grid_shard_sizes = None
+    reader.grid_shard_slice = None
     return reader
 
 
 def test_reader_latitudes_longitudes_in_radians(mocker: MockFixture) -> None:
     reader = _make_reader(grid=4, mocker=mocker)
-    np.testing.assert_allclose(reader.latitudes, np.deg2rad([-90.0, -30.0, 30.0, 90.0]))
-    np.testing.assert_allclose(reader.longitudes, np.deg2rad([0.0, 90.0, 180.0, 270.0]))
+    np.testing.assert_allclose(reader.latitudes, np.deg2rad([-90.0, -30.0, 30.0, 90.0]), rtol=1e-6)
+    np.testing.assert_allclose(reader.longitudes, np.deg2rad([0.0, 90.0, 180.0, 270.0]), rtol=1e-6)
 
 
 def test_reader_get_coordinates_full_grid(mocker: MockFixture) -> None:
     reader = _make_reader(grid=5, mocker=mocker)
     coords = reader.get_coordinates()
-    assert set(coords) == {"latitudes", "longitudes"}
-    assert coords["latitudes"].shape == (5,)
-    assert coords["longitudes"].dtype == torch.float64
-    np.testing.assert_allclose(coords["latitudes"].numpy(), reader.latitudes)
+    assert coords.shape == (5, 2)
+    assert coords.dtype == torch.float32
+    np.testing.assert_allclose(coords[:, 0].numpy(), reader.latitudes)
+    np.testing.assert_allclose(coords[:, 1].numpy(), reader.longitudes)
 
 
 def test_reader_get_coordinates_with_grid_shard(mocker: MockFixture) -> None:
     reader = _make_reader(grid=8, mocker=mocker)
-    coords = reader.get_coordinates(grid_shard_indices=slice(2, 6))
-    assert coords["latitudes"].shape == (4,)
-    np.testing.assert_allclose(coords["latitudes"].numpy(), reader.latitudes[2:6])
+    reader.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
+    coords = reader.get_coordinates()
+    assert coords.shape == (4, 2)
+    np.testing.assert_allclose(coords[:, 0].numpy(), reader.latitudes[4:8])
 
 
 def test_reader_is_static_grid_default_true(mocker: MockFixture) -> None:
@@ -68,50 +76,49 @@ def test_reader_is_static_grid_default_true(mocker: MockFixture) -> None:
 # -------------------------------------------------------- MultiDataset coords
 
 
+def _make_mock_reader(mocker: MockFixture, grid: int, *, static: bool) -> MockFixture:
+    reader = mocker.MagicMock()
+    reader.missing = set()
+    reader.dates = list(range(20))
+    reader.has_trajectories = False
+    reader.num_sequences = 1
+    reader.frequency = "3h"
+    reader.is_static_grid = static
+    reader.get_sample.return_value = GriddedSourceSample(
+        data=torch.zeros(2, 1, grid, 2),
+        variables=["x", "y"],
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        coordinates=torch.stack([torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)], dim=-1),
+        grid_size=grid,
+    )
+    return reader
+
+
 def _make_multidataset(
     mocker: MockFixture,
     *,
     a_static: bool = True,
     b_static: bool = True,
 ) -> MultiDataset:
-    grid_a, grid_b = 6, 4
-
-    mock_a = mocker.MagicMock()
-    mock_a.missing = set()
-    mock_a.dates = list(range(20))
-    mock_a.has_trajectories = False
-    mock_a.frequency = "3h"
-    mock_a.is_static_grid = a_static
-    mock_a.get_sample.return_value = torch.zeros(1, 1, grid_a, 2)
-    mock_a.get_coordinates.return_value = {
-        "latitudes": torch.linspace(-1.0, 1.0, grid_a),
-        "longitudes": torch.linspace(0.0, 6.0, grid_a),
-    }
-
-    mock_b = mocker.MagicMock()
-    mock_b.missing = set()
-    mock_b.dates = list(range(20))
-    mock_b.has_trajectories = False
-    mock_b.frequency = "3h"
-    mock_b.is_static_grid = b_static
-    mock_b.get_sample.return_value = torch.zeros(1, 1, grid_b, 2)
-    mock_b.get_coordinates.return_value = {
-        "latitudes": torch.linspace(-0.5, 0.5, grid_b),
-        "longitudes": torch.linspace(0.0, 3.0, grid_b),
-    }
-
-    return MultiDataset(
-        data_readers={"a": mock_a, "b": mock_b},
+    ds = MultiDataset(
+        data_readers={
+            "a": _make_mock_reader(mocker, grid=6, static=a_static),
+            "b": _make_mock_reader(mocker, grid=4, static=b_static),
+        },
         relative_date_indices={"a": [0, 1], "b": [0, 1]},
     )
+    ds.worker_id = 0  # normally set by worker_init_func
+    return ds
 
 
-def test_multidataset_emit_coords_payload(mocker: MockFixture) -> None:
+def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> None:
     ds = _make_multidataset(mocker)
     sample = ds.get_sample(0)
     assert set(sample) == {"a", "b"}
-    assert set(sample["a"]) == {"data", "coords"}
-    assert set(sample["a"]["coords"]) == {"latitudes", "longitudes"}
+    assert isinstance(sample["a"], GriddedSourceSample)
+    assert sample["a"].coordinates.shape == (6, 2)
+    # Relative indices [0, 1] are normalized to a slice and offset by the reference index.
+    ds.data_readers["a"].get_sample.assert_called_with(slice(0, 2, 1))
 
 
 def test_multidataset_static_dataset_detection(mocker: MockFixture) -> None:
@@ -119,7 +126,7 @@ def test_multidataset_static_dataset_detection(mocker: MockFixture) -> None:
     assert ds.static_coord_datasets == ("a",)
 
 
-def test_multidataset_emit_coords_collates_to_batch(mocker: MockFixture) -> None:
+def test_multidataset_collates_to_batch(mocker: MockFixture) -> None:
     ds = _make_multidataset(mocker)
     samples = [ds.get_sample(0), ds.get_sample(0)]
     batch = Batch.collate(samples)
@@ -128,21 +135,9 @@ def test_multidataset_emit_coords_collates_to_batch(mocker: MockFixture) -> None
     assert set(batch.dataset_names) == {"a", "b"}
     # Data is stacked along the batch dim.
     assert batch["a"].data.shape[0] == 2
-    # Both datasets are static -> coords shared by reference, no batch dim.
-    assert batch.coords["a"]["latitudes"].shape == (6,)
-    assert batch.static_coord_datasets
+    # Gridded coords are static -> shared by reference, no batch dim.
+    assert batch["a"].coordinates.shape == (6, 2)
     assert batch.static_coord_datasets == frozenset({"a", "b"})
-
-
-def test_multidataset_dynamic_dataset_stacks_coords(mocker: MockFixture) -> None:
-    ds = _make_multidataset(mocker, a_static=True, b_static=False)
-    samples = [ds.get_sample(0), ds.get_sample(0)]
-    batch = Batch.collate(samples)
-
-    # Static: shared by reference, no batch dim.
-    assert batch.coords["a"]["latitudes"].shape == (6,)
-    # Dynamic: stacked along a new batch dim.
-    assert batch.coords["b"]["latitudes"].shape == (2, 4)
 
 
 # ------------------------------------------------------ DataModule collate_fn
@@ -169,7 +164,7 @@ def test_static_coords_share_same_object_through_full_pipeline(mocker: MockFixtu
     s2 = ds.get_sample(0)
     batch = Batch.collate([s1, s2])
     # The collated coord tensor is the same Python object as the first sample's.
-    assert batch.coords["a"]["latitudes"] is s1["a"]["coords"]["latitudes"]
+    assert batch["a"].coordinates is s1["a"].coordinates
 
 
 if __name__ == "__main__":
