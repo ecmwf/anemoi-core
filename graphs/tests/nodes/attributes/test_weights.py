@@ -13,6 +13,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import AnemoiDatasetVariableWeights
 from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
 from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
 from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
@@ -174,3 +175,12 @@ def test_voronoi_region_areas_matches_convexhull():
 
     areas = attr._voronoi_region_areas(v, np.array([target]))
     np.testing.assert_allclose(areas[0], hull_area, rtol=1e-9, atol=0.0)
+
+
+def test_anemoi_dataset_variable_weights_init():
+    """Test AnemoiDatasetVariableWeights stores name, norm and dtype correctly."""
+    node_attr_builder = AnemoiDatasetVariableWeights(variable="lsm", name="lsm_weights", norm="unit-max")
+    assert node_attr_builder.variable == "lsm"
+    assert node_attr_builder.name == "lsm_weights"
+    assert node_attr_builder.norm == "unit-max"
+    assert node_attr_builder.dtype == torch.float32

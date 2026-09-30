@@ -23,7 +23,21 @@ LOGGER = logging.getLogger(__name__)
 
 
 class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
-    """Base class for computing mask based on a variable in an Anemoi dataset."""
+    """Base class for masks based on a variable of an Anemoi dataset.
+
+    It reads the variable at the first date of the dataset. It can only be used with nodes built from an
+    Anemoi dataset (i.e. :class:`AnemoiDatasetNodes`).
+
+    The `_get_mask` method must be implemented by subclasses to define how the mask is computed from the
+    variable values.
+
+    Attributes
+    ----------
+    variable : str
+        Variable to read from the Anemoi dataset.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+    """
 
     def __init__(self, variable: str, name: str | None = None) -> None:
         super().__init__(name=name)
@@ -35,7 +49,7 @@ class BaseAnemoiDatasetVariable(BooleanBaseNodeAttribute):
     def _read_data(self, nodes: NodeStorage, **kwargs) -> np.ndarray:
         return open_dataset(nodes["_dataset"], select=self.variable)[0].squeeze()
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
 
         assert nodes["node_type"] in [
             "ZarrDatasetNodes",
@@ -54,11 +68,13 @@ class NonmissingAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
     ----------
     variable : str
         Variable to read from the Anemoi dataset.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the attribute for each node.
+    compute(graph, nodes_name)
+        Compute the mask for each node.
     """
 
     def __init__(self, variable: str, name: str | None = None) -> None:
@@ -72,17 +88,19 @@ class NonmissingAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
 class NonzeroAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
     """Mask of non-zero values of an Anemoi dataset variable.
 
-    Reads a variable from an Anemoi dataset and returns a boolean mask of non-zero values in the first timestep.
+    It reads a variable from an Anemoi dataset and returns a boolean mask of non-zero values in the first timestep.
 
     Attributes
     ----------
     variable : str
         Variable to read from the Anemoi dataset.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Computer the attribute for each node.
+    compute(graph, nodes_name)
+        Compute the mask for each node.
     """
 
     def __init__(self, variable: str, name: str | None = None) -> None:
@@ -94,7 +112,18 @@ class NonzeroAnemoiDatasetVariable(BaseAnemoiDatasetVariable):
 
 
 class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
-    """Base class for computing mask based on anemoi-datasets combining operations."""
+    """Base class for masks based on anemoi-datasets combining operations (e.g. cutout, grids).
+
+    The nodes must be built from an Anemoi dataset combining several grids. The mask is True for the nodes
+    belonging to the grids listed in `grids`.
+
+    Attributes
+    ----------
+    grids : list[int]
+        Positions of the grids whose nodes are set to True. It must be set by subclasses.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+    """
 
     grids: list[int] | None = None
 
@@ -103,7 +132,7 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
         if self.grids is None:
             raise AttributeError(f"{self.__class__.__name__} class must set 'grids' attribute.")
 
-    def get_grid_sizes(self, nodes):
+    def _get_grid_sizes(self, nodes):
         from anemoi.datasets import open_dataset
 
         assert "_dataset" in nodes and isinstance(
@@ -113,7 +142,7 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
         return open_dataset(nodes["_dataset"]).grids
 
     @staticmethod
-    def get_mask_from_grid_sizes(grid_sizes: tuple[int], masked_grids_posisitons: list[int]):
+    def _get_mask_from_grid_sizes(grid_sizes: tuple[int], masked_grids_posisitons: list[int]):
         assert isinstance(masked_grids_posisitons, list), "masked_grids_positions must be a list"
         assert min(masked_grids_posisitons) >= 0, "masked_grids_positions must be non-negative"
         assert max(masked_grids_posisitons) < len(grid_sizes), f"masked_grids_positions must be < {len(grid_sizes)}"
@@ -122,20 +151,26 @@ class BaseCombineAnemoiDatasetsMask(BooleanBaseNodeAttribute, ABC):
             mask[sum(grid_sizes[:grid_id]) : sum(grid_sizes[: grid_id + 1])] = True
         return mask
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
-        grid_sizes = self.get_grid_sizes(nodes)
-        return BaseCombineAnemoiDatasetsMask.get_mask_from_grid_sizes(grid_sizes, self.grids)
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+        grid_sizes = self._get_grid_sizes(nodes)
+        return BaseCombineAnemoiDatasetsMask._get_mask_from_grid_sizes(grid_sizes, self.grids)
 
 
 class CutOutMask(BaseCombineAnemoiDatasetsMask):
     """Cut out mask.
 
-    It computes a mask for the first dataset in the cutout operation.
+    It computes a mask for the first dataset in the cutout operation, i.e. it sets to True the nodes of the
+    first (index 0) grid.
+
+    Attributes
+    ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the attribute for each node.
+    compute(graph, nodes_name)
+        Compute the mask for each node.
     """
 
     def __init__(self, name: str | None = None) -> None:
@@ -146,17 +181,20 @@ class CutOutMask(BaseCombineAnemoiDatasetsMask):
 class GridsMask(BaseCombineAnemoiDatasetsMask):
     """Grids mask.
 
-    It reads a variable from a Anemoi dataset and returns a boolean mask of nonmissing values in the first timestep.
+    It computes a mask that sets to True the nodes of the selected grids of an Anemoi dataset combining
+    several grids (e.g. with the cutout or grids operations).
 
     Attributes
     ----------
     grids : int | list[int], optional
         Grid positions to set as True. Defaults to 0, which sets True only the nodes from the first dataset.
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
 
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the attribute for each node.
+    compute(graph, nodes_name)
+        Compute the mask for each node.
     """
 
     def __init__(self, grids: int | list[int] = 0, name: str | None = None) -> None:
@@ -170,16 +208,21 @@ class LimitedAreaMask(BooleanBaseNodeAttribute):
     It adds a mask based on an area of interest. This mask is only defined
     for nodes built with a subclass of `StretchedIcosahedronNodes`.
 
+    Attributes
+    ----------
+    name : str
+        The name of the node attribute that will be used to store the computed values in the :class:`HeteroData` graph.
+
     Methods
     -------
-    compute(self, graph, nodes_name)
-        Compute the attribute for each node.
+    compute(graph, nodes_name)
+        Compute the mask for each node.
     """
 
     def __init__(self, name: str | None = None) -> None:
         super().__init__(name=name)
 
-    def get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
+    def _get_raw_values(self, nodes: NodeStorage, **kwargs) -> torch.Tensor:
         assert nodes["node_type"] in [
             "StretchedTriNodes"
         ], f"{self.__class__.__name__} can only be used with StretchedIcosahedronNodes."

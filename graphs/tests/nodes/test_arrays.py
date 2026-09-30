@@ -11,6 +11,7 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
+from anemoi.graphs.nodes.attributes import CutOutMask
 from anemoi.graphs.nodes.attributes import SphericalAreaWeights
 from anemoi.graphs.nodes.attributes import UniformWeights
 from anemoi.graphs.nodes.builders.from_vectors import LatLonNodes
@@ -62,3 +63,19 @@ def test_register_attributes(graph_with_nodes: HeteroData, attr_class):
     assert graph_with_nodes["test_nodes"]["test_attr"] is not None
     assert isinstance(graph_with_nodes["test_nodes"]["test_attr"], torch.Tensor)
     assert graph_with_nodes["test_nodes"]["test_attr"].shape[0] == graph_with_nodes["test_nodes"].x.shape[0]
+
+
+def test_register_attributes_default_name(graph_with_nodes: HeteroData):
+    """Test the class-level name is used when no name is given."""
+    node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
+    node_builder.register_attributes(graph_with_nodes, [UniformWeights()])
+
+    assert "area_weights" in graph_with_nodes["test_nodes"]
+
+
+def test_register_attributes_fail_without_name(graph_with_nodes: HeteroData):
+    """Test registering an attribute without name raises an error."""
+    node_builder = LatLonNodes(latitudes=lats, longitudes=lons, name="test_nodes")
+
+    with pytest.raises(ValueError):
+        node_builder.register_attributes(graph_with_nodes, [CutOutMask()])
