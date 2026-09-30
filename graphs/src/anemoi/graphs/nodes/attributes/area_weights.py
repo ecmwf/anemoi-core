@@ -580,9 +580,7 @@ class AnemoiDatasetVariableWeights(BaseNodeAttribute):
         Computes the area weights for the nodes `nodes_name` of the graph.
     """
 
-    def __init__(
-        self, variable: str, name: str | None = None, norm: str | None = None, dtype: str = "float32"
-    ) -> None:
+    def __init__(self, variable: str, name: str | None = None, norm: str | None = None, dtype: str = "float32") -> None:
         super().__init__(name=name, norm=norm, dtype=dtype)
         self.variable = variable
 
