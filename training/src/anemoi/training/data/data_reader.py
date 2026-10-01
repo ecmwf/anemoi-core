@@ -79,8 +79,7 @@ def _tendency_statistics_by_variable(dataset: object, timestep: str) -> dict[str
 
     if statistics and variables and all(len(values) == len(variables) for values in statistics.values()):
         return {
-            name: {key: values[index] for key, values in statistics.items()}
-            for index, name in enumerate(variables)
+            name: {key: values[index] for key, values in statistics.items()} for index, name in enumerate(variables)
         }
 
     collected: dict[str, dict] = {}

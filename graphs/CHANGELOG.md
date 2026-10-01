@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.8](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.7...graphs-0.9.8) (2026-10-01)
+
+
+### Bug Fixes
+
+* **graphs:** Pin xarray ([#1436](https://github.com/ecmwf/anemoi-core/issues/1436)) ([3681ce7](https://github.com/ecmwf/anemoi-core/commit/3681ce719a8ac71354ce41b5686f196cdf0f8858))
+
 ## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.6...graphs-0.9.7) (2026-09-07)
 
 
