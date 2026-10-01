@@ -233,6 +233,11 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
     """Test the GNNBackwardMapper class."""
 
     @pytest.fixture
+    def mapper_init(self):
+        # Latent destination features (``encoded_data``): ``in_channels_dst == num_channels``.
+        return MapperConfig(in_channels_dst=MapperConfig.num_channels)
+
+    @pytest.fixture
     def mapper(self, mapper_init, graph_provider, device):
         config = asdict(mapper_init)
         config["edge_dim"] = graph_provider.edge_dim
@@ -335,3 +340,33 @@ class TestGNNBackwardMapper(TestGNNBaseMapper):
 
         assert called["edges_are_dst_sorted"] is False
         assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
+
+    def test_forward_embeds_non_latent_destination_features(self, graph_provider, device):
+        # Destination features that are not latent (e.g. observation coordinates and forcings)
+        # are embedded to num_channels before message passing.
+        mapper_init = MapperConfig(in_channels_dst=5)
+        config = asdict(mapper_init)
+        config["edge_dim"] = graph_provider.edge_dim
+        mapper = GNNBackwardMapper(**config).to(device)
+        assert mapper.emb_nodes_dst is not None
+
+        x = (
+            torch.rand(self.NUM_SRC_NODES, mapper_init.num_channels, device=device),
+            torch.rand(self.NUM_DST_NODES, mapper_init.in_channels_dst, device=device),
+        )
+        assert mapper.pre_process(x)[1].shape == torch.Size([self.NUM_DST_NODES, mapper_init.num_channels])
+
+        batch_size = 1
+        shard_info = BipartiteGraphShardInfo(
+            src_nodes=[self.NUM_SRC_NODES], dst_nodes=[self.NUM_DST_NODES], edges=[self.NUM_EDGES]
+        )
+        edge_attr, edge_index, _ = graph_provider.get_edges(batch_size=batch_size)
+        result = mapper.forward(x, batch_size, shard_info, edge_attr, edge_index)
+        assert result.shape == torch.Size([self.NUM_DST_NODES, mapper_init.out_channels_dst])
+
+        result.sum().backward()
+        for name, param in mapper.named_parameters():
+            assert param.grad is not None, f"param.grad is None for {name}"
+
+    def test_no_destination_embedding_for_latent_features(self, mapper):
+        assert mapper.emb_nodes_dst is None

@@ -10,10 +10,12 @@
 
 import logging
 from abc import abstractmethod
+from collections.abc import Iterable
 
 import numpy as np
 import torch
 from hydra.utils import instantiate
+from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -54,7 +56,9 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
     def __init__(self, nodes: NodeStorage, attribute_name: str) -> None:
         super().__init__()
         assert attribute_name in nodes, f"{self.__class__.__name__} cannot find attribute '{attribute_name}' in nodes."
-        mask = nodes[attribute_name].bool().squeeze()
+        # The model may build its graph on GPU; keep the mask on CPU, where `apply` and
+        # `supporting_arrays` expect it.
+        mask = nodes[attribute_name].bool().squeeze().cpu()
         self.register_buffer("mask", mask)
 
     @property
@@ -122,7 +126,7 @@ class Boolean1DMask(torch.nn.Module, BaseMask):
             indices = (~mask).nonzero(as_tuple=True)[0].to(x.device)
             return Boolean1DMask._fill_tensor_with_tensor(x, indices, fill_value, dim)
 
-        mask = self.broadcast_like(x, dim, grid_shard_slice).cpu()
+        mask = self.broadcast_like(x, dim, grid_shard_slice).to(x.device)
         return Boolean1DMask._fill_tensor_with_float(x, ~mask, fill_value)
 
     def rollout_boundary(
@@ -171,16 +175,26 @@ class NoOutputMask(BaseMask):
         return x
 
 
-def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict, **kwargs) -> dict[str, BaseMask]:
+def create_output_masks(
+    output_mask_config: dict[str, dict],
+    graph_data: HeteroData,
+    dataset_names: Iterable[str],
+    **kwargs,
+) -> dict[str, BaseMask]:
     """Create output masks for each dataset based on the provided configuration.
 
     Parameters
     ----------
     output_mask_config : dict[str, dict]
         A dictionary containing the output mask configuration for each dataset. If a dataset is
-        not found in this configuration, a `NoOutputMask` will be used as the default.
-    data_readers : dict
-        A dictionary containing the data readers for each dataset.
+        not found in this configuration, or its entry is null, a `NoOutputMask` is used.
+    graph_data : HeteroData
+        The model graph. Masks read their node attributes (e.g. ``cutout_mask``) from the node
+        group named after the dataset.
+    dataset_names : Iterable[str]
+        Names of the datasets to create masks for.
+    **kwargs
+        Extra keyword arguments passed to each mask constructor.
 
     Returns
     -------
@@ -188,8 +202,8 @@ def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict,
         A dictionary mapping dataset names to their corresponding output masks.
     """
     output_masks = {}
-    for dataset_name, data_reader in data_readers.items():
-        if dataset_name not in output_mask_config:
+    for dataset_name in dataset_names:
+        if output_mask_config.get(dataset_name) is None:
             LOGGER.warning(
                 "Dataset %s not found in 'config.model.output_mask'. Using `NoOutputMask` as default.",
                 dataset_name,
@@ -197,6 +211,11 @@ def create_output_masks(output_mask_config: dict[str, dict], data_readers: dict,
             output_masks[dataset_name] = NoOutputMask()
             continue
 
-        output_masks[dataset_name] = instantiate(output_mask_config[dataset_name], nodes=data_reader, **kwargs)
+        assert dataset_name in graph_data.node_types, f"Dataset '{dataset_name}' not found in graph_data."
+        output_masks[dataset_name] = instantiate(
+            output_mask_config[dataset_name],
+            nodes=graph_data[dataset_name],
+            **kwargs,
+        )
 
     return output_masks

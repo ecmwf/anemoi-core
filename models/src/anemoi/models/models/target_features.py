@@ -318,7 +318,14 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.input_dim[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        # An encoder whose mapper updates its source nodes (e.g. GNNForwardMapper) returns the
+        # source latent; other mappers, and projecting encoders, hand over the assembled input.
+        encoder_name = getattr(self.model, "dataset2encoder", {}).get(dataset_name)
+        latent_dim = getattr(self.model, "encoder_src_latent_dim", {}).get(encoder_name)
+        if latent_dim is not None and not self.model._encoder_projects_sources(encoder_name):
+            return latent_dim
+        return self.model.input_dim[dataset_name]
 
     def _compute(
         self,

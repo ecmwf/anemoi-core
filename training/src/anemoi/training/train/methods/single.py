@@ -76,6 +76,8 @@ class SingleTraining(BaseTrainingModule):
                     **task_kwargs,
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
+                    # The LAM boundary refill indexes the local grid shard.
+                    grid_shard_slice={name: self._grid_shard_slice(view) for name, view in x.items()},
                 )
 
             step_losses.append(loss_next)

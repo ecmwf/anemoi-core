@@ -148,6 +148,7 @@ class BaseForecaster(BaseTask):
         output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
@@ -164,6 +165,7 @@ class BaseForecaster(BaseTask):
         rollout_step: int = 0,
         data_indices: dict[str, IndexCollection] | None = None,
         output_mask: dict[str, object] | None = None,
+        grid_shard_slice: dict[str, slice | None] | None = None,
     ) -> "Batch":
         """Advance the input state for the next rollout step, preserving coords and metadata.
 
@@ -186,6 +188,7 @@ class BaseForecaster(BaseTask):
                 output_values[dataset_name].data,
                 data_indices=data_indices[dataset_name],
                 output_mask=None if output_mask is None else output_mask[dataset_name],
+                grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice.get(dataset_name),
             )
         return x.with_data(new_data)
 
@@ -282,6 +285,7 @@ class Forecaster(BaseForecaster):
         output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
@@ -313,6 +317,7 @@ class Forecaster(BaseForecaster):
                 x[:, -(i + 1)],
                 true_state,
                 data_indices,
+                grid_shard_slice=grid_shard_slice,
             )
 
             # get new "constants" needed for time-varying fields
@@ -395,6 +400,7 @@ class OffsetForecaster(BaseForecaster):
         output_values: torch.Tensor,
         data_indices: IndexCollection | None = None,
         output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
         """Advance a single dataset's input state for the next rollout step.
 
@@ -427,6 +433,7 @@ class OffsetForecaster(BaseForecaster):
                 x[:, new_idx],
                 true_state,
                 data_indices,
+                grid_shard_slice=grid_shard_slice,
             )
 
             # get new "constants" needed for time-varying fields

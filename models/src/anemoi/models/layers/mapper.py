@@ -55,6 +55,11 @@ class BaseMapper(nn.Module, ABC):
     specialized for their mapper type.
     """
 
+    # Whether ``forward`` returns the updated source-node latent (width ``num_channels``) rather
+    # than passing the source input through. It sets the width of the ``encoded_data`` decoder
+    # target feature.
+    returns_src_latent: bool = False
+
     def __init__(
         self,
         *,
@@ -872,6 +877,8 @@ class GNNBaseMapper(BaseMapper, ABC):
 class GNNForwardMapper(GNNBaseMapper):
     """Graph Neural Network Mapper data -> hidden."""
 
+    returns_src_latent = True
+
     def __init__(
         self,
         *,
@@ -1062,8 +1069,21 @@ class GNNBackwardMapper(GNNBaseMapper):
             mlp_implementation=mlp_implementation,
         )
 
+        self.emb_nodes_dst = None
+        if in_channels_dst != num_channels:
+            self.emb_nodes_dst = MLP(
+                in_features=in_channels_dst,
+                hidden_dim=mlp_hidden_dim,
+                out_features=num_channels,
+                layer_kernels=self.layer_factory,
+                n_extra_layers=mlp_extra_layers + 1,
+                mlp_implementation=mlp_implementation,
+            )
+
     def pre_process(self, x):
         x_src, x_dst = x
+        if self.emb_nodes_dst is not None:
+            x_dst = self.emb_nodes_dst(x_dst)
         return x_src, x_dst
 
     def post_process(self, x_dst):

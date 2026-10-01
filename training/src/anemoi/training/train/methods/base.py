@@ -196,16 +196,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.dataset_names = list(data_indices.keys())
 
-        self.output_mask: dict[str, BaseMask] = create_output_masks(
-            get_multiple_datasets_config(config.model.output_mask),
-            data_readers=data_readers,
-        )
-
-        # Handle supporting_arrays merge with all output masks
-        combined_supporting_arrays = supporting_arrays.copy()
-        for dataset_name, mask in self.output_mask.items():
-            combined_supporting_arrays[dataset_name].update(mask.supporting_arrays)
-
         # Define number of input/output timesteps per node for each dataset
         self.n_step_input = dict.fromkeys(self.dataset_names, self.task.num_input_timesteps)
         self.n_step_output = dict.fromkeys(self.dataset_names, self.task.num_output_timesteps)
@@ -219,8 +209,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             metadata=metadata,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            supporting_arrays=combined_supporting_arrays,
+            supporting_arrays=supporting_arrays.copy(),
         )
+
+        # Output masks read node attributes (e.g. the LAM `cutout_mask`) from the graph,
+        # which the model builds, so they are created once the model exists.
+        self.output_mask: dict[str, BaseMask] = create_output_masks(
+            get_multiple_datasets_config(config.model.output_mask),
+            graph_data=self.model.graph_data,
+            dataset_names=self.dataset_names,
+        )
+
+        # Handle supporting_arrays merge with all output masks
+        for dataset_name, mask in self.output_mask.items():
+            self.model.supporting_arrays[dataset_name].update(mask.supporting_arrays)
 
         self.data_indices = data_indices
 

@@ -10,9 +10,11 @@
 
 import logging
 from abc import abstractmethod
+from pathlib import Path
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import ListConfig
 from torch import Tensor
@@ -21,6 +23,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
+from anemoi.graphs.create import load_graph_from_file
+from anemoi.graphs.create import validate_loaded_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import Template
 from anemoi.models.data_indices.collection import IndexCollection
@@ -100,6 +104,52 @@ def split_graph_config(
     return DotDict(static_graph_config), DotDict(dynamic_graph_config)
 
 
+def load_existing_graph(
+    graph_path: str | Path | None,
+    is_dataset_static: dict[str, bool],
+    hidden_nodes_name: str | list[str],
+) -> tuple[HeteroData, DotDict]:
+    """Load a pre-built static graph and return it with an empty dynamic graph configuration.
+
+    This serves the existing-graph mode, where the graph config defines
+    no nodes or edges and the graph is read from ``system.input.graph``.
+
+    Parameters
+    ----------
+    graph_path : str | Path | None
+        Path to the serialised graph.
+    is_dataset_static : dict[str, bool]
+        Dictionary indicating whether each dataset is static. The hidden nodes are added as static.
+    hidden_nodes_name : str or list of str
+        Name(s) of the hidden nodes in the graph.
+
+    Returns
+    -------
+    tuple[HeteroData, DotDict]
+        The loaded graph and a dynamic graph configuration with no builders for any of its edges.
+    """
+    if graph_path is None:
+        raise ValueError(
+            "The graph config defines no nodes, so a pre-built graph must be given in `system.input.graph`."
+        )
+    dynamic_datasets = [name for name, is_static in is_dataset_static.items() if not is_static]
+    if dynamic_datasets:
+        raise NotImplementedError(
+            f"A pre-built graph only works with static datasets, but {dynamic_datasets} require a dynamic graph. "
+            "Define their nodes and edges in the graph config instead."
+        )
+
+    hidden_names = [hidden_nodes_name] if isinstance(hidden_nodes_name, str) else list(hidden_nodes_name)
+    for hidden_name in hidden_names:
+        is_dataset_static[hidden_name] = True
+
+    graph = load_graph_from_file(Path(graph_path))
+    validate_loaded_graph(graph, list(is_dataset_static))
+
+    dynamic_graph_config = {"nodes": {}, "edges": {edge_type: {} for edge_type in graph.edge_types}}
+    return graph, DotDict(dynamic_graph_config)
+
+
 class BaseGraphModel(nn.Module):
     """Message passing graph neural network."""
 
@@ -139,11 +189,18 @@ class BaseGraphModel(nn.Module):
         model_graph_config = DotDict(model_graph_config)
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
 
-        static_graph_config, dynamic_graph_config = split_graph_config(
-            model_graph_config, is_dataset_static, self._graph_name_hidden
-        )
-
-        self._graph_data = GraphCreator(static_graph_config).create()
+        if model_graph_config.get("nodes"):
+            static_graph_config, dynamic_graph_config = split_graph_config(
+                model_graph_config, is_dataset_static, self._graph_name_hidden
+            )
+            self._graph_data = GraphCreator(static_graph_config).create()
+        else:
+            # Existing-graph mode: no nodes in the graph config, load the graph from file.
+            self._graph_data, dynamic_graph_config = load_existing_graph(
+                model_config.get("system", {}).get("input", {}).get("graph"),
+                is_dataset_static,
+                self._graph_name_hidden,
+            )
         self.data_indices = data_indices
         self.statistics = statistics
         self.n_step_input = n_step_input
@@ -203,7 +260,14 @@ class BaseGraphModel(nn.Module):
         self.dataset2encoder: dict[str, str] = {}
         self.encoder2datasets: dict[str, list[str]] = {}
         self.encoder_fusing_strategy: dict[str, str] = {}
+        # Width of the source latent returned by encoders whose mapper updates its source nodes
+        # (e.g. GNNForwardMapper); other mappers pass the source input through.
+        self.encoder_src_latent_dim: dict[str, int] = {}
         for encoder_name, encoder_config in encoders_config.items():
+            mapper_target = encoder_config.get("mapper", {}).get("_target_")
+            if mapper_target is not None and getattr(get_class(mapper_target), "returns_src_latent", False):
+                self.encoder_src_latent_dim[encoder_name] = encoder_config.mapper.num_channels
+
             datasets_to_encode = list(encoder_config["source_datasets"])
             self.encoder2datasets[encoder_name] = datasets_to_encode
             for d in datasets_to_encode:
