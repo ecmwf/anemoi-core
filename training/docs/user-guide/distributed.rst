@@ -19,7 +19,10 @@ scale Anemoi Training across multiple GPUs. Each GPU holds a *full
 replica* of the model and processes a distinct subset of every batch
 in parallel. After the backward pass the gradients are averaged across
 all replicas with a collective ``all-reduce`` before the optimiser step,
-so every replica stays in sync. These all-reduce operations are completely independent from computing the backwards pass. Therefore, the additional communication is heavily overlapped with existing computation, which makes data parallelism very inexpensive.
+so every replica stays in sync. These all-reduce operations are
+independent of the backward pass computation, so the additional
+communication is heavily overlapped with work that is happening anyway,
+which makes data parallelism very inexpensive.
 
 Data parallelism is enabled automatically whenever the number of
 data-parallel replicas
@@ -124,7 +127,13 @@ resource-allocation guidance.
    (``--gpus-per-node`` and ``--ntasks-per-node`` under SLURM, or
    ``CUDA_VISIBLE_DEVICES`` when launching locally). A mismatch
    typically manifests as ranks hanging during process-group
-   initialisation or as out-of-memory errors on the "extra" ranks or else by an error at startup:  ``lightning_fabric.utilities.exceptions.MisconfigurationException: You requested gpu: [0, 1, 2, 3] But your machine only has: [0]``
+   initialisation, as out-of-memory errors on the "extra" ranks, or as an
+   error at startup:
+
+   .. code:: text
+
+      lightning_fabric.utilities.exceptions.MisconfigurationException:
+      You requested gpu: [0, 1, 2, 3] But your machine only has: [0]
 
 How data parallelism works under the hood
 =========================================
@@ -147,10 +156,12 @@ PyTorch Lightning's ``DDPStrategy``:
 
 Because each replica processes ``batch_size.training`` samples per
 step, adding more data-parallel replicas increases the *effective*
-batch size linearly. The default configs assume ``B_eff = 16``; if you
-change either ``batch_size.training`` or the number of replicas the
-per-step learning-rate scale changes with it. Anemoi rescales the base
-learning rate as
+batch size linearly. The shipped learning rates are tuned for
+``B_eff = 16`` — the default ``batch_size.training=2`` across 8
+data-parallel replicas, not the single-GPU defaults in the table above.
+If you change either ``batch_size.training`` or the number of replicas
+the per-step learning-rate scale changes with it. Anemoi rescales the
+base learning rate as
 
 .. math::
 
@@ -169,18 +180,19 @@ Trade-offs and tips
    activations for its local batch. If the model does not fit on a
    single GPU, switch to (or combine with) :ref:`Model Sharding
    <model-sharding>` by setting ``num_gpus_per_model > 1``.
--  **Communication.** DDP only synchronises once per step and the syncronisation is overlapped with the existing computation of the backward pass
-   (gradient all-reduce), so it scales very well across nodes as long as
-   the interconnect is not saturated. Prefer data parallelism over model
-   sharding whenever the model fits in a single GPU's memory.
+-  **Communication.** DDP only synchronises once per step (the gradient
+   all-reduce), and that synchronisation is overlapped with the backward
+   pass, so it scales very well across nodes as long as the interconnect
+   is not saturated. Prefer data parallelism over model sharding whenever
+   the model fits in a single GPU's memory.
 -  **Dataloader throughput** often becomes the limiting factor before
    compute does when scaling out. Allocate enough CPU cores per task,
    tune ``dataloader.num_workers``, and consider ``read_group_size`` for
    sharded reads — see the :doc:`performance-optimisation` guide.
--  **Reproducibility.** Because ordering of the ``all-reduce`` is
-   deterministic per-world-size, changing the number of GPUs will
-   produce numerically different (but statistically equivalent) runs
-   even at the same effective batch size.
+-  **Reproducibility.** The reduction order of the ``all-reduce`` depends
+   on the world size, so changing the number of GPUs produces
+   numerically different (but statistically equivalent) runs even at
+   the same effective batch size. A fixed world size reproduces.
 
 .. _model-sharding:
 

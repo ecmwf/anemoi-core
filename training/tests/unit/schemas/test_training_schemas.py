@@ -202,11 +202,11 @@ def test_combined_loss_with_scalers_valid() -> None:
             "losses": [
                 {
                     "_target_": "anemoi.training.losses.MSELoss",
-                    "scalers": ["nan_mask_weights"],
+                    "scalers": ["node_weights"],
                 },
                 {
                     "_target_": "anemoi.training.losses.MAELoss",
-                    "scalers": ["nan_mask_weights"],
+                    "scalers": ["node_weights"],
                 },
             ],
             "loss_weights": [1.0, 1.0],

@@ -1050,10 +1050,9 @@ values to be changed at the specified point. If ``None`` is returned by
 these methods, it indicates that the scaler values should not be updated
 at that time.
 
-An example of this updating scaler is the
-``anemoi.training.losses.scalers.loss_weights_mask.NaNMaskScaler``,
-which updates the loss weights based on the presence of NaN values in
-the input.
+Updating scalers are an extension point for application-specific loss
+weights. Missing targets use the loss-level ``ignore_nans`` option and
+do not require an updating scaler.
 
 ********************
  Validation Metrics

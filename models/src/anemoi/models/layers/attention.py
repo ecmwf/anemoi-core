@@ -72,7 +72,7 @@ class MultiHeadSelfAttention(nn.Module):
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
         attention_implementation: str = "flash_attention",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -459,7 +459,7 @@ class FlashAttentionWrapper(nn.Module):
         causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         alibi_slopes: torch.Tensor = None,
     ):
         query, key, value = (

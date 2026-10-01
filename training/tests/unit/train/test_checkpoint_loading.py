@@ -19,7 +19,6 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
-from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
@@ -53,6 +52,14 @@ class DummyProcessor(torch.nn.Module):
         return x
 
 
+class LegacyStepwiseProcessors(torch.nn.Module):
+    """State-dict layout of the removed ``StepwiseProcessors``, as stored in older checkpoints."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._processors = torch.nn.ModuleDict()
+
+
 class DummyModel(torch.nn.Module):
     def __init__(self, lead_times: list[str], offset: float) -> None:
         super().__init__()
@@ -61,14 +68,11 @@ class DummyModel(torch.nn.Module):
             {"data": Processors([["dummy", DummyProcessor(offset + 100)]], inverse=True)},
         )
 
-        pre_tend = StepwiseProcessors(lead_times)
-        post_tend = StepwiseProcessors(lead_times)
+        pre_tend = LegacyStepwiseProcessors()
+        post_tend = LegacyStepwiseProcessors()
         for idx, lead_time in enumerate(lead_times):
-            pre_tend.set(lead_time, Processors([["dummy", DummyProcessor(offset + idx)]]))
-            post_tend.set(
-                lead_time,
-                Processors([["dummy", DummyProcessor(offset + idx + 50)]], inverse=True),
-            )
+            pre_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx)]])
+            post_tend._processors[lead_time] = Processors([["dummy", DummyProcessor(offset + idx + 50)]], inverse=True)
 
         self.pre_processors_tendencies = torch.nn.ModuleDict({"data": pre_tend})
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})

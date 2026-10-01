@@ -8,18 +8,20 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+from abc import ABC
+from abc import abstractmethod
 from typing import Optional
 
 import torch
-from torch import Tensor
 from torch import nn
 
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
 
 
-class BasePreprocessor(nn.Module):
+class BasePreprocessor(nn.Module, ABC):
     """Base class for data pre- and post-processors."""
 
     def __init__(
@@ -109,12 +111,28 @@ class BasePreprocessor(nn.Module):
             for variable in variables
         }
 
-    def forward(self, x, in_place: bool = True, inverse: bool = False, **kwargs) -> Tensor:
+    @abstractmethod
+    def transform(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Transform the input tensor."""
+        raise NotImplementedError
+
+    @abstractmethod
+    def inverse_transform(self, x: torch.Tensor, **kwargs) -> torch.Tensor:
+        """Inverse transform the input tensor."""
+        raise NotImplementedError
+
+    def forward(
+        self,
+        x: Source,
+        in_place: bool = True,
+        inverse: bool = False,
+        **kwargs,
+    ) -> Source:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Source
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -125,26 +143,16 @@ class BasePreprocessor(nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        Source
             Processed tensor
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
+
         if inverse:
-            return self.inverse_transform(x, in_place=in_place, **kwargs)
-        return self.transform(x, in_place=in_place, **kwargs)
+            return x.apply_func(self.inverse_transform, in_place=in_place, **kwargs)
 
-    def transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
-        """Process the input tensor."""
-        if not in_place:
-            x = x.clone()
-        return x
-
-    def inverse_transform(self, x, in_place: bool = True, **kwargs) -> Tensor:
-        """Inverse process the input tensor."""
-        if not in_place:
-            x = x.clone()
-        return x
+        return x.apply_func(self.transform, in_place=in_place, **kwargs)
 
 
 class Processors(nn.Module):
@@ -161,7 +169,7 @@ class Processors(nn.Module):
         super().__init__()
 
         self.inverse = inverse
-        self.first_run = True
+        # self.first_run = True
 
         if inverse:
             # Reverse the order of processors for inverse transformation
@@ -173,12 +181,12 @@ class Processors(nn.Module):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__} [{'inverse' if self.inverse else 'forward'}]({self.processors})"
 
-    def forward(self, x, in_place: bool = True, **kwargs) -> Tensor:
+    def forward(self, x: Source, in_place: bool = True, **kwargs) -> Source:
         """Process the input tensor.
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Source
             Input tensor
         in_place : bool
             Whether to process the tensor in place
@@ -187,53 +195,12 @@ class Processors(nn.Module):
 
         Returns
         -------
-        torch.Tensor
+        Source
             Processed tensor
         """
         for processor in self.processors.values():
+            if self.inverse and getattr(processor, "supports_skip_imputation", False):
+                continue
             x = processor(x, in_place=in_place, inverse=self.inverse, **kwargs)
 
-        if self.first_run:
-            self.first_run = False
-            self._run_checks(x)
         return x
-
-    def _run_checks(self, x):
-        """Run checks on the processed tensor."""
-        if not self.inverse:
-            # Forward transformation checks:
-            assert not torch.isnan(
-                x
-            ).any(), f"NaNs ({torch.isnan(x).sum()}) found in processed tensor after {self.__class__.__name__}."
-
-
-class StepwiseProcessors(nn.Module):
-    """Ordered container for per-step processors that can include missing steps."""
-
-    def __init__(self, lead_times: list[str]) -> None:
-        super().__init__()
-        self._lead_times = list(lead_times)
-        self._processors = nn.ModuleDict()
-
-    def __len__(self) -> int:
-        return len(self._lead_times)
-
-    def __iter__(self):
-        for lead_time in self._lead_times:
-            key = str(lead_time)
-            yield self._processors[key] if key in self._processors else None
-
-    def __getitem__(self, index: int | str) -> Optional["Processors"]:
-        if isinstance(index, int):
-            lead_time = self._lead_times[index]
-        else:
-            lead_time = str(index)
-        key = str(lead_time)
-        return self._processors[key] if key in self._processors else None
-
-    @property
-    def lead_times(self) -> list[str]:
-        return list(self._lead_times)
-
-    def set(self, lead_time: str, processors: "Processors") -> None:
-        self._processors[str(lead_time)] = processors

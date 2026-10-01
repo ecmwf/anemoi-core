@@ -20,6 +20,7 @@ from anemoi.models.distributed.primitives import _halo_exchange_bwd
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import check_shard_sizes_match_group
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.shapes import validate_dim
 from anemoi.models.distributed.shapes import validate_shard_sizes
@@ -69,6 +70,35 @@ def ensure_sharded(
     return shard_tensor(x, dim, shard_sizes, model_comm_group), shard_sizes
 
 
+def _validate_shard_sizes(op: str, sizes: ShardSizes, mgroup: ProcessGroup | None) -> None:
+    """Fail loudly when a collective is asked to move data with unusable shard sizes.
+
+    Only enforced when ``mgroup`` actually spans multiple ranks: with a 1-rank (or absent)
+    group nothing is communicated and every wrapper is a no-op, so ``sizes=None`` is legal
+    and common there (the strategy still creates a real 1-rank ProcessGroup when
+    ``num_gpus_per_model=1``, and e.g. the ``keep_x_dst_sharded=False`` mapper gathers rely
+    on that bypass).
+
+    ``sizes=None`` means "replicated". Skipping communication for a replicated tensor is
+    the *caller's* responsibility (see :meth:`Source.allgather`), so reaching a
+    collective with ``None`` always indicates a missing guard. Silently no-oping here would
+    either propagate a wrongly-shaped tensor or - worse - make some ranks skip a collective
+    that the others entered, which hangs rather than fails. So: raise.
+    """
+    if not model_is_distributed(mgroup):
+        return
+    if sizes is None:
+        msg = (
+            f"{op} was called with shard_sizes=None on a process group of {mgroup.size()} "
+            "ranks. shard_sizes=None means 'replicated / not sharded' and cannot be "
+            "communicated: skip the collective for replicated tensors (see "
+            "Source.allgather) or supply per-rank shard sizes (see "
+            "anemoi.models.distributed.graph.ensure_sharded)."
+        )
+        raise ValueError(msg)
+    check_shard_sizes_match_group(sizes, mgroup, context=op)
+
+
 def shard_tensor(
     input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGroup | None, gather_in_backward: bool = True
 ) -> Tensor:
@@ -83,7 +113,7 @@ def shard_tensor(
     dim : int
         dimension along which to shard.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes. Must not be ``None`` when ``mgroup`` spans multiple ranks.
     mgroup : ProcessGroup or None
         Model communication group. If ``None`` or of size 1, no communication is performed and this operation
         leaves the tensor unchanged.
@@ -94,7 +124,16 @@ def shard_tensor(
     -------
     Tensor
         Sharded tensor.
+
+    Raises
+    ------
+    ValueError
+        If ``sizes`` is ``None`` or does not match ``mgroup``, and ``mgroup`` is
+        distributed. See :func:`_validate_shard_sizes`.
     """
+    if not model_is_distributed(mgroup):
+        return input_  # 1-rank / absent group: _split would return input_ unchanged
+    _validate_shard_sizes("shard_tensor", sizes, mgroup)
     if model_is_distributed(mgroup):
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
@@ -120,7 +159,7 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     dim : int
         dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes. Must not be ``None`` when ``mgroup`` spans multiple ranks.
     mgroup : ProcessGroup or None
         Model communication group. If ``None`` or of size 1, no communication is performed and this operation
         leaves the tensor unchanged.
@@ -129,7 +168,16 @@ def gather_tensor(input_: Tensor, dim: int, sizes: ShardSizes, mgroup: ProcessGr
     -------
     Tensor
         Gathered tensor.
+
+    Raises
+    ------
+    ValueError
+        If ``sizes`` is ``None`` or does not match ``mgroup``, and ``mgroup`` is
+        distributed. See :func:`_validate_shard_sizes`.
     """
+    if not model_is_distributed(mgroup):
+        return input_  # 1-rank / absent group: _gather would return input_ unchanged
+    _validate_shard_sizes("gather_tensor", sizes, mgroup)
     if model_is_distributed(mgroup):
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)
@@ -182,7 +230,10 @@ def sync_tensor(
     dim : int
         dimension along which to gather.
     sizes : ShardSizes
-        Per-rank shard sizes
+        Per-rank shard sizes, or ``None`` when the input is replicated. Unlike
+        :func:`gather_tensor`, ``None`` is legal here: the forward gather is skipped while
+        the backward all-reduce still happens (see
+        :func:`anemoi.models.distributed.khop_edges.shard_graph_to_local`).
     mgroup : ProcessGroup or None
         Model communication group. If ``None`` or of size 1, no communication is performed and this operation
         leaves the tensor unchanged.
@@ -196,6 +247,7 @@ def sync_tensor(
     Tensor
         Synced tensor.
     """
+    check_shard_sizes_match_group(sizes, mgroup, context="sync_tensor")
     if model_is_distributed(mgroup) and gather_in_fwd and sizes is not None:
         validate_dim(input_, dim)
         validate_shard_sizes(sizes, mgroup)

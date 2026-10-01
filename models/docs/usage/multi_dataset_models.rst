@@ -46,14 +46,14 @@ choose stable, descriptive names.
    encoders:
      global:                 # user-defined group name (appears in the state-dict)
        source_datasets: [ "era5", "ifs"]  # datasets encoded by this group
-       dataset_fusing_strategy: "not_supported"
+       dataset_fusing_strategy: "sequential"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
          # ... mapper configuration
      regional:
        source_datasets: [ "cerra" ]
-       dataset_fusing_strategy: "not_supported"
+       dataset_fusing_strategy: "none"
        mapper:
          _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
          num_channels: 1024
@@ -81,8 +81,8 @@ choose stable, descriptive names.
 
 ``dataset_fusing_strategy``
    How multiple datasets within a single group are combined if passed during the
-   same forward pass. Currently only ``"not_supported"`` is available; it is a
-   placeholder for future fusing strategies.
+   same forward pass: ``"none"`` (default), ``"sequential"`` or ``"joint"``. See
+   below.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -97,12 +97,20 @@ choose stable, descriptive names.
  Encoding multiple datasets with the same encoder
 ***************************************************
 
-The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
-Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
-by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+A different strategy can be chosen for each encoder by setting the ``dataset_fusing_strategy`` field, which supports
+the following values:
 
-``not_supported``
-   Indicates that multiple datasets per encoder are not currently supported.
+``none``
+   No fusion (default). The natural choice for a single-source encoder. With several source datasets, each is encoded
+   separately and they must share an input dimension.
+
+``sequential``
+   One encoder pass per source dataset, in the order listed in ``source_datasets``, with shared encoder weights. The
+   resulting latents are combined by the latent aggregator.
+
+``joint``
+   A single encoder pass over the union of all source nodes, so each hidden node attends to every source dataset at
+   once.
 
 *******************
  Latent aggregator

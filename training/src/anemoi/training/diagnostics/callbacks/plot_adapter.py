@@ -23,6 +23,8 @@ from abc import abstractmethod
 from typing import TYPE_CHECKING
 from typing import Any
 
+from anemoi.models.data.sources.base import Source
+
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
@@ -39,6 +41,17 @@ class BasePlotAdapter(ABC):
     def is_ensemble(self) -> bool:
         return False
 
+    @staticmethod
+    def select_time(data: Any, time_indices: Any) -> Any:
+        """Select timesteps along the logical time axis.
+
+        Accepts either a Source or a plain array/tensor
+        whose leading axis is the time axis.
+        """
+        if isinstance(data, Source):
+            return data.select_time(time_indices).data
+        return data[time_indices, ...]
+
     @property
     def default_plot_members(self) -> int | list[int] | None:
         """Default ``members`` selection for plot callbacks that don't request a specific subset.
@@ -54,7 +67,12 @@ class BasePlotAdapter(ABC):
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return output_tensor
 
-    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:  # noqa: ARG002
+    def select_members(
+        self,
+        tensor: Any,
+        members: int | list[int] | None = None,  # noqa: ARG002
+        ensemble_axis: int | None = None,  # noqa: ARG002
+    ) -> Any:
         """Select ensemble members from tensor. No-op for non-ensemble adapters."""
         return tensor
 
@@ -83,7 +101,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
         input_time_indices = self._task.get_batch_input_indices()
 
-        input_data = data[input_time_indices, ...]
+        input_data = self.select_time(data, input_time_indices)
 
         x = input_data[self.get_init_step(), ...].squeeze()
 
@@ -91,7 +109,7 @@ class ForecasterPlotAdapter(BasePlotAdapter):
             rollout_step = validation_step_kwargs["rollout_step"]
             output_time_indices = self._task.get_batch_output_indices(rollout_step=rollout_step)
 
-            output_data = data[output_time_indices, ...]
+            output_data = self.select_time(data, output_time_indices)
 
             for out_step in range(self._task.num_output_timesteps):
                 y_true = output_data[out_step, ...].squeeze()
@@ -167,26 +185,37 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     def prepare_plot_output_tensor(self, output_tensor: Any) -> Any:
         return self._inner.prepare_plot_output_tensor(output_tensor)
 
-    def select_members(self, tensor: Any, members: int | list[int] | None = None) -> Any:
-        """Slice ensemble members from dim 2 of the output tensor.
+    def select_members(
+        self,
+        tensor: Any,
+        members: int | list[int] | None = None,
+        ensemble_axis: int | None = None,
+    ) -> Any:
+        """Slice ensemble members from the input tensor's ensemble axis.
 
         Parameters
         ----------
         tensor : Any
-            Tensor with shape (..., members, grid, vars).
+            Tensor carrying an ensemble axis at ``ensemble_axis``.
         members : int | list[int] | None
             Members to select. None returns all members, int/list selects specific members.
+        ensemble_axis : int | None
+            Physical position of the ensemble axis, as retrieved from the prediction
+            view's layout. Defaults to 2, i.e., its position in the canonical gridded
+            (batch, time, ensemble, grid, variables) layout.
 
         Returns
         -------
         Any
-            Tensor with selected ensemble members.
+            Tensor with selected ensemble members. The ensemble axis is kept (with
+            size 1 for a single member) so callers can rely on its position.
         """
         if members is None:
             return tensor
         if not isinstance(members, list):
             members = [members]
-        return tensor[:, :, members, ...]
+        axis = 2 if ensemble_axis is None else ensemble_axis % tensor.ndim
+        return tensor[(slice(None),) * axis + (members,)]
 
     def prepare_loss_batch(self, batch: dict) -> dict:
         """Return the batch for loss plotting."""

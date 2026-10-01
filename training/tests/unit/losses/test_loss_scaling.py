@@ -17,6 +17,9 @@ from _pytest.fixtures import SubRequest
 from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
+from anemoi.models.data import Source
+from anemoi.models.data import TensorLayout
+from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.loss import get_metric_ranges
@@ -349,6 +352,18 @@ expected_var_tendency_scaling = torch.Tensor(
 )
 
 
+def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
+    """Wrap a five-dimensional loss tensor in the public loss input type."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=variables,
+        statistics={},
+        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+    )
+
+
 @pytest.mark.parametrize("norm", [None, "unit-sum", "unit-mean"])
 @pytest.mark.parametrize(
     ("scaler_config", "expected_weights"),
@@ -412,8 +427,14 @@ def test_variable_scalers_with_interspersed_target(
         scalers=scalers,
         data_indices=data_indices,
     )
-    pred = torch.tensor([3.0, 5.0, 0.0]).reshape(1, 1, 1, 1, 3)
-    target = torch.tensor([0.0, -10.0, 2.0, 3.0, 0.0]).reshape(1, 1, 1, 1, 5)
+    pred = _gridded_source_view(
+        torch.tensor([3.0, 5.0, 0.0]).reshape(1, 1, 1, 1, 3),
+        list(data_indices.model.output.ordered_names),
+    )
+    target = _gridded_source_view(
+        torch.tensor([0.0, -10.0, 2.0, 3.0, 0.0]).reshape(1, 1, 1, 1, 5),
+        list(data_indices.name_to_index),
+    )
     result = loss(pred, target, pred_layout=IndexSpace.MODEL_OUTPUT, target_layout=IndexSpace.DATA_FULL)
 
     # Squared errors are (3 - 2)^2 = 1 and (5 - 3)^2 = 4.

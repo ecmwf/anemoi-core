@@ -61,6 +61,21 @@ class RadialBasisFeaturesSchema(BaseModel):
     dtype: str = Field(default="float32", description="Data type for computations")
 
 
+class TimedeltasSchema(BaseModel):
+    target_: Literal["anemoi.graphs.edges.attributes.Timedeltas"] = Field(..., alias="_target_")
+    "Runtime timedelta edge attribute."
+    node_axis: Literal["source", "target"]
+    "Endpoint from which timedeltas are propagated."
+    scale_seconds: float = Field(default=3600.0, gt=0, allow_inf_nan=False)
+    "Number of input seconds per scaled unit."
+    dtype: str = Field(default="float32")
+    "Torch floating-point output dtype."
+
+
 EdgeAttributeSchema = (
-    BaseEdgeAttributeSchema | EdgeAttributeFromNodeSchema | DirectionalHarmonicsSchema | RadialBasisFeaturesSchema
+    BaseEdgeAttributeSchema
+    | EdgeAttributeFromNodeSchema
+    | DirectionalHarmonicsSchema
+    | RadialBasisFeaturesSchema
+    | TimedeltasSchema
 )

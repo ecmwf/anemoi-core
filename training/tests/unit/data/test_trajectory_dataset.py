@@ -7,69 +7,59 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for TrajectoryDataset (successor to the removed ForecastStepDataset)."""
+"""Tests for TrajectoryDataset.
+
+A TrajectoryDataset is a gridded reader over a date-indexed dataset whose dates form
+consecutive forecast runs ("trajectories") of ``trajectory_length`` steps, counted from
+``trajectory_start``. ``trajectory_ids`` labels each date with its run, so that sample
+windows never cross runs (see ``get_usable_indices`` and ``test_compute_valid_data_indices.py``).
+"""
 
 import datetime
-from typing import ClassVar
 from unittest.mock import patch
 
 import numpy as np
+import pytest
 import torch
+from omegaconf import OmegaConf
 
+from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.data_reader import TrajectoryDataset
+from anemoi.training.data.data_reader import create_dataset
+
+# Naive, like the dataset dates (numpy datetime64).
+START = np.datetime64("2020-01-01T00:00:00", "s").astype(datetime.datetime)
 
 
-class FakeTrajectoriesDataset:
-    """Fake object that mimics the TrajectoriesZarr interface expected by TrajectoryDataset.
+class FakeGriddedDataset:
+    """Fake object that mimics the anemoi-datasets interface read by gridded readers.
 
-    On-disk shape: (num_inits, variables, ensemble, steps, gridpoints)
+    Shape: (dates, variables, ensemble, gridpoints).
     """
 
     def __init__(
         self,
-        num_inits: int = 4,
+        num_dates: int = 24,
         variables: int = 3,
         ensemble: int = 2,
-        steps: int = 24,
         gridpoints: int = 10,
-        step_frequency: datetime.timedelta | None = None,
+        frequency: datetime.timedelta = datetime.timedelta(hours=1),
+        first_date: datetime.datetime = START,
         missing: set[int] | None = None,
-    ):
-        self._shape = (num_inits, variables, ensemble, steps, gridpoints)
-        self._data = np.random.default_rng(42).standard_normal(self._shape).astype(np.float32)
-        self._step_frequency = step_frequency or datetime.timedelta(hours=1)
-        self._missing: set[int] = missing or set()
-
-    @property
-    def shape(self) -> tuple:
-        return self._shape
-
-    @property
-    def step_frequency(self) -> datetime.timedelta:
-        return self._step_frequency
-
-    @property
-    def missing(self) -> set[int]:
-        return self._missing
-
-    @property
-    def grids(self) -> list[int]:
-        return [self._shape[4]]
-
-    @property
-    def variables(self) -> list[str]:
-        return [f"var_{i}" for i in range(self._shape[1])]
-
-    @property
-    def resolution(self) -> str:
-        return "o96"
-
-    @property
-    def name_to_index(self) -> dict[str, int]:
-        return {f"var_{i}": i for i in range(self._shape[1])}
-
-    def dataset_metadata(self) -> dict:
-        return {}
+    ) -> None:
+        self.shape = (num_dates, variables, ensemble, gridpoints)
+        self._data = np.random.default_rng(42).standard_normal(self.shape).astype(np.float32)
+        self.frequency = frequency
+        self.dates = np.datetime64(first_date, "s") + np.arange(num_dates) * np.timedelta64(frequency)
+        self.missing = missing or set()
+        self.variables = [f"var_{i}" for i in range(variables)]
+        self.name_to_index = {name: i for i, name in enumerate(self.variables)}
+        self.resolution = "o96"
+        self.grids = [gridpoints]
+        self.latitudes = np.linspace(-90.0, 90.0, gridpoints)
+        self.longitudes = np.linspace(0.0, 350.0, gridpoints)
+        self.statistics = {"mean": np.zeros(variables), "stdev": np.ones(variables)}
 
     def metadata(self) -> dict:
         return {}
@@ -77,45 +67,23 @@ class FakeTrajectoriesDataset:
     def supporting_arrays(self) -> dict:
         return {}
 
-    @property
-    def statistics(self) -> dict:
-        return {"mean": np.zeros(self._shape[1]), "stdev": np.ones(self._shape[1])}
-
-    def __getitem__(self, n: int) -> np.ndarray:
-        """Return (variables, ensemble, steps, gridpoints) for a scalar init index."""
-        return self._data[n]
+    def __getitem__(self, key: tuple) -> np.ndarray:
+        return self._data[key]
 
 
 def _make_trajectory_dataset(
-    num_inits: int = 4,
-    variables: int = 3,
-    ensemble: int = 2,
-    steps: int = 24,
-    gridpoints: int = 10,
-    step_frequency: str | datetime.timedelta = "1h",
-    missing: set[int] | None = None,
-    sampling: dict | None = None,
+    trajectory_length: int = 6,
+    trajectory_start: datetime.datetime = START,
+    **fake_kwargs,
 ) -> TrajectoryDataset:
     """Create a TrajectoryDataset backed by a fake dataset (no real file I/O)."""
-    if isinstance(step_frequency, str):
-        from anemoi.utils.dates import frequency_to_timedelta
-
-        step_td = frequency_to_timedelta(step_frequency)
-    else:
-        step_td = step_frequency
-
-    dataset = TrajectoryDataset.__new__(TrajectoryDataset)
-    dataset.data = FakeTrajectoriesDataset(
-        num_inits=num_inits,
-        variables=variables,
-        ensemble=ensemble,
-        steps=steps,
-        gridpoints=gridpoints,
-        step_frequency=step_td,
-        missing=missing,
-    )
-    dataset.default_sampling = sampling if sampling is not None else {"stride": None}
-    return dataset
+    fake = FakeGriddedDataset(**fake_kwargs)
+    with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake):
+        return TrajectoryDataset(
+            trajectory_start=trajectory_start,
+            trajectory_length=trajectory_length,
+            dataset="fake.zarr",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -124,62 +92,73 @@ def _make_trajectory_dataset(
 
 
 class TestTrajectoryDatasetProperties:
-    """Test TrajectoryDataset geometry properties."""
+    """Test TrajectoryDataset properties."""
 
-    def test_num_sequences(self) -> None:
-        ds = _make_trajectory_dataset(num_inits=7)
-        assert ds.num_sequences == 7
+    def test_is_a_gridded_reader_with_trajectories(self) -> None:
+        ds = _make_trajectory_dataset()
+        assert isinstance(ds, GriddedDataReader)
+        assert ds.has_trajectories
+        assert ds.is_static_grid
 
-    def test_sequence_length(self) -> None:
-        ds = _make_trajectory_dataset(steps=18)
-        assert ds.sequence_length() == 18
+    def test_stores_trajectory_start_and_length(self) -> None:
+        ds = _make_trajectory_dataset(trajectory_length=12, trajectory_start=START)
+        assert ds.trajectory_length == 12
+        assert ds.trajectory_start == START
+
+    def test_all_dates_form_a_single_sequence(self) -> None:
+        """Runs are delimited by ``trajectory_ids``, not by separate sequences."""
+        ds = _make_trajectory_dataset(num_dates=24)
+        assert ds.num_sequences == 1
+        assert len(ds.dates) == 24
 
     def test_grid_size(self) -> None:
         ds = _make_trajectory_dataset(gridpoints=42)
         assert ds.grid_size == 42
 
-    def test_frequency_returns_step_frequency(self) -> None:
-        ds = _make_trajectory_dataset(step_frequency="1h")
-        assert ds.frequency == datetime.timedelta(hours=1)
-
-        ds = _make_trajectory_dataset(step_frequency="6h")
+    def test_frequency(self) -> None:
+        ds = _make_trajectory_dataset(frequency=datetime.timedelta(hours=6))
         assert ds.frequency == datetime.timedelta(hours=6)
 
-    def test_missing_sequences(self) -> None:
-        ds = _make_trajectory_dataset(num_inits=5, missing={1, 3})
-        assert ds.missing_sequences == {1, 3}
+    def test_missing_dates_are_passed_through(self) -> None:
+        ds = _make_trajectory_dataset(missing={1, 3})
+        assert ds.missing == {1, 3}
 
-    def test_missing_positions_is_always_empty(self) -> None:
-        """TrajectoryDataset does not track per-step missing values."""
-        ds = _make_trajectory_dataset(num_inits=4)
-        assert ds.missing_positions(0) == set()
-        assert ds.missing_positions(2) == set()
-
-    def test_missing_sequences_empty_when_no_missing(self) -> None:
-        ds = _make_trajectory_dataset()
-        assert ds.missing_sequences == set()
+    def test_tree_reports_trajectory_settings(self) -> None:
+        ds = _make_trajectory_dataset(trajectory_length=6)
+        text = repr(ds)
+        assert "Trajectory start" in text
+        assert "Trajectory length: 6 steps" in text
 
 
 # ---------------------------------------------------------------------------
-# default_sampling
+# trajectory_ids
 # ---------------------------------------------------------------------------
 
 
-class TestTrajectoryDatasetDefaultSampling:
-    """Test that default_sampling is correctly set."""
+class TestTrajectoryIds:
+    """Each date is labelled with the forecast run it belongs to."""
 
-    def test_default_sampling_is_non_overlapping(self) -> None:
-        """Without explicit sampling, stride=None (non-overlapping)."""
-        ds = _make_trajectory_dataset()
-        assert ds.default_sampling == {"stride": None}
+    def test_consecutive_runs_of_trajectory_length(self) -> None:
+        ds = _make_trajectory_dataset(num_dates=12, trajectory_length=4)
+        np.testing.assert_array_equal(ds.trajectory_ids, np.repeat([0, 1, 2], 4))
 
-    def test_explicit_stride_stored(self) -> None:
-        ds = _make_trajectory_dataset(sampling={"stride": 6})
-        assert ds.default_sampling == {"stride": 6}
+    def test_one_id_per_date(self) -> None:
+        ds = _make_trajectory_dataset(num_dates=24, trajectory_length=6)
+        assert len(ds.trajectory_ids) == len(ds.dates)
 
-    def test_stride_1_stored(self) -> None:
-        ds = _make_trajectory_dataset(sampling={"stride": 1})
-        assert ds.default_sampling == {"stride": 1}
+    def test_runs_are_counted_from_trajectory_start(self) -> None:
+        """Dates before ``trajectory_start`` belong to earlier runs (negative ids)."""
+        ds = _make_trajectory_dataset(
+            num_dates=8,
+            trajectory_length=4,
+            trajectory_start=START + datetime.timedelta(hours=2),
+        )
+        np.testing.assert_array_equal(ds.trajectory_ids, [-1, -1, 0, 0, 0, 0, 1, 1])
+
+    def test_length_is_in_steps_of_the_dataset_frequency(self) -> None:
+        """``trajectory_length`` counts steps, so the run duration scales with the frequency."""
+        ds = _make_trajectory_dataset(num_dates=8, trajectory_length=2, frequency=datetime.timedelta(hours=6))
+        np.testing.assert_array_equal(ds.trajectory_ids, [0, 0, 1, 1, 2, 2, 3, 3])
 
 
 # ---------------------------------------------------------------------------
@@ -188,47 +167,53 @@ class TestTrajectoryDatasetDefaultSampling:
 
 
 class TestTrajectoryDatasetGetSample:
-    """Test get_sample(sequence, positions, grid_shard_indices)."""
+    """Test get_sample(time_indices)."""
 
-    def test_get_sample_list_positions(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=0, positions=[2, 3, 4], grid_shard_indices=None)
-        assert sample.shape == (3, 2, 10, 3)
-        assert isinstance(sample, torch.Tensor)
-
-    def test_get_sample_slice_positions(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=0, positions=slice(0, 5), grid_shard_indices=None)
-        assert sample.shape == (5, 2, 10, 3)
-
-    def test_get_sample_second_sequence(self) -> None:
-        ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=2, positions=[0, 1, 2], grid_shard_indices=None)
-        assert sample.shape == (3, 2, 10, 3)
-
-    def test_get_sample_with_grid_shard_slice(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=0, positions=[0, 1], grid_shard_indices=slice(0, 5))
-        assert sample.shape == (2, 2, 5, 3)
-
-    def test_get_sample_with_grid_shard_array(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        grid_indices = np.array([0, 2, 4, 6, 8])
-        sample = ds.get_sample(sequence=0, positions=[0, 1, 2], grid_shard_indices=grid_indices)
-        assert sample.shape == (3, 2, 5, 3)
+    @pytest.mark.parametrize(
+        ("time_indices", "num_steps"),
+        [([2, 3, 4], 3), (slice(0, 5), 5), ([0, 6, 7], 3)],
+    )
+    def test_get_sample_shape(self, time_indices: list[int] | slice, num_steps: int) -> None:
+        ds = _make_trajectory_dataset(variables=3, ensemble=2, gridpoints=10)
+        sample = ds.get_sample(time_indices)
+        assert isinstance(sample, GriddedSourceSample)
+        assert isinstance(sample.data, torch.Tensor)
+        assert sample.data.shape == (num_steps, 2, 10, 3)  # (dates, ensemble, gridpoints, variables)
+        assert sample.variables == ds.variables
 
     def test_get_sample_returns_correct_data(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=0, positions=[0, 1, 2], grid_shard_indices=None)
-        # data[0] → (vars, ensemble, steps, gridpoints); select steps [0,1,2]
-        raw = ds.data[0][:, :, [0, 1, 2], :]  # (vars, ens, 3, grid)
-        expected = np.transpose(raw, (2, 1, 3, 0))  # (steps, ens, grid, vars)
-        np.testing.assert_allclose(sample.numpy(), expected, rtol=1e-6)
+        ds = _make_trajectory_dataset(variables=3, ensemble=2, gridpoints=10)
+        sample = ds.get_sample([0, 1, 2])
+        raw = ds.data[[0, 1, 2], :, :, :]  # (dates, vars, ens, grid)
+        expected = np.transpose(raw, (0, 2, 3, 1))  # (dates, ens, grid, vars)
+        np.testing.assert_allclose(sample.data.numpy(), expected, rtol=1e-6)
 
-    def test_get_sample_none_grid_indices(self) -> None:
-        ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=0, positions=[0, 1], grid_shard_indices=None)
-        assert sample.shape == (2, 2, 10, 3)
+    def test_get_sample_coordinates_in_radians(self) -> None:
+        ds = _make_trajectory_dataset(gridpoints=10)
+        sample = ds.get_sample([0, 1])
+        assert sample.coordinates.shape == (10, 2)
+        expected = np.deg2rad(np.stack([ds.data.latitudes, ds.data.longitudes], axis=-1))
+        np.testing.assert_allclose(sample.coordinates.numpy(), expected, rtol=1e-6)
+
+    def test_get_sample_full_grid_without_reader_group(self) -> None:
+        ds = _make_trajectory_dataset(gridpoints=10)
+        sample = ds.get_sample([0, 1])
+        assert sample.data.shape[2] == 10
+        assert sample.shard_sizes is None
+
+    def test_get_sample_with_grid_shard(self) -> None:
+        """With a reader group, each reader returns its share of the grid."""
+        ds = _make_trajectory_dataset(variables=3, ensemble=2, gridpoints=10)
+        full = ds.get_sample([0, 1, 2])
+
+        ds.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
+        sample = ds.get_sample([0, 1, 2])
+
+        assert ds.grid_shard_sizes == [5, 5]
+        assert sample.shard_sizes == [5, 5]
+        assert sample.data.shape == (3, 2, 5, 3)
+        torch.testing.assert_close(sample.data, full.data[:, :, 5:])
+        torch.testing.assert_close(sample.coordinates, full.coordinates[5:])
 
 
 # ---------------------------------------------------------------------------
@@ -237,61 +222,31 @@ class TestTrajectoryDatasetGetSample:
 
 
 class TestCreateDatasetWithTrajectory:
-    """Test that create_dataset factory routes correctly based on the trajectory key."""
+    """Test that create_dataset routes on the ``trajectory`` key."""
 
     def test_create_dataset_selects_trajectory_reader(self) -> None:
-        """create_dataset should instantiate TrajectoryDataset when trajectory key is set."""
-        fake = FakeTrajectoriesDataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
-
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake):
-            from anemoi.training.data.data_reader import create_dataset
-
-            config = {
+        """A ``trajectory`` section with ``start`` and ``length`` gives a TrajectoryDataset."""
+        config = OmegaConf.create(
+            {
                 "dataset_config": {"dataset": "fake.zarr"},
-                "trajectory": {"sampling": {"stride": None}},
-            }
+                "trajectory": {"start": "2020-01-01T00:00:00", "length": 6},
+            },
+        )
+        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeGriddedDataset()):
             ds = create_dataset(config)
-            assert isinstance(ds, TrajectoryDataset)
 
-    def test_create_dataset_passes_sampling_to_reader(self) -> None:
-        """create_dataset should forward trajectory.sampling to TrajectoryDataset."""
-        fake = FakeTrajectoriesDataset()
+        assert isinstance(ds, TrajectoryDataset)
+        assert ds.trajectory_length == 6
+        np.testing.assert_array_equal(ds.trajectory_ids, np.repeat([0, 1, 2, 3], 6))
 
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake):
-            from anemoi.training.data.data_reader import create_dataset
-
-            config = {
-                "dataset_config": {"dataset": "fake.zarr"},
-                "trajectory": {"sampling": {"stride": 6}},
-            }
+    @pytest.mark.parametrize("trajectory", [None, "absent"])
+    def test_create_dataset_without_trajectory_gives_gridded_reader(self, trajectory: str | None) -> None:
+        """No ``trajectory`` key, or ``trajectory: null``, gives a plain GriddedDataReader."""
+        config = {"dataset_config": {"dataset": "fake.zarr"}}
+        if trajectory != "absent":
+            config["trajectory"] = trajectory
+        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeGriddedDataset()):
             ds = create_dataset(config)
-            assert isinstance(ds, TrajectoryDataset)
-            assert ds.default_sampling == {"stride": 6}
 
-    def test_create_dataset_without_trajectory_gives_native(self) -> None:
-        """create_dataset without trajectory key should give NativeGridDataset."""
-
-        class FakeAnalysis:
-            shape = (100, 3, 1, 1000)
-            dates = np.array([np.datetime64("2020-01-01")])
-            grids: ClassVar[list[int]] = [1000]
-            variables: ClassVar[list[str]] = ["a", "b", "c"]
-            frequency = datetime.timedelta(hours=6)
-            resolution = "o96"
-            name_to_index: ClassVar[dict[str, int]] = {"a": 0, "b": 1, "c": 2}
-            missing: ClassVar[set[int]] = set()
-            statistics: ClassVar[dict] = {}
-
-            def metadata(self) -> dict:
-                return {}
-
-            def supporting_arrays(self) -> dict:
-                return {}
-
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeAnalysis()):
-            from anemoi.training.data.data_reader import NativeGridDataset
-            from anemoi.training.data.data_reader import create_dataset
-
-            config = {"dataset_config": {"dataset": "fake.zarr"}}
-            ds = create_dataset(config)
-            assert isinstance(ds, NativeGridDataset)
+        assert type(ds) is GriddedDataReader
+        assert not ds.has_trajectories

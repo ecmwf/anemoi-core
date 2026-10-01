@@ -8,31 +8,52 @@
 # nor does it submit to any jurisdiction.
 
 import numpy as np
+from pytest_mock import MockFixture
 
-from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.training.data.data_reader import GriddedDataReader
+from anemoi.training.data.multidataset import MultiDataset
 
 
-def test_get_sample_normalizes_time_indices_before_dataset_access() -> None:
-    """Test that NativeGridDataset.get_sample normalizes time indices to slices before accessing the dataset."""
+def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFixture) -> None:
+    """Contiguous relative time indices are collapsed to slices; sparse ones are kept as lists."""
+    reader = mocker.MagicMock()
+    reader.missing = set()
+    reader.dates = list(range(20))
+    reader.has_trajectories = False
+    reader.num_sequences = 1
+
+    ds = MultiDataset(
+        data_readers={"a": reader, "b": reader},
+        relative_date_indices={"a": [0, 1, 2], "b": [0, 2, 3]},
+    )
+
+    assert ds.relative_date_indices["a"] == slice(0, 3, 1)
+    assert ds.relative_date_indices["b"] == [0, 2, 3]
+
+
+def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
+    """GriddedDataReader.get_data forwards time indices to the dataset unchanged."""
 
     class FakeDataset:
         def __init__(self) -> None:
             self.last_index = None
 
-        def __getitem__(self, item: int) -> np.ndarray:
+        def __getitem__(self, item: object) -> np.ndarray:
             self.last_index = item
             return np.zeros((3, 2, 4, 5), dtype=np.float32)
 
-    dataset = NativeGridDataset.__new__(NativeGridDataset)
-    dataset.data = FakeDataset()
+    reader = GriddedDataReader.__new__(GriddedDataReader)
+    reader.data = FakeDataset()
+    reader.grid_shard_slice = None
 
-    dataset.get_sample(sequence=0, positions=[4, 5, 6], grid_shard_indices=slice(0, 5))
+    reader.get_data([4, 5, 7])
+    assert reader.data.last_index == [4, 5, 7]
 
-    time_index = dataset.data.last_index[0]
-    assert isinstance(time_index, list)
+    reader.get_data(slice(4, 7, 1))
+    assert reader.data.last_index == slice(4, 7, 1)
 
-    dataset.get_sample(sequence=0, positions=slice(4, 7, 1), grid_shard_indices=slice(0, 5))
-
-    time_index = dataset.data.last_index[0]
-    assert isinstance(time_index, slice)
-    assert (time_index.start, time_index.stop, time_index.step) == (4, 7, 1)
+    reader.grid_shard_slice = slice(0, 2)
+    x = reader.get_data(slice(4, 7, 1))
+    assert reader.data.last_index == (slice(4, 7, 1), slice(None), slice(None), slice(0, 2))
+    # (dates, variables, ensemble, grid) -> (dates, ensemble, grid, variables)
+    assert tuple(x.shape) == (3, 4, 5, 2)

@@ -19,6 +19,8 @@ if TYPE_CHECKING:
 
     import torch
 
+    from anemoi.models.data.sources import Source
+
 
 @dataclass
 class TrainingStepOutput:
@@ -26,5 +28,5 @@ class TrainingStepOutput:
 
     loss: torch.Tensor
     metrics: Mapping[str, torch.Tensor]
-    predictions: list[dict[str, torch.Tensor]]
+    predictions: list[dict[str, Source]]
     plot_kwargs: dict[str, Any] = field(default_factory=dict)

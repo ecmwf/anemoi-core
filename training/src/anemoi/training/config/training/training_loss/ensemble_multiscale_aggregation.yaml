@@ -1,7 +1,7 @@
 datasets:
   data:
     _target_: anemoi.training.losses.combined.CombinedLoss
-    ignore_nans: False
+    ignore_nans: True
     # loss_weights: [n_timesteps / (n_timesteps + n_agg_ops), n_agg_ops / (n_timesteps + n_agg_ops)]
     # Each sub-loss averages internally (raw over timesteps, aggregate over agg ops).
     # These weights re-scale so the total matches: sum_all / (n_timesteps + n_agg_ops).
@@ -9,20 +9,22 @@ datasets:
     loss_weights: [0.6, 0.4]
     losses:
       - _target_: anemoi.training.losses.MultiscaleLossWrapper
+        ignore_nans: True
         multiscale_config: null  # null = single scale, no smoothing
         weights: [1.0]
         per_scale_loss:
           _target_: anemoi.training.losses.CRPS
-          scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights', 'time_steps']
-          ignore_nans: False
+          scalers: ['pressure_level', 'general_variable', 'node_weights', 'time_steps']
+          ignore_nans: True
           no_autocast: True
           alpha: 0.95
       - _target_: anemoi.training.losses.aggregate.TimeAggregateLossWrapper
-        scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
+        scalers: ['pressure_level', 'general_variable', 'node_weights']
+        ignore_nans: True
         time_aggregation_types: [mean, max, min, diff]
         loss_fn:
           _target_: anemoi.training.losses.CRPS
-          ignore_nans: False
+          ignore_nans: True
           no_autocast: True
           alpha: 0.95
 

@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
+from anemoi.models.data import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
@@ -24,8 +25,10 @@ from anemoi.training.utils.index_space import IndexSpace
 if TYPE_CHECKING:
     from omegaconf import DictConfig
     from torch.distributed.distributed_c10d import ProcessGroup
-    from torch_geometric.data import HeteroData
 
+    from anemoi.models.data.layout import TensorLayout
+    from anemoi.models.data.sources import Source
+    from anemoi.models.data.sources import Template
     from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
@@ -40,10 +43,10 @@ class EnsembleTraining(BaseTrainingModule):
         *,
         config: DictConfig,
         task: BaseTask,
-        graph_data: HeteroData,
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
+        data_readers: dict,
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -59,16 +62,18 @@ class EnsembleTraining(BaseTrainingModule):
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
+        data_readers : dict
+            Per-dataset readers; the model interface derives ``is_dataset_static`` from them.
         metadata : dict
             Provenance information
         """
         super().__init__(
             config=config,
             task=task,
-            graph_data=graph_data,
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
+            data_readers=data_readers,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )
@@ -151,32 +156,74 @@ class EnsembleTraining(BaseTrainingModule):
             self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
         return self._ensemble_plot_adapter
 
-    def _expand_ens_dim(self, batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Expand the ensemble dimension in the input batch by stacking the data nens_per_device times."""
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            x[dataset_name] = dataset_batch.tile(1, 1, self.nens_per_device, 1, 1)
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
+    def _expand_ens_dim(self, batch: Batch) -> Batch:
+        """Expand the per-device ensemble dimension by tiling the data nens_per_device times.
 
-        return x
+        The tiling is driven by each dataset's own layout rather than a fixed dimension.
+        """
+        new_data = {}
+        for dataset_name, source in batch.items():
+            dataset_batch = source.data
+            layout = source.layout
+            if layout is None or layout.ensemble is None:
+                msg = f"Dataset {dataset_name!r} has no ensemble axis in its layout ({layout!r})"
+                raise ValueError(msg)
+
+            if isinstance(dataset_batch, list):
+                # unstructured obs: the batch is the outer list, so each sample is tiled on its own.
+                new_data[dataset_name] = [self._tile_members(sample, layout) for sample in dataset_batch]
+                shapes = [list(sample.shape) for sample in new_data[dataset_name]]
+            else:
+                new_data[dataset_name] = self._tile_members(dataset_batch, layout)
+                shapes = list(new_data[dataset_name].shape)
+            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
+        return batch.with_data(new_data)
+
+    def _member_template(self, templates: dict[str, Template]) -> dict[str, Template]:
+        """What the model predicts for the tiled members, given the task's target ``templates``.
+
+        The decoder reads its target node count from the template, so it must describe as many
+        members as the tiled input. Only the member count changes: the targets themselves keep
+        their single member for the loss, and nothing is copied.
+        """
+        return {
+            name: template.with_ensemble_size(template.ensemble_size * self.nens_per_device)
+            for name, template in templates.items()
+        }
+
+    def _tile_members(self, data: torch.Tensor, layout: TensorLayout) -> torch.Tensor:
+        """Repeat the data nens_per_device times along its ensemble axis (identified from the layout)."""
+        repeats = [1] * data.ndim
+        repeats[layout.axis("ensemble", ndim=data.ndim)] = self.nens_per_device
+        return data.repeat(*repeats)
 
     def compute_dataset_loss_metrics(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         dataset_name: str,
         rollout_step: int | None = None,
         validation_mode: bool = False,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
         **_kwargs,
-    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], torch.Tensor]:
+    ) -> tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]:
+        # a Source has no ndim; the layout's rank is the per-tensor rank (per sample for tabular sources)
+        ensemble_axis = y_pred.layout.axis(TensorDim.ENSEMBLE_DIM, ndim=y_pred.layout.ndim)
 
-        y_pred_ens = gather_tensor(
-            y_pred.clone(),  # for bwd because we checkpoint this region
-            dim=TensorDim.ENSEMBLE_DIM,
-            sizes=[y_pred.size(TensorDim.ENSEMBLE_DIM)] * self.ens_comm_subgroup_size,
-            mgroup=self.ens_comm_subgroup,
+        def gather_members(tensor: torch.Tensor) -> torch.Tensor:
+            return gather_tensor(
+                tensor.clone(),  # for bwd because we checkpoint this region
+                dim=ensemble_axis,
+                sizes=[tensor.shape[ensemble_axis]] * self.ens_comm_subgroup_size,
+                mgroup=self.ens_comm_subgroup,
+            )
+
+        payload = y_pred.data
+        y_pred_ens = y_pred.clone(
+            data=(
+                [gather_members(sample) for sample in payload] if isinstance(payload, list) else gather_members(payload)
+            ),
         )
 
         y_pred_ens_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -194,7 +241,9 @@ class EnsembleTraining(BaseTrainingModule):
         # Tensors must be marked as dynamic before being passed to the compiled function
         dynamic_indices = True  # TODO(cathal): set as true only for validation
         if dynamic_indices:
-            torch._dynamo.mark_dynamic(y_pred_ens_full, -1)
+            full_payload = y_pred_ens_full.data
+            for tensor in full_payload if isinstance(full_payload, list) else [full_payload]:
+                torch._dynamo.mark_dynamic(tensor, y_pred_ens_full.layout.axis(TensorDim.VARIABLE, ndim=tensor.ndim))
 
         loss = self._compute_loss(
             y_pred_ens_full,
@@ -220,12 +269,18 @@ class EnsembleTraining(BaseTrainingModule):
 
         return loss, metrics_next, y_pred_ens
 
-    def forward(self, x: dict[str, torch.Tensor], rollout_step: int | None = None, **kwargs) -> dict[str, torch.Tensor]:
+    def forward(
+        self,
+        x: Batch,
+        rollout_step: int | None = None,
+        **kwargs,
+    ) -> Batch:
         """Forward method.
 
         This method calls the model's forward method with the appropriate
         communication group and sharding information.
         """
+        assert isinstance(x, Batch), f"EnsembleTraining.forward expects a Batch, got {type(x).__name__}"
         if rollout_step is not None:
             kwargs["fcstep"] = rollout_step
         else:
@@ -234,26 +289,41 @@ class EnsembleTraining(BaseTrainingModule):
         return self.model(
             x,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes=self.grid_shard_sizes,
             **kwargs,
         )
 
     def _step(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: Batch,
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
         step_losses, step_metrics, y_preds = [], [], []
 
-        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        x = self.preprocess_inputs(self.task.get_inputs(batch, data_indices=self.data_indices))
         x = self._expand_ens_dim(x)
 
         task_steps = self.task.steps("training" if not validation_mode else "validation")
-        for i, task_step_kwargs in enumerate(task_steps):
-            y_pred = self(x, **task_step_kwargs)
+        for step_index, task_step_kwargs in enumerate(task_steps):
+            # get_targets returns (targets, target_template, target_forcings): the full target slice
+            # used for the loss, what the model predicts at the target nodes, and the output-time
+            # forcing variables that condition the decoder.
+            raw_targets, target_template, target_forcings = self.task.get_targets(
+                batch,
+                data_indices=self.data_indices,
+                **task_step_kwargs,
+            )
+            y = self.preprocess_targets(raw_targets)
+            # the target forcings are consumed by the decoder, so they are model inputs and
+            # must be preprocessed accordingly (e.g., with NaN masking) and tiled like x
+            target_forcings = self._expand_ens_dim(self.preprocess_inputs(target_forcings))
 
-            y = self.task.get_targets(batch, **task_step_kwargs)
+            y_pred = self(
+                x,
+                target_forcings=target_forcings,
+                target_template=self._member_template(target_template),
+                **task_step_kwargs,
+            )
 
             loss_next, metrics_next, y_preds_next = checkpoint(
                 self.compute_loss_metrics,
@@ -266,16 +336,17 @@ class EnsembleTraining(BaseTrainingModule):
                 use_reentrant=False,
             )
 
-            # Advance input state for each dataset if another step follows
-            if i < len(task_steps) - 1:
+            # Advance input state for each dataset, except at the final step
+            if step_index < len(task_steps) - 1:
                 x = self.task.advance_input(
                     x,
                     y_pred,
-                    batch,
+                    self.preprocess_inputs(raw_targets),
                     **task_step_kwargs,
                     data_indices=self.data_indices,
                     output_mask=self.output_mask,
-                    grid_shard_slice=self.grid_shard_slice,
+                    # The LAM boundary refill indexes the local grid shard.
+                    grid_shard_slice={name: self._grid_shard_slice(view) for name, view in x.items()},
                 )
 
             step_losses.append(loss_next)
