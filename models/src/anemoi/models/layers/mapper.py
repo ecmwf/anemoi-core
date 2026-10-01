@@ -315,6 +315,18 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         self._compiled_forward_impl = self._compiled_call_impl
         self._compiled_call_impl = self._compiled_call_with_chunk_plan_prepass
 
+    def __getstate__(self) -> dict:
+        # like nn.Module, which drops _compiled_call_impl, don't pickle the compiled forward.
+        # The chunk plan cache is derived from the graph, so it doesn't belong in checkpoints either.
+        state = super().__getstate__()
+        state.pop("_compiled_forward_impl", None)
+        state["_compiled_chunk_plans"] = {}
+        return state
+
+    def __setstate__(self, state: dict) -> None:
+        super().__setstate__(state)
+        self.__dict__.setdefault("_compiled_chunk_plans", {})  # mappers pickled before the cache existed
+
     def _compiled_call_with_chunk_plan_prepass(self, *args, **kwargs):
         if self.shard_strategy == "edges" and not self._compiled_chunk_plans:
             self.prepare_chunk_plan(*args, **kwargs)
