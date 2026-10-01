@@ -49,7 +49,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         n_step_output: dict[str, int],
     ) -> None:
         # Read before super().__init__, which calls _calculate_input_dim.
-        self.condition_on_residual = DotDict(model_config).model.condition_on_residual
+        self.condition_on_residual = DotDict(model_config).condition_on_residual
         super().__init__(
             model_config=model_config,
             model_graph_config=model_graph_config,
