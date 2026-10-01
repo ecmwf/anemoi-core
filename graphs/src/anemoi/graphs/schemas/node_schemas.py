@@ -83,8 +83,10 @@ class ICONMeshNodeSchema(BaseModel):
     "Mesh based on ICON grid class implementation from anemoi.graphs.nodes."
     grid_filename: str
     "Name of NetCDF ICON grid file."
-    max_level: int
+    max_level: int | None = None
     "Maximum refinement level of the multi mesh / cell grid."
+    min_level: int | None = None
+    "Minimum refinement level of the multi mesh / cell grid."
 
 
 class LimitedAreaNPZFileNodesSchema(BaseModel):
