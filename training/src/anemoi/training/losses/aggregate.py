@@ -77,6 +77,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             Distributed group for reduction, by default ``None``.
         squash_mode : str | None, optional
             Variable-dimension reduction mode. If omitted, the wrapped loss default is used.
+        **kwargs
+            Additional arguments passed to the wrapped loss.
 
         Returns
         -------
@@ -84,9 +86,8 @@ class TimeAggregateLossWrapper(BaseLossWrapper):
             Accumulated loss across all aggregation types.
         """
         if pred.is_tabular:
-            raise NotImplementedError(
-                "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources.",
-            )
+            msg = "TimeAggregateLossWrapper needs an explicit time axis; it does not support tabular sources."
+            raise NotImplementedError(msg)
         assert (
             pred.time_size > 1
         ), "TimeAggregateLossWrapper requires an output time dimension of size > 1 for aggregation."

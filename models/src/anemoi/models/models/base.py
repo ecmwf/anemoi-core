@@ -129,15 +129,15 @@ def load_existing_graph(
         The loaded graph and a dynamic graph configuration with no builders for any of its edges.
     """
     if graph_path is None:
-        raise ValueError(
-            "The graph config defines no nodes, so a pre-built graph must be given in `system.input.graph`."
-        )
+        msg = "The graph config defines no nodes, so a pre-built graph must be given in `system.input.graph`."
+        raise ValueError(msg)
     dynamic_datasets = [name for name, is_static in is_dataset_static.items() if not is_static]
     if dynamic_datasets:
-        raise NotImplementedError(
+        msg = (
             f"A pre-built graph only works with static datasets, but {dynamic_datasets} require a dynamic graph. "
             "Define their nodes and edges in the graph config instead."
         )
+        raise NotImplementedError(msg)
 
     hidden_names = [hidden_nodes_name] if isinstance(hidden_nodes_name, str) else list(hidden_nodes_name)
     for hidden_name in hidden_names:
@@ -644,6 +644,8 @@ class BaseGraphModel(nn.Module):
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
+        n_step_input : dict[str, int]
+            Number of input time steps per dataset.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
