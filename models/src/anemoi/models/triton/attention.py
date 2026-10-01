@@ -60,6 +60,50 @@ set_allocator()
 
 
 @triton.jit
+def _window_bounds(
+    start,  # first position of the fixed block
+    N_CTX: tl.constexpr,
+    BLOCK_FIXED: tl.constexpr,
+    BLOCK_ITER: tl.constexpr,
+    WINDOW: tl.constexpr,
+    UNEVEN_CTX: tl.constexpr,
+):
+    """Range of iter blocks that the fixed block [start, start + BLOCK_FIXED) sees through the sliding window.
+
+    Returns lo <= lo_in <= hi_in <= hi, all multiples of BLOCK_ITER. [lo, hi) holds every iter block with at
+    least one pair inside the window. [lo_in, hi_in) holds the iter blocks whose every pair is inside the window
+    and inside the context, so they need no masking.
+    """
+    # Attends within the following range (Assuming W=1)
+    # X X - - -
+    # X X X - -
+    # - X X X -
+    # - - X X X
+    # - - - X X
+    lo = tl.maximum(0, start - WINDOW)
+    hi = tl.minimum(N_CTX, start + BLOCK_FIXED + WINDOW)
+    # round lo down and hi up to the nearest multiple of BLOCK_ITER
+    lo = (lo // BLOCK_ITER) * BLOCK_ITER
+    hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
+
+    # An iter block [c, c + BLOCK_ITER) is fully inside the window of every fixed position when
+    # c >= start + BLOCK_FIXED - 1 - WINDOW and c + BLOCK_ITER - 1 <= start + WINDOW.
+    lo_in = ((tl.maximum(start + BLOCK_FIXED - 1 - WINDOW, 0) + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
+    hi_in = ((start + WINDOW + 1) // BLOCK_ITER) * BLOCK_ITER
+    if UNEVEN_CTX:
+        # the last, partly filled block always takes the masked path
+        hi_in = tl.minimum(hi_in, (N_CTX // BLOCK_ITER) * BLOCK_ITER)
+    lo_in = tl.minimum(tl.maximum(lo_in, lo), hi)
+    hi_in = tl.maximum(tl.minimum(hi_in, hi), lo_in)
+    return (
+        tl.multiple_of(lo, BLOCK_ITER),
+        tl.multiple_of(lo_in, BLOCK_ITER),
+        tl.multiple_of(hi_in, BLOCK_ITER),
+        tl.multiple_of(hi, BLOCK_ITER),
+    )
+
+
+@triton.jit
 def _attn_fwd_inner(
     acc,  # accumulator in smem for the output of this block, with shape [BLOCK_FIXED, HEAD_DIM]
     l_i,  # smem buffer for the denominator of the softmax, with shape [BLOCK_FIXED]
@@ -67,9 +111,10 @@ def _attn_fwd_inner(
     q,  # the block of Q loaded into shared memory, with shape [BLOCK_FIXED, HEAD_DIM]
     desc_k,  # tensor descriptor for K
     desc_v,  # tensor descriptor for V
-    iter_offset,  # the starting offset into K and V which this block will iterate over
+    iter_offset,  # the offset into K and V of the first key of this batch and head
+    lo,  # first key position this call iterates over, a multiple of BLOCK_ITER
+    hi,  # end of the key positions this call iterates over
     dtype: tl.constexpr,
-    start_fixed,  # the starting block of the context within Q and O which this kernel is responsible for, used for masking
     qk_scale,  # scaling factor for the QK^T operation, contains the 1/log(2) factor for faster exponentant calculation
     BLOCK_FIXED: tl.constexpr,  # The size of BLOCK_FIXED, which determines how much of Q is loaded into shared memory and how much of the output is calculated by each block, determined by autotuning
     BLOCK_ITER: tl.constexpr,  # The size of BLOCK_ITER, which determines how much of K and V is iterated over in each block, determined by autotuning
@@ -80,75 +125,23 @@ def _attn_fwd_inner(
     WINDOW: tl.constexpr,  # The sliding window size for attention. If 0, no sliding window masking is applied.
     WARP_SPECIALIZE: tl.constexpr,  # Whether or not warp specialization should be used.
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
+    MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Tiled calculation of the attention algorithm. Inner loop.
 
     Outside this function, each program has loaded a BLOCK_FIXED sized section of the context Q
     This is stored in shared memory throughout.
-    It then loops over K and V in sizes of BLOCK_ITER until the entire
-    BLOCK_FIXED sized output is calculated in shared memory.
+    It then loops over K and V in sizes of BLOCK_ITER from lo to hi, updating the
+    BLOCK_FIXED sized output in shared memory.
     Outside this function, output is stored back to global memory.
 
     Optionally, causal or sliding window masking can be performed.
     Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
 
     """
-    # range of values handled by this kernel
-
-    # If masking is being used, compute the bounds of the attention for this block based on the position of the block in the context
-    if CAUSAL:
-        # Attends within the following range
-        # X - - - -
-        # X X - - -
-        # X X X - -
-        # X X X X -
-        # X X X X X
-
-        lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_CTX)
-        hi = tl.multiple_of(hi, BLOCK_FIXED)
-
-        # round down to lowest multiple of BLOCK_ITER
-        lo = (lo // BLOCK_ITER) * BLOCK_ITER
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        if not UNEVEN_CTX:
-            hi = tl.multiple_of(hi, BLOCK_ITER)
-    elif WINDOW >= 0:
-        # Attends within the following range (Assuming W=1)
-        # X X - - -
-        # X X X - -
-        # - X X X -
-        # - - X X X
-        # - - - X X
-
-        lo = tl.maximum(0, (start_fixed * BLOCK_FIXED) - WINDOW)
-        hi = tl.minimum(N_CTX, (start_fixed + 1) * BLOCK_FIXED + WINDOW)
-
-        # round down to lowest multiple if not even
-        if lo % BLOCK_ITER != 0:
-            lo = (lo // BLOCK_ITER) * BLOCK_ITER
-        # round up to highest multiple if not even
-        if hi % BLOCK_ITER != 0:
-            hi = (hi // BLOCK_ITER) * BLOCK_ITER + BLOCK_ITER
-
-        # Apply bounds and inform compiler about multiples
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
-    else:
-        # Attends within the following range
-        # X X X X X
-        # X X X X X
-        # X X X X X
-        # X X X X X
-        # X X X X X
-
-        lo, hi = 0, N_CTX
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        if not UNEVEN_CTX:
-            hi = tl.multiple_of(hi, BLOCK_ITER)
-
     MINUS_INF: tl.constexpr = float(-1.0e8)
 
-    # Compute the starting offset of K and V, based on optional masking
+    # Compute the starting offset of K and V
     iter_offset = iter_offset + lo
 
     # loop over k, v and update accumulator
@@ -158,30 +151,30 @@ def _attn_fwd_inner(
 
         # -- compute qk  (load Kt, optionally mask it, load compute QKt, optionally mask it)----
         k = desc_k.load([iter_offset, 0]).T
-        if UNEVEN_CTX and tail_iter_block:
+        if MASKED and UNEVEN_CTX and tail_iter_block:
             k = tl.where(
                 (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
             )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
 
-        # qk = tl.dot(q, k) * qk_scale
         qk = tl.dot(q, k)
 
-        if UNEVEN_CTX and tail_iter_block:
-            qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+        if MASKED:
+            if UNEVEN_CTX and tail_iter_block:
+                qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
 
-        # apply Causal or Window masking if needed.
-        if WINDOW >= 0:
-            fixed_pos = offs_fixed[:, None]
-            iter_pos = (curr_iter + offs_iter)[None, :]
-            # Mask condition: keep if (q - window_size <= k <= q + window size)
-            mask = (iter_pos <= fixed_pos + WINDOW) & (iter_pos >= fixed_pos - WINDOW)
-            qk = tl.where(mask, qk, MINUS_INF)
+            # apply Causal or Window masking if needed.
+            if WINDOW >= 0:
+                fixed_pos = offs_fixed[:, None]
+                iter_pos = (curr_iter + offs_iter)[None, :]
+                # Mask condition: keep if (q - window_size <= k <= q + window size)
+                mask = (iter_pos <= fixed_pos + WINDOW) & (iter_pos >= fixed_pos - WINDOW)
+                qk = tl.where(mask, qk, MINUS_INF)
 
-        elif CAUSAL:
-            fixed_pos = offs_fixed[:, None]
-            iter_pos = (curr_iter + offs_iter)[None, :]
-            mask = fixed_pos >= iter_pos
-            qk = tl.where(mask, qk, MINUS_INF)
+            elif CAUSAL:
+                fixed_pos = offs_fixed[:, None]
+                iter_pos = (curr_iter + offs_iter)[None, :]
+                mask = fixed_pos >= iter_pos
+                qk = tl.where(mask, qk, MINUS_INF)
 
         # The row maximum is kept in unscaled logits and subtracted before scaling, so the largest
         # score of a row maps to exactly 0. Scaling first and subtracting a separately rounded,
@@ -199,7 +192,7 @@ def _attn_fwd_inner(
         acc = acc * alpha[:, None]
         # prepare p and v for the dot
         v = desc_v.load([iter_offset, 0])
-        if UNEVEN_CTX and tail_iter_block:
+        if MASKED and UNEVEN_CTX and tail_iter_block:
             v = tl.where(
                 (curr_iter + offs_iter)[:, None] < N_CTX, v, 0.0
             )  # mask out-of-bounds v values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_ITER
@@ -433,27 +426,124 @@ def _attn_fwd(
         q = tl.where(offs_fixed[:, None] < N_CTX, q, 0.0)
 
     # ****** 5) main loop, iterating over blocks of K and V, and updating the output accumulator, m_i and l_i for each block *****
-    acc, l_i, m_i = _attn_fwd_inner(
-        acc,
-        l_i,
-        m_i,
-        q,  #
-        desc_k,
-        desc_v,  #
-        iter_offset,
-        dtype,
-        start_fixed,
-        qk_scale,  #
-        BLOCK_FIXED,
-        BLOCK_ITER,  #
-        CAUSAL,
-        offs_fixed,
-        offs_iter,
-        N_CTX,  #
-        WINDOW,
-        WARP_SPECIALIZE,
-        UNEVEN_CTX,
-    )
+    if WINDOW >= 0:
+        # Key blocks inside the window of every query of this block need no mask, so only the blocks
+        # at the two edges of the window go through the masked loop.
+        lo, lo_in, hi_in, hi = _window_bounds(
+            start_fixed * BLOCK_FIXED, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX
+        )
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,
+            desc_k,
+            desc_v,
+            iter_offset,
+            lo,
+            lo_in,
+            dtype,
+            qk_scale,
+            BLOCK_FIXED,
+            BLOCK_ITER,
+            CAUSAL,
+            offs_fixed,
+            offs_iter,
+            N_CTX,
+            WINDOW,
+            WARP_SPECIALIZE,
+            UNEVEN_CTX,
+            True,
+        )
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,
+            desc_k,
+            desc_v,
+            iter_offset,
+            lo_in,
+            hi_in,
+            dtype,
+            qk_scale,
+            BLOCK_FIXED,
+            BLOCK_ITER,
+            CAUSAL,
+            offs_fixed,
+            offs_iter,
+            N_CTX,
+            WINDOW,
+            WARP_SPECIALIZE,
+            UNEVEN_CTX,
+            False,
+        )
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,
+            desc_k,
+            desc_v,
+            iter_offset,
+            hi_in,
+            hi,
+            dtype,
+            qk_scale,
+            BLOCK_FIXED,
+            BLOCK_ITER,
+            CAUSAL,
+            offs_fixed,
+            offs_iter,
+            N_CTX,
+            WINDOW,
+            WARP_SPECIALIZE,
+            UNEVEN_CTX,
+            True,
+        )
+    else:
+        if CAUSAL:
+            # Attends within the following range
+            # X - - - -
+            # X X - - -
+            # X X X - -
+            # X X X X -
+            # X X X X X
+            lo, hi = 0, tl.minimum((start_fixed + 1) * BLOCK_FIXED, N_CTX)
+            hi = tl.multiple_of(hi, BLOCK_FIXED)
+        else:
+            # Attends within the following range
+            # X X X X X
+            # X X X X X
+            # X X X X X
+            # X X X X X
+            # X X X X X
+            lo, hi = 0, N_CTX
+        if not UNEVEN_CTX:
+            hi = tl.multiple_of(hi, BLOCK_ITER)
+        acc, l_i, m_i = _attn_fwd_inner(
+            acc,
+            l_i,
+            m_i,
+            q,
+            desc_k,
+            desc_v,
+            iter_offset,
+            lo,
+            hi,
+            dtype,
+            qk_scale,
+            BLOCK_FIXED,
+            BLOCK_ITER,
+            CAUSAL,
+            offs_fixed,
+            offs_iter,
+            N_CTX,
+            WINDOW,
+            WARP_SPECIALIZE,
+            UNEVEN_CTX,
+            True,
+        )
     # epilogue
     # Save m_max (in unscaled logits) and inv_l separately so the backward can compute
     # p = exp2((qk - m_max) * scale) * inv_l without the fp precision loss
@@ -482,30 +572,100 @@ def _attn_fwd(
 
 
 @triton.jit
-def _attn_bwd_preprocess(
-    Out, DO, Delta, N_CTX, n_ctx_rounded: tl.constexpr, PRE_BLOCK: tl.constexpr, HEAD_DIM: tl.constexpr
-):  #  #  #  #
-    """Calculates a per-token scalar Delta needed for backwards softmax computation.
+def _attn_bwd_dkdv_inner(
+    dk,  # gradient accumulator for dK, [BLOCK_FIXED, HEAD_DIM]
+    dv,  # gradient accumulator for dV, [BLOCK_FIXED, HEAD_DIM]
+    k,  # the fixed block of K
+    v,  # the fixed block of V
+    desc_q,
+    desc_do,
+    M,  # row-wise softmax max values of this batch and head
+    INV_L,  # row-wise inverse softmax sums of this batch and head
+    D,  # delta values of this batch and head
+    LAM,  # per-query correction of ds of this batch and head, written by _attn_bwd_dq
+    iter_offset,  # the offset into Q and dO of the first query of this batch and head
+    lo,  # first query position this call iterates over, a multiple of BLOCK_ITER
+    hi,  # end of the query positions this call iterates over
+    qk_scale,
+    offs_fixed,  # positions of the fixed block of K and V
+    N_CTX: tl.constexpr,
+    BLOCK_ITER: tl.constexpr,
+    CAUSAL: tl.constexpr,
+    WINDOW: tl.constexpr,
+    WARP_SPECIALIZE: tl.constexpr,
+    dtype: tl.constexpr,
+    UNEVEN_CTX: tl.constexpr,
+    MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
+):
+    """Inner loop of _attn_bwd_dkdv over the blocks of Q between lo and hi."""
+    MINUS_INF: tl.constexpr = float(-1.0e8)
+    offs_iter = tl.arange(0, BLOCK_ITER)
 
-    Pre-computing and storing it here prevents repeated recomputation during inner backward computation.
-    """
-    off_m = tl.program_id(0) * PRE_BLOCK + tl.arange(0, PRE_BLOCK)
-    off_hz = tl.program_id(1)
-    off_n = tl.arange(0, HEAD_DIM)
-    # load - use N_CTX for stride since tensors are not padded
-    o = tl.load(
-        Out + off_hz.to(tl.int64) * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
-        mask=off_m[:, None] < N_CTX,
-        other=0.0,
-    ).to(tl.float32)
-    do = tl.load(
-        DO + off_hz.to(tl.int64) * HEAD_DIM * N_CTX + off_m[:, None] * HEAD_DIM + off_n[None, :],
-        mask=off_m[:, None] < N_CTX,
-        other=0.0,
-    ).to(tl.float32)
-    delta = tl.sum(o * do, axis=1)
-    # write-back - use n_ctx_rounded since Delta has that dimension
-    tl.store(Delta + off_hz * n_ctx_rounded + off_m, delta, mask=off_m < N_CTX)
+    # skip up to 'lo'
+    iter_offset += lo
+
+    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
+        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
+        curr_offs = curr_iter + offs_iter
+        qT = desc_q.load([iter_offset, 0]).T
+        tail_iter_block = MASKED and UNEVEN_CTX and (curr_iter + BLOCK_ITER > N_CTX)
+        if tail_iter_block:
+            # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
+            qT = tl.where(curr_offs[None, :] < N_CTX, qT, 0.0)
+
+        # Load m and inv_l before computing qk to reduce pipeline stall.
+        if tail_iter_block:
+            m = tl.load(M + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            inv_l = tl.load(INV_L + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+        else:
+            m = tl.load(M + curr_offs)
+            inv_l = tl.load(INV_L + curr_offs)
+        qkT = tl.dot(k, qT)
+
+        # Apply masking.
+        if MASKED:
+            if tail_iter_block:
+                qkT = tl.where((curr_offs[None, :] < N_CTX), qkT, MINUS_INF)
+            if CAUSAL:
+                mask = curr_offs[None, :] >= offs_fixed[:, None]
+                qkT = tl.where(mask, qkT, MINUS_INF)
+            if WINDOW >= 0:
+                iter_pos = curr_offs[None, :]
+                # Mask condition: keep if (q - window_size <= k <= q + window size)
+                mask = (offs_fixed[:, None] - WINDOW <= iter_pos) & (offs_fixed[:, None] + WINDOW >= iter_pos)
+                qkT = tl.where(mask, qkT, MINUS_INF)
+
+        # Apply exponent after masking, then multiply by inv_l to get the
+        # normalised softmax probability.  Keeping m_max and inv_l separate
+        # (rather than the combined M = m + log2(l) used on the main branch)
+        # avoids fp precision loss when m and log2(l) differ greatly.
+        pT = tl.math.exp2((qkT - m[None, :]) * qk_scale) * inv_l[None, :]
+
+        do = desc_do.load([iter_offset, 0])
+        if tail_iter_block:
+            # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
+            do = tl.where(curr_offs[:, None] < N_CTX, do, 0.0)
+        # Compute dV.
+        dv += tl.dot(pT.to(dtype), do)
+        if tail_iter_block:
+            Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            lam = tl.load(LAM + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+        else:
+            Di = tl.load(D + curr_offs)
+            lam = tl.load(LAM + curr_offs)
+        # Compute dP and dS.
+        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+        dsT = pT * (dpT - Di[None, :])
+        dk += tl.dot(dsT.to(dtype), tl.trans(qT))
+        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero here too.
+        # The correction stays a product of its own: lam * p is far smaller than ds, and rounding
+        # ds - lam * p to 16 bits would lose most of it.
+        dk += tl.dot((pT * -lam[None, :]).to(dtype), tl.trans(qT))
+
+        # Move to next iter block
+        iter_offset += BLOCK_ITER
+
+    return dk, dv
 
 
 @triton.autotune(
@@ -528,7 +688,7 @@ def _attn_bwd_dkdv(
     dv_ptr,
     M,  # pointer to row-wise softmax max values (m_i) saved by forward
     INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
-    D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
+    D,  # pointer to delta values written by _attn_bwd_dq
     LAM,  # pointer to the per-query correction of ds written by _attn_bwd_dq, see there
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -563,7 +723,6 @@ def _attn_bwd_dkdv(
     start_fixed = (
         pid * BLOCK_FIXED
     )  # which BLOCK_FIXED sized section of K and V this program loads and computes gradients for
-    start_iter = 0
 
     # Index into head and batch
     off_hz = tl.program_id(2)  # Which head and batch this program is responsible for
@@ -650,115 +809,128 @@ def _attn_bwd_dkdv(
         k = tl.where(offs_fixed[:, None] < N_CTX, k, 0.0)
         v = tl.where(offs_fixed[:, None] < N_CTX, v, 0.0)
 
-    # Create offset pointers for tensors
-    offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
-
-    curr_iter = start_iter
-
-    MINUS_INF: tl.constexpr = float(-1.0e8)
-
     # This is a single stage kernel, which loops over columns of Q
     # When masking (causal or sliding-window) is used, it must determine where the
     # current block is in the global matrix to determine how it is masked
-    # There are 2 options:
+    # There are 3 options:
     #   fully masked out => skip block
-    #   masked => apply MASK to block
-
-    # Calculate the upper and lower bounds when using masking
-    if WINDOW >= 0:
-        # Rather then iterating across the whole context, we iterate
-        # Over a window around the position of the K and V blocks
-        lo = tl.maximum(0, start_fixed - WINDOW)
-        hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
-        kv_lower_bound = offs_fixed[:, None] - WINDOW
-        kv_upper_bound = offs_fixed[:, None] + WINDOW
-
-        # align lo and hi to nearest BLOCK_ITER
-        lo = (lo // BLOCK_ITER) * BLOCK_ITER
-        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
-    elif CAUSAL:
-        # lo, hi = start_n, N_CTX
-        # start_fixed, rounded down to lowest multiple if not even
-        lo = (start_fixed // BLOCK_ITER) * BLOCK_ITER
-        hi = N_CTX
-        # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
-
-    else:
-        lo: tl.constexpr = 0
-        hi: tl.constexpr = N_CTX
+    #   partly masked => apply MASK to block
+    #   fully inside the window => no MASK needed
 
     # ***** 5) main loop, iterating over blocks of Q, and updating the gradient accumulators dK and dV for each block *****
 
-    # skip up to 'lo'
-    iter_offset += lo
-
-    offs_iter = tl.arange(0, BLOCK_ITER)
-
-    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
-
-        curr_offs = curr_iter + offs_iter
-        qT = desc_q.load([iter_offset, 0]).T
-        tail_iter_block = curr_iter + BLOCK_ITER > N_CTX
-        if UNEVEN_CTX and tail_iter_block:
-            # mask out-of-bounds q values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            qT = tl.where(curr_offs[None, :] < N_CTX, qT, 0.0)
-
-        # Load m and inv_l before computing qk to reduce pipeline stall.
-        if UNEVEN_CTX and tail_iter_block:
-            m = tl.load(M + curr_offs, mask=curr_offs < N_CTX, other=0.0)
-            inv_l = tl.load(INV_L + curr_offs, mask=curr_offs < N_CTX, other=0.0)
-        else:
-            m = tl.load(M + curr_offs)
-            inv_l = tl.load(INV_L + curr_offs)
-        qkT = tl.dot(k, qT)
-
-        # Apply masking.
-        if UNEVEN_CTX and tail_iter_block:
-            qkT = tl.where((curr_offs[None, :] < N_CTX), qkT, MINUS_INF)
+    if WINDOW >= 0:
+        # Rather then iterating across the whole context, we iterate over a window around the
+        # position of the K and V blocks; query blocks inside the window of every key need no mask.
+        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX)
+        dk, dv = _attn_bwd_dkdv_inner(
+            dk,
+            dv,
+            k,
+            v,
+            desc_q,
+            desc_do,
+            M,
+            INV_L,
+            D,
+            LAM,
+            iter_offset,
+            lo,
+            lo_in,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
+        dk, dv = _attn_bwd_dkdv_inner(
+            dk,
+            dv,
+            k,
+            v,
+            desc_q,
+            desc_do,
+            M,
+            INV_L,
+            D,
+            LAM,
+            iter_offset,
+            lo_in,
+            hi_in,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            False,
+        )
+        dk, dv = _attn_bwd_dkdv_inner(
+            dk,
+            dv,
+            k,
+            v,
+            desc_q,
+            desc_do,
+            M,
+            INV_L,
+            D,
+            LAM,
+            iter_offset,
+            hi_in,
+            hi,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
+    else:
         if CAUSAL:
-            mask = curr_offs[None, :] >= offs_fixed[:, None]
-            qkT = tl.where(mask, qkT, MINUS_INF)
-
-        if WINDOW >= 0:
-            iter_pos = curr_offs[None, :]
-            # Mask condition: keep if (q - window_size <= k <= q + window size)
-            mask = (kv_lower_bound <= iter_pos) & (kv_upper_bound >= iter_pos)
-            qkT = tl.where(mask, qkT, MINUS_INF)
-
-        # Apply exponent after masking, then multiply by inv_l to get the
-        # normalised softmax probability.  Keeping m_max and inv_l separate
-        # (rather than the combined M = m + log2(l) used on the main branch)
-        # avoids fp precision loss when m and log2(l) differ greatly.
-        pT = tl.math.exp2((qkT - m[None, :]) * qk_scale) * inv_l[None, :]
-
-        do = desc_do.load([iter_offset, 0])
-        if UNEVEN_CTX and tail_iter_block:
-            # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
-            do = tl.where(curr_offs[:, None] < N_CTX, do, 0.0)
-        # Compute dV.
-        ppT = pT.to(dtype)
-        dv += tl.dot(ppT, do)
-        # D (= delta) is pre-divided by ds_scale.
-        if UNEVEN_CTX and tail_iter_block:
-            Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
-            lam = tl.load(LAM + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            # start_fixed, rounded down to lowest multiple if not even
+            lo = (start_fixed // BLOCK_ITER) * BLOCK_ITER
+            # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+            lo = tl.multiple_of(lo, BLOCK_ITER)
         else:
-            Di = tl.load(D + curr_offs)
-            lam = tl.load(LAM + curr_offs)
-        # Compute dP and dS.
-        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
-        dsT = pT * (dpT - Di[None, :])
-        dsT = dsT.to(dtype)
-        dk += tl.dot(dsT, tl.trans(qT))
-        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero here too.
-        dk += tl.dot(ppT, tl.trans((qT * -lam[None, :]).to(dtype)))
-
-        # Move to next iter block
-        iter_offset += BLOCK_ITER
+            lo = 0
+        dk, dv = _attn_bwd_dkdv_inner(
+            dk,
+            dv,
+            k,
+            v,
+            desc_q,
+            desc_do,
+            M,
+            INV_L,
+            D,
+            LAM,
+            iter_offset,
+            lo,
+            N_CTX,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
 
     # ***** 6) store gradients dK and dV *****
 
@@ -784,6 +956,96 @@ def _attn_bwd_dkdv(
         desc_dk.store([fixed_offset, 0], dk.to(dtype))
 
 
+@triton.jit
+def _attn_bwd_dq_inner(
+    dq,  # gradient accumulator for dQ, [BLOCK_FIXED, HEAD_DIM]
+    p_k,  # accumulator for the rounded probabilities times K, [BLOCK_FIXED, HEAD_DIM]
+    ds_sum,  # sums of the rounded ds of each query, [BLOCK_FIXED]
+    p_sum,  # sums of the rounded probabilities of each query, [BLOCK_FIXED]
+    q,  # the fixed block of Q
+    do,  # the fixed block of dO
+    m,  # row-wise softmax max values of the fixed block, [BLOCK_FIXED, 1]
+    inv_l,  # row-wise inverse softmax sums of the fixed block
+    Di,  # delta values of the fixed block
+    desc_k,
+    desc_v,
+    iter_offset,  # the offset into K and V of the first key of this batch and head
+    lo,  # first key position this call iterates over, a multiple of BLOCK_ITER
+    hi,  # end of the key positions this call iterates over
+    qk_scale,
+    offs_fixed,  # positions of the fixed block of Q
+    N_CTX: tl.constexpr,
+    BLOCK_ITER: tl.constexpr,
+    CAUSAL: tl.constexpr,
+    WINDOW: tl.constexpr,
+    WARP_SPECIALIZE: tl.constexpr,
+    dtype: tl.constexpr,
+    UNEVEN_CTX: tl.constexpr,
+    MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
+):
+    """Inner loop of _attn_bwd_dq over the blocks of K and V between lo and hi."""
+    MINUS_INF: tl.constexpr = float(-1.0e8)
+    offs_iter = tl.arange(0, BLOCK_ITER)
+
+    # skip up to 'lo'
+    iter_offset += lo
+
+    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
+        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
+        tail_iter_block = MASKED and UNEVEN_CTX and ((curr_iter + BLOCK_ITER) > N_CTX)
+
+        kT = desc_k.load([iter_offset, 0]).T
+        vT = desc_v.load([iter_offset, 0]).T
+        if tail_iter_block:
+            # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_CTX is not divisible by BLOCK_FIXED
+            kT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, kT, 0.0)
+            vT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, vT, 0.0)
+
+        qk = tl.dot(q, kT)
+
+        # apply masking
+        if MASKED:
+            if tail_iter_block:
+                qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+            if CAUSAL:
+                iter_pos = (curr_iter + offs_iter)[None, :]
+                fixed_pos = offs_fixed[:, None]
+                mask = fixed_pos >= iter_pos
+                qk = tl.where(mask, qk, MINUS_INF)
+            if WINDOW >= 0:
+                iter_pos = (curr_iter + offs_iter)[None, :]
+                mask = (iter_pos <= offs_fixed[:, None] + WINDOW) & (iter_pos >= offs_fixed[:, None] - WINDOW)
+                qk = tl.where(mask, qk, MINUS_INF)
+
+        # Apply exponent after masking, then multiply by inv_l for the
+        # normalised softmax probability (see _attn_bwd_dkdv for rationale).
+        # Reconstruct probabilities with the same FP32 scaling as forward.
+        p = tl.math.exp2((qk - m) * qk_scale) * inv_l[:, None]
+        # Compute dP and dS.
+        # NOTE: dp - Di still suffers from cancellation when the softmax is
+        # very sharp (v[j*] ≈ out[i]) because both are O(1) scalars and their
+        # difference is computed after the dot-product accumulation.  The
+        # element-wise fix used in the graph-transformer kernel (gt.py) cannot
+        # be applied here: v[j] lives in the iter tile while out[i] lives in
+        # the fixed tile, so dot(do[i], v[j]-out[i]) cannot be expressed as a
+        # single tl.dot without restructuring to a non-tiled per-query loop.
+        dp = tl.dot(do, vT).to(tl.float32)
+        ds = p * (dp - Di[:, None])
+        # Compute dQ.
+        # K is unscaled; apply the softmax chain-rule scale in the epilogue.
+        ds = ds.to(dtype)
+        p = p.to(dtype)
+        ds_sum += tl.sum(ds.to(tl.float32), 1)
+        p_sum += tl.sum(p.to(tl.float32), 1)
+        dq += tl.dot(ds, tl.trans(kT))
+        p_k += tl.dot(p, tl.trans(kT))
+
+        # move to the next iter_block
+        iter_offset += BLOCK_ITER
+
+    return dq, p_k, ds_sum, p_sum
+
+
 @triton.autotune(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
@@ -799,9 +1061,10 @@ def _attn_bwd_dq(
     desc_do,
     desc_dq,
     dq_ptr,  # raw pointer for dq when using uneven ctx, to handle the dynamic block sizes and masked stores required for uneven ctx
+    Out,  # raw pointer to the output saved by forward
     M,  # pointer to row-wise softmax max values (m_i) saved by forward
     INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
-    D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
+    D,  # written here: delta values, rowsum(O * dO) per query, read by _attn_bwd_dkdv
     LAM,  # written here: sum of the rounded ds over sum of the rounded probabilities per query, see below
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
@@ -836,7 +1099,6 @@ def _attn_bwd_dq(
     start_fixed = (
         pid * BLOCK_FIXED
     )  # which BLOCK_FIXED sized section of Q this program loads and computes gradients for
-    start_iter = 0
 
     # Index into head and batch
     off_hz = tl.program_id(2)  # Which head and batch this program is responsible for
@@ -925,109 +1187,145 @@ def _attn_bwd_dq(
     if UNEVEN_CTX and tail_fixed_block:
         m = tl.load(M + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)  # Add masking to prevent loading garbage values
         inv_l = tl.load(INV_L + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
-        Di = tl.load(D + offs_fixed, mask=offs_fixed < N_CTX, other=0.0)
     else:
         m = tl.load(M + offs_fixed)
         inv_l = tl.load(INV_L + offs_fixed)
-        Di = tl.load(D + offs_fixed)
     m = m[:, None]
 
-    # D (= delta) is pre-divided by ds_scale.
-    curr_iter = start_iter
-
-    MINUS_INF: tl.constexpr = float(-1.0e8)
+    # delta = rowsum(O * dO), the per-query scalar of the softmax backward. It is worked out here from
+    # the saved output of this block and stored for the dK/dV kernel.
+    o = tl.load(
+        Out + off_hz.to(tl.int64) * N_CTX * HEAD_DIM + offs_fixed[:, None] * HEAD_DIM + tl.arange(0, HEAD_DIM)[None, :],
+        mask=offs_fixed[:, None] < N_CTX,
+        other=0.0,
+    )
+    Di = tl.sum(o.to(tl.float32) * do.to(tl.float32), axis=1)
+    tl.store(D + offs_fixed, Di, mask=offs_fixed < N_CTX)
 
     # This is a single stage kernel, which loops over columns of K and V
     # When masking (causal or sliding-window) is used, it must determine where the
     # current block is in the global matrix to determine how it is masked
-    # There are 2 options:
+    # There are 3 options:
     #   fully masked out => skip block
-    #   masked => apply MASK to block
-
-    # Calculate the upper and lower bounds when using masking
-    if WINDOW >= 0:
-        lo = tl.maximum(0, start_fixed - WINDOW)
-        hi = tl.minimum(N_CTX, (start_fixed + BLOCK_FIXED) + WINDOW)
-        q_lower_bound = offs_fixed[:, None] - WINDOW
-        q_upper_bound = offs_fixed[:, None] + WINDOW
-
-        # align lo and hi to nearest BLOCK_ITER
-        lo = (lo // BLOCK_ITER) * BLOCK_ITER
-        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
-    elif CAUSAL:
-        # hi is block after start_m, rounded up to nearest multiple of step_n
-        lo = 0
-        hi = start_fixed + BLOCK_FIXED
-
-        # round hi up to nearest multiple of BLOCK_ITER
-        hi = ((hi + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
-        # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
-        lo = tl.multiple_of(lo, BLOCK_ITER)
-        hi = tl.multiple_of(hi, BLOCK_ITER)
-    else:
-        lo: tl.constexpr = 0
-        hi: tl.constexpr = N_CTX
+    #   partly masked => apply MASK to block
+    #   fully inside the window => no MASK needed
 
     # ***** 5) main loop, iterating over blocks of K and V, and updating the gradient accumulator dQ for each block *****
 
-    # skip up to 'lo'
-    iter_offset += lo
-    offs_iter = tl.arange(0, BLOCK_ITER)
-
-    for curr_iter in tl.range(lo, hi, BLOCK_ITER, warp_specialize=WARP_SPECIALIZE):
-        curr_iter = tl.multiple_of(curr_iter, BLOCK_ITER)  # Tells compiler curr_iter is a multiple of BLOCK_ITER
-        tail_iter_block = (curr_iter + BLOCK_ITER) > N_CTX
-
-        kT = desc_k.load([iter_offset, 0]).T
-        vT = desc_v.load([iter_offset, 0]).T
-        if UNEVEN_CTX and tail_iter_block:
-            # mask out-of-bounds k and q values to 0, so they dont contribute to output when N_CTX is not divisible by BLOCK_FIXED
-            kT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, kT, 0.0)
-            vT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, vT, 0.0)
-
-        qk = tl.dot(q, kT)
-
-        # apply masking
-        if UNEVEN_CTX and tail_iter_block:
-            qk = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, qk, MINUS_INF)
+    if WINDOW >= 0:
+        lo, lo_in, hi_in, hi = _window_bounds(start_fixed, N_CTX, BLOCK_FIXED, BLOCK_ITER, WINDOW, UNEVEN_CTX)
+        dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
+            dq,
+            p_k,
+            ds_sum,
+            p_sum,
+            q,
+            do,
+            m,
+            inv_l,
+            Di,
+            desc_k,
+            desc_v,
+            iter_offset,
+            lo,
+            lo_in,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
+        dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
+            dq,
+            p_k,
+            ds_sum,
+            p_sum,
+            q,
+            do,
+            m,
+            inv_l,
+            Di,
+            desc_k,
+            desc_v,
+            iter_offset,
+            lo_in,
+            hi_in,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            False,
+        )
+        dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
+            dq,
+            p_k,
+            ds_sum,
+            p_sum,
+            q,
+            do,
+            m,
+            inv_l,
+            Di,
+            desc_k,
+            desc_v,
+            iter_offset,
+            hi_in,
+            hi,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
+    else:
         if CAUSAL:
-            iter_pos = (curr_iter + offs_iter)[None, :]
-            fixed_pos = offs_fixed[:, None]
-            mask = fixed_pos >= iter_pos
-            qk = tl.where(mask, qk, MINUS_INF)
-
-        if WINDOW >= 0:
-            iter_pos = (curr_iter + offs_iter)[None, :]
-            mask = (iter_pos <= q_upper_bound) & (iter_pos >= q_lower_bound)
-            qk = tl.where(mask, qk, MINUS_INF)
-
-        # Apply exponent after masking, then multiply by inv_l for the
-        # normalised softmax probability (see _attn_bwd_dkdv for rationale).
-        # Reconstruct probabilities with the same FP32 scaling as forward.
-        p = tl.math.exp2((qk - m) * qk_scale) * inv_l[:, None]
-        # Compute dP and dS.
-        # NOTE: dp - Di still suffers from cancellation when the softmax is
-        # very sharp (v[j*] ≈ out[i]) because both are O(1) scalars and their
-        # difference is computed after the dot-product accumulation.  The
-        # element-wise fix used in the graph-transformer kernel (gt.py) cannot
-        # be applied here: v[j] lives in the iter tile while out[i] lives in
-        # the fixed tile, so dot(do[i], v[j]-out[i]) cannot be expressed as a
-        # single tl.dot without restructuring to a non-tiled per-query loop.
-        dp = tl.dot(do, vT).to(tl.float32)
-        ds = p * (dp - Di[:, None])
-        # Compute dQ.
-        # K is unscaled; apply the softmax chain-rule scale in the epilogue.
-        ds = ds.to(dtype)
-        p = p.to(dtype)
-        ds_sum += tl.sum(ds.to(tl.float32), 1)
-        p_sum += tl.sum(p.to(tl.float32), 1)
-        dq += tl.dot(ds, tl.trans(kT))
-        p_k += tl.dot(p, tl.trans(kT))
-
-        # move to the next iter_block
-        iter_offset += BLOCK_ITER
+            # hi is the block end, rounded up to the nearest multiple of BLOCK_ITER
+            hi = ((start_fixed + BLOCK_FIXED + BLOCK_ITER - 1) // BLOCK_ITER) * BLOCK_ITER
+            # this function doesnt convert to a multiple - it informs the compiler that the first number IS a multiple of the second
+            hi = tl.multiple_of(hi, BLOCK_ITER)
+        else:
+            hi = N_CTX
+        dq, p_k, ds_sum, p_sum = _attn_bwd_dq_inner(
+            dq,
+            p_k,
+            ds_sum,
+            p_sum,
+            q,
+            do,
+            m,
+            inv_l,
+            Di,
+            desc_k,
+            desc_v,
+            iter_offset,
+            0,
+            hi,
+            qk_scale,
+            offs_fixed,
+            N_CTX,
+            BLOCK_ITER,
+            CAUSAL,
+            WINDOW,
+            WARP_SPECIALIZE,
+            dtype,
+            UNEVEN_CTX,
+            True,
+        )
 
     # ***** 6) store gradient dQ *****
 
@@ -1216,7 +1514,6 @@ class TritonAttention(torch.autograd.Function):
         dv = torch.empty_like(v).contiguous()
         BATCH, N_HEAD, N_CTX, HEAD_DIM = q.shape
 
-        PRE_BLOCK = 16
         delta = torch.empty_like(M)
         lam = torch.empty_like(M)
 
@@ -1226,20 +1523,8 @@ class TritonAttention(torch.autograd.Function):
         n_ctx_rounded = math.ceil(n_ctx / MAX_BLOCK_SIZE) * MAX_BLOCK_SIZE
         uneven_ctx = n_ctx_rounded != n_ctx
 
-        # Pad tensors to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_ITER
-        pre_grid = (triton.cdiv(n_ctx, PRE_BLOCK), BATCH * N_HEAD)
-
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, False)
         desc_dq, desc_dk, desc_dv, desc_do, extra_kern_args = _system_specific_settings(dq, dk, dv, do, False)
-
-        # precompute 'delta' value needed for softmax computation
-        _attn_bwd_preprocess[pre_grid](
-            o, do, delta, N_CTX, n_ctx_rounded=n_ctx_rounded, PRE_BLOCK=PRE_BLOCK, HEAD_DIM=HEAD_DIM
-        )
-
-        # for some reason, when using device-side tensor descriptors, the allocator must be set explictly before the backward pass, otherwise triton complains no allocator has been set
-        if not supports_host_descriptor():
-            set_allocator()
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
         # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
@@ -1255,7 +1540,7 @@ class TritonAttention(torch.autograd.Function):
         if not supports_host_descriptor():
             set_allocator()
 
-        # Compute dQ first: it also writes lam, which the dK/dV kernel reads.
+        # Compute dQ first: it also writes delta and lam, which the dK/dV kernel reads.
         _attn_bwd_dq[grid_dq](
             desc_q,
             desc_k,
@@ -1264,6 +1549,7 @@ class TritonAttention(torch.autograd.Function):
             desc_dq,
             # need to pass raw pointer in uneven ctx case
             dq,
+            o,
             M,
             inv_l,
             delta,  #
