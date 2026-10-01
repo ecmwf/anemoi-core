@@ -39,14 +39,29 @@ _MASKED = tl.constexpr(-1.0e30)
 _RCP_LN2 = tl.constexpr(1.4426950408889634)
 # Larger than any position in any row, for taking minima and maxima over rows.
 _FAR = tl.constexpr(1 << 30)
-# (TILE_H, TILE_W) shapes the autotuner chooses from; the kernels pick the matching tile table.
-_TILE_SHAPES = ((1, 32), (2, 16), (2, 32), (4, 16))
+# (TILE_H, TILE_W) shapes the autotuner chooses from; the kernels read their part of the packed tile table.
+_TILE_SHAPES = ((1, 16), (2, 8), (1, 32), (2, 16), (2, 32), (4, 16))
 _MAX_TILE_H = max(h for h, _ in _TILE_SHAPES)
 
 
 def _configs() -> list[triton.Config]:
     return [
         triton.Config({"TILE_H": th, "TILE_W": tw, "BLOCK_ITER": bi}, num_warps=4, num_stages=s)
+        for th, tw in _TILE_SHAPES
+        for bi in (16, 32)
+        for s in (2, 3)
+    ]
+
+
+def _backward_configs() -> list[triton.Config]:
+    """Like :func:`_configs`; tiles of 32 points are held to 168 registers per thread, so three programs fit per SM."""
+    return [
+        triton.Config(
+            {"TILE_H": th, "TILE_W": tw, "BLOCK_ITER": bi},
+            num_warps=4,
+            num_stages=s,
+            maxnreg=168 if th * tw == 32 else None,
+        )
         for th, tw in _TILE_SHAPES
         for bi in (16, 32)
         for s in (2, 3)
@@ -76,19 +91,34 @@ def _shift_table(row_shifts: tuple[int, ...], device: torch.device) -> torch.Ten
     return torch.tensor(row_shifts, dtype=torch.int32, device=device)
 
 
+@lru_cache(maxsize=32)
+def _packed_tiles(row_lengths: tuple[int, ...], device: torch.device) -> tuple[torch.Tensor, torch.Tensor]:
+    """The tile tables of all shapes one after the other, and where each shape's table starts."""
+    _, tiles = _grid_tables(row_lengths, device)
+    parts = [tiles[shape] for shape in _TILE_SHAPES]
+    starts = [0]
+    for part in parts[:-1]:
+        starts.append(starts[-1] + part.shape[0])
+    return torch.cat(parts), torch.tensor(starts, dtype=torch.int32, device=device)
+
+
 @triton.jit
-def _tile_start(T1x32, T2x16, T2x32, T4x16, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
+def _tile_start(TILES, TILE_OFFSETS, TILE_H: tl.constexpr, TILE_W: tl.constexpr):
     """First row and longitude band of the tile handled by this program."""
-    if TILE_H == 1:
-        table = T1x32
-    elif TILE_H == 4:
-        table = T4x16
-    elif TILE_W == 16:
-        table = T2x16
-    else:
-        table = T2x32
-    pid = tl.program_id(0)
-    return tl.load(table + 2 * pid), tl.load(table + 2 * pid + 1)
+    if TILE_H == 1 and TILE_W == 16:
+        shape = 0
+    elif TILE_H == 2 and TILE_W == 8:
+        shape = 1
+    elif TILE_H == 1 and TILE_W == 32:
+        shape = 2
+    elif TILE_H == 2 and TILE_W == 16:
+        shape = 3
+    elif TILE_H == 2 and TILE_W == 32:
+        shape = 4
+    elif TILE_H == 4 and TILE_W == 16:
+        shape = 5
+    pid = tl.load(TILE_OFFSETS + shape) + tl.program_id(0)
+    return tl.load(TILES + 2 * pid), tl.load(TILES + 2 * pid + 1)
 
 
 @triton.jit
@@ -251,10 +281,8 @@ def _rg_fwd(
     INV_L,  # inverse of the softmax sum of each query, same shape as M
     ROW_START,
     ROW_SHIFT,
-    T1x32,
-    T2x16,
-    T2x32,
-    T4x16,
+    TILES,
+    TILE_OFFSETS,
     sm_scale,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
@@ -275,7 +303,7 @@ def _rg_fwd(
     base = bh * NUM_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(T1x32, T2x16, T2x32, T4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
@@ -349,7 +377,7 @@ def _rg_fwd(
     tl.store(INV_L + bh * NUM_POINTS + q_tok, inv_l, mask=q_valid)
 
 
-@triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
+@triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
 @triton.jit
 def _rg_bwd_dq(
     Q,
@@ -364,10 +392,8 @@ def _rg_bwd_dq(
     LAM,  # written here: sum of the rounded ds over sum of the rounded probabilities per query, see below
     ROW_START,
     ROW_SHIFT,
-    T1x32,
-    T2x16,
-    T2x32,
-    T4x16,
+    TILES,
+    TILE_OFFSETS,
     sm_scale,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
@@ -388,7 +414,7 @@ def _rg_bwd_dq(
     base = bh * NUM_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(T1x32, T2x16, T2x32, T4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
@@ -418,8 +444,9 @@ def _rg_bwd_dq(
     # and dk use that. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
     # https://arxiv.org/abs/2609.34272.
     p_k = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
-    ds_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
-    p_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
+    # The sums are kept per key column and added up after the loop, so each step only adds elementwise.
+    ds_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
+    p_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
 
     k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _key_rows(
         ROW_START,
@@ -437,15 +464,23 @@ def _rg_bwd_dq(
         BLOCK_ITER,
         SHIFTED,
     )
+    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
+    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
+    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
+    # gains most where the stretches differ in length (near the poles, between grids of different
+    # resolution) and can be a few percent slower where they are about equally long.
+    row_blocks = tl.where(idx < num_k_rows, tl.cdiv(lengths, BLOCK_ITER), 0)
+    ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
-    for it in range(0, num_k_rows * blocks):
-        i = it // blocks
+    for it in range(0, tl.sum(row_blocks)):
+        i = tl.sum((ends <= it).to(tl.int32))
+        block = it - _pick(ends - row_blocks, idx, i)
         k_row = k_first_row + i
         k_row_start = _pick(k_starts, idx, i)
         other_n = _pick(k_lengths, idx, i)
         first = _pick(firsts, idx, i)
         length = _pick(lengths, idx, i)
-        t = (it % blocks) * BLOCK_ITER + offs
+        t = block * BLOCK_ITER + offs
         k_valid = t < length
         k_pos = _wrap(first + t, other_n)
         k_tok = k_row_start + k_pos
@@ -465,18 +500,20 @@ def _rg_bwd_dq(
         dp = tl.dot(do, tl.trans(v), input_precision=DOT_PRECISION)
         ds = (p * (dp - delta[:, None])).to(k.dtype)
         p = p.to(k.dtype)
-        ds_sum += tl.sum(ds.to(tl.float32), 1)
-        p_sum += tl.sum(p.to(tl.float32), 1)
+        ds_sums += ds.to(tl.float32)
+        p_sums += p.to(tl.float32)
         dq = tl.dot(ds, k, dq, input_precision=DOT_PRECISION)
         p_k = tl.dot(p, k, p_k, input_precision=DOT_PRECISION)
 
+    ds_sum = tl.sum(ds_sums, 1)
+    p_sum = tl.sum(p_sums, 1)
     lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
     tl.store(LAM + bh * NUM_POINTS + q_tok, lam, mask=q_valid)
     dq = (dq - lam[:, None] * p_k) * sm_scale
     tl.store(DQ + q_ptrs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
 
 
-@triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
+@triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
 @triton.jit
 def _rg_bwd_dkdv(
     Q,
@@ -491,10 +528,8 @@ def _rg_bwd_dkdv(
     LAM,
     ROW_START,
     ROW_SHIFT,
-    T1x32,
-    T2x16,
-    T2x32,
-    T4x16,
+    TILES,
+    TILE_OFFSETS,
     sm_scale,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
@@ -515,7 +550,7 @@ def _rg_bwd_dkdv(
     base = bh * NUM_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(T1x32, T2x16, T2x32, T4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     k_rows, k_pos, k_valid, k_n, k_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
@@ -538,30 +573,52 @@ def _rg_bwd_dkdv(
     _, q_last_row = _rows_seeing(last_row, KERNEL_H, NUM_ROWS)
     num_q_rows = q_last_row - q_first_row + 1
     idx, row_valid, q_starts, q_lengths = _rows_info(ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
+    # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
+    # tile's points there. The matching position only grows along a row, so inverting it gives one
+    # stretch per tile row; only the tile rows inside the query row's window count. Two turns are
+    # added so the divisions work on positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
-    # Adding two turns keeps the divisions on positive numbers; the stretch is a little wider than
-    # needed and the exact test is left to _near_in_row.
-    firsts_h = ((lo_h[None, :] - RADIUS_W - 1 + 2 * n_k[None, :]) * q_lengths[:, None]) // n_k[None, :]
-    lasts_h = ((hi_h[None, :] + RADIUS_W + 2 * n_k[None, :]) * q_lengths[:, None]) // n_k[None, :] + 1
     if SHIFTED:
-        # Half-spacing shifts move the matching position by up to one more point.
         q_shifts = tl.load(ROW_SHIFT + q_first_row + idx, mask=row_valid, other=0)
-        firsts_h = firsts_h - 1
     else:
         q_shifts = idx * 0
-    firsts, lengths = _union(firsts_h - 2 * q_lengths[:, None], lasts_h - 2 * q_lengths[:, None], nonempty, q_lengths)
-    blocks = tl.max(tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0))
+    two_n_k = 2 * n_k
+    low = 2 * (lo_h - RADIUS_W + 2 * n_k) - 1 + shift_h
+    high = 2 * (hi_h - 1 + RADIUS_W + 2 * n_k) + 1 + shift_h
+    q_offset = two_n_k[None, :] - 1 - q_shifts[:, None] * n_k[None, :]
+    firsts_h = (low[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :]
+    lasts_h = (high[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :] - 1
+    q_windows = _row_window_start(q_first_row + idx, KERNEL_H, NUM_ROWS)
+    tile_rows = first_row + tl.arange(0, TILE_H)
+    sees = (
+        nonempty[None, :]
+        & (tile_rows[None, :] >= q_windows[:, None])
+        & (tile_rows[None, :] < q_windows[:, None] + KERNEL_H)
+    )
+    lowest = tl.min(tl.where(sees, firsts_h, _FAR), axis=1) - 2 * q_lengths
+    highest = tl.max(tl.where(sees, lasts_h, -_FAR), axis=1) - 2 * q_lengths
+    whole = highest - lowest + 1 >= q_lengths
+    firsts = tl.where(whole, 0, lowest)
+    lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
+    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
+    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
+    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
+    # gains most where the stretches differ in length (near the poles, between grids of different
+    # resolution) and can be a few percent slower where they are about equally long.
+    row_blocks = tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0)
+    ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
-    for it in range(0, num_q_rows * blocks):
-        i = it // blocks
+    for it in range(0, tl.sum(row_blocks)):
+        i = tl.sum((ends <= it).to(tl.int32))
+        block = it - _pick(ends - row_blocks, idx, i)
         q_row = q_first_row + i
         q_row_start = _pick(q_starts, idx, i)
         n = _pick(q_lengths, idx, i)
         first = _pick(firsts, idx, i)
         length = _pick(lengths, idx, i)
-        t = (it % blocks) * BLOCK_ITER + offs
+        t = block * BLOCK_ITER + offs
         q_valid = t < length
         q_pos = _wrap(first + t, n)
         q_tok = q_row_start + q_pos
@@ -590,11 +647,14 @@ def _rg_bwd_dkdv(
 
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
-        p_t = p_t.to(do.dtype)
-        dv = tl.dot(p_t, do, dv, input_precision=DOT_PRECISION)
+        dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
         # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
-        dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
+        # This deviates from the paper (arXiv:2609.34272, appendix B, eq. 13), which rounds p and lam * q
+        # separately: here -lam * p is rounded once and multiplied with q, which is already 16-bit.
+        # The paper's version:
+        # dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
+        dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
     tl.store(DK + k_ptrs, dk.to(DK.dtype.element_ty), mask=k_valid[:, None])
@@ -644,7 +704,7 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             KEY_ROWS=triton.next_power_of_2(kernel_size[0] + _MAX_TILE_H - 1),
             QUERY_ROWS=triton.next_power_of_2(2 * kernel_size[0] + _MAX_TILE_H - 2),
         )
-        tables = (row_starts, _shift_table(grid.shifts, q.device), *(tiles[shape] for shape in _TILE_SHAPES))
+        tables = (row_starts, _shift_table(grid.shifts, q.device), *_packed_tiles(tuple(row_lengths), q.device))
 
         _rg_fwd[_launch_grid(tiles, batch * heads)](q, k, v, o, m, inv_l, *tables, sm_scale, **sizes)
         ctx.save_for_backward(q, k, v, o, m, inv_l)
@@ -662,7 +722,11 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         delta, lam = torch.empty_like(m), torch.empty_like(m)
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
         row_starts, tiles = _grid_tables(ctx.grid.row_lengths, q.device)
-        tables = (row_starts, _shift_table(ctx.grid.shifts, q.device), *(tiles[shape] for shape in _TILE_SHAPES))
+        tables = (
+            row_starts,
+            _shift_table(ctx.grid.shifts, q.device),
+            *_packed_tiles(tuple(ctx.grid.row_lengths), q.device),
+        )
         grid = _launch_grid(tiles, batch * heads)
 
         # The dQ kernel also writes delta and lam, which the dK/dV kernel reads, so it runs first.

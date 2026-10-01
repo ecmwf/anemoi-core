@@ -30,13 +30,14 @@ from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.triton.reduced_grid_attention import _MASKED
 from anemoi.models.triton.reduced_grid_attention import _MAX_TILE_H
 from anemoi.models.triton.reduced_grid_attention import _RCP_LN2
-from anemoi.models.triton.reduced_grid_attention import _TILE_SHAPES
+from anemoi.models.triton.reduced_grid_attention import _backward_configs
 from anemoi.models.triton.reduced_grid_attention import _configs
 from anemoi.models.triton.reduced_grid_attention import _grid_tables
 from anemoi.models.triton.reduced_grid_attention import _launch_grid
 from anemoi.models.triton.reduced_grid_attention import _matching
 from anemoi.models.triton.reduced_grid_attention import _matching_shifted
 from anemoi.models.triton.reduced_grid_attention import _near_in_row
+from anemoi.models.triton.reduced_grid_attention import _packed_tiles
 from anemoi.models.triton.reduced_grid_attention import _pick
 from anemoi.models.triton.reduced_grid_attention import _rows_info
 from anemoi.models.triton.reduced_grid_attention import _shift_table
@@ -172,14 +173,10 @@ def _xg_fwd(
     WINDOW_START,
     SEE_FIRST,
     SEE_LAST,
-    QT1x32,
-    QT2x16,
-    QT2x32,
-    QT4x16,
-    KT1x32,
-    KT2x16,
-    KT2x32,
-    KT4x16,
+    QTILES,
+    QTILE_OFFSETS,
+    KTILES,
+    KTILE_OFFSETS,
     sm_scale,
     Q_ROWS: tl.constexpr,
     Q_POINTS: tl.constexpr,
@@ -203,7 +200,7 @@ def _xg_fwd(
     k_base = bh * K_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(QT1x32, QT2x16, QT2x32, QT4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(QTILES, QTILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         Q_ROW_START, first_row, band, Q_ROWS, TILE_H, TILE_W
     )
@@ -277,7 +274,7 @@ def _xg_fwd(
     tl.store(INV_L + bh * Q_POINTS + q_tok, inv_l, mask=q_valid)
 
 
-@triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
+@triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
 @triton.jit
 def _xg_bwd_dq(
     Q,
@@ -297,14 +294,10 @@ def _xg_bwd_dq(
     WINDOW_START,
     SEE_FIRST,
     SEE_LAST,
-    QT1x32,
-    QT2x16,
-    QT2x32,
-    QT4x16,
-    KT1x32,
-    KT2x16,
-    KT2x32,
-    KT4x16,
+    QTILES,
+    QTILE_OFFSETS,
+    KTILES,
+    KTILE_OFFSETS,
     sm_scale,
     Q_ROWS: tl.constexpr,
     Q_POINTS: tl.constexpr,
@@ -328,7 +321,7 @@ def _xg_bwd_dq(
     k_base = bh * K_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(QT1x32, QT2x16, QT2x32, QT4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(QTILES, QTILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         Q_ROW_START, first_row, band, Q_ROWS, TILE_H, TILE_W
     )
@@ -357,8 +350,9 @@ def _xg_bwd_dq(
     # and dk use that. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
     # https://arxiv.org/abs/2609.34272.
     p_k = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
-    ds_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
-    p_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
+    # The sums are kept per key column and added up after the loop, so each step only adds elementwise.
+    ds_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
+    p_sums = tl.zeros([TILE_H * TILE_W, BLOCK_ITER], dtype=tl.float32)
 
     q_window, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
         K_ROW_START,
@@ -378,15 +372,23 @@ def _xg_bwd_dq(
         KEY_ROWS,
         BLOCK_ITER,
     )
+    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
+    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
+    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
+    # gains most where the stretches differ in length (near the poles, between grids of different
+    # resolution) and can be a few percent slower where they are about equally long.
+    row_blocks = tl.where(idx < num_k_rows, tl.cdiv(lengths, BLOCK_ITER), 0)
+    ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
-    for it in range(0, num_k_rows * blocks):
-        i = it // blocks
+    for it in range(0, tl.sum(row_blocks)):
+        i = tl.sum((ends <= it).to(tl.int32))
+        block = it - _pick(ends - row_blocks, idx, i)
         k_row = k_first_row + i
         k_row_start = _pick(k_starts, idx, i)
         other_n = _pick(k_lengths, idx, i)
         first = _pick(firsts, idx, i)
         length = _pick(lengths, idx, i)
-        t = (it % blocks) * BLOCK_ITER + offs
+        t = block * BLOCK_ITER + offs
         k_valid = t < length
         k_pos = _wrap(first + t, other_n)
         k_tok = k_row_start + k_pos
@@ -406,18 +408,20 @@ def _xg_bwd_dq(
         dp = tl.dot(do, tl.trans(v), input_precision=DOT_PRECISION)
         ds = (p * (dp - delta[:, None])).to(k.dtype)
         p = p.to(k.dtype)
-        ds_sum += tl.sum(ds.to(tl.float32), 1)
-        p_sum += tl.sum(p.to(tl.float32), 1)
+        ds_sums += ds.to(tl.float32)
+        p_sums += p.to(tl.float32)
         dq = tl.dot(ds, k, dq, input_precision=DOT_PRECISION)
         p_k = tl.dot(p, k, p_k, input_precision=DOT_PRECISION)
 
+    ds_sum = tl.sum(ds_sums, 1)
+    p_sum = tl.sum(p_sums, 1)
     lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
     tl.store(LAM + bh * Q_POINTS + q_tok, lam, mask=q_valid)
     dq = (dq - lam[:, None] * p_k) * sm_scale
     tl.store(DQ + q_ptrs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
 
 
-@triton.autotune(configs=_configs(), key=_AUTOTUNE_KEY)
+@triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
 @triton.jit
 def _xg_bwd_dkdv(
     Q,
@@ -437,14 +441,10 @@ def _xg_bwd_dkdv(
     WINDOW_START,
     SEE_FIRST,
     SEE_LAST,
-    QT1x32,
-    QT2x16,
-    QT2x32,
-    QT4x16,
-    KT1x32,
-    KT2x16,
-    KT2x32,
-    KT4x16,
+    QTILES,
+    QTILE_OFFSETS,
+    KTILES,
+    KTILE_OFFSETS,
     sm_scale,
     Q_ROWS: tl.constexpr,
     Q_POINTS: tl.constexpr,
@@ -468,7 +468,7 @@ def _xg_bwd_dkdv(
     k_base = bh * K_POINTS * HEAD_DIM
     d = tl.arange(0, HEAD_DIM)
 
-    first_row, band = _tile_start(KT1x32, KT2x16, KT2x32, KT4x16, TILE_H, TILE_W)
+    first_row, band = _tile_start(KTILES, KTILE_OFFSETS, TILE_H, TILE_W)
     k_rows, k_pos, k_valid, k_n, k_tok, lo_h, hi_h, lengths_h = _tile_points(
         K_ROW_START, first_row, band, K_ROWS, TILE_H, TILE_W
     )
@@ -496,30 +496,51 @@ def _xg_bwd_dkdv(
     idx, row_valid, q_starts, q_lengths = _rows_info(Q_ROW_START, q_first_row, num_q_rows, QUERY_ROWS)
     q_windows = tl.load(WINDOW_START + q_first_row + idx, mask=row_valid, other=0)
 
-    # The stretch of queries in each query row that may see the tile; a little wider than needed,
-    # the exact test is left to _near_in_row. Adding two turns keeps the divisions on positive numbers.
+    # In each query row, the queries whose matching position in a tile row lies within RADIUS_W of the
+    # tile's points there. The matching position only grows along a row, so inverting it gives one
+    # stretch per tile row; only the tile rows inside the query row's window count. Two turns are
+    # added so the divisions work on positive numbers.
     nonempty = hi_h > lo_h
     n_k = tl.maximum(lengths_h, 1)
-    firsts_h = ((lo_h[None, :] - RADIUS_W - 1 + 2 * n_k[None, :]) * q_lengths[:, None]) // n_k[None, :]
-    lasts_h = ((hi_h[None, :] + RADIUS_W + 2 * n_k[None, :]) * q_lengths[:, None]) // n_k[None, :] + 1
     if SHIFTED:
-        # Half-spacing shifts move the matching position by up to one more point.
         q_shifts = tl.load(Q_ROW_SHIFT + q_first_row + idx, mask=row_valid, other=0)
-        firsts_h = firsts_h - 1
     else:
         q_shifts = idx * 0
-    firsts, lengths = _union(firsts_h - 2 * q_lengths[:, None], lasts_h - 2 * q_lengths[:, None], nonempty, q_lengths)
-    blocks = tl.max(tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0))
+    two_n_k = 2 * n_k
+    low = 2 * (lo_h - RADIUS_W + 2 * n_k) - 1 + shift_h
+    high = 2 * (hi_h - 1 + RADIUS_W + 2 * n_k) + 1 + shift_h
+    q_offset = two_n_k[None, :] - 1 - q_shifts[:, None] * n_k[None, :]
+    firsts_h = (low[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :]
+    lasts_h = (high[None, :] * q_lengths[:, None] + q_offset) // two_n_k[None, :] - 1
+    tile_rows = first_row + tl.arange(0, TILE_H)
+    sees = (
+        nonempty[None, :]
+        & (tile_rows[None, :] >= q_windows[:, None])
+        & (tile_rows[None, :] < q_windows[:, None] + KERNEL_H)
+    )
+    lowest = tl.min(tl.where(sees, firsts_h, _FAR), axis=1) - 2 * q_lengths
+    highest = tl.max(tl.where(sees, lasts_h, -_FAR), axis=1) - 2 * q_lengths
+    whole = highest - lowest + 1 >= q_lengths
+    firsts = tl.where(whole, 0, lowest)
+    lengths = tl.maximum(tl.where(whole, q_lengths, highest - lowest + 1), 0)
 
+    # Each row gets only the blocks its own stretch needs, rather than as many as the longest stretch,
+    # so blocks whose keys would all be masked out are never computed; ends holds the running total of
+    # blocks per row. Finding the row and block of each step costs a little index arithmetic, so this
+    # gains most where the stretches differ in length (near the poles, between grids of different
+    # resolution) and can be a few percent slower where they are about equally long.
+    row_blocks = tl.where(row_valid, tl.cdiv(lengths, BLOCK_ITER), 0)
+    ends = tl.cumsum(row_blocks, 0)
     offs = tl.arange(0, BLOCK_ITER)
-    for it in range(0, num_q_rows * blocks):
-        i = it // blocks
+    for it in range(0, tl.sum(row_blocks)):
+        i = tl.sum((ends <= it).to(tl.int32))
+        block = it - _pick(ends - row_blocks, idx, i)
         q_row_start = _pick(q_starts, idx, i)
         n = _pick(q_lengths, idx, i)
         q_window = _pick(q_windows, idx, i)
         first = _pick(firsts, idx, i)
         length = _pick(lengths, idx, i)
-        t = (it % blocks) * BLOCK_ITER + offs
+        t = block * BLOCK_ITER + offs
         q_valid = t < length
         q_pos = _wrap_twice(first + t, n)
         q_tok = q_row_start + q_pos
@@ -548,11 +569,14 @@ def _xg_bwd_dkdv(
 
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
-        p_t = p_t.to(do.dtype)
-        dv = tl.dot(p_t, do, dv, input_precision=DOT_PRECISION)
+        dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
         # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
-        dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
+        # This deviates from the paper (arXiv:2609.34272, appendix B, eq. 13), which rounds p and lam * q
+        # separately: here -lam * p is rounded once and multiplied with q, which is already 16-bit.
+        # The paper's version:
+        # dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
+        dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
     tl.store(DK + k_ptrs, dk.to(DK.dtype.element_ty), mask=k_valid[:, None])
@@ -593,8 +617,8 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             cross["window_start"],
             cross["see_first"],
             cross["see_last"],
-            *(q_tiles[shape] for shape in _TILE_SHAPES),
-            *(k_tiles[shape] for shape in _TILE_SHAPES),
+            *_packed_tiles(query_grid.row_lengths, q.device),
+            *_packed_tiles(key_grid.row_lengths, q.device),
         )
         sizes = dict(
             Q_ROWS=query_grid.num_rows,
