@@ -28,6 +28,8 @@ class NeighbourhoodSchema(BaseModel):
     "Latitude rows and points per row each query attends to; both odd."
     backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
     "Kernels to use: 'triton' (GPU), 'flex' (flex attention) or 'sdpa' (dense mask, small grids). Default to 'triton'."
+    num_bands: PositiveInt = Field(default=1)
+    "Number of bands of query rows worked through one at a time, each with its own checkpoint, to save memory on large grids. Each query attends to the same keys whatever the number. Default to 1."
 
     @field_validator("grid")
     @classmethod

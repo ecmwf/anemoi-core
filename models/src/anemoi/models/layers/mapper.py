@@ -36,7 +36,9 @@ from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.neighbourhood_attention import split_into_bands
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
@@ -1357,6 +1359,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         )
 
+        grid_neighbourhood = build_grid_neighbourhood(
+            attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
+        )
         self.proc = TransformerMapperBlock(
             num_channels=num_channels,
             hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
@@ -1369,13 +1374,21 @@ class TransformerBaseMapper(BaseMapper, ABC):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            neighbourhood=build_grid_neighbourhood(
-                attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
-            ),
+            neighbourhood=grid_neighbourhood,
             rotary=build_spherical_rotary(
                 rotary_embeddings, (attn_channels or num_channels) // num_heads, dst_node_coords, src_node_coords
             ),
         )
+
+        # With neighbourhood attention split into bands, the destination points are worked
+        # through one band at a time (see forward_in_bands).
+        self.bands: Optional[list[NeighbourhoodBand]] = None
+        if grid_neighbourhood is not None and grid_neighbourhood.num_bands > 1:
+            if cpu_offload:
+                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
+            self.bands = split_into_bands(grid_neighbourhood, grid_neighbourhood.num_bands)
+            self.num_src_points = grid_neighbourhood.key_grid.num_points
+            self.num_dst_points = grid_neighbourhood.query_grid.num_points
 
         self.offload_layers(cpu_offload)
 
@@ -1432,6 +1445,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        if self.bands is not None:
+            return self.forward_in_bands(x, batch_size, model_comm_group, cond=kwargs.get("cond"))
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1442,6 +1457,57 @@ class TransformerBaseMapper(BaseMapper, ABC):
             keep_x_dst_sharded=keep_x_dst_sharded,
             **kwargs,
         )
+
+    def forward_in_bands(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """The mapper worked through band by band, with one checkpoint per band.
+
+        Every band runs the whole mapper, from the embeddings to the output layer, for its
+        destination points and the source points they attend to, so only one band is held in
+        memory at a time. The result is written into one output for all destination points.
+        """
+        if model_comm_group is not None and model_comm_group.size() > 1:
+            raise NotImplementedError("Neighbourhood attention in bands does not yet support sharding across GPUs.")
+        x_src = x[0].view(batch_size, self.num_src_points, -1)
+        x_dst = x[1].view(batch_size, self.num_dst_points, -1)
+        if cond is not None:
+            cond = (
+                cond[0].view(batch_size, self.num_src_points, -1),
+                cond[1].view(batch_size, self.num_dst_points, -1),
+            )
+
+        out = None
+        for band in self.bands:
+            band_cond = None if cond is None else (cond[0][:, band.key_points], cond[1][:, band.query_points])
+            out_band = maybe_checkpoint(
+                self.forward_band,
+                self.gradient_checkpointing,
+                x_src[:, band.key_points],
+                x_dst[:, band.query_points],
+                band,
+                band_cond,
+            )
+            if out is None:
+                out = out_band.new_empty(batch_size, self.num_dst_points, out_band.shape[-1])
+            out[:, band.query_points] = out_band
+        return out.view(batch_size * self.num_dst_points, -1)
+
+    def forward_band(
+        self,
+        x_src: Tensor,
+        x_dst: Tensor,
+        band: NeighbourhoodBand,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """The mapper for one band: embeddings, the transformer block and the output layer."""
+        x_src, x_dst = self.pre_process((x_src, x_dst))
+        x_dst = self.proc.forward_band((x_src, x_dst), band, cond=cond)
+        return self.post_process(x_dst)
 
 
 class TransformerForwardMapper(TransformerBaseMapper):

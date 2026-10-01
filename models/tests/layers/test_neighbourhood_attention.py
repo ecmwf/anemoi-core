@@ -317,6 +317,7 @@ def test_schema_accepts_neighbourhood_settings():
         "grid": "healpix",
         "kernel_size": (7, 13),
         "backend": "triton",
+        "num_bands": 1,
     }
 
 

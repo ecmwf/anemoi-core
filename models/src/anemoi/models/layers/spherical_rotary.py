@@ -159,6 +159,15 @@ class SphericalRotaryEmbedding(nn.Module):
         key_cos, key_sin = (self.query_cos, self.query_sin) if self.shared else (self.key_cos, self.key_sin)
         return self._turn(query, self.query_cos, self.query_sin, "query"), self._turn(key, key_cos, key_sin, "key")
 
+    def turn_queries(self, query: Tensor, points: slice) -> Tensor:
+        """Turn the queries of a contiguous range of query points, given in node order."""
+        return self._turn(query, self.query_cos[points], self.query_sin[points], "query")
+
+    def turn_keys(self, key: Tensor, points: slice) -> Tensor:
+        """Turn the keys of a contiguous range of key points, given in node order."""
+        key_cos, key_sin = (self.query_cos, self.query_sin) if self.shared else (self.key_cos, self.key_sin)
+        return self._turn(key, key_cos[points], key_sin[points], "key")
+
 
 def build_spherical_rotary(
     config: Optional[dict],

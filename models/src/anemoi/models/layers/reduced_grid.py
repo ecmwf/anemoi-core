@@ -189,6 +189,14 @@ class ReducedGrid:
         lon = 2 * math.pi * (positions + shifts / 2) / lengths
         return torch.stack([lat, lon], dim=1)
 
+    def rows(self, start: int, stop: int) -> ReducedGrid:
+        """The grid made of rows ``start`` to ``stop - 1`` of this grid, with their latitudes and shifts."""
+        return ReducedGrid(
+            self.row_lengths[start:stop],
+            None if self.row_latitudes is None else self.row_latitudes[start:stop],
+            None if self.row_shifts is None else self.row_shifts[start:stop],
+        )
+
     def nearest_rows(self, other: ReducedGrid) -> Tensor:
         """For each row of this grid, the row of ``other`` nearest in latitude."""
         if self.row_latitudes is None or other.row_latitudes is None:

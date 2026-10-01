@@ -27,7 +27,9 @@ from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.neighbourhood_attention import split_into_bands
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
@@ -288,6 +290,7 @@ class TransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        grid_neighbourhood = build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords)
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
@@ -301,9 +304,18 @@ class TransformerProcessor(BaseProcessor):
             attention_implementation=attention_implementation,
             mlp_implementation=mlp_implementation,
             softcap=softcap,
-            neighbourhood=build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords),
+            neighbourhood=grid_neighbourhood,
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
+
+        # With neighbourhood attention split into bands, every layer works through the points
+        # one band at a time (see forward_in_bands).
+        self.bands: Optional[list[NeighbourhoodBand]] = None
+        if grid_neighbourhood is not None and grid_neighbourhood.num_bands > 1:
+            if cpu_offload:
+                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
+            self.bands = split_into_bands(grid_neighbourhood, grid_neighbourhood.num_bands)
+            self.num_points = grid_neighbourhood.query_grid.num_points
 
         self.offload_layers(cpu_offload)
 
@@ -323,9 +335,47 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
+        if self.bands is not None:
+            return self.forward_in_bands(x, batch_size, model_comm_group, cond=kwargs.get("cond"))
+
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x
+
+    def forward_in_bands(
+        self,
+        x: Tensor,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[Tensor] = None,
+    ) -> Tensor:
+        """The layers worked through band by band, with one checkpoint per band of each layer.
+
+        Each band of a layer reads the band's points and the rows around them that its attention
+        reaches, and writes the band's points of the layer's output. Only one band is held in
+        memory at a time, besides the input and output of the layer.
+        """
+        if model_comm_group is not None and model_comm_group.size() > 1:
+            raise NotImplementedError("Neighbourhood attention in bands does not yet support sharding across GPUs.")
+        x = x.view(batch_size, self.num_points, -1)
+        if cond is not None:
+            cond = cond.view(batch_size, self.num_points, -1)
+
+        for layer in self.proc:
+            out = None
+            for band in self.bands:
+                out_band = maybe_checkpoint(
+                    layer.forward_band,
+                    self.gradient_checkpointing,
+                    x[:, band.key_points],
+                    band,
+                    None if cond is None else cond[:, band.key_points],
+                )
+                if out is None:
+                    out = out_band.new_empty(batch_size, self.num_points, out_band.shape[-1])
+                out[:, band.query_points] = out_band
+            x = out
+        return x.view(batch_size * self.num_points, -1)
 
 
 class GNNProcessor(BaseProcessor):

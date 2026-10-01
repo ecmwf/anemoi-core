@@ -63,14 +63,30 @@ _AUTOTUNE_KEY = [
 ]
 
 
-@lru_cache(maxsize=32)
 def _cross_tables(query_grid: ReducedGrid, key_grid: ReducedGrid, kernel_h: int, device: torch.device) -> dict:
     """Row tables linking the two grids, and the sizes of the per-tile row vectors.
 
     ``window_start[r]`` is the first key row seen from query row ``r``; ``see_first[k]`` and
     ``see_last[k]`` are the first and last query rows whose window includes key row ``k``
     (``see_first > see_last`` when there are none).
+
+    The tables are kept for each pair of grids. Grids compare equal on their row lengths and
+    shifts only, but the row latitudes decide which key rows a query row sees, so they are part
+    of what the tables are kept by: parts of a grid with the same rows at other latitudes, such
+    as bands of rows, get their own tables.
     """
+    return _cross_tables_for(query_grid, key_grid, query_grid.row_latitudes, key_grid.row_latitudes, kernel_h, device)
+
+
+@lru_cache(maxsize=512)
+def _cross_tables_for(
+    query_grid: ReducedGrid,
+    key_grid: ReducedGrid,
+    query_latitudes: tuple[float, ...],
+    key_latitudes: tuple[float, ...],
+    kernel_h: int,
+    device: torch.device,
+) -> dict:
     num_q_rows, num_k_rows = query_grid.num_rows, key_grid.num_rows
     start = (query_grid.nearest_rows(key_grid) - kernel_h // 2).clamp(0, num_k_rows - kernel_h)
     key_rows = torch.arange(num_k_rows)

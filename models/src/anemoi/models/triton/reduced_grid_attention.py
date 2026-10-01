@@ -71,7 +71,8 @@ def _backward_configs() -> list[triton.Config]:
 _AUTOTUNE_KEY = ["NUM_ROWS", "NUM_POINTS", "HEAD_DIM", "KERNEL_H", "KERNEL_W", "DOT_PRECISION", "SHIFTED"]
 
 
-@lru_cache(maxsize=32)
+# Room for the tables of many grids at once, as when attention runs over bands of rows.
+@lru_cache(maxsize=512)
 def _grid_tables(row_lengths: tuple[int, ...], device: torch.device) -> tuple[torch.Tensor, dict]:
     """Row starts, and for each tile shape the (first row, band) of every tile."""
     row_starts = ReducedGrid(row_lengths).row_starts.to(dtype=torch.int32, device=device)
@@ -85,7 +86,7 @@ def _grid_tables(row_lengths: tuple[int, ...], device: torch.device) -> tuple[to
     return row_starts, tiles
 
 
-@lru_cache(maxsize=32)
+@lru_cache(maxsize=512)
 def _shift_table(row_shifts: tuple[int, ...], device: torch.device) -> torch.Tensor:
     """The shift of every row in half spacings; only read by kernels compiled with ``SHIFTED``."""
     return torch.tensor(row_shifts, dtype=torch.int32, device=device)

@@ -25,6 +25,10 @@ A model component names the grid family in its configuration, for example::
 
 and the node coordinates of the graph fix the resolution and the order of the points.
 
+With ``num_bands`` above one, a model component works through its queries in bands of whole
+latitude rows, each band with only the key rows its queries reach (see :func:`split_into_bands`).
+Each query attends to exactly the same keys, and only one band is held in memory at a time.
+
 The kernels compare queries and keys by content only; rotary position embeddings
 (:mod:`anemoi.models.layers.spherical_rotary`) add where each key lies relative to its query.
 """
@@ -34,6 +38,7 @@ from __future__ import annotations
 import importlib
 import logging
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Callable
 from typing import Optional
 
@@ -198,6 +203,7 @@ class GridNeighbourhood:
     query_order: Optional[Tensor] = None
     key_order: Optional[Tensor] = None
     is_self_attention: bool = False
+    num_bands: int = 1
 
     @classmethod
     def from_config(
@@ -212,8 +218,9 @@ class GridNeighbourhood:
         ----------
         config : dict
             ``grid`` (a key of :data:`GRID_KERNELS`), ``kernel_size`` (two odd numbers: latitude
-            rows and points per row) and optionally ``backend`` (``"triton"``, the default,
-            ``"flex"`` or ``"sdpa"``).
+            rows and points per row), optionally ``backend`` (``"triton"``, the default,
+            ``"flex"`` or ``"sdpa"``) and optionally ``num_bands`` (the number of bands of query
+            rows to work through one at a time, 1 by default).
         key_coords : Tensor
             Coordinates of the key nodes in radians, shape ``(num_keys, 2)``.
         query_coords : Tensor, optional
@@ -228,9 +235,11 @@ class GridNeighbourhood:
             raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' configuration.")
         if key_coords is None:
             raise ValueError("Neighbourhood attention needs the coordinates of the graph nodes.")
-        unknown = set(config) - {"grid", "kernel_size", "backend"}
+        unknown = set(config) - {"grid", "kernel_size", "backend", "num_bands"}
         if unknown:
-            raise ValueError(f"Unknown neighbourhood settings {sorted(unknown)}; use grid, kernel_size and backend.")
+            raise ValueError(
+                f"Unknown neighbourhood settings {sorted(unknown)}; use grid, kernel_size, backend and num_bands."
+            )
         family = config["grid"]
         kernel_size = tuple(int(k) for k in config["kernel_size"])
         backend = config.get("backend", "triton")
@@ -238,13 +247,33 @@ class GridNeighbourhood:
             raise ValueError(f"kernel_size must be two positive odd numbers, got {config['kernel_size']}.")
         if backend not in BACKENDS:
             raise ValueError(f"Neighbourhood attention backend must be one of {BACKENDS}, got '{backend}'.")
+        num_bands = int(config.get("num_bands", 1))
+        if num_bands < 1:
+            raise ValueError(f"num_bands must be at least 1, got {num_bands}.")
 
         key_grid, key_order = grid_from_coords(family, key_coords)
         if query_coords is None:
-            return cls(family, kernel_size, backend, key_grid, key_grid, key_order, key_order, is_self_attention=True)
-        query_grid, query_order = grid_from_coords(family, query_coords)
-        check_every_key_attended(query_grid, key_grid, kernel_size)
-        return cls(family, kernel_size, backend, query_grid, key_grid, query_order, key_order)
+            query_grid, query_order, is_self_attention = key_grid, key_order, True
+        else:
+            query_grid, query_order = grid_from_coords(family, query_coords)
+            check_every_key_attended(query_grid, key_grid, kernel_size)
+            is_self_attention = False
+        if num_bands > 1 and (query_order is not None or key_order is not None):
+            raise ValueError(
+                "Working through bands of rows (num_bands > 1) needs the nodes stored in grid order, row by "
+                "row from north to south; build the nodes in that order, e.g. HEALPix in ring ordering."
+            )
+        return cls(
+            family,
+            kernel_size,
+            backend,
+            query_grid,
+            key_grid,
+            query_order,
+            key_order,
+            is_self_attention=is_self_attention,
+            num_bands=num_bands,
+        )
 
     @property
     def kernels(self) -> GridKernels:
@@ -401,6 +430,77 @@ class NeighbourhoodAttentionWrapper(nn.Module):
         if self._reorder_queries:
             out = _ReorderPoints.apply(out, self.query_inverse, self.query_order)
         return out
+
+
+@dataclass(frozen=True, eq=False)
+class NeighbourhoodBand:
+    """A band of whole query rows and the key rows its queries reach.
+
+    The points of a band are contiguous in grid order, which is also the node order; the key
+    points include every key any query of the band attends to.
+    """
+
+    query_points: slice
+    key_points: slice
+    attention: NeighbourhoodAttentionWrapper
+
+
+def split_into_bands(neighbourhood: GridNeighbourhood, num_bands: int) -> list[NeighbourhoodBand]:
+    """Split the queries into bands of whole rows with about the same number of points.
+
+    Each band attends to the rows of the key grid its queries reach, which themselves form a
+    small grid. A query finds its key rows from its own latitude and its points from the lengths
+    and shifts of the rows, so within its band it sees exactly the keys it sees on the whole grid.
+    For self attention the band's key rows are its own rows and a margin of ``kernel_size[0] // 2``
+    rows on either side (fewer at the poles).
+
+    Parameters
+    ----------
+    neighbourhood : GridNeighbourhood
+        The neighbourhood of the whole grids, with the nodes in grid order.
+    num_bands : int
+        Number of bands to aim for; there are fewer when the query grid has fewer rows.
+
+    Returns
+    -------
+    list[NeighbourhoodBand]
+        The bands from north to south.
+    """
+    if neighbourhood.query_order is not None or neighbourhood.key_order is not None:
+        raise ValueError("Bands of rows need the query and key nodes stored in grid order.")
+    query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
+    kernel_h = neighbourhood.kernel_size[0]
+    if neighbourhood.is_self_attention:
+        row_map = torch.arange(query_grid.num_rows)
+    else:
+        row_map = query_grid.nearest_rows(key_grid)
+    # First key row of each query row's window, kept inside the key grid as the attention rule does.
+    window_start = (row_map - kernel_h // 2).clamp(0, key_grid.num_rows - kernel_h)
+
+    # Cut the query rows where the running number of points passes each equal share.
+    shares = torch.linspace(0, query_grid.num_points, num_bands + 1, dtype=torch.float64)
+    cuts = torch.searchsorted(query_grid.row_starts.to(torch.float64), shares)
+    cuts = torch.unique(torch.cat([torch.tensor([0, query_grid.num_rows]), cuts])).tolist()
+
+    bands = []
+    for first_row, end_row in zip(cuts[:-1], cuts[1:]):
+        first_key_row = int(window_start[first_row:end_row].min())
+        end_key_row = int(window_start[first_row:end_row].max()) + kernel_h
+        band_neighbourhood = replace(
+            neighbourhood,
+            query_grid=query_grid.rows(first_row, end_row),
+            key_grid=key_grid.rows(first_key_row, end_key_row),
+            is_self_attention=False,
+            num_bands=1,
+        )
+        bands.append(
+            NeighbourhoodBand(
+                query_points=slice(int(query_grid.row_starts[first_row]), int(query_grid.row_starts[end_row])),
+                key_points=slice(int(key_grid.row_starts[first_key_row]), int(key_grid.row_starts[end_key_row])),
+                attention=NeighbourhoodAttentionWrapper(band_neighbourhood),
+            )
+        )
+    return bands
 
 
 def build_grid_neighbourhood(

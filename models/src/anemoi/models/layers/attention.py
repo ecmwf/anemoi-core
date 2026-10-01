@@ -30,6 +30,7 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
 from anemoi.models.layers.neighbourhood_attention import NeighbourhoodAttentionWrapper
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
 from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.utils.config import DotDict
 
@@ -270,6 +271,70 @@ class MultiHeadSelfAttention(nn.Module):
 
         return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 
+    def attend_band(self, query: Tensor, key: Tensor, value: Tensor, band: NeighbourhoodBand) -> Tensor:
+        """Neighbourhood attention for one band of queries, followed by the output projection.
+
+        Does for one band what :meth:`attention_computation` does for the whole grid, on a single
+        GPU: the same normalisation, rotary turn, attention and projection of every point.
+
+        Parameters
+        ----------
+        query : Tensor
+            Projected queries of the band, shape ``(batch, band query points, channels)``.
+        key, value : Tensor
+            Projected keys and values of the key rows the band reaches, shape
+            ``(batch, band key points, channels)``.
+        band : NeighbourhoodBand
+            The band, with its own neighbourhood attention.
+
+        Returns
+        -------
+        Tensor
+            Attention output of the band, shape ``(batch, band query points, embed_dim)``.
+        """
+        query, key, value = (
+            einops.rearrange(t, "batch grid (heads vars) -> batch heads grid vars", heads=self.num_heads)
+            for t in (query, key, value)
+        )
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+        if self.rotary is not None:
+            query = self.rotary.turn_queries(query, band.query_points)
+            key = self.rotary.turn_keys(key, band.key_points)
+
+        out = band.attention(
+            query,
+            key,
+            value,
+            query.shape[0],
+            window_size=self.window_size,
+            dropout_p=self.dropout_p if self.training else 0.0,
+            softcap=self.softcap,
+        )
+        out = einops.rearrange(out, "batch heads grid vars -> batch grid (heads vars)")
+        return self.projection(out)
+
+    def forward_band(self, x: Tensor, band: NeighbourhoodBand) -> Tensor:
+        """Self attention for one band of points.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input of the band's key points, which include its query points, shape
+            ``(batch, band key points, embed_dim)``.
+        band : NeighbourhoodBand
+            The band.
+
+        Returns
+        -------
+        Tensor
+            Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
+        """
+        first = band.query_points.start - band.key_points.start
+        queries = x[:, first : first + band.query_points.stop - band.query_points.start]
+        return self.attend_band(self.lin_q(queries), self.lin_k(x), self.lin_v(x), band)
+
 
 class SDPAAttentionWrapper(nn.Module):
     """Wrapper for Pytorch scaled dot product attention
@@ -498,3 +563,21 @@ class MultiHeadCrossAttention(MultiHeadSelfAttention):
         shard_sizes = (shard_info.src_nodes, shard_info.dst_nodes)
 
         return self.attention_computation(query, key, value, shard_sizes, batch_size, model_comm_group)
+
+    def forward_band(self, x: PairTensor, band: NeighbourhoodBand) -> Tensor:
+        """Cross attention for one band of queries.
+
+        Parameters
+        ----------
+        x : PairTensor
+            Input of the band's key points, shape ``(batch, band key points, embed_dim)``, and of its
+            query points, shape ``(batch, band query points, embed_dim)``.
+        band : NeighbourhoodBand
+            The band.
+
+        Returns
+        -------
+        Tensor
+            Attention output of the band's query points, shape ``(batch, band query points, embed_dim)``.
+        """
+        return self.attend_band(self.lin_q(x[1]), self.lin_k(x[0]), self.lin_v(x[0]), band)
