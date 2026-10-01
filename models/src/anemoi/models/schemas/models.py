@@ -304,6 +304,15 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+    compile_fusion_fix: Literal["block_distant_fusion", "no_split_sums", "none"] = "block_distant_fusion"
+    """Workaround for inductor fusions that inflate backward memory with activation checkpointing.
+    'block_distant_fusion': don't fuse nodes far apart in the graph (patches inductor's scheduler).
+    'no_split_sums': raise inductor's realize thresholds so large sums are not split (public config, slower).
+    'none': leave inductor unchanged."""
+    compile_activation_memory_budget: Optional[Annotated[float, Field(gt=0, le=1)]] = None
+    """Activation memory budget for torch.compile (torch._functorch.config.activation_memory_budget).
+    Fraction of activations saved for backward in compiled regions, the rest is recomputed.
+    1.0 saves all activations (no recomputation). None keeps torch's default (1.0)."""
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

@@ -97,6 +97,75 @@ def check_env_and_warn() -> None:
         )
 
 
+def _block_distant_fusion() -> None:
+    """Prevent inductor from fusing nodes which are far apart in the graph.
+
+    With activation checkpointing, inductor can fuse the early partial sum of a gradient
+    (e.g. of edge_attr, which is shared by all processor layers) with the final sum at the end
+    of the backward graph. Scheduling the fused node pulls the remaining input-gradient chain
+    ahead of it and defers all weight-gradient computations to the end of the graph, keeping
+    the activations of every remaining layer alive (~2x peak memory for n320 with a level-7 mesh).
+
+    torch's scheduler already has a heuristic for this (Scheduler.are_long_distant_nodes) but
+    does not use it (torch 2.9). This patches Scheduler.can_fuse to apply it.
+    """
+    from torch._inductor.scheduler import Scheduler
+
+    if getattr(Scheduler.can_fuse, "_anemoi_blocks_distant_fusion", False):
+        return
+    if not hasattr(Scheduler, "are_long_distant_nodes"):
+        LOGGER.warning("torch._inductor Scheduler.are_long_distant_nodes not found, not blocking distant fusions.")
+        return
+
+    can_fuse = Scheduler.can_fuse
+
+    def can_fuse_unless_distant(self, node1, node2) -> bool:
+        if self.are_long_distant_nodes(node1, node2):
+            return False
+        return can_fuse(self, node1, node2)
+
+    can_fuse_unless_distant._anemoi_blocks_distant_fusion = True
+    Scheduler.can_fuse = can_fuse_unless_distant
+
+
+def apply_compile_fusion_fix(fusion_fix: str) -> None:
+    """Apply a workaround for inductor fusions which inflate backward memory.
+
+    'block_distant_fusion' (default): don't fuse nodes far apart in the graph, see _block_distant_fusion.
+    'no_split_sums': raise inductor's realize thresholds so large sums (e.g. gradients of tensors
+        shared by many layers) are not split into partial sums that can be fused across the graph.
+        Only uses public inductor config, but generates slower code.
+    'none': leave inductor unchanged.
+    """
+    if fusion_fix == "block_distant_fusion":
+        _block_distant_fusion()
+    elif fusion_fix == "no_split_sums":
+        import torch._inductor.config
+
+        torch._inductor.config.realize_acc_reads_threshold = 64
+        torch._inductor.config.realize_opcount_threshold = 1000
+    elif fusion_fix != "none":
+        msg = f"Unknown compile_fusion_fix '{fusion_fix}', expected 'block_distant_fusion', 'no_split_sums' or 'none'."
+        raise ValueError(msg)
+    LOGGER.info("torch.compile fusion fix: %s", fusion_fix)
+
+
+def set_activation_memory_budget(budget: float | None) -> None:
+    """Set the fraction of activations torch.compile saves for backward, recomputing the rest.
+
+    Applies to compiled regions only. None keeps torch's default (1.0, save everything).
+    """
+    if budget is None:
+        return
+    if not 0.0 < budget <= 1.0:
+        msg = f"compile_activation_memory_budget must be in (0, 1], got {budget}."
+        raise ValueError(msg)
+    import torch._functorch.config
+
+    torch._functorch.config.activation_memory_budget = float(budget)
+    LOGGER.info("torch.compile activation memory budget: %s", budget)
+
+
 def prepare_compilation(
     model: torch.nn.Module,
     model_config: DictConfig,
@@ -111,11 +180,15 @@ def prepare_compilation(
     #'The AccumulateGrad node's stream does not match the stream of the node that produced the incoming gradient.'
     # at the start of BWD when compiling the whole processor
     # TODO(cathal): verify this is not a problem for performance and can be safely ignored
-    torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
+    # only available in newer versions of torch (not in 2.9)
+    if hasattr(torch.autograd.graph, "set_warn_on_accumulate_grad_stream_mismatch"):
+        torch.autograd.graph.set_warn_on_accumulate_grad_stream_mismatch(False)
 
     if hasattr(model_config, "compile"):
         model = mark_for_compilation(model, model_config.compile)
         check_env_and_warn()  # warn if env settings interfere with compilation
+        apply_compile_fusion_fix(getattr(model_config, "compile_fusion_fix", "block_distant_fusion"))
+        set_activation_memory_budget(getattr(model_config, "compile_activation_memory_budget", None))
     recompile_limit = getattr(model_config, "recompile_limit", None)
     if hasattr(training_config, "recompile_limit"):
         LOGGER.warning(

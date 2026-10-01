@@ -111,6 +111,12 @@ trainable_parameters:
 # options (dict): a dict of further options which can be passed to torch.compile
 compile:
   - module: anemoi.models.layers.conv.GraphTransformerConv
+# Workaround for inductor fusions that inflate backward memory with activation checkpointing:
+# block_distant_fusion (default), no_split_sums or none
+# compile_fusion_fix: block_distant_fusion
+# Fraction of activations saved for backward in compiled modules, the rest is recomputed (0, 1].
+# Unset keeps torch's default of 1.0 (save everything).
+# compile_activation_memory_budget: 0.5
 
 attributes:
   edges:

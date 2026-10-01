@@ -24,10 +24,12 @@ from torch_geometric.typing import PairTensor
 
 from anemoi.models.distributed.graph import ensure_sharded
 from anemoi.models.distributed.graph import gather_tensor
+from anemoi.models.distributed.khop_edges import GraphChunkPlan
 from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.distributed.khop_edges import build_graph_chunk_plan
 from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
+from anemoi.models.distributed.khop_edges import get_local_shard_info
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -216,6 +218,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         )
 
         self.num_chunks = num_chunks
+        # chunk plans cached for use inside torch.compile, keyed by (num_chunks, num_src, num_dst, num_edges)
+        self._compiled_chunk_plans: dict[tuple[int, int, int, int], GraphChunkPlan] = {}
 
         Linear = self.layer_factory.Linear
 
@@ -248,6 +252,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
     def prepare_edge_sharding_wrapper(
         self,
         x: PairTensor,
+        shard_partition: GraphPartition,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         edge_attr: Tensor,
@@ -256,6 +261,7 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         cond: Optional[tuple[Tensor, Tensor]] = None,
         edges_are_dst_sorted: bool = True,
     ):
+        # only returns tensors, as this may run inside a checkpointed region under torch.compile
         x_dst = x[1]
         num_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
         edge_attr, edge_index = ensure_edges_are_dst_sorted(
@@ -267,16 +273,8 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             edges_are_dst_sorted=edges_are_dst_sorted,
         )
 
-        # build a GraphPartition for the distributed shard (across GPUs)
-        shard_partition = build_graph_partition_from_shard_info(
-            edge_index,
-            x,
-            shard_info,
-            model_comm_group,
-        )
-
         # shard to local rank: gathers src, shards dst+edges, relabels dst, drops unconnected src
-        (x_src, x_dst), edge_attr, edge_index, shard_info, cond = shard_graph_to_local(
+        (x_src, x_dst), edge_attr, edge_index, _, cond = shard_graph_to_local(
             shard_partition,
             x,
             edge_attr,
@@ -286,33 +284,93 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             cond=cond,
         )
 
-        # build a second GraphPartition for local chunking within this shard
-        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
-        chunk_partition = build_graph_partition(
-            edge_index,
-            num_parts=num_chunks,
-            num_nodes=(x_src.shape[0], x_dst.shape[0]),
-        )
+        return x_src, x_dst, edge_attr, edge_index, cond
 
-        return x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition
+    def get_chunk_plan(self, edge_index: Adj, num_nodes: tuple[int, int], use_cache: bool = False) -> GraphChunkPlan:
+        """Get the slicing metadata for local chunking within this shard.
+
+        Building the plan needs data-dependent ops (`.item()`, `torch.unique`), which break the
+        graph under torch.compile. With `use_cache`, the plan is built once per graph size and
+        reused, assuming the graph structure is static for a given size.
+
+        Note: the cache is only valid for graphs from a StaticGraphProvider. Compiled mappers fed
+        different edges of the same size (e.g. by a DynamicGraphProvider) would reuse a stale plan.
+        """
+        num_chunks = max(self.num_chunks, NUM_CHUNKS_INFERENCE_MAPPER)
+        if not use_cache:
+            return build_graph_chunk_plan(edge_index, num_parts=num_chunks, num_nodes=num_nodes)
+
+        key = (num_chunks, num_nodes[0], num_nodes[1], edge_index.shape[1])
+        if key in self._compiled_chunk_plans:
+            return self._compiled_chunk_plans[key]
+        return self._build_and_cache_chunk_plan(key, edge_index, num_nodes)
+
+    def compile(self, *args, **kwargs) -> None:
+        """Compile the mapper, building the chunk plan in an eager no-grad pre-pass before the first compiled call.
+
+        With the plan cached before dynamo traces forward, the compiled graph is free of graph breaks
+        and the first call does not need to run the whole mapper eagerly.
+        """
+        super().compile(*args, **kwargs)
+        self._compiled_forward_impl = self._compiled_call_impl
+        self._compiled_call_impl = self._compiled_call_with_chunk_plan_prepass
+
+    def _compiled_call_with_chunk_plan_prepass(self, *args, **kwargs):
+        if self.shard_strategy == "edges" and not self._compiled_chunk_plans:
+            self.prepare_chunk_plan(*args, **kwargs)
+        return self._compiled_forward_impl(*args, **kwargs)
+
+    @torch.no_grad()
+    def prepare_chunk_plan(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        edge_attr: Tensor,
+        edge_index: Adj,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        edges_are_dst_sorted: bool = True,
+        **kwargs,
+    ) -> None:
+        """Build and cache the chunk plan for these inputs, without running the mapper."""
+        shard_partition = build_graph_partition_from_shard_info(edge_index, x, shard_info, model_comm_group)
+        x_src, x_dst, _, edge_index, _ = self.prepare_edge_sharding_wrapper(
+            x, shard_partition, shard_info, batch_size, edge_attr, edge_index, model_comm_group, None, edges_are_dst_sorted
+        )
+        self.get_chunk_plan(edge_index, (x_src.shape[0], x_dst.shape[0]), use_cache=True)
+
+    @torch.compiler.disable
+    def _build_and_cache_chunk_plan(
+        self, key: tuple[int, int, int, int], edge_index: Adj, num_nodes: tuple[int, int]
+    ) -> GraphChunkPlan:
+        plan = build_graph_chunk_plan(edge_index, num_parts=key[0], num_nodes=num_nodes)
+        self._compiled_chunk_plans[key] = plan
+        return plan
 
     def run_processor_chunk(
         self,
-        chunk_partition: GraphPartition,
-        chunk_id: int,
         x: tuple[Tensor, Tensor],
         edge_attr: Tensor,
-        edge_index: Adj,
+        edge_range: tuple[int, int],
+        dst_range: tuple[int, int],
+        src_ids: Tensor,
+        edge_index_chunk: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         **kwargs,
     ) -> Tensor:
-        # O(1) slicing: extract subgraph for this chunk
-        (x_src_chunk, x_dst_chunk), edge_attr_chunk, edge_index_chunk, cond_chunk = chunk_partition.materialise(
-            chunk_id, x, edge_attr, edge_index, cond=cond
-        )
+        # O(1) slicing: extract subgraph for this chunk using the precomputed chunk plan
+        x_src, x_dst = x
+        x_src_chunk = x_src[src_ids]
+        x_dst_chunk = x_dst[dst_range[0] : dst_range[1]]
+        edge_attr_chunk = edge_attr[edge_range[0] : edge_range[1]]
+        cond_chunk = None
+        if cond is not None:
+            cond_src, cond_dst = cond
+            cond_chunk = (cond_src[src_ids], cond_dst[dst_range[0] : dst_range[1]])
         chunk_size = (x_src_chunk.shape[0], x_dst_chunk.shape[0])
 
         # pre-process chunk, embedding x_src/x_dst
@@ -343,12 +401,18 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
         keep_x_dst_sharded: bool = False,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         edges_are_dst_sorted: bool = True,
+        use_chunk_plan_cache: bool = False,
         **kwargs,
     ) -> PairTensor:
-        x_src, x_dst, edge_attr, edge_index, shard_info, cond, chunk_partition = maybe_checkpoint(
+        # build a GraphPartition for the distributed shard (across GPUs)
+        # (per-dst degrees do not depend on edge order, so this does not need dst-sorted edges)
+        shard_partition = build_graph_partition_from_shard_info(edge_index, x, shard_info, model_comm_group)
+
+        x_src, x_dst, edge_attr, edge_index, cond = maybe_checkpoint(
             self.prepare_edge_sharding_wrapper,
             self.gradient_checkpointing,
             x,
+            shard_partition,
             shard_info,
             batch_size,
             edge_attr,
@@ -357,21 +421,24 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             cond,
             edges_are_dst_sorted,
         )
+        shard_info = get_local_shard_info(shard_partition, shard_info, model_comm_group)
 
         out_channels = self.out_channels_dst if self.out_channels_dst is not None else self.hidden_dim
         out_type = torch.get_autocast_gpu_dtype() if torch.is_autocast_enabled() else x_dst.dtype
         out_dst = torch.empty((*x_dst.shape[:-1], out_channels), device=x_dst.device, dtype=out_type)
 
-        for chunk_id in range(chunk_partition.num_parts):
-            dst_range = chunk_partition._get_dst_range(chunk_id)
-            out_dst[dst_range] = maybe_checkpoint(
+        chunk_plan = self.get_chunk_plan(edge_index, (x_src.shape[0], x_dst.shape[0]), use_cache=use_chunk_plan_cache)
+        for chunk_id in range(chunk_plan.num_parts):
+            dst_start, dst_end = chunk_plan.dst_ranges[chunk_id]
+            out_dst[dst_start:dst_end] = maybe_checkpoint(
                 self.run_processor_chunk,
                 self.gradient_checkpointing,
-                chunk_partition,
-                chunk_id,
                 (x_src, x_dst),
                 edge_attr,
-                edge_index,
+                chunk_plan.edge_ranges[chunk_id],
+                chunk_plan.dst_ranges[chunk_id],
+                chunk_plan.src_ids[chunk_id],
+                chunk_plan.edge_indices[chunk_id],
                 shard_info,
                 batch_size,
                 model_comm_group,
@@ -467,18 +534,10 @@ class GraphTransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         }
 
-        if torch.compiler.is_compiling():
-            LOGGER.warning(
-                "Explicit gradient checkpointing interferes with torch compile (specifically cuda graphs)."
-                "Disabling explicit gradient checkpointing for this function."
-                "Note: torch.compile will apply its own implicit checkpointing, determined by "
-                "'torch._dynamo.config.activation_memory_budget'"
-            )
-            self.gradient_checkpointing = False
-            self.num_chunks = 1
-
         if self.shard_strategy == "edges":
-            return self.mapper_forward_with_edge_sharding(**kwargs_forward)
+            return self.mapper_forward_with_edge_sharding(
+                **kwargs_forward, use_chunk_plan_cache=torch.compiler.is_compiling()
+            )
         else:  # self.shard_strategy == "heads"
             return maybe_checkpoint(
                 self.mapper_forward_with_heads_sharding,

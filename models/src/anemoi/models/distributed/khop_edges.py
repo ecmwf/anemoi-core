@@ -202,6 +202,76 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
     )
 
 
+@dataclass(frozen=True)
+class GraphChunkPlan:
+    """Precomputed per-chunk slicing metadata for local chunking of a dst-sorted graph.
+
+    Holds everything that `GraphPartition.materialise` derives from `edge_index`, so that
+    chunks can be extracted with plain slicing and indexing. Because the plan only depends on
+    the graph structure, it can be built once outside of a torch.compile region and reused,
+    avoiding the data-dependent ops (`.item()`, `torch.unique`) that cause graph breaks.
+
+    Parameters
+    ----------
+    dst_ranges : tuple[tuple[int, int], ...]
+        Per-chunk (start, end) of destination nodes.
+    edge_ranges : tuple[tuple[int, int], ...]
+        Per-chunk (start, end) of edges.
+    src_ids : tuple[Tensor, ...]
+        Per-chunk indices of the source nodes connected to the chunk.
+    edge_indices : tuple[Adj, ...]
+        Per-chunk edge index, relabelled to chunk-local src and dst indices.
+    """
+
+    dst_ranges: tuple[tuple[int, int], ...]
+    edge_ranges: tuple[tuple[int, int], ...]
+    src_ids: tuple[Tensor, ...]
+    edge_indices: tuple[Adj, ...]
+
+    @property
+    def num_parts(self) -> int:
+        return len(self.dst_ranges)
+
+
+def build_graph_chunk_plan(edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]) -> GraphChunkPlan:
+    """Build a GraphChunkPlan from a dst-sorted edge_index.
+
+    Parameters
+    ----------
+    edge_index : Adj
+        The edge index tensor (must be sorted by destination node).
+    num_parts : int
+        The number of chunks to partition the graph into.
+    num_nodes : tuple[int, int]
+        The number of (src, dst) nodes in the graph.
+
+    Returns
+    -------
+    GraphChunkPlan
+        The per-chunk slicing metadata.
+    """
+    partition = build_graph_partition(edge_index, num_parts, num_nodes)
+
+    dst_ranges, edge_ranges, src_ids, edge_indices = [], [], [], []
+    for partition_id in range(num_parts):
+        edge_range = partition._get_edge_range(partition_id)
+        edge_index_chunk = edge_index[:, edge_range].clone()  # clone to avoid in-place corruption
+        partition._relabel_dst_nodes(edge_index_chunk, partition_id)
+        connected_src_nodes, edge_index_chunk = _relabel_connected_src_nodes(edge_index_chunk, num_nodes[0])
+
+        dst_ranges.append(get_partition_range(partition.dst_splits, partition_id))
+        edge_ranges.append(get_partition_range(partition.edge_splits, partition_id))
+        src_ids.append(connected_src_nodes)
+        edge_indices.append(edge_index_chunk)
+
+    return GraphChunkPlan(
+        dst_ranges=tuple(dst_ranges),
+        edge_ranges=tuple(edge_ranges),
+        src_ids=tuple(src_ids),
+        edge_indices=tuple(edge_indices),
+    )
+
+
 def build_graph_partition_from_shard_info(
     edge_index: Adj,
     x: PairTensor,
@@ -327,6 +397,25 @@ def shard_edges_1hop(
     return edge_attr, edge_index, edge_shard_sizes
 
 
+def get_local_shard_info(
+    partition: GraphPartition,
+    shard_info: BipartiteGraphShardInfo,
+    model_comm_group: Optional[ProcessGroup] = None,
+) -> BipartiteGraphShardInfo:
+    """Shard metadata of the local subgraph returned by `shard_graph_to_local`.
+
+    Only depends on partition metadata, so it can be computed outside of checkpointed regions.
+    """
+    if not model_is_distributed(model_comm_group):
+        return shard_info
+
+    return BipartiteGraphShardInfo(
+        src_nodes=shard_info.src_nodes,
+        dst_nodes=partition.dst_splits,
+        edges=partition.edge_splits,
+    )
+
+
 def shard_graph_to_local(
     partition: GraphPartition,
     x: PairTensor,
@@ -413,11 +502,7 @@ def shard_graph_to_local(
         cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
         cond_local = (cond_src_full[src_ids], cond_dst)
 
-    updated_shard_info = BipartiteGraphShardInfo(
-        src_nodes=shard_info.src_nodes,
-        dst_nodes=partition.dst_splits,
-        edges=partition.edge_splits,
-    )
+    updated_shard_info = get_local_shard_info(partition, shard_info, model_comm_group)
 
     return (x_src_local, x_dst), edge_attr, edge_index, updated_shard_info, cond_local
 
@@ -506,14 +591,24 @@ def _drop_unconnected_src_nodes(x_src: Tensor, edge_index: Adj, in_place: bool =
         Subset of x_src, relabeled edge_index, indices of connected source nodes.
     """
     edge_index = edge_index if in_place else edge_index.clone()
-    connected_src_nodes = torch.unique(edge_index[0])
+    connected_src_nodes, edge_index = _relabel_connected_src_nodes(edge_index, x_src.shape[0])
     x_src_subset = x_src[connected_src_nodes]
 
-    relabel_map = torch.empty(x_src.shape[0], dtype=torch.long, device=x_src.device)
-    relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=x_src.device)
+    return x_src_subset, edge_index, connected_src_nodes
+
+
+def _relabel_connected_src_nodes(edge_index: Adj, num_src: int) -> tuple[Tensor, Adj]:
+    """Find src nodes with edges and relabel src indices in-place to be contiguous.
+
+    Returns the indices of the connected source nodes and the relabelled edge_index.
+    """
+    connected_src_nodes = torch.unique(edge_index[0])
+
+    relabel_map = torch.empty(num_src, dtype=torch.long, device=edge_index.device)
+    relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=edge_index.device)
     edge_index[0] = relabel_map[edge_index[0]]
 
-    return x_src_subset, edge_index, connected_src_nodes
+    return connected_src_nodes, edge_index
 
 
 ########## Slow path: explicit subgraph extraction (used when edges are NOT pre-sorted). ##########
