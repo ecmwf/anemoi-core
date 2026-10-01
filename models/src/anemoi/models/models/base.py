@@ -23,8 +23,8 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.create import load_graph_from_file
-from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.utils import load_graph_from_file
+from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import Template
 from anemoi.models.data_indices.collection import IndexCollection
