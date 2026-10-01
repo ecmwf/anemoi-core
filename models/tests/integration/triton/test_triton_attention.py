@@ -105,6 +105,100 @@ def test_triton_attention_sharp_softmax_dv(dtype, causal, window):
     torch.testing.assert_close(dv[0, 0].double(), expected_dv, atol=1e-3, rtol=1e-2)
 
 
+MASKINGS = [(False, -1), (True, -1), (False, 32)]  # (causal, window): global, causal, sliding window
+
+
+def _attention_fp64_grads(q, k, v, grad_out, sm_scale, causal, window):
+    """Output gradients of attention worked out in float64 from the same inputs."""
+    q, k, v = (t.detach().double().requires_grad_() for t in (q, k, v))
+    scores = q @ k.transpose(-1, -2) * sm_scale
+    positions = torch.arange(q.shape[2], device=q.device)
+    offsets = positions[:, None] - positions[None, :]
+    if causal:
+        scores = scores.masked_fill(offsets < 0, float("-inf"))
+    if window >= 0:
+        scores = scores.masked_fill(offsets.abs() > window, float("-inf"))
+    (scores.softmax(-1) @ v).backward(grad_out.double())
+    return q.grad, k.grad, v.grad
+
+
+def _triton_grads(q, k, v, grad_out, sm_scale, causal, window):
+    q, k, v = (t.detach().clone().requires_grad_() for t in (q, k, v))
+    out = TritonAttention.apply(q, k, v, causal, window, sm_scale)
+    return torch.autograd.grad(out, (q, k, v), grad_out)
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal,window", MASKINGS)
+def test_triton_attention_low_precision_gradients_with_offset_keys(dtype, causal, window):
+    """Keys sharing an offset 100 times their spread still give gradients as accurate as the precision allows.
+
+    The exact gradients do not depend on such an offset; rounding the score gradient to 16 bits before the
+    products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
+    """
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    shape = (1, 2, 512, 64)
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator) for _ in range(4))
+    offset = torch.randn(shape[-1], device="cuda", generator=generator)
+    k = k + 100 * shape[-1] ** 0.5 * offset / offset.norm()
+    q, k, v, grad_out = (t.to(dtype) for t in (q, k, v, grad_out))
+    sm_scale = shape[-1] ** -0.5
+
+    results = _triton_grads(q, k, v, grad_out, sm_scale, causal, window)
+    references = _attention_fp64_grads(q, k, v, grad_out, sm_scale, causal, window)
+    for name, result, reference in zip(("dq", "dk", "dv"), results, references):
+        error = ((result.double() - reference).norm() / reference.norm()).item()
+        assert error < 1e-2, f"{name}: relative error {error:.3g}"
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal,window", MASKINGS)
+def test_triton_attention_dq_ignores_a_key_coordinate_the_queries_do_not_see(dtype, causal, window):
+    """With every query 0 in one coordinate and every key sharing a large value there, dQ is 0 in it."""
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    shape = (1, 2, 512, 64)
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator) for _ in range(4))
+    q[..., 0] = 0.0
+    k[..., 0] = 2048.0
+    q, k, v, grad_out = (t.to(dtype) for t in (q, k, v, grad_out))
+
+    dq = _triton_grads(q, k, v, grad_out, shape[-1] ** -0.5, causal, window)[0].double()
+    assert dq[..., 0].abs().max() < 1e-2 * dq.pow(2).mean().sqrt()
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("dtype", [torch.float16, torch.bfloat16])
+@pytest.mark.parametrize("causal,window", MASKINGS)
+def test_triton_attention_dk_with_nearly_one_hot_attention(dtype, causal, window):
+    """The winning key retains its gradient when the saved output rounds to its value."""
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
+    shape, row = (1, 1, 97, 64), 48
+    q = torch.zeros(shape, device="cuda", dtype=dtype)
+    k, v, grad_out = torch.zeros_like(q), torch.zeros_like(q), torch.zeros_like(q)
+    q[..., 0] = 8.0
+    k[..., 0] = -80.0
+    k[..., row, 0], k[..., row - 1, 0] = 0.0, -8.0
+    v[..., row, 0] = 1.0
+    grad_out[..., row, 0] = 1.0
+
+    # Scaling by 1/sqrt(64) gives logits 0, -8 and -80. The output rounds to 1 in 16 bits,
+    # making uncorrected ds zero at the winning key, whose exact dK is about 3.35e-4.
+    sm_scale = shape[-1] ** -0.5
+    dk = _triton_grads(q, k, v, grad_out, sm_scale, causal, window)[1]
+    reference = _attention_fp64_grads(q, k, v, grad_out, sm_scale, causal, window)[1]
+    torch.testing.assert_close(dk.double(), reference, rtol=1e-2, atol=1e-7)
+
+
 @pytest.mark.gpu
 def test_triton_attention_deterministic():
     """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""

@@ -183,14 +183,17 @@ def _attn_fwd_inner(
             mask = fixed_pos >= iter_pos
             qk = tl.where(mask, qk, MINUS_INF)
 
-        # compute max and exponent after masking (more numerically stable)
-        # m_ij = tl.maximum(m_i, tl.max(qk, 1))
-        # p = tl.math.exp2(qk - m_ij[:, None])
-        m_ij = tl.maximum(m_i, tl.max(qk, 1) * qk_scale)
-        p = tl.math.exp2(qk * qk_scale - m_ij[:, None])
+        # The row maximum is kept in unscaled logits and subtracted before scaling, so the largest
+        # score of a row maps to exactly 0. Scaling first and subtracting a separately rounded,
+        # scaled maximum lets the compiler fuse the two into one multiply-add, which leaves the
+        # largest score slightly off 0; at large logits that error reaches the saved output and,
+        # through delta, every gradient. See Chen et al., "Broken symmetry in BF16 attention",
+        # https://arxiv.org/abs/2609.34272, section 3.3.
+        m_ij = tl.maximum(m_i, tl.max(qk, 1))
+        p = tl.math.exp2((qk - m_ij[:, None]) * qk_scale)
 
         # -- compute correction factor --
-        alpha = tl.math.exp2(m_i - m_ij)
+        alpha = tl.math.exp2((m_i - m_ij) * qk_scale)
         l_ij = tl.sum(p, 1)
         # -- update output accumulator --
         acc = acc * alpha[:, None]
@@ -320,7 +323,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 @triton.jit
 def _attn_fwd(
     sm_scale,  # softmax scaling factor.
-    M,  # pointer to row-wise softmax max values (m_i), shape [Z*H*n_ctx_rounded]
+    M,  # pointer to row-wise softmax max values (m_i) in unscaled logits, shape [Z*H*n_ctx_rounded]
     INV_L,  # pointer to row-wise inverse softmax sum (1/l_i), shape [Z*H*n_ctx_rounded]
     Z,  # batch size
     H,  # num heads
@@ -452,8 +455,8 @@ def _attn_fwd(
         UNEVEN_CTX,
     )
     # epilogue
-    # Save m_max and inv_l separately so the backward can compute
-    # p = exp2(qk*scale - m_max) * inv_l without the fp precision loss
+    # Save m_max (in unscaled logits) and inv_l separately so the backward can compute
+    # p = exp2((qk - m_max) * scale) * inv_l without the fp precision loss
     # that can occur when forming the combined M = m + log2(l).
     inv_l_i = 1.0 / l_i
     acc = acc * inv_l_i[:, None]
@@ -526,6 +529,7 @@ def _attn_bwd_dkdv(
     M,  # pointer to row-wise softmax max values (m_i) saved by forward
     INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
+    LAM,  # pointer to the per-query correction of ds written by _attn_bwd_dq, see there
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
     Z: tl.constexpr,  # batch size
@@ -620,10 +624,11 @@ def _attn_bwd_dkdv(
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of K and V into shared memory *****
 
-    # offset pointers for batch/head into M, and D arrays
+    # offset pointers for batch/head into M, D and LAM arrays
     M += off_chz
     INV_L += off_chz
     D += off_chz
+    LAM += off_chz
 
     # start_fixed is an element offset here (pid * BLOCK_FIXED), not a block index as in _attn_fwd
     tail_fixed_block = (start_fixed + BLOCK_FIXED) > N_CTX
@@ -728,7 +733,7 @@ def _attn_bwd_dkdv(
         # normalised softmax probability.  Keeping m_max and inv_l separate
         # (rather than the combined M = m + log2(l) used on the main branch)
         # avoids fp precision loss when m and log2(l) differ greatly.
-        pT = tl.math.exp2(qkT * qk_scale - m[None, :]) * inv_l[None, :]
+        pT = tl.math.exp2((qkT - m[None, :]) * qk_scale) * inv_l[None, :]
 
         do = desc_do.load([iter_offset, 0])
         if UNEVEN_CTX and tail_iter_block:
@@ -740,13 +745,17 @@ def _attn_bwd_dkdv(
         # D (= delta) is pre-divided by ds_scale.
         if UNEVEN_CTX and tail_iter_block:
             Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
+            lam = tl.load(LAM + curr_offs, mask=curr_offs < N_CTX, other=0.0)
         else:
             Di = tl.load(D + curr_offs)
+            lam = tl.load(LAM + curr_offs)
         # Compute dP and dS.
         dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
         dsT = dsT.to(dtype)
         dk += tl.dot(dsT, tl.trans(qT))
+        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero here too.
+        dk += tl.dot(ppT, tl.trans((qT * -lam[None, :]).to(dtype)))
 
         # Move to next iter block
         iter_offset += BLOCK_ITER
@@ -793,6 +802,7 @@ def _attn_bwd_dq(
     M,  # pointer to row-wise softmax max values (m_i) saved by forward
     INV_L,  # pointer to row-wise inverse softmax sum (1/l_i) saved by forward
     D,  # pointer to delta values (precomputed in _attn_bwd_preprocess)
+    LAM,  # written here: sum of the rounded ds over sum of the rounded probabilities per query, see below
     sm_scale: tl.constexpr,  # softmax scaling factor
     # shared by Q/K/V/DO.
     Z: tl.constexpr,  # batch size
@@ -881,10 +891,11 @@ def _attn_bwd_dq(
 
     # ***** 4) allocate shared memory buffers for gradients and load fixed subset of Q and dO into shared memory *****
 
-    # offset pointers for batch/head into M and D arrays
+    # offset pointers for batch/head into M, D and LAM arrays
     M += off_chz
     INV_L += off_chz
     D += off_chz
+    LAM += off_chz
 
     # generate offset array for fixed block
     offs_fixed = start_fixed + tl.arange(0, BLOCK_FIXED)
@@ -892,6 +903,17 @@ def _attn_bwd_dq(
 
     q = desc_q.load([fixed_offset, 0])
     dq = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)  # gradient accumulator for dQ
+    # The exact ds of a query sums to zero over its keys, which keeps dq blind to where the keys sit
+    # as a group. Rounding ds to the input precision before the product with k leaves a small sum,
+    # and dq picks up that sum times the mean key, which outweighs the true gradient when the keys
+    # are far from the origin compared with their spread. The sums of the rounded ds and of the
+    # rounded probabilities are kept, and lam = their ratio, so that ds - lam * p sums to zero; dq
+    # and dk use that. It also removes the sum that delta, built from the rounded saved output,
+    # leaves in ds. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
+    # https://arxiv.org/abs/2609.34272.
+    p_k = tl.zeros([BLOCK_FIXED, HEAD_DIM], dtype=tl.float32)
+    ds_sum = tl.zeros([BLOCK_FIXED], dtype=tl.float32)
+    p_sum = tl.zeros([BLOCK_FIXED], dtype=tl.float32)
     do = desc_do.load([fixed_offset, 0])
     if UNEVEN_CTX and tail_fixed_block:
         # mask out-of-bounds q values to 0, so they dont contribute to output. This can happen when N_CTX is not divisible by BLOCK_FIXED
@@ -984,7 +1006,7 @@ def _attn_bwd_dq(
         # Apply exponent after masking, then multiply by inv_l for the
         # normalised softmax probability (see _attn_bwd_dkdv for rationale).
         # Reconstruct probabilities with the same FP32 scaling as forward.
-        p = tl.math.exp2(qk * qk_scale - m) * inv_l[:, None]
+        p = tl.math.exp2((qk - m) * qk_scale) * inv_l[:, None]
         # Compute dP and dS.
         # NOTE: dp - Di still suffers from cancellation when the softmax is
         # very sharp (v[j*] ≈ out[i]) because both are O(1) scalars and their
@@ -998,14 +1020,20 @@ def _attn_bwd_dq(
         # Compute dQ.
         # K is unscaled; apply the softmax chain-rule scale in the epilogue.
         ds = ds.to(dtype)
+        p = p.to(dtype)
+        ds_sum += tl.sum(ds.to(tl.float32), 1)
+        p_sum += tl.sum(p.to(tl.float32), 1)
         dq += tl.dot(ds, tl.trans(kT))
+        p_k += tl.dot(p, tl.trans(kT))
 
         # move to the next iter_block
         iter_offset += BLOCK_ITER
 
     # ***** 6) store gradient dQ *****
 
-    dq *= sm_scale
+    lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
+    tl.store(LAM + offs_fixed, lam, mask=offs_fixed < N_CTX)
+    dq = (dq - lam[:, None] * p_k) * sm_scale
     # to avoid writing out of bounds when N_CTX is not divisible by BLOCK_FIXED, the block size of desc_dq is set to be smaller in the last block, so we only write the in-bounds values
     if UNEVEN_CTX and tail_fixed_block:
         dq_ptrs = (
@@ -1190,6 +1218,7 @@ class TritonAttention(torch.autograd.Function):
 
         PRE_BLOCK = 16
         delta = torch.empty_like(M)
+        lam = torch.empty_like(M)
 
         n_ctx = q.shape[2]
         MAX_BLOCK_SIZE = 128
@@ -1222,24 +1251,23 @@ class TritonAttention(torch.autograd.Function):
         def grid_dq(META):
             return (triton.cdiv(n_ctx, META["BLOCK_FIXED"]), 1, BATCH * N_HEAD)
 
-        # Compute dK and dV
         # for some reason, when using device-side tensor descriptors, the allocator must be set explictly before the backward pass, otherwise triton complains no allocator has been set
         if not supports_host_descriptor():
             set_allocator()
 
-        _attn_bwd_dkdv[grid_dkdv](
+        # Compute dQ first: it also writes lam, which the dK/dV kernel reads.
+        _attn_bwd_dq[grid_dq](
             desc_q,
             desc_k,
             desc_v,
             desc_do,
-            desc_dk,
-            desc_dv,
+            desc_dq,
             # need to pass raw pointer in uneven ctx case
-            dk,
-            dv,
+            dq,
             M,
             inv_l,
             delta,  #
+            lam,
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
@@ -1253,18 +1281,21 @@ class TritonAttention(torch.autograd.Function):
             **extra_kern_args,
         )
 
-        # Compute dQ
-        _attn_bwd_dq[grid_dq](
+        # Compute dK and dV
+        _attn_bwd_dkdv[grid_dkdv](
             desc_q,
             desc_k,
             desc_v,
             desc_do,
-            desc_dq,
+            desc_dk,
+            desc_dv,
             # need to pass raw pointer in uneven ctx case
-            dq,
+            dk,
+            dv,
             M,
             inv_l,
             delta,  #
+            lam,
             ctx.sm_scale,
             Z=BATCH,
             H=N_HEAD,
