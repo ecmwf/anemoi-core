@@ -122,6 +122,14 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
+class IterationSchema(PydanticBaseModel):
+    """Hydra configuration for dataset iteration."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    target_: str = Field(alias="_target_")
+
+
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -134,6 +142,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
+    iteration: IterationSchema
+    "Dataset iteration implementation."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet

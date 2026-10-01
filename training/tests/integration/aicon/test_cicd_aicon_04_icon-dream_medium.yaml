@@ -410,6 +410,8 @@ diagnostics:
 dataloader:
   prefetch_factor: 1
   pin_memory: True
+  iteration:
+    _target_: anemoi.training.data.iteration.BaseIteration
   read_group_size: ${system.hardware.num_gpus_per_model}
   #dataset: ${system.input.dataset}
   batch_size:

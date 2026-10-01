@@ -42,7 +42,6 @@ from anemoi.training.losses.scalers import create_scalers
 from anemoi.training.losses.scalers.base_scaler import AvailableCallbacks
 from anemoi.training.losses.scalers.base_scaler import BaseScaler
 from anemoi.training.losses.scalers.base_scaler import BaseUpdatingScaler
-from anemoi.training.losses.utils import check_loss_tree_variable_units
 from anemoi.training.losses.utils import print_variable_scaling
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
@@ -216,6 +215,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             config=config,
         )
         self.config = config
+        self._ckpt_variables_metadata: dict[str, dict] | None = None
 
         self.data_indices = data_indices
 
@@ -284,10 +284,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 graph_data=graph_data,
                 data_node_name=data_node_name,
             )
-
-            # Check unit compatibility between predicted and target variables
-            ds_variables_metadata = metadata["dataset"][dataset_name].get("variables_metadata")
-            check_loss_tree_variable_units(self.loss[dataset_name], ds_variables_metadata)
 
             self.metrics[dataset_name] = self._build_metrics_for_dataset(
                 val_metrics_configs[dataset_name],
@@ -847,6 +843,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Prepare tensors for loss/metrics computation
         total_loss, metrics_next, y_preds = None, {}, {}
         for dataset_name in self.target_dataset_names:
+            if dataset_name not in y:
+                continue
             if dataset_name not in y_pred:
                 err_msg = (
                     f"Your model is not predicting dataset '{dataset_name}' (not included in any decoder) but "
@@ -946,7 +944,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = {}
         self.grid_shard_slice = {}
 
-        for dataset_name in self.dataset_names:
+        for dataset_name in batch:
             if self.keep_batch_sharded and self.model_comm_group_size > 1:
                 self.grid_shard_sizes[dataset_name] = self.shard_sizes[dataset_name]
                 start, end = get_partition_range(

@@ -47,6 +47,8 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         self.input_datasets = ["dataset_a", "dataset_b"]
         self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
         self._graph_name_hidden = "hidden"
+        self.dataset2hidden = {"dataset_a": "hidden", "dataset_b": "hidden"}
+        self._multiple_hidden_meshes = False
         self.input_dim_latent = 4
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(

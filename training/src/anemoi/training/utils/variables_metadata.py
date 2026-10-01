@@ -20,6 +20,29 @@ LOG = logging.getLogger(__name__)
 GROUP_SPEC = str | list[str] | bool
 
 
+def check_datasets_variables_compatibility(
+    datasets_variables: dict[str, dict[str, Variable]],
+    **options: object,
+) -> None:
+    """Check common variables for compatibility across datasets."""
+    dataset_names = list(datasets_variables)
+    for index, dataset_name in enumerate(dataset_names):
+        for other_name in dataset_names[index + 1 :]:
+            common_variables = datasets_variables[dataset_name].keys() & datasets_variables[other_name].keys()
+            try:
+                Variable.check_compatibility(
+                    {name: datasets_variables[dataset_name][name] for name in common_variables},
+                    {name: datasets_variables[other_name][name] for name in common_variables},
+                    **options,
+                )
+            except ValueError as error:
+                msg = (
+                    f"Variable compatibility check failed for dataset '{dataset_name}' "
+                    f"and dataset '{other_name}': {error}"
+                )
+                raise ValueError(msg) from error
+
+
 def extract_variables_metadata_from_checkpoint(
     checkpoint: dict,
     dataset_names: dict[str, object],
