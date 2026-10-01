@@ -7,10 +7,12 @@ anemoi-datasets) and load data into the model. It performs
 validation checks, such as ensuring that the training dataset end date is
 before the start date of the validation dataset.
 
-The dataset files contain functions which define how datasets get
-split between workers (``worker_init_func``) and how datasets are
-iterated across to produce data batches that get fed as input into
-the model (``__iter__``).
+Each training, validation, and test dataset is a map-style dataset:
+an index selects one sample, which ``__getitem__`` reads from all data
+readers. The datamodule pairs each dataset with a sampler that decides
+which samples a rank loads and in which order, and with a dataloader
+that records its position so that training can resume in the middle of
+an epoch.
 
 Dataset Architecture
 ====================
@@ -51,15 +53,16 @@ or ``TrajectoryDataset`` instances). This is the primary interface used
 for training and supports:
 
 * Synchronizing samples across multiple datasets with different grids
-* Managing distributed data loading across workers and communication groups
-* Shuffling and batching data for training
 * Handling grid sharding for distributed training
+
+Shuffling and the split of samples between groups of ranks are done by the
+sampler that the datamodule builds, not by the dataset.
 
 .. note::
 
    Users wishing to change the format of the batch input into the model
-   should sub-class ``MultiDataset`` and override the ``__iter__``
-   method or the ``get_sample`` method.
+   should sub-class ``MultiDataset`` and override the ``get_sample``
+   method.
 
 API Reference
 =============

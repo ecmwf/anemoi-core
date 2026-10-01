@@ -7,11 +7,16 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import random
+
+import numpy as np
 import pytest
+import torch
 
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import seed_random_generators
 
 
 @pytest.mark.parametrize("env_var", ["ANEMOI_BASE_SEED", "SLURM_JOB_ID", "CUSTOM_BASE_SEED"])
@@ -52,9 +57,10 @@ def test_derive_seed_distinguishes_contexts() -> None:
         derive_seed(base_seed, SeedContext.TRAINER),
         derive_seed(base_seed, SeedContext.MODEL, 0),
         derive_seed(base_seed, SeedContext.DATALOADER, 0),
+        derive_seed(base_seed, SeedContext.TRAINING_BATCH, 0),
     }
 
-    assert len(seeds) == 3
+    assert len(seeds) == 4
 
 
 @pytest.mark.parametrize(
@@ -69,3 +75,14 @@ def test_derive_seed_distinguishes_contexts() -> None:
 )
 def test_derive_seed_within_uint32_bounds(base_seed: int, keys: tuple[int, ...]) -> None:
     assert 0 <= derive_seed(base_seed, *keys) <= 2**32 - 1
+
+
+def test_seed_random_generators_repeats_all_streams() -> None:
+    def draw() -> tuple[float, float, float]:
+        return random.random(), float(np.random.random()), float(torch.rand(1))  # noqa: S311, NPY002
+
+    seed_random_generators(1234)
+    first = draw()
+    seed_random_generators(1234)
+
+    assert draw() == first

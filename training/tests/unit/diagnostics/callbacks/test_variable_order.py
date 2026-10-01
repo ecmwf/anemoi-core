@@ -20,6 +20,7 @@ from anemoi.training.diagnostics.callbacks.sanity import CheckVariableOrder
 from anemoi.training.tasks import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils.seeding import get_base_seed
 
 
 class DummyTrainingModule(BaseTrainingModule):
@@ -264,6 +265,7 @@ def test_on_load_checkpoint_restores_name_to_index() -> None:
             "data_indices": {
                 dataset_name: MagicMock(name_to_index=mock_name_to_index),
             },
+            "metadata": {"base_seed": get_base_seed()},
         },
     }
     # Act

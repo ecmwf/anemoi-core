@@ -99,48 +99,43 @@ parallel reductions can still differ slightly.
 -  If neither value is available, Anemoi Training falls back to ``42``.
 
 Anemoi Training derives unsigned 32-bit runtime seeds from the selected base seed
-for the trainer, model communication groups, and data-loading epochs. Both
-the base seed and the derived trainer seed are stored in the checkpoint
-metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also
-logged during training. To reuse the same seed derivation after a restart, set
-``ANEMOI_BASE_SEED`` to the stored ``base_seed``.
+for the trainer, model communication groups, the data shuffle, and every training
+batch. Both the base seed and the derived trainer seed are stored in the checkpoint
+metadata (as ``base_seed`` and ``seed``); the derived trainer seed is also logged
+during training.
 
-``persistent_workers`` controls whether dataloader worker processes remain alive
-between epochs. It defaults to ``true`` to avoid starting new workers every epoch
-during standard training.
+Resuming a run
+==============
 
-The dataloader epoch is also stored in training checkpoints. When
-``dataloader.persistent_workers`` is ``false``, workers are restarted every
-epoch. Restarting from a checkpoint saved at the end of an epoch with the same
-base seed, data, dataloader configuration, and distributed configuration then
-produces the same shuffle as uninterrupted training.
+A run resumed from a checkpoint loads the same batches and draws the same random
+numbers as a run that was never interrupted. This holds for checkpoints saved at the
+end of an epoch and in the middle of one, provided the resumed job uses the same base
+seed, data, dataloader configuration, and distributed configuration. A checkpoint
+saved on exactly the last training batch of an epoch is the exception: PyTorch
+Lightning resumes it into an empty epoch.
 
-Anemoi automatically sets ``persistent_workers`` to ``false`` when the rollout
-changes between epochs (``rollout.epoch_increment > 0``), so that new workers
-receive the updated rollout.
+-  **Base seed.** Resuming fails if the base seed differs from the ``base_seed``
+   stored in the checkpoint. Inside SLURM the base seed falls back to the job ID,
+   which changes when a job is resubmitted, so set ``ANEMOI_BASE_SEED`` to the
+   stored ``base_seed`` when resuming. Loading only the weights
+   (``training.load_weights_only``) starts a new run and accepts any base seed.
+-  **Data order.** The training shuffle depends only on the base seed and the
+   epoch. The dataloader counts the samples it has handed out, and this count is
+   stored in the checkpoint, so a resumed run continues with the next batch. This
+   works with and without ``dataloader.persistent_workers``.
+-  **Model randomness.** The random number generators are seeded at the start of
+   every training batch from the base seed, the model communication group, the
+   epoch, and the batch number. Random numbers used by stochastic parts of the model,
+   such as noise injection or diffusion noise, therefore do not depend on what was
+   drawn before the batch, and no generator state needs to be stored.
 
-The workers' random number generator state is not stored in checkpoints.
-Consequently, when ``persistent_workers`` is ``true``, a restarted job does not
-continue the same shuffle sequence as an uninterrupted run, even when it uses the
-same base seed.
+When the rollout changes between epochs (``rollout.epoch_increment > 0``), the
+number of samples changes with it. The dataloaders are then rebuilt every epoch, and
+``persistent_workers`` is set to ``false``.
 
-With ``persistent_workers`` set to ``true``, repeating a training run split
-across multiple jobs produces the same shuffle sequence if the jobs restart from
-checkpoints saved at the end of the same epochs and use the same base seed, data,
-dataloader configuration, and distributed configuration. However, this sequence
-differs from running the same number of epochs in one uninterrupted job.
-
-Anemoi does not store a dataloader's position within an epoch. A checkpoint
-written during an epoch therefore cannot resume the exact data sequence at the
-next batch and may repeat or skip samples. Use checkpoints saved at the end of an
-epoch and set ``persistent_workers`` to ``false`` when the data sequence must match
-uninterrupted training.
-
-The same data shuffling does not necessarily make the complete training run
-exactly reproducible. The random number generators used by stochastic parts of
-the model are seeded at job startup, but their current state is not stored in
-checkpoints. In addition, some GPU kernels used by the model may also produce
-results that are not bitwise identical between runs.
+The same data and random numbers do not necessarily make the complete training run
+bitwise reproducible: some GPU kernels used by the model may produce results that
+differ slightly between runs.
 
 Step 5: Execute Training
 ========================
