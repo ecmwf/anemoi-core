@@ -159,10 +159,14 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         if dataset_name in self.node_attributes:
             node_attributes_data = self.node_attributes(dataset_name, batch_size=bse).to(y_noised_features.data.device)
-            if node_attributes_data.shape[0] != y_noised_features.data.shape[0]:
+            # The attributes cover every node; a sharded target holds only this rank's share.
+            num_target_nodes = (
+                sum(grid_shard_sizes) if grid_shard_sizes is not None else y_noised_features.data.shape[0]
+            )
+            if node_attributes_data.shape[0] != num_target_nodes:
                 msg = (
                     "Trainable node attributes are not implemented for dynamic sparse transport nodes. "
-                    f"Dataset '{dataset_name}' has {y_noised_features.data.shape[0]} target nodes, "
+                    f"Dataset '{dataset_name}' has {num_target_nodes} target nodes, "
                     f"but static node attributes provide {node_attributes_data.shape[0]} rows."
                 )
                 raise NotImplementedError(msg)
@@ -252,11 +256,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         noise_cond: torch.Tensor,
         dataset_name: str,
         data_view: Optional["Source"] = None,
+        data_shard_sizes: ShardSizes = None,
         edge_conditioning: bool = False,
     ) -> torch.Tensor:
 
         if data_view is None:
             c_data = self._make_noise_emb(noise_cond, repeat=self._graph_data[dataset_name].num_nodes)
+        elif data_shard_sizes is not None and len(data_shard_sizes) > 1:
+            # Model sharding permits one sample/member, so all nodes share one embedding.
+            c_data = self._make_noise_emb(noise_cond, repeat=sum(data_shard_sizes))
         else:
             c_data = self._make_noise_emb_for_view(noise_cond, data_view)
         c_hidden = self._make_noise_emb(noise_cond, repeat=self._graph_data[self._graph_name_hidden].num_nodes)
@@ -303,16 +311,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             # The same transport noise/time embedding is shared across all output steps.
             noise_cond = noise_cond_base[:, None, :, None, :]
+            data_view = conditioned_target[dataset_name]
+            data_shard_sizes = data_view.template().flatten().shard_sizes
             c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
                 noise_cond,
                 dataset_name=dataset_name,
-                data_view=conditioned_target[dataset_name],
+                data_view=data_view,
+                data_shard_sizes=data_shard_sizes,
                 edge_conditioning=False,
             )
-            c_data_shard_sizes = get_shard_sizes(c_data, 0, model_comm_group=model_comm_group)
             c_hidden_shard_sizes = get_shard_sizes(c_hidden, 0, model_comm_group=model_comm_group)
-            c_data = shard_tensor(c_data, 0, c_data_shard_sizes, model_comm_group)
             c_hidden = shard_tensor(c_hidden, 0, c_hidden_shard_sizes, model_comm_group)
+
+            # Conditioning enters each mapper with the same node layout as its features.
+            if data_shard_sizes is not None:
+                c_data = shard_tensor(c_data, 0, data_shard_sizes, model_comm_group)
 
             fwd_mapper_kwargs[dataset_name] = {"cond": (c_data, c_hidden)}
             bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden, c_data)}

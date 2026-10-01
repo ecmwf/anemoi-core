@@ -187,6 +187,61 @@ def test_transport_conditioning_embedding_uses_compact_condition_width() -> None
     assert hidden_cond.shape == hidden_back_cond.shape == processor_kwargs["cond"].shape == (2 * 3 * 5, cond_dim)
 
 
+@pytest.mark.parametrize(
+    ("local_grid", "shard_sizes"),
+    [
+        pytest.param(4, None, id="whole_view"),
+        pytest.param(2, [2, 2], id="sharded_view"),
+    ],
+)
+def test_transport_conditioning_is_split_like_the_nodes_it_conditions(
+    monkeypatch: pytest.MonkeyPatch,
+    local_grid: int,
+    shard_sizes: list[int] | None,
+) -> None:
+    """Both mappers receive conditioning in the same layout as their input node features."""
+    model = _transport_model_stub()
+    model._graph_name_hidden = "hidden"
+    model._graph_data = {"data": SimpleNamespace(num_nodes=4), "hidden": SimpleNamespace(num_nodes=6)}
+    model._embed_noise_conditioning = lambda sigma: torch.ones((*sigma.shape[:-1], 2), dtype=sigma.dtype)
+    # A model group of two ranks, seen from rank 0: every sharded tensor keeps its first shard.
+    sharded_row_counts = []
+
+    def shard_first(tensor, dim, sizes, model_comm_group):
+        sharded_row_counts.append(tensor.shape[dim])
+        return tensor.narrow(dim, 0, sizes[0])
+
+    monkeypatch.setattr(
+        transport_model_module,
+        "get_shard_sizes",
+        lambda tensor, dim, model_comm_group=None: [tensor.shape[dim] // 2] * 2,
+    )
+    monkeypatch.setattr(transport_model_module, "shard_tensor", shard_first)
+
+    x = build_batch(
+        data={"data": torch.empty(1, 1, 1, local_grid, 1)},
+        coordinates={"data": torch.zeros(local_grid, 2)},
+        metadata={"static_coords": frozenset({"data"})},
+        shard_sizes={"data": shard_sizes},
+        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
+        variables={"data": ["a"]},
+        statistics={"data": {}},
+    )
+    condition = {"data": torch.zeros(1, 1, 1, 1, 1)}
+
+    fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = model._build_conditioning_kwargs(
+        x,
+        condition,
+        model_comm_group=object(),
+    )
+
+    encoder_data_cond, encoder_hidden_cond = fwd_mapper_kwargs["data"]["cond"]
+    decoder_hidden_cond, decoder_data_cond = bwd_mapper_kwargs["data"]["cond"]
+    assert encoder_data_cond.shape[0] == decoder_data_cond.shape[0] == local_grid
+    assert encoder_hidden_cond.shape[0] == decoder_hidden_cond.shape[0] == processor_kwargs["cond"].shape[0] == 3
+    assert set(sharded_row_counts) == ({6} if shard_sizes is None else {6, 4})
+
+
 def test_transport_conditioning_uses_sparse_target_node_counts() -> None:
     model = _transport_model_stub()
     model._graph_name_hidden = "hidden"
@@ -1162,6 +1217,7 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
     model.transport_source = TransportSourceBuilder(TransportSourceSettings(kind="reference_state"))
     model.n_step_output = {"ds_a": 2}
     model.num_output_channels = {"ds_a": 2}
+    model.statistics = {"ds_a": {}}
     model.data_indices = {
         "ds_a": SimpleNamespace(
             name_to_index={"a": 0, "c": 1, "b": 2, "d": 3},
@@ -1184,7 +1240,7 @@ def test_tendency_sampling_source_can_use_reference_state() -> None:
     source = model.build_sampling_source(x, target_template=x.select(variables={"ds_a": [0, 2]}))
 
     expected = x_data[:, -1:, :, :, :].index_select(-1, torch.tensor([0, 2])).expand(-1, 2, -1, -1, -1)
-    torch.testing.assert_close(source["ds_a"], expected)
+    torch.testing.assert_close(source["ds_a"].data, expected)
 
 
 def test_stochastic_interpolant_objective_returns_raw_drift_prediction() -> None:
