@@ -114,6 +114,33 @@ def test_triton_bfloat16_gradients_with_offset_keys(query_name, key_name, kernel
         assert ((result.double() - reference).norm() / reference.norm()).item() < 1e-2, name
 
 
+@pytest.mark.parametrize(
+    ("query_name", "key_name", "kernel_size"), [("O8", "O16", (5, 5)), ("O16", "O8", (3, 5)), ("H8", "H4", (3, 5))]
+)
+def test_triton_bfloat16_dk_with_nearly_one_hot_attention(query_name, key_name, kernel_size):
+    """The winning key retains its gradient when the saved output rounds to its value."""
+    query_grid, key_grid = _grid(query_name), _grid(key_name)
+    dense = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")
+    query = query_grid.num_points // 2
+    keys = dense._mask_on(torch.device("cuda"))[query].nonzero().flatten()[:2]
+    q = torch.zeros(1, 1, query_grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
+    k = torch.zeros(1, 1, key_grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
+    v, grad_out = torch.zeros_like(k), torch.zeros_like(q)
+    q[..., 0] = 8.0
+    k[..., 0] = -80.0
+    k[..., keys[0], 0], k[..., keys[1], 0] = 0.0, -8.0
+    v[..., keys[0], 0] = 1.0
+    grad_out[..., query, 0] = 1.0
+
+    # Scaling by 1/sqrt(64) gives logits 0, -8 and -80. The output rounds to 1 in BF16,
+    # making uncorrected ds zero at the winning key, whose exact dK is about 3.35e-4.
+    qkv = [q, k, v]
+    triton = cross_attention(query_grid, key_grid, kernel_size, backend="triton")
+    _, _, dk, _ = _run(triton, qkv, grad_out)
+    _, _, reference, _ = _run(dense, [t.double() for t in qkv], grad_out.double())
+    torch.testing.assert_close(dk.double(), reference, rtol=1e-2, atol=1e-7)
+
+
 @pytest.mark.parametrize("grid_name", ["O16", "H8"])
 def test_cross_on_one_grid_matches_self_attention_kernel(grid_name):
     grid = _grid(grid_name)

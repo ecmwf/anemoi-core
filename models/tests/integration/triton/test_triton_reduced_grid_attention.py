@@ -113,6 +113,29 @@ def test_triton_bfloat16_gradients_with_offset_keys(grid_name):
 
 
 @pytest.mark.parametrize("grid_name", ["O16", "H8"])
+def test_triton_bfloat16_dk_with_nearly_one_hot_attention(grid_name):
+    """The winning key retains its gradient when the saved output rounds to its value."""
+    grid, kernel_size = _grid(grid_name), (5, 7)
+    dense = self_attention(grid, kernel_size, backend="sdpa")
+    query = grid.num_points // 2
+    keys = dense._mask_on(torch.device("cuda"))[query].nonzero().flatten()[:2]
+    q = torch.zeros(1, 1, grid.num_points, 64, device="cuda", dtype=torch.bfloat16)
+    k, v, grad_out = torch.zeros_like(q), torch.zeros_like(q), torch.zeros_like(q)
+    q[..., 0] = 8.0
+    k[..., 0] = -80.0
+    k[..., keys[0], 0], k[..., keys[1], 0] = 0.0, -8.0
+    v[..., keys[0], 0] = 1.0
+    grad_out[..., query, 0] = 1.0
+
+    # Scaling by 1/sqrt(64) gives logits 0, -8 and -80. The output rounds to 1 in BF16,
+    # making uncorrected ds zero at the winning key, whose exact dK is about 3.35e-4.
+    qkv = [q, k, v]
+    _, _, dk, _ = _run("triton", grid, kernel_size, qkv, grad_out)
+    _, _, reference, _ = _run("sdpa", grid, kernel_size, [t.double() for t in qkv], grad_out.double())
+    torch.testing.assert_close(dk.double(), reference, rtol=1e-2, atol=1e-7)
+
+
+@pytest.mark.parametrize("grid_name", ["O16", "H8"])
 def test_triton_bfloat16_dq_ignores_a_key_coordinate_the_queries_do_not_see(grid_name):
     """With every query 0 in one coordinate and every key sharing a large value there, dQ is 0 in it."""
     grid, kernel_size = _grid(grid_name), (5, 7)
