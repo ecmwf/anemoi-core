@@ -9,6 +9,7 @@
 
 
 import logging
+from dataclasses import dataclass
 from typing import Callable
 from typing import Optional
 
@@ -22,12 +23,11 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import ForwardContext
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
 from anemoi.models.transport import NoiseConditioningSettings
@@ -44,8 +44,26 @@ LOGGER = logging.getLogger(__name__)
 SamplingData = tuple[dict[str, torch.Tensor], ...]
 
 
+@dataclass(kw_only=True)
+class TransportForwardContext(ForwardContext):
+    """Forward context of the transport models.
+
+    Attributes
+    ----------
+    conditioned_target : dict[str, Tensor]
+        Corrupted target per dataset (noised target for diffusion, interpolant state for stochastic
+        interpolants), fed to the encoder alongside the input history.
+    """
+
+    conditioned_target: dict[str, torch.Tensor]
+
+
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
-    """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time."""
+    """Encoder-processor-decoder model conditioned on diffusion noise level or bridge time.
+
+    The noise level or bridge time is embedded once per forward pass and passed as ``cond`` to the
+    encoders, the processor and the decoders through the :class:`ForwardContext`.
+    """
 
     def __init__(
         self,
@@ -99,41 +117,38 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
     def _assemble_input(
         self,
         x: torch.Tensor,
-        y_noised: torch.Tensor,
-        bse: int,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, None, ShardSizes]:
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
-        # Combine input history, corrupted target, and node position features
+        ctx: TransportForwardContext,
+        dataset_name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor | None, ShardSizes]:
+        """Combine input history, corrupted target, and node position features. No residual skip."""
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
+                self._flatten_nodes(x),
+                self._flatten_nodes(ctx.conditioned_target[dataset_name]),
+                self._data_node_attributes(dataset_name, ctx),
             ),
             dim=-1,  # feature dimension
         )
 
-        return x_data_latent, None, grid_shard_sizes
+        return x_data_latent, None, ctx.dataset_shard_sizes(dataset_name)
 
-    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
-        x_out = einops.rearrange(
+    def _assemble_output(
+        self,
+        x_out: torch.Tensor,
+        x_skip: torch.Tensor | None,
+        ctx: ForwardContext,
+        dtype: torch.dtype,
+        dataset_name: str,
+    ) -> torch.Tensor:
+        """Reshape the raw network output; residual and boundings are handled by the transport objective."""
+        del x_skip, dataset_name
+        return einops.rearrange(
             x_out,
             "(batch ensemble grid) (time vars) -> batch time ensemble grid vars",
-            batch=batch_size,
-            ensemble=ensemble_size,
+            batch=ctx.batch_size,
+            ensemble=ctx.ensemble_size,
             time=self.n_step_output,
         ).to(dtype=dtype)
-
-        return x_out
 
     def _make_noise_emb(self, noise_emb: torch.Tensor, repeat: int) -> torch.Tensor:
         assert noise_emb.ndim in (4, 5), "noise_emb must be 4D or 5D."
@@ -168,37 +183,8 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             ), "Batch or ensemble dimension mismatch across datasets for conditioned inputs."
         return batch_size, ensemble_size
 
-    def _generate_noise_conditioning(
-        self,
-        noise_cond: torch.Tensor,
-        dataset_name: str,
-        edge_conditioning: bool = False,
-    ) -> torch.Tensor:
-
-        c_data = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[dataset_name])
-        c_hidden = self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[self._graph_name_hidden])
-
-        if edge_conditioning:  # currently unused, but available if graph edges need conditioning later
-            c_data_to_hidden = self._make_noise_emb(
-                noise_cond,
-                repeat=self._graph_data[(dataset_name, "to", self._graph_name_hidden)]["edge_length"].shape[0],
-            )
-            c_hidden_to_data = self._make_noise_emb(
-                noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", dataset_name)]["edge_length"].shape[0],
-            )
-            c_hidden_to_hidden = self._make_noise_emb(
-                noise_cond,
-                repeat=self._graph_data[(self._graph_name_hidden, "to", self._graph_name_hidden)]["edge_length"].shape[
-                    0
-                ],
-            )
-        else:
-            c_data_to_hidden = None
-            c_hidden_to_data = None
-            c_hidden_to_hidden = None
-
-        return c_data, c_hidden, c_data_to_hidden, c_hidden_to_data, c_hidden_to_hidden
+    def _shard_conditioning(self, cond: torch.Tensor, model_comm_group: Optional[ProcessGroup]) -> torch.Tensor:
+        return shard_tensor(cond, 0, get_shard_sizes(cond, 0, model_comm_group=model_comm_group), model_comm_group)
 
     def _build_conditioning_kwargs(
         self,
@@ -206,33 +192,68 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         condition: dict[str, torch.Tensor],
         model_comm_group: Optional[ProcessGroup] = None,
     ) -> tuple[dict[str, dict], dict[str, torch.Tensor], dict[str, dict]]:
+        """Embed the noise level or bridge time and expand it over the nodes of every graph.
+
+        Returns
+        -------
+        tuple[dict[str, dict], dict, dict[str, dict]]
+            ``(encoder_kwargs, processor_kwargs, decoder_kwargs)``: per-dataset ``cond`` pairs
+            ``(c_src, c_dst)`` for the encoders and decoders, and the ``cond`` of the deepest hidden
+            level for the processor.
+        """
         self._assert_condition_shapes(condition)
         dataset_names = list(x.keys())
 
         # Transport assumes one noise level or bridge time per sample and
         # ensemble member, shared across datasets. The training objectives build
         # the condition that way, so we can read it from the first dataset,
-        # embed it once, and repeat it over each dataset's graph nodes below.
+        # embed it once, and repeat it over each graph's nodes below.
+        # The same embedding is shared across all output steps.
         condition_base = condition[dataset_names[0]][:, 0, :, 0]
-        noise_cond_base = self._embed_noise_conditioning(condition_base)
+        noise_cond = self._embed_noise_conditioning(condition_base)[:, None, :, None, :]
 
-        fwd_mapper_kwargs, bwd_mapper_kwargs = {}, {}
-        for dataset_name in x:
-            # The same transport noise/time embedding is shared across all output steps.
-            noise_cond = noise_cond_base[:, None, :, None, :]
-            c_data, c_hidden, _, _, _ = self._generate_noise_conditioning(
-                noise_cond, dataset_name=dataset_name, edge_conditioning=False
+        c_hidden = {
+            hidden_name: self._shard_conditioning(
+                self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[hidden_name]),
+                model_comm_group,
             )
-            c_data_shard_sizes = get_shard_sizes(c_data, 0, model_comm_group=model_comm_group)
-            c_hidden_shard_sizes = get_shard_sizes(c_hidden, 0, model_comm_group=model_comm_group)
-            c_data = shard_tensor(c_data, 0, c_data_shard_sizes, model_comm_group)
-            c_hidden = shard_tensor(c_hidden, 0, c_hidden_shard_sizes, model_comm_group)
+            for hidden_name in self._hidden_names
+        }
 
-            fwd_mapper_kwargs[dataset_name] = {"cond": (c_data, c_hidden)}
-            bwd_mapper_kwargs[dataset_name] = {"cond": (c_hidden, c_data)}
+        encoder_kwargs, decoder_kwargs = {}, {}
+        for dataset_name in dataset_names:
+            c_data = self._shard_conditioning(
+                self._make_noise_emb(noise_cond, repeat=self.node_attributes.num_nodes[dataset_name]),
+                model_comm_group,
+            )
+            encoder_kwargs[dataset_name] = {"cond": (c_data, c_hidden[self._hidden_names[0]])}
+            decoder_kwargs[dataset_name] = {"cond": (c_hidden[self._hidden_names[0]], c_data)}
 
-        processor_kwargs = {"cond": c_hidden}
-        return fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs
+        processor_kwargs = {"cond": c_hidden[self._hidden_names[-1]]}
+        return encoder_kwargs, processor_kwargs, decoder_kwargs
+
+    def _init_forward_context(
+        self,
+        x: dict[str, torch.Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+        conditioned_target: dict[str, torch.Tensor],
+        condition: dict[str, torch.Tensor],
+        **kwargs,
+    ) -> TransportForwardContext:
+        ctx = super()._init_forward_context(
+            x,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
+        )
+        ctx = TransportForwardContext(**vars(ctx), conditioned_target=conditioned_target)
+        # Embed the current noise level or bridge time and pass it to the conditional layers.
+        ctx.encoder_kwargs, ctx.processor_kwargs, ctx.decoder_kwargs = self._build_conditioning_kwargs(
+            x, condition, model_comm_group=ctx.model_comm_group
+        )
+        return ctx
 
     def forward(
         self,
@@ -262,142 +283,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
-        # Multi-dataset case
-        dataset_names = list(x.keys())
-
-        # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
-
-        bse = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
+        """Single evaluation of the network for the given corrupted target and condition."""
+        return super().forward(
+            x,
+            model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            conditioned_target=conditioned_target,
+            condition=condition,
+            **kwargs,
         )
-        for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
-
-        # Embed the current noise level or bridge time and pass it to the conditional layers.
-        fwd_mapper_kwargs, processor_kwargs, bwd_mapper_kwargs = self._build_conditioning_kwargs(
-            x, condition, model_comm_group=model_comm_group
-        )
-
-        # Process each dataset through its corresponding encoder
-        dataset_latents = {}
-        x_skip_dict: dict[str, torch.Tensor | None] = {}
-        x_data_latent_dict = {}
-        shard_sizes_data_dict = {}
-
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_size)
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group=model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
-            if dataset_name not in self.input_datasets:
-                continue
-
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                conditioned_target[dataset_name],
-                bse,
-                grid_shard_sizes,
-                model_comm_group,
-                dataset_name,
-            )
-            x_skip_dict[dataset_name] = x_skip
-            shard_sizes_data_dict[dataset_name] = shard_sizes_data
-
-            (
-                encoder_edge_attr,
-                encoder_edge_index,
-                enc_edge_shard_sizes,
-            ) = self.encoder_graph_provider[dataset_name].get_edges(
-                batch_size=bse,
-                model_comm_group=model_comm_group,
-            )
-
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                dst_nodes=shard_sizes_hidden,
-                edges=enc_edge_shard_sizes,
-            )
-
-            # Encoder for this dataset
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_latent, dataset_latents[dataset_name] = self.encoder[encoder_name](
-                (x_data_latent, x_hidden_latent),
-                batch_size=bse,
-                shard_info=enc_shard_info,
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-                **fwd_mapper_kwargs[dataset_name],
-            )
-            x_data_latent_dict[dataset_name] = x_data_latent
-
-        # Combine all dataset latents
-        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
-
-        # Processor
-        (
-            processor_edge_attr,
-            processor_edge_index,
-            proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
-            batch_size=bse,
-            model_comm_group=model_comm_group,
-        )
-
-        x_latent_proc = self.processor(
-            x=x_latent,
-            batch_size=bse,
-            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            **processor_kwargs,
-        )
-
-        if self.latent_skip:
-            # Processor skip connection
-            x_latent_proc = x_latent_proc + x_latent
-
-        # Decoder
-        x_out_dict = {}
-        for dataset_name in self.target_datasets:
-            # Compute decoder edges using updated latent representation
-            (
-                decoder_edge_attr,
-                decoder_edge_index,
-                dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=bse,
-                model_comm_group=model_comm_group,
-            )
-
-            dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                edges=dec_edge_shard_sizes,
-            )
-
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
-                batch_size=bse,
-                shard_info=dec_shard_info,
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded[dataset_name],
-                **bwd_mapper_kwargs[dataset_name],
-            )
-
-            x_out_dict[dataset_name] = self._assemble_output(
-                x_out, x_skip_dict[dataset_name], batch_size, ensemble_size, x[dataset_name].dtype
-            )
-
-        return x_out_dict
 
     def _before_sampling(
         self,
@@ -659,16 +553,6 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             **kwargs,
         )
 
-    def fill_metadata(self, md_dict) -> None:
-        for dataset in self.input_dim.keys():
-            shapes = {
-                "variables": self.input_dim[dataset],
-                "input_timesteps": self.n_step_input,
-                "ensemble": 1,
-                "grid": None,  # grid size is dynamic
-            }
-            md_dict["metadata_inference"][dataset]["shapes"] = shapes
-
 
 class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model that predicts tendencies and converts them back to state fields."""
@@ -718,35 +602,18 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     def _assemble_input(
         self,
         x: torch.Tensor,
-        y_noised: torch.Tensor,
-        bse: int,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor | None, ShardSizes]:
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        ctx: TransportForwardContext,
+        dataset_name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
+        """Transport input features, optionally followed by the prognostic residual as conditioning."""
+        x_data_latent, _, grid_shard_sizes = super()._assemble_input(x, ctx, dataset_name)
 
-        x_skip = self.residual[dataset_name](x, grid_shard_sizes, model_comm_group, n_step_output=self.n_step_output)[
-            ..., self._internal_input_idx[dataset_name]
-        ]
+        x_skip = self.residual[dataset_name](
+            x, grid_shard_sizes, ctx.model_comm_group, n_step_output=self.n_step_output
+        )[..., self._internal_input_idx[dataset_name]]
         assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
         x_skip = einops.rearrange(x_skip, "batch time ensemble grid vars -> (batch ensemble) grid (time vars)")
 
-        # Shard node attributes if grid sharding is enabled
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
-        # Combine input history, corrupted target, and node position features
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(y_noised, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-            ),
-            dim=-1,  # feature dimension
-        )
         if self.condition_on_residual:
             x_data_latent = torch.cat(
                 (x_data_latent, einops.rearrange(x_skip, "bse grid vars -> (bse grid) vars")), dim=-1

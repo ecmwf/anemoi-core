@@ -47,6 +47,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
         self.input_datasets = ["dataset_a", "dataset_b"]
         self.dataset2encoder = {"dataset_a": "dataset_a", "dataset_b": "dataset_a"}
         self._graph_name_hidden = "hidden"
+        self._hidden_names = ["hidden"]
         self.input_dim_latent = 4
         self.node_attributes = _HiddenAttributes()
         self.encoder_graph_provider = nn.ModuleDict(
@@ -58,14 +59,7 @@ class _SharedEncoderModel(AnemoiModelEncProcDec):
     def _build_networks(self, model_config) -> None:
         raise NotImplementedError
 
-    def _assemble_input(
-        self,
-        x: torch.Tensor,
-        batch_size: int,
-        grid_shard_sizes=None,
-        model_comm_group=None,
-        dataset_name: str | None = None,
-    ):
+    def _assemble_input(self, x: torch.Tensor, ctx, dataset_name: str):
         value = float(self.input_datasets.index(dataset_name) + 1)
         return torch.full((1, 4), value), None, [1]
 

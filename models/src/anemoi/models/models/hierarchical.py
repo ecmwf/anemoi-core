@@ -9,73 +9,52 @@
 
 
 import logging
-from typing import Optional
 
-import torch
 from hydra.utils import instantiate
+from torch import Tensor
 from torch import nn
-from torch.distributed.distributed_c10d import ProcessGroup
 
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.layers.graph_provider import create_graph_provider
-from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import ForwardContext
+from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
 class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
-    """Message passing hierarchical graph neural network."""
+    """Message passing hierarchical graph neural network.
 
-    def _build_networks(self, model_config):
-        """Builds the model components."""
-        # Encoder data -> hidden
-        self.encoder_graph_provider = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
-            if dataset_name not in self.input_datasets:
-                LOGGER.info(
-                    f"Dataset {dataset_name} is not part of the input as it doesn't have a corresponding encoder."
-                )
-                continue
+    Encoders and decoders are those of :class:`AnemoiModelEncProcDec`, attached to the first hidden
+    level. The process stage is a U-Net over the hidden levels: the latent is mapped level by level
+    down to the deepest one (``upscale`` mappers, optional per-level ``down_level_processor``),
+    processed there, and mapped back up (``downscale`` mappers, per-level skip connections, optional
+    ``up_level_processor``). The number of latent channels doubles at every level.
+    """
 
-            encoder_config = model_config.encoders[self.dataset2encoder[dataset_name]]
-
-            # Create graph providers
-            self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(dataset_name, "to", self._graph_name_hidden[0])],
-                edge_attributes=encoder_config.mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[dataset_name],
-                dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-                trainable_size=encoder_config.mapper.get("trainable_size", 0),
-            )
-
-        self.encoder = torch.nn.ModuleDict()
-        for encoder_name, encoder_config in model_config.encoders.items():
-            encoder_in_channels_src = [self.input_dim[d] for d in self.encoder2datasets[encoder_name]]
-            assert all(ch == encoder_in_channels_src[0] for ch in encoder_in_channels_src), (
-                f"All datasets for encoder {encoder_name} must have the same input dimension, "
-                f"but got {encoder_in_channels_src}."
-            )
-
-            self.encoder[encoder_name] = instantiate(
-                encoder_config.mapper,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=encoder_in_channels_src[0],
-                in_channels_dst=self.input_dim_latent,
-                edge_dim=self.encoder_graph_provider[encoder_config.source_datasets[0]].edge_dim,
-            )
-
-        # Latent aggregator: combines encoder outputs before the processor
-        self._build_latent_aggregator(model_config.latent_aggregator)
-
-        # self.hidden_dims is the dimentionality of features at each depth
-        self.hidden_dims = {
-            hidden: self.latent_aggregator.hidden_dim * (2**i) for i, hidden in enumerate(self._graph_name_hidden)
+    def _calculate_hidden_dims(self) -> dict[str, int]:
+        """Latent channels at each hidden level: ``2**level`` times the aggregator output."""
+        return {
+            hidden_name: self.latent_aggregator.hidden_dim * (2**level)
+            for level, hidden_name in enumerate(self._hidden_names)
         }
-        self.num_hidden = len(self._graph_name_hidden)
+
+    def _build_level_processor(self, nodes_name: str, model_config: DotDict) -> tuple[nn.Module, nn.Module]:
+        """Build the graph provider and processor acting within one hidden level."""
+        graph_provider = self._build_graph_provider(nodes_name, nodes_name, model_config.processor)
+        processor = instantiate(
+            model_config.processor,
+            _recursive_=False,  # Avoids instantiation of layer_kernels here
+            num_channels=self.hidden_dims[nodes_name],
+            edge_dim=graph_provider.edge_dim,
+            num_layers=model_config.level_process_num_layers,
+        )
+        return graph_provider, processor
+
+    def _build_processor(self, model_config: DotDict) -> None:
+        """Build the hierarchy: level processors, the deepest processor and the inter-level mappers."""
+        self.num_hidden = len(self._hidden_names)
+        # Pairs of (shallower, deeper) adjacent hidden levels, from the data side to the deepest level.
+        level_pairs = list(zip(self._hidden_names[:-1], self._hidden_names[1:]))
 
         # Level processors
         self.level_process = model_config.enable_hierarchical_level_processing
@@ -84,76 +63,26 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             self.down_level_processor_graph_providers = nn.ModuleDict()
             self.up_level_processor = nn.ModuleDict()
             self.up_level_processor_graph_providers = nn.ModuleDict()
-            for i in range(0, self.num_hidden - 1):
-                nodes_names = self._graph_name_hidden[i]
-
-                # Create graph providers for down level processor
-                self.down_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_size=self.node_attributes.num_nodes[nodes_names],
-                    trainable_size=model_config.processor.get("trainable_size", 0),
-                )
-
-                self.down_level_processor[nodes_names] = instantiate(
-                    model_config.processor,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
-                    num_channels=self.hidden_dims[nodes_names],
-                    edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
-                    num_layers=model_config.level_process_num_layers,
-                )
-
-                # Create graph providers for up level processor
-                self.up_level_processor_graph_providers[nodes_names] = create_graph_provider(
-                    graph=self._graph_data[(nodes_names, "to", nodes_names)],
-                    edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-                    src_size=self.node_attributes.num_nodes[nodes_names],
-                    dst_size=self.node_attributes.num_nodes[nodes_names],
-                    trainable_size=model_config.processor.get("trainable_size", 0),
-                )
-
-                self.up_level_processor[nodes_names] = instantiate(
-                    model_config.processor,
-                    _recursive_=False,  # Avoids instantiation of layer_kernels here
-                    num_channels=self.hidden_dims[nodes_names],
-                    edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
-                    num_layers=model_config.level_process_num_layers,
-                )
+            for nodes_name in self._hidden_names[:-1]:
+                (
+                    self.down_level_processor_graph_providers[nodes_name],
+                    self.down_level_processor[nodes_name],
+                ) = self._build_level_processor(nodes_name, model_config)
+                (
+                    self.up_level_processor_graph_providers[nodes_name],
+                    self.up_level_processor[nodes_name],
+                ) = self._build_level_processor(nodes_name, model_config)
 
         # Main processor at deepest level
-        self.processor_graph_provider = create_graph_provider(
-            graph=self._graph_data[
-                (self._graph_name_hidden[self.num_hidden - 1], "to", self._graph_name_hidden[self.num_hidden - 1])
-            ],
-            edge_attributes=model_config.processor.get("sub_graph_edge_attributes"),
-            src_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            dst_size=self.node_attributes.num_nodes[self._graph_name_hidden[self.num_hidden - 1]],
-            trainable_size=model_config.processor.get("trainable_size", 0),
-        )
+        super()._build_processor(model_config, num_channels=self.hidden_dims[self._hidden_names[-1]])
 
-        self.processor = instantiate(
-            model_config.processor,
-            _recursive_=False,  # Avoids instantiation of layer_kernels here
-            num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
-            edge_dim=self.processor_graph_provider.edge_dim,
-        )
-
-        # Upscale
+        # Upscale: shallower -> deeper level (forward mappers)
         self.upscale = nn.ModuleDict()
         self.upscale_graph_providers = nn.ModuleDict()
-        for i in range(0, self.num_hidden - 1):
-            src_nodes_name = self._graph_name_hidden[i]
-            dst_nodes_name = self._graph_name_hidden[i + 1]
-
-            self.upscale_graph_providers[src_nodes_name] = create_graph_provider(
-                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.upscale_mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
-                trainable_size=model_config.upscale_mapper.get("trainable_size", 0),
+        for src_nodes_name, dst_nodes_name in level_pairs:
+            self.upscale_graph_providers[src_nodes_name] = self._build_graph_provider(
+                src_nodes_name, dst_nodes_name, model_config.upscale_mapper
             )
-
             self.upscale[src_nodes_name] = instantiate(
                 model_config.upscale_mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -163,21 +92,13 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
             )
 
-        # Downscale
+        # Downscale: deeper -> shallower level (backward mappers), keyed by the destination level
         self.downscale = nn.ModuleDict()
         self.downscale_graph_providers = nn.ModuleDict()
-        for i in range(1, self.num_hidden):
-            src_nodes_name = self._graph_name_hidden[i]
-            dst_nodes_name = self._graph_name_hidden[i - 1]
-
-            self.downscale_graph_providers[dst_nodes_name] = create_graph_provider(
-                graph=self._graph_data[(src_nodes_name, "to", dst_nodes_name)],
-                edge_attributes=model_config.downscale_mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[src_nodes_name],
-                dst_size=self.node_attributes.num_nodes[dst_nodes_name],
-                trainable_size=model_config.downscale_mapper.get("trainable_size", 0),
+        for dst_nodes_name, src_nodes_name in level_pairs:
+            self.downscale_graph_providers[dst_nodes_name] = self._build_graph_provider(
+                src_nodes_name, dst_nodes_name, model_config.downscale_mapper
             )
-
             self.downscale[dst_nodes_name] = instantiate(
                 model_config.downscale_mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
@@ -188,327 +109,63 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                 edge_dim=self.downscale_graph_providers[dst_nodes_name].edge_dim,
             )
 
-        # Decoder hidden -> data
-        self.decoder_graph_provider = torch.nn.ModuleDict()
-        for dataset_name in self.dataset_names:
-            if dataset_name not in self.target_datasets:
-                LOGGER.info(
-                    f"Dataset {dataset_name} is not part of the output as it doesn't have a corresponding decoder."
-                )
-                continue
+    def _process(self, x_latent: Tensor, ctx: ForwardContext) -> Tensor:
+        """U-Net over the hidden levels: ``hidden_1 -> ... -> hidden_n -> processor -> ... -> hidden_1``."""
+        level_pairs = list(zip(self._hidden_names[:-1], self._hidden_names[1:]))
 
-            decoder_config = model_config.decoders[self.dataset2decoder[dataset_name]]
-            self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=self._graph_data[(self._graph_name_hidden[0], "to", dataset_name)],
-                edge_attributes=decoder_config.mapper.get("sub_graph_edge_attributes"),
-                src_size=self.node_attributes.num_nodes[self._graph_name_hidden[0]],
-                dst_size=self.node_attributes.num_nodes[dataset_name],
-                trainable_size=decoder_config.mapper.get("trainable_size", 0),
-            )
-
-        self.decoder = torch.nn.ModuleDict()
-        for decoder_name, decoder_config in model_config.decoders.items():
-            decoder_in_channels_dst = [self.target_dim[d] for d in self.decoder2datasets[decoder_name]]
-            assert all(ch == decoder_in_channels_dst[0] for ch in decoder_in_channels_dst), (
-                f"All datasets for decoder {decoder_name} must have the same target dimension, "
-                f"but got {decoder_in_channels_dst}."
-            )
-            decoder_output_channels_dst = [self.output_dim[d] for d in self.decoder2datasets[decoder_name]]
-            assert all(ch == decoder_output_channels_dst[0] for ch in decoder_output_channels_dst), (
-                f"All datasets for decoder {decoder_name} must have the same output dimension, "
-                f"but got {decoder_output_channels_dst}."
-            )
-
-            self.decoder[decoder_name] = instantiate(
-                decoder_config.mapper,
-                _recursive_=False,  # Avoids instantiation of layer_kernels here
-                in_channels_src=self.hidden_dims[self._graph_name_hidden[0]],
-                in_channels_dst=decoder_in_channels_dst[0],
-                out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
-            )
-
-    def forward(
-        self,
-        x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        **kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Forward pass of the model.
-
-        Parameters
-        ----------
-        x : dict[str, Tensor]
-            Input data.
-        model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None.
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension. ``None`` means the
-            corresponding dataset is replicated, not sharded.
-        **kwargs
-            Additional model arguments.
-
-        Returns
-        -------
-        dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded).
-        """
-        dataset_names = list(x.keys())
-
-        # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
-
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
-            grid_shard_sizes=grid_shard_sizes,
-        )
-        for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
-
-        # Get all trainable parameters for the hidden layers -> initialisation of each hidden, which becomes trainable bias
-        x_hidden_latents = {}
-        for hidden in self._graph_name_hidden:
-            x_hidden_latents[hidden] = self.node_attributes(hidden, batch_size=batch_size)
-
-        # Get data and hidden shapes for sharding, and pre-shard hidden latents
-        shard_sizes_hidden_dict = {}
-        for hidden, x_latent in x_hidden_latents.items():
-            shard_sizes_hidden_dict[hidden] = get_shard_sizes(x_latent, 0, model_comm_group=model_comm_group)
-            x_hidden_latents[hidden] = shard_tensor(x_latent, 0, shard_sizes_hidden_dict[hidden], model_comm_group)
-
-        # Process each dataset through its corresponding encoder
-        x_skip_dict = {}
-        x_data_latent_dict = {}
-        dataset_latents = {}
-        shard_sizes_data_dict = {}
-        x_encoded_latents_dict = {}
-        for dataset_name in dataset_names:
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                batch_size=batch_size,
-                grid_shard_sizes=grid_shard_sizes,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
-            )
-            x_skip_dict[dataset_name] = x_skip
-            shard_sizes_data_dict[dataset_name] = shard_sizes_data
-
-            # Compute encoder edges at model level
-            (
-                encoder_edge_attr,
-                encoder_edge_index,
-                enc_edge_shard_sizes,
-            ) = self.encoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
-
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                dst_nodes=shard_sizes_hidden_dict[self._graph_name_hidden[0]],
-                edges=enc_edge_shard_sizes,
-            )
-
-            # Encoder for this dataset
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_latent, x_latent = self.encoder[encoder_name](
-                (x_data_latent, x_hidden_latents[self._graph_name_hidden[0]]),
-                batch_size=batch_size,
-                shard_info=enc_shard_info,
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-            x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
-
-        # Combine all dataset latents in the innermost layer
-        x_latent = self.latent_aggregator(x_hidden_latents[self._graph_name_hidden[0]], dataset_latents)
-
-        ## Upscale
-        x_encoded_latents_dict = {}
-        for i in range(0, self.num_hidden - 1):
-            src_hidden_name = self._graph_name_hidden[i]
-            dst_hidden_name = self._graph_name_hidden[i + 1]
-
-            ## Processing at same level
+        # Down the hierarchy, towards the deepest level
+        x_level_skip: dict[str, Tensor] = {}
+        x_level_encoded: dict[str, Tensor] = {}
+        for src_nodes_name, dst_nodes_name in level_pairs:
             if self.level_process:
-                # Compute edges for down level processor
-                (
-                    down_level_edge_attr,
-                    down_level_edge_index,
-                    down_edge_shard_sizes,
-                ) = self.down_level_processor_graph_providers[src_hidden_name].get_edges(
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                )
-
-                x_latent = self.down_level_processor[src_hidden_name](
+                x_latent = self._run_processor(
+                    self.down_level_processor[src_nodes_name],
+                    self.down_level_processor_graph_providers[src_nodes_name],
                     x_latent,
-                    batch_size=batch_size,
-                    shard_info=GraphShardInfo(
-                        nodes=shard_sizes_hidden_dict[src_hidden_name],
-                        edges=down_edge_shard_sizes,
-                    ),
-                    edge_attr=down_level_edge_attr,
-                    edge_index=down_level_edge_index,
-                    model_comm_group=model_comm_group,
+                    ctx.shard_sizes_hidden[src_nodes_name],
+                    ctx,
                 )
 
             # store latents for skip connections
-            x_skip_dict[src_hidden_name] = x_latent
-
-            # Compute edges for upscale mapper
-            (
-                upscale_edge_attr,
-                upscale_edge_index,
-                us_edge_shard_sizes,
-            ) = self.upscale_graph_providers[src_hidden_name].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
-
-            us_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden_dict[src_hidden_name],
-                dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                edges=us_edge_shard_sizes,
-            )
+            x_level_skip[src_nodes_name] = x_latent
 
             # Encode to next hidden level
-            x_encoded_latents_dict[src_hidden_name], x_latent = self.upscale[src_hidden_name](
-                (x_latent, x_hidden_latents[dst_hidden_name]),
-                batch_size=batch_size,
-                shard_info=us_shard_info,
-                edge_attr=upscale_edge_attr,
-                edge_index=upscale_edge_index,
-                model_comm_group=model_comm_group,
+            x_level_encoded[src_nodes_name], x_latent = self._run_mapper(
+                self.upscale[src_nodes_name],
+                self.upscale_graph_providers[src_nodes_name],
+                (x_latent, ctx.x_hidden[dst_nodes_name]),
+                src_shard_sizes=ctx.shard_sizes_hidden[src_nodes_name],
+                dst_shard_sizes=ctx.shard_sizes_hidden[dst_nodes_name],
+                ctx=ctx,
                 keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
             )
 
-        # Processing hidden-most level
-        # Compute edges for main processor
-        (
-            processor_edge_attr,
-            processor_edge_index,
-            proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
-            batch_size=batch_size,
-            model_comm_group=model_comm_group,
-        )
+        # Deepest level: main processor with latent skip connection
+        x_latent = super()._process(x_latent, ctx)
 
-        x_latent_proc = self.processor(
-            x_latent,
-            batch_size=batch_size,
-            shard_info=GraphShardInfo(
-                nodes=shard_sizes_hidden_dict[self._graph_name_hidden[self.num_hidden - 1]],
-                edges=proc_edge_shard_sizes,
-            ),
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-        )
-
-        if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
-        x_latent = x_latent_proc
-
-        ## Downscale
-        for i in reversed(range(1, self.num_hidden)):
-            src_hidden_name = self._graph_name_hidden[i]
-            dst_hidden_name = self._graph_name_hidden[i - 1]
-
-            # Compute edges for upscale mapper
-            (
-                downscale_edge_attr,
-                downscale_edge_index,
-                ds_edge_shard_sizes,
-            ) = self.downscale_graph_providers[dst_hidden_name].get_edges(
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
-
-            ds_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden_dict[src_hidden_name],
-                dst_nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                edges=ds_edge_shard_sizes,
-            )
-
-            # Decode to next level
-            x_latent = self.downscale[dst_hidden_name](
-                (x_latent, x_encoded_latents_dict[dst_hidden_name]),
-                batch_size=batch_size,
-                shard_info=ds_shard_info,
-                edge_attr=downscale_edge_attr,
-                edge_index=downscale_edge_index,
-                model_comm_group=model_comm_group,
+        # Back up the hierarchy, towards the data nodes
+        for dst_nodes_name, src_nodes_name in reversed(level_pairs):
+            # Decode to previous level
+            x_latent = self._run_mapper(
+                self.downscale[dst_nodes_name],
+                self.downscale_graph_providers[dst_nodes_name],
+                (x_latent, x_level_encoded[dst_nodes_name]),
+                src_shard_sizes=ctx.shard_sizes_hidden[src_nodes_name],
+                dst_shard_sizes=ctx.shard_sizes_hidden[dst_nodes_name],
+                ctx=ctx,
                 keep_x_dst_sharded=True,
             )
 
             # Add skip connections
-            x_latent = x_latent + x_skip_dict[dst_hidden_name]
+            x_latent = x_latent + x_level_skip[dst_nodes_name]
 
-            # Processing at same level
             if self.level_process:
-                # Compute edges for up level processor
-                (
-                    up_level_edge_attr,
-                    up_level_edge_index,
-                    up_edge_shard_sizes,
-                ) = self.up_level_processor_graph_providers[dst_hidden_name].get_edges(
-                    batch_size=batch_size,
-                    model_comm_group=model_comm_group,
-                )
-
-                x_latent = self.up_level_processor[dst_hidden_name](
+                x_latent = self._run_processor(
+                    self.up_level_processor[dst_nodes_name],
+                    self.up_level_processor_graph_providers[dst_nodes_name],
                     x_latent,
-                    edge_attr=up_level_edge_attr,
-                    edge_index=up_level_edge_index,
-                    batch_size=batch_size,
-                    shard_info=GraphShardInfo(
-                        nodes=shard_sizes_hidden_dict[dst_hidden_name],
-                        edges=up_edge_shard_sizes,
-                    ),
-                    model_comm_group=model_comm_group,
+                    ctx.shard_sizes_hidden[dst_nodes_name],
+                    ctx,
                 )
 
-        x_out_dict = {}
-        for dataset_name in dataset_names:
-            # Compute decoder edges
-            (
-                decoder_edge_attr,
-                decoder_edge_index,
-                dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(batch_size=batch_size, model_comm_group=model_comm_group)
-
-            dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden_dict[self._graph_name_hidden[0]],
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                edges=dec_edge_shard_sizes,
-            )
-
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent, x_data_latent_dict[dataset_name]),
-                batch_size=batch_size,
-                shard_info=dec_shard_info,
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-            )
-
-            x_out_dict[dataset_name] = self._assemble_output(
-                x_out,
-                x_skip_dict[dataset_name],
-                batch_size,
-                ensemble_size,
-                x[dataset_name].dtype,
-                dataset_name,
-            )
-
-        return x_out_dict
+        return x_latent

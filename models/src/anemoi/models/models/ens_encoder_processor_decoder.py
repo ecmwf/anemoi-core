@@ -9,6 +9,7 @@
 
 
 import logging
+from dataclasses import dataclass
 from typing import Optional
 
 import einops
@@ -19,20 +20,34 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.models import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.encoder_processor_decoder import ForwardContext
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
 
+@dataclass(kw_only=True)
+class EnsForwardContext(ForwardContext):
+    """Forward context of the ensemble model.
+
+    Attributes
+    ----------
+    fcstep : int
+        Forecast step the input is conditioned on, clipped to ``{0, 1}``.
+    """
+
+    fcstep: int
+
+
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
-    """Message passing graph neural network with ensemble functionality."""
+    """Message passing graph neural network with ensemble functionality.
+
+    Extends the base model with a forecast-step input feature, an optional conditioning on the
+    residual, and noise injection into the latent before the processor.
+    """
 
     def __init__(
         self,
@@ -71,90 +86,66 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             base_input_dim += self.num_input_channels_prognostic[dataset_name]
         return base_input_dim
 
+    def _init_forward_context(
+        self,
+        x: dict[str, Tensor],
+        *,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+        fcstep: int,
+        **kwargs,
+    ) -> EnsForwardContext:
+        ctx = super()._init_forward_context(
+            x,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+            **kwargs,
+        )
+        return EnsForwardContext(**vars(ctx), fcstep=min(1, fcstep))
+
     def _assemble_input(
         self,
-        x: torch.Tensor,
-        fcstep: int,
-        batch_ens_size: int,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+        x: Tensor,
+        ctx: EnsForwardContext,
+        dataset_name: str,
+    ) -> tuple[Tensor, Tensor, ShardSizes]:
+        """Base input features, followed by the forecast step and optionally the residual."""
+        x_data_latent, x_skip, grid_shard_sizes = super()._assemble_input(x, ctx, dataset_name)
 
-        x_skip = self.residual[dataset_name](
-            x,
-            grid_shard_sizes=grid_shard_sizes,
-            model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
-        )
-
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
-        # add data positional info (lat/lon)
-        x_data_latent = torch.cat(
-            (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
-            ),
-            dim=-1,  # feature dimension
-        )
+        fcstep_feature = torch.full((x_data_latent.shape[0], 1), float(ctx.fcstep), device=x.device)
+        x_data_latent = torch.cat((x_data_latent, fcstep_feature), dim=-1)
 
         if self.condition_on_residual:
-            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
-            x_data_latent = torch.cat(
-                (
-                    x_data_latent,
-                    einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars"),
-                ),
-                dim=-1,
-            )
+            # Prognostic variables of the first residual step, matching ``_calculate_input_dim``.
+            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
+            x_skip_cond = x_skip[:, 0][..., self._internal_input_idx[dataset_name]]
+            x_skip_cond = einops.rearrange(x_skip_cond, "batch ensemble grid vars -> (batch ensemble grid) vars")
+            x_data_latent = torch.cat((x_data_latent, x_skip_cond), dim=-1)
 
         return x_data_latent, x_skip, grid_shard_sizes
 
-    def _assemble_output(
-        self,
-        x_out: torch.Tensor,
-        x_skip: torch.Tensor | None,
-        batch_size: int,
-        batch_ens_size: int,
-        dtype: torch.dtype,
-        dataset_name: str | None = None,
-    ):
-        ensemble_size = batch_ens_size // batch_size
-        x_out = (
-            einops.rearrange(
-                x_out,
-                "(bs e n) (time vars) -> bs time e n vars",
-                bs=batch_size,
-                e=ensemble_size,
-                time=self.n_step_output,
-            )
-            .to(dtype=dtype)
-            .clone()
+    def _prepare_processor_input(self, x_latent: Tensor, ctx: EnsForwardContext) -> tuple[Tensor, dict]:
+        """Inject noise into the latent entering the processor and condition the processor on it."""
+        hidden_name = self._hidden_names[-1]
+
+        x_latent_noised, latent_noise = self.noise_injector(
+            x=x_latent,
+            batch_size=ctx.batch_size,
+            ensemble_size=ctx.ensemble_size,
+            grid_size=self.node_attributes.num_nodes[hidden_name],
+            grid_shard_sizes=ctx.shard_sizes_hidden[hidden_name],
+            model_comm_group=ctx.model_comm_group,
         )
 
-        # residual connection (just for the prognostic variables)
-        assert dataset_name is not None, "dataset_name must be provided for multi-dataset case"
-        if x_skip is not None:
-            assert x_skip.ndim == 5, "Residual must be (batch, time, ensemble, grid, vars)."
-            assert (
-                x_skip.shape[1] == x_out.shape[1]
-            ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
-            x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
+        processor_kwargs = dict(ctx.processor_kwargs)
+        if latent_noise is not None:
+            processor_kwargs["cond"] = latent_noise
 
-        for bounding in self.boundings[dataset_name]:
-            # bounding performed in the order specified in the config file
-            x_out = bounding(x_out)
-        return x_out
+        return x_latent_noised, processor_kwargs
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
+        x: dict[str, Tensor],
         *,
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -182,155 +173,10 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         dict[str, Tensor]
             Output tensor per dataset
         """
-        dataset_names = list(x.keys())
-
-        # Extract and validate batch & ensemble sizes across datasets
-        batch_size = self._get_consistent_dim(x, 0)
-        ensemble_size = self._get_consistent_dim(x, 2)
-
-        batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
-        in_out_sharded = self._resolve_in_out_sharded(
-            dataset_names=dataset_names,
+        return super().forward(
+            x,
+            model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
+            fcstep=fcstep,
+            **kwargs,
         )
-        for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
-
-        fcstep = min(1, fcstep)
-        # Process each dataset through its corresponding encoder
-        dataset_latents = {}
-        x_skip_dict = {}
-        x_data_latent_dict = {}
-        shard_sizes_data_dict = {}
-
-        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
-        shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
-        for dataset_name in x.keys():
-            if dataset_name not in self.input_datasets:
-                continue
-
-            x_data_latent, x_skip, shard_sizes_data = self._assemble_input(
-                x[dataset_name],
-                fcstep=fcstep,
-                batch_ens_size=batch_ens_size,
-                grid_shard_sizes=grid_shard_sizes,
-                model_comm_group=model_comm_group,
-                dataset_name=dataset_name,
-            )
-            x_skip_dict[dataset_name] = x_skip
-            shard_sizes_data_dict[dataset_name] = shard_sizes_data
-
-            (
-                encoder_edge_attr,
-                encoder_edge_index,
-                enc_edge_shard_sizes,
-            ) = self.encoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_ens_size,
-                model_comm_group=model_comm_group,
-            )
-
-            enc_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
-                dst_nodes=shard_sizes_hidden,
-                edges=enc_edge_shard_sizes,
-            )
-
-            # Encoder for this dataset
-            encoder_name = self.dataset2encoder[dataset_name]
-            x_data_latent, x_latent = self.encoder[encoder_name](
-                (x_data_latent, x_hidden_latent),
-                batch_size=batch_ens_size,
-                shard_info=enc_shard_info,
-                edge_attr=encoder_edge_attr,
-                edge_index=encoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-            )
-            x_data_latent_dict[dataset_name] = x_data_latent
-            dataset_latents[dataset_name] = x_latent
-
-        # Combine all dataset latents
-        x_latent = self.latent_aggregator(x_hidden_latent, dataset_latents)
-
-        x_latent_proc, latent_noise = self.noise_injector(
-            x=x_latent,
-            batch_size=batch_size,
-            ensemble_size=ensemble_size,
-            grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
-            grid_shard_sizes=shard_sizes_hidden,
-            model_comm_group=model_comm_group,
-        )
-
-        (
-            processor_edge_attr,
-            processor_edge_index,
-            proc_edge_shard_sizes,
-        ) = self.processor_graph_provider.get_edges(
-            batch_size=batch_ens_size,
-            model_comm_group=model_comm_group,
-        )
-        processor_kwargs = {"cond": latent_noise} if latent_noise is not None else {}
-
-        # Processor
-        x_latent_proc = self.processor(
-            x=x_latent_proc,
-            batch_size=batch_ens_size,
-            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
-            edge_attr=processor_edge_attr,
-            edge_index=processor_edge_index,
-            model_comm_group=model_comm_group,
-            **processor_kwargs,
-        )
-
-        if self.latent_skip:
-            x_latent_proc = x_latent_proc + x_latent
-
-        x_out_dict = {}
-        for dataset_name in self.target_datasets:
-            x_target_latent, shard_sizes_target = self._assemble_targets(
-                x[dataset_name],
-                x_data_latent_dict.get(dataset_name, None),
-                batch_size,
-                grid_shard_sizes,
-                model_comm_group,
-                dataset_name,
-            )
-
-            # Compute decoder edges using updated latent representation
-            (
-                decoder_edge_attr,
-                decoder_edge_index,
-                dec_edge_shard_sizes,
-            ) = self.decoder_graph_provider[dataset_name].get_edges(
-                batch_size=batch_ens_size,
-                model_comm_group=model_comm_group,
-            )
-
-            dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_target,  # None if not sharded
-                edges=dec_edge_shard_sizes,
-            )
-
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_target_latent),
-                batch_size=batch_ens_size,
-                shard_info=dec_shard_info,
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
-                model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
-            )
-
-            x_out_dict[dataset_name] = self._assemble_output(
-                x_out,
-                x_skip_dict.get(dataset_name, None),
-                batch_size,
-                batch_ens_size,
-                dtype=x[dataset_name].dtype,
-                dataset_name=dataset_name,
-            )
-
-        return x_out_dict

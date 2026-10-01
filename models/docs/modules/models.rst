@@ -26,6 +26,37 @@ This base model also encodes and decodes multiple datasets; see
 :ref:`usage-multi-dataset` for the ``encoders``/``decoders``,
 ``latent_aggregator`` and decoder ``target_node_features`` options.
 
+Model stages
+============
+
+``AnemoiModelEncProcDec`` is built and run in three stages, and every
+other model in this module is a specialisation of one or more of them:
+
+-  **encode**: ``_build_encoders`` / ``_encode``. Each input dataset is
+   assembled by ``_assemble_input`` and mapped onto the first hidden
+   level; the per-dataset latents are combined by the latent aggregator.
+-  **process**: ``_build_processor`` / ``_process``. The latent is
+   transformed on the deepest hidden level. ``_prepare_processor_input``
+   is a smaller hook for models that alter the latent right before the
+   processor (the ensemble model injects noise there); the hierarchical
+   model wraps the whole stage in a U-Net over the hidden levels.
+-  **decode**: ``_build_decoders`` / ``_decode``. The processed latent is
+   mapped back onto every target dataset and finalised by
+   ``_assemble_output``.
+
+Per-call state (batch and ensemble sizes, sharding, the hidden latents,
+the encoder by-products and any extra keyword arguments for the mappers
+and the processor, such as the ``cond`` of the transport models) travels
+in a ``ForwardContext`` created by ``_init_forward_context``. Models
+that need extra forward inputs extend this dataclass.
+
+Because the stages are orthogonal, variants combine through multiple
+inheritance, for example
+``class TransportHierarchical(AnemoiTransportModelEncProcDec, AnemoiModelEncProcDecHierarchical)``.
+Note that the inter-level mappers and level processors of the
+hierarchical model receive no conditioning, so their layer kernels must
+be unconditional in such a combination.
+
 Reproducing the ``AnemoiModelAutoEncoder`` (deprecated)
 ========================================================
 

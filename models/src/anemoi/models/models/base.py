@@ -71,6 +71,8 @@ class BaseGraphModel(nn.Module):
 
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        # Hidden levels ordered from the one connected to the data nodes to the deepest one.
+        self._hidden_names: list[str] = self._as_hidden_node_names(self._graph_name_hidden)
 
         self.latent_skip = model_config.model.model.latent_skip
 
@@ -232,9 +234,8 @@ class BaseGraphModel(nn.Module):
         return self.n_step_input * self.num_input_channels[dataset_name] + self.node_attributes.attr_ndims[dataset_name]
 
     def _calculate_input_dim_latent(self) -> int:
-        """Calculate the latent input dimension."""
-        nodes_name = self._graph_name_hidden if isinstance(self._graph_name_hidden, str) else self._graph_name_hidden[0]
-        return self.node_attributes.attr_ndims[nodes_name]
+        """Calculate the latent input dimension (node attributes of the hidden level the encoders map into)."""
+        return self.node_attributes.attr_ndims[self._hidden_names[0]]
 
     def _calculate_target_dim(self, dataset_name: str) -> int:
         """Calculate the decoder target input dimension for a given dataset.
@@ -319,20 +320,6 @@ class BaseGraphModel(nn.Module):
         """Builds the networks for the model."""
         pass
 
-    @abstractmethod
-    def _assemble_input(
-        self,
-        x,
-        batch_size,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        model_comm_group: ProcessGroup | None = None,
-    ):
-        pass
-
-    @abstractmethod
-    def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
-        pass
-
     def _build_residual(self, residual_configs: dict[str, DotDict], sparse_projector_config: DotDict) -> None:
         """Instantiate the per-dataset residual connection modules."""
         self.residual = torch.nn.ModuleDict()
@@ -355,7 +342,7 @@ class BaseGraphModel(nn.Module):
             node_attributes_graph[dataset_name].x = self._graph_data[dataset_name].x
             node_attributes_graph[dataset_name].num_nodes = self._graph_data[dataset_name].num_nodes
 
-        for hidden_name in self._as_hidden_node_names(self._graph_name_hidden):
+        for hidden_name in self._hidden_names:
             node_attributes_graph[hidden_name].x = self._graph_data[hidden_name].x
             node_attributes_graph[hidden_name].num_nodes = self._graph_data[hidden_name].num_nodes
 
