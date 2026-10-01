@@ -15,10 +15,10 @@ import logging
 import os
 import re
 import shutil
+import subprocess
 import sys
 from collections.abc import Generator
 from pathlib import Path
-from textwrap import dedent
 from typing import Any
 
 from hydra import compose
@@ -33,6 +33,7 @@ from rich.console import Console
 
 from anemoi.training.commands import Command
 from anemoi.training.migrations.migrator import MIGRATION_PATH
+from anemoi.training.migrations.migrator import MIGRATOR_VERSION
 from anemoi.training.migrations.migrator import ConfigMigrator
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.utils.migrations import added_migrations_compared_to_main_branch
@@ -43,48 +44,6 @@ LOGGER = logging.getLogger(__name__)
 
 here = Path(__file__).parent
 root_folder = here.parent.parent.parent.parent.parent
-
-
-def get_migration_template() -> str:
-    """Return the migration script template.
-
-    This is used to generate a new migration script.
-    """
-    return dedent("""\
-        {% for import in imports %}
-        {{import}}
-        {% endfor %}
-
-        # DO NOT CHANGE -->
-        metadata = MigrationMetadata(
-            versions={
-                "migration": "{{migration_version}}",
-                "anemoi-training": "%NEXT_ANEMOI_TRAINING_VERSION%",
-            },
-            {% if final %}
-            final=True,
-            {% endif %}
-        )
-        # <-- END DO NOT CHANGE
-        {% if not final %}
-
-
-        def migrate(config: Config) -> Config:
-            \"""Migrate the config.
-
-            Parameters
-            ----------
-            config : Config
-                The config object to migrated.
-
-            Returns
-            -------
-            Config
-                The migrated config.
-            \"""
-            return config
-        {% endif %}
-        """)
 
 
 class ConfigGenerator(Command):
@@ -157,6 +116,11 @@ class ConfigGenerator(Command):
             type=Path,
             help="Path to the migrated config dump.",
         )
+        migration_sync.add_argument(
+            "--no-summary",
+            action="store_true",
+            help="Skip summary items at the top of the config.",
+        )
         migration_sync.add_argument("--no-color", action="store_true", help="Disables terminal colors.")
 
         help_msg = "Generate a config migration script."
@@ -177,11 +141,36 @@ class ConfigGenerator(Command):
         help_msg = "Fix the order of migrations after a git merge."
         migration_subcommands.add_parser("fix-order", help=help_msg, description=help_msg)
 
+        help_msg = "Generate an LLM prompt to instruct your favorite LLM to make the migration script for you."
+        migration_llm_prompt = migration_subcommands.add_parser("llm-prompt", help=help_msg, description=help_msg)
+        migration_llm_prompt.add_argument(
+            "--ref",
+            "-r",
+            default="HEAD",
+            type=str,
+            help="The ref commit to compare from. If not provided HEAD is used.",
+        )
+        migration_llm_prompt.add_argument(
+            "--base",
+            "-b",
+            default="origin/main",
+            type=str,
+            help="The base branch to compare the changes against.",
+        )
+        migration_llm_prompt.add_argument("--output", "-o", default=None, help="An output file to output the prompt.")
+        migration_llm_prompt.add_argument(
+            "--context",
+            "-c",
+            type=str,
+            nargs="+",
+            help="The files to use as context.",
+        )
+
     def run(self, args: argparse.Namespace) -> None:
 
         if args.subcommand == "migration" and args.migration_subcommand == "sync":
             LOGGER.info("Migrating config %s in %s.", args.path, args.output)
-            self.migrate_config(args.path, args.output, args.no_color)
+            self.migrate_config(args.path, args.output, not args.no_summary, args.no_color)
             return
         if args.subcommand == "migration" and args.migration_subcommand == "create":
             LOGGER.info("Creating migration script %s.", args.name)
@@ -189,6 +178,9 @@ class ConfigGenerator(Command):
             return
         if args.subcommand == "migration" and args.migration_subcommand == "fix-order":
             self.fix_order_config_migration()
+            return
+        if args.subcommand == "migration" and args.migration_subcommand == "llm-prompt":
+            self.generate_llm_prompt(args.ref, args.base, args.output, args.context)
             return
 
         self.overwrite = args.overwrite
@@ -323,12 +315,15 @@ class ConfigGenerator(Command):
         self,
         config_path: Path,
         output: Path | None,
-        no_color: bool = False,
+        update_summary: bool,
+        no_color: bool,
     ) -> None:
         """Migrate a config dump."""
         from difflib import unified_diff
 
-        original_config, migrated_config, executed_migrations = ConfigMigrator().sync(config_path)
+        migrator = ConfigMigrator(update_summary=update_summary)
+
+        original_config, migrated_config, executed_migrations = migrator.sync(config_path)
         original_config_lines = original_config.to_yaml().split("\n")
         migrated_config_content = migrated_config.to_yaml()
         migrated_config_lines = migrated_config_content.split("\n")
@@ -350,13 +345,16 @@ class ConfigGenerator(Command):
 
     def create_config_migration(self, name: str, final: bool = False) -> None:
         """Create a new migration script."""
+        from anemoi.training.migrations.utils import _MIGRATION_TEMPLATE
+
         name = get_migration_name(name)
 
         imports: list[str] = ["from anemoi.utils.migrations import MigrationMetadata", ""]
         if not final:
             imports.append("from anemoi.training.migrations.config import Config")
+
         template = Environment(trim_blocks=True, lstrip_blocks=True, autoescape=select_autoescape()).from_string(
-            get_migration_template(),
+            _MIGRATION_TEMPLATE,
         )
 
         migration_path = MIGRATION_PATH / name
@@ -366,7 +364,7 @@ class ConfigGenerator(Command):
         migration_path.write_text(
             template.render(
                 {
-                    "migration_version": "1.0.0",
+                    "migration_version": MIGRATOR_VERSION,
                     "imports": imports,
                     "final": final,
                 },
@@ -397,6 +395,86 @@ class ConfigGenerator(Command):
             new_name = f"{new_timestamp + k}_{new_name}"
             print(f"Renaming {name} to {new_name}.")  # noqa: T201
             path.rename(path.with_name(new_name))
+
+    def generate_llm_prompt(self, ref: str, base: str, output: str | None, context: list[str] | None) -> None:
+        """Generates an LLM prompt to make a migration.
+
+        It is composed of general guidelines, the API of the migrator, and a diff of the changes
+        compared to the given base.
+        """
+        from anemoi.training.migrations.utils import _LLM_MIGRATION_GUIDELINES
+        from anemoi.training.migrations.utils import _LLM_PROMPT_GUIDELINES
+        from anemoi.training.migrations.utils import _MIGRATION_TEMPLATE
+        from anemoi.training.migrations.utils import extract_api_from_files
+
+        migration_template = (
+            Environment(trim_blocks=True, lstrip_blocks=True, autoescape=select_autoescape())
+            .from_string(
+                _MIGRATION_TEMPLATE,
+            )
+            .render(
+                {
+                    "migration_version": MIGRATOR_VERSION,
+                    "imports": ["from anemoi.utils.migrations import MigrationMetadata", ""],
+                    "final": False,
+                },
+            )
+        )
+
+        prompt: list[str] = []
+
+        prompt.append("1. General guidelines")
+        prompt.append(_LLM_PROMPT_GUIDELINES)
+
+        migration_modules = [
+            ("anemoi.training.migrations.config", "Config"),
+            ("anemoi.training.migrations.nodes", "Node"),
+            ("anemoi.training.migrations.nodes", "NodeContainer"),
+            ("anemoi.training.migrations.nodes", "NodeDict"),
+            ("anemoi.training.migrations.nodes", "NodeList"),
+        ]
+        prompt.append("2. Migration System API")
+        prompt.append(extract_api_from_files(migration_modules))
+
+        prompt.append("3. Migration specific guildelines")
+        migration_template = (
+            Environment(trim_blocks=True, lstrip_blocks=True, autoescape=select_autoescape())
+            .from_string(_MIGRATION_TEMPLATE)
+            .render(
+                {
+                    "migration_version": MIGRATOR_VERSION,
+                    "imports": ["from anemoi.utils.migrations import MigrationMetadata", ""],
+                    "final": False,
+                },
+            )
+        )
+        llm_guidelines = (
+            Environment(trim_blocks=True, lstrip_blocks=True, autoescape=select_autoescape())
+            .from_string(_LLM_MIGRATION_GUIDELINES)
+            .render({"migration_template": migration_template})
+        )
+        prompt.append(llm_guidelines)
+
+        prompt.append(f"4. Git diff (current vs. {base})")
+
+        if context is None:
+            context = [
+                str(here.parent / "schemas"),
+                str(here.parent / "config"),
+                str(here.parent.parent.parent.parent / "docs"),
+            ]
+
+        git_diff = subprocess.run(  # noqa: S603
+            ("/usr/bin/git", "--no-pager", "diff", "--no-color", "--unified=0", f"{base}..{ref}", "--", *context),
+            check=True,
+            capture_output=True,
+        )
+        prompt.append(git_diff.stdout.decode("utf-8"))
+
+        if output is None:
+            print("\n".join(prompt))  # noqa: T201
+            return
+        Path(output).write_text("\n".join(prompt))
 
 
 @contextlib.contextmanager
