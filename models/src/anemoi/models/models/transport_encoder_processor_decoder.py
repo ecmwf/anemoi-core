@@ -70,7 +70,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         model_config = DotDict(model_config)
 
-        transport_params = model_config.model.model.transport
+        transport_params = model_config.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -1073,7 +1073,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
     ) -> None:
         model_config = DotDict(model_config)
 
-        self.condition_on_residual = model_config.model.condition_on_residual
+        self.condition_on_residual = model_config.condition_on_residual
         super().__init__(
             model_config=model_config,
             model_graph_config=model_graph_config,

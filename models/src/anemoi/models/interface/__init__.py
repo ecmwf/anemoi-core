@@ -131,7 +131,7 @@ class AnemoiModelInterface(torch.nn.Module):
         }
         self.model = instantiate(
             model_instantiate_config,
-            model_config=self.config,
+            model_config=self.config.model,
             model_graph_config=self.config.graph,
             data_indices=self.data_indices,
             statistics=self.statistics,
