@@ -12,9 +12,12 @@ import datetime
 import numpy as np
 import pytest
 import torch
+from omegaconf import OmegaConf
 from pydantic import ValidationError
 
-from anemoi.training.data.data_reader import NativeGridDataset
+from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.training.data.data_reader import GriddedDataReader
+from anemoi.training.data.data_reader import TrajectoryDataset
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
@@ -29,8 +32,8 @@ def dataset_path(extract_dataset_path: tuple[str, str], get_test_archive: GetTes
     return path
 
 
-class TestNativeGridDataset:
-    """Test NativeGridDataset instantiation and properties."""
+class TestGriddedDataReader:
+    """Test GriddedDataReader instantiation and properties."""
 
     @skip_if_offline
     @pytest.mark.parametrize("start", [None, 2017])
@@ -41,8 +44,8 @@ class TestNativeGridDataset:
         start: datetime.datetime,
         end: datetime.datetime,
     ) -> None:
-        """Test basic instantiation of NativeGridDataset."""
-        dataset = NativeGridDataset(dataset=dataset_path, start=start, end=end)
+        """Test basic instantiation of GriddedDataReader."""
+        dataset = GriddedDataReader(dataset=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
         assert dataset.dates is not None
@@ -64,7 +67,7 @@ class TestNativeGridDataset:
         if drop is not None:
             dataset_cfg["drop"] = drop
 
-        dataset = NativeGridDataset(dataset=dataset_cfg)
+        dataset = GriddedDataReader(dataset=dataset_cfg)
 
         assert dataset.data is not None
         assert dataset.dates is not None
@@ -73,8 +76,8 @@ class TestNativeGridDataset:
 
     @skip_if_offline
     def test_instantiation_with_time_range(self, dataset_path: str) -> None:
-        """Test NativeGridDataset with start and end dates."""
-        original = NativeGridDataset(dataset=dataset_path)
+        """Test GriddedDataReader with start and end dates."""
+        original = GriddedDataReader(dataset=dataset_path)
         dates = original.dates
 
         if len(dates) < 10:
@@ -83,7 +86,7 @@ class TestNativeGridDataset:
         start = dates[2]
         end = dates[-3]
 
-        dataset = NativeGridDataset(dataset=dataset_path, start=start, end=end)
+        dataset = GriddedDataReader(dataset=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
         assert dataset.dates[0] >= start
@@ -91,16 +94,16 @@ class TestNativeGridDataset:
 
     @skip_if_offline
     def test_instantiation_with_drop(self, dataset_path: str) -> None:
-        """Test NativeGridDataset with dropped variables."""
+        """Test GriddedDataReader with dropped variables."""
         # Get original variables to know what to drop
-        original = NativeGridDataset(dataset=dataset_path)
+        original = GriddedDataReader(dataset=dataset_path)
         original_vars = original.variables.copy()
 
         if len(original_vars) < 2:
             pytest.skip("Dataset needs at least 2 variables for drop test")
 
         drop_vars = [original_vars[0]]
-        dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": drop_vars})
+        dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": drop_vars})
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
@@ -110,7 +113,7 @@ class TestNativeGridDataset:
     @skip_if_offline
     def test_dataset_properties(self, dataset_path: str) -> None:
         """Test that dataset properties are correctly accessible."""
-        dataset = NativeGridDataset(dataset=dataset_path)
+        dataset = GriddedDataReader(dataset=dataset_path)
 
         assert isinstance(dataset.dates, np.ndarray)
         assert len(dataset.dates) > 0
@@ -123,35 +126,52 @@ class TestNativeGridDataset:
         assert isinstance(dataset.statistics, dict)
 
     @skip_if_offline
-    def test_get_sample_with_slice(self, dataset_path: str) -> None:
-        """Test get_sample with grid shard as slice."""
-        dataset = NativeGridDataset(dataset=dataset_path)
+    def test_get_sample_with_time_slice(self, dataset_path: str) -> None:
+        """Test get_sample with a time slice on the full grid."""
+        dataset = GriddedDataReader(dataset=dataset_path)
 
-        # Get a sample
-        sample = dataset.get_sample(sequence=0, positions=slice(0, 3), grid_shard_indices=slice(0, 50))
+        sample = dataset.get_sample(slice(0, 3))
 
-        assert isinstance(sample, torch.Tensor)
-        assert sample.ndim == 4  # dates, ensemble, gridpoints, variables
-        assert sample.shape[0] == 3  # 3 time steps
-        assert sample.shape[2] == 50  # 50 gridpoints
+        assert isinstance(sample, GriddedSourceSample)
+        assert isinstance(sample.data, torch.Tensor)
+        assert sample.data.ndim == 4  # dates, ensemble, gridpoints, variables
+        assert sample.data.shape[0] == 3  # 3 time steps
+        assert sample.data.shape[2] == dataset.grid_size
+        assert sample.data.shape[3] == len(dataset.variables)
+        assert sample.coordinates.shape == (dataset.grid_size, 2)
+        assert sample.shard_sizes is None
 
     @skip_if_offline
-    def test_get_sample_with_array_indices(self, dataset_path: str) -> None:
-        """Test get_sample with grid shard as array indices."""
-        dataset = NativeGridDataset(dataset=dataset_path)
+    def test_get_sample_with_time_index_list(self, dataset_path: str) -> None:
+        """Test get_sample with irregular time indices (e.g. offset-forecaster inputs)."""
+        dataset = GriddedDataReader(dataset=dataset_path)
 
-        grid_indices = np.array([0, 10, 20, 30])
-        sample = dataset.get_sample(sequence=0, positions=slice(0, 3), grid_shard_indices=grid_indices)
+        sample = dataset.get_sample([0, 2, 5])
 
-        assert isinstance(sample, torch.Tensor)
-        assert sample.ndim == 4
-        assert sample.shape[0] == 3  # 3 time steps
-        assert sample.shape[2] == 4  # 4 selected gridpoints
+        assert sample.data.ndim == 4
+        assert sample.data.shape[0] == 3  # 3 time steps
+        expected = dataset.get_sample(slice(0, 6)).data[[0, 2, 5]]
+        torch.testing.assert_close(sample.data, expected)
+
+    @skip_if_offline
+    def test_get_sample_with_grid_shard(self, dataset_path: str) -> None:
+        """Test get_sample returns this reader's grid shard once reader-group info is set."""
+        dataset = GriddedDataReader(dataset=dataset_path)
+        full = dataset.get_sample(slice(0, 3))
+
+        dataset.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
+        sample = dataset.get_sample(slice(0, 3))
+
+        assert sample.shard_sizes == dataset.grid_shard_sizes
+        assert sum(dataset.grid_shard_sizes) == dataset.grid_size
+        assert sample.data.shape[2] == dataset.grid_shard_sizes[1]
+        torch.testing.assert_close(sample.data, full.data[:, :, dataset.grid_shard_slice])
+        torch.testing.assert_close(sample.coordinates, full.coordinates[dataset.grid_shard_slice])
 
 
 @skip_if_offline
-def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> None:
-    original = NativeGridDataset(dataset=dataset_path)
+def test_gridded_data_reader_accepts_dataset_dictionary(dataset_path: str) -> None:
+    original = GriddedDataReader(dataset=dataset_path)
     if not original.variables:
         pytest.skip("Dataset has no variables to test drop.")
 
@@ -161,7 +181,7 @@ def test_native_grid_dataset_accepts_dataset_dictionary(dataset_path: str) -> No
         "frequency": "6h",
         "drop": [drop_var],
     }
-    dataset = NativeGridDataset(dataset=dataset_cfg, start=None, end=None)
+    dataset = GriddedDataReader(dataset=dataset_cfg, start=None, end=None)
 
     assert dataset.data is not None
     assert dataset.dates is not None
@@ -188,7 +208,7 @@ def test_create_dataset_accepts_nested_dataset_dictionary(dataset_path: str) -> 
 
 @skip_if_offline
 def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str) -> None:
-    original = NativeGridDataset(dataset=dataset_path)
+    original = GriddedDataReader(dataset=dataset_path)
 
     dataset_reader_cfg = {
         "dataset_config": {
@@ -207,8 +227,8 @@ def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str)
 
 
 @skip_if_offline
-def test_native_grid_dataset_select_and_drop_filters_variables(dataset_path: str) -> None:
-    base = NativeGridDataset(dataset=dataset_path)
+def test_gridded_data_reader_select_and_drop_filters_variables(dataset_path: str) -> None:
+    base = GriddedDataReader(dataset=dataset_path)
     variables = set(base.variables)
 
     required_for_test = {"2t", "msl", "10u"}
@@ -216,19 +236,19 @@ def test_native_grid_dataset_select_and_drop_filters_variables(dataset_path: str
         pytest.skip("Fixture dataset does not contain expected variables for select/drop test.")
 
     selected = ["2t", "msl", "10u"]
-    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    selected_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "select": selected})
     assert set(selected_dataset.variables) == set(selected)
 
     dropped = ["2t", "msl"]
-    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    dropped_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": dropped})
     assert "2t" not in dropped_dataset.variables
     assert "msl" not in dropped_dataset.variables
     assert "10u" in dropped_dataset.variables
 
 
 @skip_if_offline
-def test_native_grid_dataset_select_and_drop_atmospheric_variables(dataset_path: str) -> None:
-    base = NativeGridDataset(dataset=dataset_path)
+def test_gridded_data_reader_select_and_drop_atmospheric_variables(dataset_path: str) -> None:
+    base = GriddedDataReader(dataset=dataset_path)
     variables = set(base.variables)
 
     required_for_test = {"z_500", "t_100", "u_700"}
@@ -236,11 +256,11 @@ def test_native_grid_dataset_select_and_drop_atmospheric_variables(dataset_path:
         pytest.skip("Fixture dataset does not contain expected atmospheric variables for select/drop test.")
 
     selected = ["z_500", "t_100", "u_700"]
-    selected_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "select": selected})
+    selected_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "select": selected})
     assert set(selected_dataset.variables) == set(selected)
 
     dropped = ["z_500", "t_100"]
-    dropped_dataset = NativeGridDataset(dataset={"dataset": dataset_path, "drop": dropped})
+    dropped_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": dropped})
     assert "z_500" not in dropped_dataset.variables
     assert "t_100" not in dropped_dataset.variables
     assert "u_700" in dropped_dataset.variables
@@ -357,14 +377,14 @@ def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
 
 
 @skip_if_offline
-def test_native_grid_dataset_raises_for_invalid_open_dataset_key(dataset_path: str) -> None:
+def test_gridded_data_reader_raises_for_invalid_open_dataset_key(dataset_path: str) -> None:
     dataset_cfg = {
         "dataset": dataset_path,
         "invalid_key": "not_supported",
     }
 
     with pytest.raises(NotImplementedError, match=r"invalid_key|Unsupported arguments"):
-        NativeGridDataset(dataset=dataset_cfg, start=1985, end=2020)
+        GriddedDataReader(dataset=dataset_cfg, start=1985, end=2020)
 
 
 def test_native_dataset_schema_validates_new_dataset_dictionary() -> None:
@@ -429,14 +449,37 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
     assert cfg.dataset_config == {"invalid_key": "not_supported"}
 
 
-def test_trajectory_dataset_rejects_frequency_in_dataset_config() -> None:
-    """TrajectoryDataset must raise if dataset_config contains a non-null frequency."""
-    dataset_cfg = {
-        "dataset_config": {
-            "dataset": "mock-trajectory-dataset.zarr",
-            "frequency": "6h",
+@skip_if_offline
+def test_create_dataset_selects_trajectory_reader(dataset_path: str) -> None:
+    """A ``trajectory`` section with ``start`` and ``length`` creates a TrajectoryDataset."""
+    dataset_reader_cfg = OmegaConf.create(
+        {
+            "dataset_config": {"dataset": dataset_path, "frequency": "6h"},
+            "start": None,
+            "end": None,
+            "trajectory": {"start": "2017-01-01T00:00:00", "length": 4},
         },
-        "trajectory": {"sampling": None},
+    )
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert isinstance(dataset, TrajectoryDataset)
+    assert dataset.has_trajectories
+    assert dataset.trajectory_length == 4
+    assert len(dataset.trajectory_ids) == len(dataset.dates)
+
+
+@skip_if_offline
+def test_create_dataset_without_trajectory_gives_gridded_reader(dataset_path: str) -> None:
+    """``trajectory: null`` creates a plain GriddedDataReader."""
+    dataset_reader_cfg = {
+        "dataset_config": {"dataset": dataset_path, "frequency": "6h"},
+        "start": None,
+        "end": None,
+        "trajectory": None,
     }
-    with pytest.raises(AssertionError, match=r"data\.frequency: null"):
-        create_dataset(dataset_cfg)
+
+    dataset = create_dataset(dataset_reader_cfg)
+
+    assert type(dataset) is GriddedDataReader
+    assert not dataset.has_trajectories
