@@ -37,8 +37,8 @@ dependencies = [
   "anemoi-graphs>=0.5.2",
   "anemoi-models[migrations]>=0.9.5",
   "anemoi-transform>=0.4.1",
-  "anemoi-utils[mlflow]>=0.4.37",
-  "anemoi-utils[provenance]>=0.5.1",
+  # Update this when anemoi-utils#339 is merged
+  "anemoi-utils[mlflow,provenance] @ git+https://github.com/ecmwf/anemoi-utils.git@feat/migration-utils",
   "einops>=0.6.1",
   "hydra-core>=1.3",
   "numba",
