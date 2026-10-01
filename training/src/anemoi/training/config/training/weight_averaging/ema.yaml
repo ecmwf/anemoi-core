@@ -1,2 +1,2 @@
-_target_: pytorch_lightning.callbacks.EMAWeightAveraging
+_target_: anemoi.training.diagnostics.callbacks.weight_averaging.EMAWeightAveraging
 decay: 0.999

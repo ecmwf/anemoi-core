@@ -76,8 +76,8 @@ class WeightAveragingSchema(GenericSchema):
           decay: 0.999
           update_starting_at_step: 1000
 
-    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used.
-    Set ``use_buffers=False`` when the model contains non-floating-point buffers.
+    Stock ``pytorch_lightning.callbacks.*WeightAveraging`` classes can also be used, but they
+    default to ``use_buffers=True``, which fails on non-floating-point buffers.
     """
 
 
