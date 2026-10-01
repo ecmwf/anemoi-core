@@ -103,6 +103,8 @@ class ICONMultiMesh:
         # restrict edge-vertex list to multi_mesh level "max_level":
         if self.max_level < self.reflvl_vertex.max():
             self.nodeset = self.nodeset[self.reflvl_vertex <= self.max_level]
+        if self.min_level > self.reflvl_vertex.min():
+            self.reflvl_vertex[self.reflvl_vertex<self.min_level]=self.min_level
 
     @cached_property
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
@@ -184,7 +186,7 @@ class ICONMultiMesh:
         selected_vertex_coarse = scipy.sparse.diags(np.ones(num_vertices), dtype=bool)
 
         # coarsen edge-vertex list from level `ilevel -> ilevel - 1`:
-        for ilevel in reversed(range(max(self.min_level, 1), self.reflvl_vertex.max() + 1)):
+        for ilevel in reversed(range(max(self.min_level, 0)+1, self.reflvl_vertex.max() + 1)):
             LOGGER.debug(f"  edges[{ilevel}] = {edge_vertices[0].shape[0] : >9}")
 
             # define edge selection matrix (selecting only edges of which have

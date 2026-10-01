@@ -26,8 +26,16 @@ class TestEdgeBuilderDependencies:
     def icon_graph(self, monkeypatch, icon_dataset_mock) -> HeteroData:
         """Return a HeteroData object with ICON node builders."""
         monkeypatch.setattr(netCDF4, "Dataset", icon_dataset_mock)
+        hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=2)
+        testresult=len(hidden_node_builder.icon_nodes.multi_mesh_edges)
+        hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=2, min_level=2)
+        testsum1=len(hidden_node_builder.icon_nodes.multi_mesh_edges)
+
         data_node_builder = ICONCellGridNodes(name="data", grid_filename="test.nc", max_level=1)
         hidden_node_builder = ICONMultiMeshNodes(name="hidden", grid_filename="test.nc", max_level=1)
+
+        testsum2=len(hidden_node_builder.icon_nodes.multi_mesh_edges)
+        assert testresult == testsum1 + testsum2
 
         graph = HeteroData()
         graph = data_node_builder.update_graph(graph, {})
