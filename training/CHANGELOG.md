@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.17.1](https://github.com/ecmwf/anemoi-core/compare/training-0.17.0...training-0.17.1) (2026-10-01)
+
+
+### Bug Fixes
+
+* Correct tendency scaler with dataset join ([3ebeac3](https://github.com/ecmwf/anemoi-core/commit/3ebeac383b8cd3ca3ddb268ba7d72b07174bec45))
+
 ## [0.17.0](https://github.com/ecmwf/anemoi-core/compare/training-0.16.0...training-0.17.0) (2026-09-07)
 
 
