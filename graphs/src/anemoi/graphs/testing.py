@@ -55,7 +55,9 @@ class _DatasetMock:
             "vlat": MockVariable(np.array([1, 0, 1, 0, 0]), "radian", ("vertex",)),
             "clon": MockVariable(np.array([0.66, 0.33, 1.33]), "radian", ("cell",)),
             "clat": MockVariable(np.array([0.66, 0.33, 0.33]), "radian", ("cell",)),
-            "edge_vertices": MockVariable(np.array([[1, 2], [2, 3], [3, 1], [2, 4], [4, 1], [2, 5], [3, 5]]).T, "", ("nc", "edge")),
+            "edge_vertices": MockVariable(
+                np.array([[1, 2], [2, 3], [3, 1], [2, 4], [4, 1], [2, 5], [3, 5]]).T, "", ("nc", "edge")
+            ),
             "vertex_of_cell": MockVariable(np.array([[1, 2, 3], [1, 2, 4], [2, 4, 5]]).T, "", ("nv", "cell")),
             "refinement_level_v": MockVariable(np.array([0, 0, 0, 1, 2]), "", ("vertex",)),
             "refinement_level_c": MockVariable(np.array([0, 1, 2]), "", ("cell",)),
