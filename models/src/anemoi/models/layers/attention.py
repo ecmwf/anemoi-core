@@ -286,22 +286,22 @@ class SDPAAttentionWrapper(nn.Module):
         Parameters
         ----------
         B : int
-            Batch size
+            Batch size.
         H : int
-            Number of heads
+            Number of heads.
         Q_LEN : int
-            Query sequence length
+            Query sequence length.
         KV_LEN : int
-            Key/value sequence length
+            Key/value sequence length.
         window_size : tuple
             Tuple of (left_window, right_window). Use -1 for unlimited.
         device : str
-            Device for the mask tensor
+            Device for the mask tensor.
 
         Returns
         -------
         Tensor
-            2D attention mask
+            2D attention mask.
         """
         window_size_l = KV_LEN if window_size[0] == -1 else window_size[0]
         window_size_r = KV_LEN if window_size[1] == -1 else window_size[1]
@@ -548,12 +548,12 @@ def get_alibi_slopes(num_heads: int) -> Tensor:
     Parameters
     ----------
     num_heads : int
-        number of attention heads
+        Number of attention heads.
 
     Returns
     -------
     Tensor
-        aLiBi slopes
+        aLiBi slopes.
     """
     n = 2 ** math.floor(math.log2(num_heads))
     slope_0 = 2 ** (-8 / n)
@@ -563,3 +563,59 @@ def get_alibi_slopes(num_heads: int) -> Tensor:
         alibi_slopes_hat = torch.pow(slope_hat_0, torch.arange(1, 1 + 2 * (num_heads - n), 2))
         alibi_slopes = torch.cat([alibi_slopes, alibi_slopes_hat])
     return alibi_slopes
+
+
+class PointwiseMultiHeadCrossAttention(nn.Module):
+    """Attend over source tokens independently at each hidden node."""
+
+    def __init__(
+        self,
+        num_heads: int,
+        embed_dim: int,
+        layer_kernels: DotDict,
+        attn_channels: Optional[int] = None,
+        qkv_bias: bool = False,
+        qk_norm: bool = False,
+        dropout_p: float = 0.0,
+    ) -> None:
+        super().__init__()
+        self.attn_channels = embed_dim if attn_channels is None else attn_channels
+        if self.attn_channels % num_heads != 0:
+            raise ValueError(
+                f"attn_channels ({self.attn_channels}) must be divisible by number of heads ({num_heads}).",
+            )
+
+        self.num_heads = num_heads
+        self.head_dim = self.attn_channels // num_heads
+        self.dropout_p = dropout_p
+        self.qk_norm = qk_norm
+
+        linear = layer_kernels.Linear
+        self.lin_q = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_k = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.lin_v = linear(embed_dim, self.attn_channels, bias=qkv_bias)
+        self.projection = linear(self.attn_channels, embed_dim, bias=True)
+
+        if qk_norm:
+            self.q_norm = layer_kernels.QueryNorm(self.head_dim)
+            self.k_norm = layer_kernels.KeyNorm(self.head_dim)
+
+    def forward(self, query: Tensor, key: Tensor, value: Tensor) -> Tensor:
+        """Apply cross-attention over source tokens at each hidden node."""
+        query = einops.rearrange(self.lin_q(query), "grid (heads vars) -> grid heads vars", heads=self.num_heads)
+        key, value = (
+            einops.rearrange(tensor, "grid sources (heads vars) -> grid heads sources vars", heads=self.num_heads)
+            for tensor in (self.lin_k(key), self.lin_v(value))
+        )
+
+        if self.qk_norm:
+            query = self.q_norm(query)
+            key = self.k_norm(key)
+
+        # Score each source against the node's query: (g,h,s,v) @ (g,h,v,1) -> (g,h,s)
+        scores = (key @ query.unsqueeze(-1)).squeeze(-1) / math.sqrt(self.head_dim)
+        # Turn the scores into weights over the sources that sum to 1 at each node and head.
+        weights = nn.functional.dropout(scores.softmax(dim=-1), p=self.dropout_p, training=self.training)
+        # Weighted average of the source values: (g,h,1,s) @ (g,h,s,v) -> (g,h,v)
+        output = (weights.unsqueeze(-2) @ value).squeeze(-2)
+        return self.projection(einops.rearrange(output, "grid heads vars -> grid (heads vars)"))

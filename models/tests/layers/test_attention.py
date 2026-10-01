@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+import math
+
 import hypothesis.strategies as st
 import psutil
 import pytest
@@ -20,12 +22,30 @@ from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
+from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
 from anemoi.models.layers.utils import load_layer_kernels
 
 
 @pytest.fixture(scope="session")
 def layer_kernels():
     return load_layer_kernels()
+
+
+def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(layer_kernels):
+    attention = PointwiseMultiHeadCrossAttention(num_heads=1, embed_dim=2, layer_kernels=layer_kernels, dropout_p=1.0)
+    with torch.no_grad():
+        for linear in (attention.lin_q, attention.lin_k, attention.lin_v, attention.projection):
+            linear.weight.copy_(torch.eye(2))
+        attention.projection.bias.zero_()
+
+    query = torch.tensor([[math.sqrt(2) * math.log(3), 0.0], [0.0, 0.0]])
+    key = torch.eye(2).expand(2, -1, -1)
+    value = torch.tensor([[[2.0, 0.0], [0.0, 4.0]], [[6.0, 0.0], [0.0, 8.0]]])
+
+    torch.testing.assert_close(attention(query, key, value), torch.zeros(2, 2))
+    attention.eval()
+    # The first node has source weights (3/4, 1/4); the second has (1/2, 1/2).
+    torch.testing.assert_close(attention(query, key, value), torch.tensor([[1.5, 1.0], [3.0, 4.0]]))
 
 
 @given(
