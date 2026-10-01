@@ -91,6 +91,29 @@ def test_triton_matches_dense_mask(query_name, key_name, kernel_size, head_dim, 
         torch.testing.assert_close(result.double() / scale, reference / scale, rtol=tolerance, atol=tolerance, msg=name)
 
 
+@pytest.mark.parametrize(
+    ("query_name", "key_name", "kernel_size"), [("O8", "O16", (5, 5)), ("O16", "O8", (3, 5)), ("H8", "H4", (3, 5))]
+)
+def test_triton_bfloat16_gradients_with_offset_keys(query_name, key_name, kernel_size):
+    """Keys sharing an offset 100 times their spread still give gradients as accurate as bfloat16 allows.
+
+    The exact gradients do not depend on such an offset; rounding the score gradient to bfloat16 before
+    the products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
+    """
+    query_grid, key_grid, head_dim = _grid(query_name), _grid(key_name), 64
+    q, k, v = _tensors(query_grid, key_grid, head_dim, torch.float32)
+    offset = torch.randn(head_dim, generator=torch.Generator().manual_seed(1)).cuda()
+    k = k + 100 * head_dim**0.5 * offset / offset.norm()
+    qkv = [t.bfloat16() for t in (q, k, v)]
+    grad_out = torch.randn_like(qkv[0])
+
+    results = _run(cross_attention(query_grid, key_grid, kernel_size, backend="triton"), qkv, grad_out)
+    dense = cross_attention(query_grid, key_grid, kernel_size, backend="sdpa")
+    references = _run(dense, [t.double() for t in qkv], grad_out.double())
+    for name, result, reference in zip(("dq", "dk", "dv"), results[1:], references[1:]):
+        assert ((result.double() - reference).norm() / reference.norm()).item() < 1e-2, name
+
+
 @pytest.mark.parametrize("grid_name", ["O16", "H8"])
 def test_cross_on_one_grid_matches_self_attention_kernel(grid_name):
     grid = _grid(grid_name)

@@ -88,6 +88,44 @@ def test_triton_matches_dense_mask(grid_name, kernel_size, head_dim, dtype, tole
         torch.testing.assert_close(result.double() / scale, reference / scale, rtol=tolerance, atol=tolerance, msg=name)
 
 
+def _relative_error(result, reference):
+    return ((result.double() - reference).norm() / reference.norm()).item()
+
+
+@pytest.mark.parametrize("grid_name", ["O16", "H8"])
+def test_triton_bfloat16_gradients_with_offset_keys(grid_name):
+    """Keys sharing an offset 100 times their spread still give gradients as accurate as bfloat16 allows.
+
+    The exact gradients do not depend on such an offset; rounding the score gradient to bfloat16 before
+    the products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
+    """
+    grid, kernel_size, head_dim = _grid(grid_name), (5, 7), 64
+    q, k, v = _qkv(grid.num_points, head_dim, torch.float32)
+    offset = torch.randn(head_dim, generator=torch.Generator().manual_seed(1)).cuda()
+    k = k + 100 * head_dim**0.5 * offset / offset.norm()
+    qkv = [t.bfloat16() for t in (q, k, v)]
+    grad_out = torch.randn_like(qkv[0])
+
+    results = _run("triton", grid, kernel_size, qkv, grad_out)
+    references = _run("sdpa", grid, kernel_size, [t.double() for t in qkv], grad_out.double())
+    for name, result, reference in zip(("dq", "dk", "dv"), results[1:], references[1:]):
+        assert _relative_error(result, reference) < 1e-2, name
+
+
+@pytest.mark.parametrize("grid_name", ["O16", "H8"])
+def test_triton_bfloat16_dq_ignores_a_key_coordinate_the_queries_do_not_see(grid_name):
+    """With every query 0 in one coordinate and every key sharing a large value there, dQ is 0 in it."""
+    grid, kernel_size = _grid(grid_name), (5, 7)
+    q, k, v = _qkv(grid.num_points, 32, torch.float32)
+    q[..., 0] = 0.0
+    k[..., 0] = 4096.0
+    qkv = [t.bfloat16() for t in (q, k, v)]
+
+    _, dq, _, _ = _run("triton", grid, kernel_size, qkv, torch.randn_like(qkv[0]))
+    dq = dq.double()
+    assert dq[..., 0].abs().max() < 1e-2 * dq.pow(2).mean().sqrt()
+
+
 @pytest.mark.parametrize("grid_name", ["O16", "H8"])
 def test_triton_output_depends_only_on_keys_in_the_window(grid_name):
     """Changing one key and value changes exactly the outputs of the queries whose window holds it."""

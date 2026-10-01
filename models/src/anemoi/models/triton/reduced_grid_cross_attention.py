@@ -289,6 +289,7 @@ def _xg_bwd_dq(
     M,
     INV_L,
     DELTA,  # written here: sum over the head dimension of OUT * DO for each query, read by the dK/dV kernel
+    LAM,  # written here: sum of the rounded ds over sum of the rounded probabilities per query, see below
     Q_ROW_START,
     K_ROW_START,
     Q_ROW_SHIFT,
@@ -348,6 +349,16 @@ def _xg_bwd_dq(
 
     qk_scale = sm_scale * _RCP_LN2
     dq = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
+    # The exact ds of a query sums to zero over its keys, which keeps dq blind to where the keys sit
+    # as a group. Rounding ds to the input precision before the product with k leaves a small sum,
+    # and dq picks up that sum times the mean key, which outweighs the true gradient when the keys
+    # are far from the origin compared with their spread. The sums of the rounded ds and of the
+    # rounded probabilities are kept, and lam = their ratio, so that ds - lam * p sums to zero; dq
+    # and dk use that. See Chen et al., "Broken symmetry in BF16 attention" (GProj),
+    # https://arxiv.org/abs/2609.34272.
+    p_k = tl.zeros([TILE_H * TILE_W, HEAD_DIM], dtype=tl.float32)
+    ds_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
+    p_sum = tl.zeros([TILE_H * TILE_W], dtype=tl.float32)
 
     q_window, k_first_row, num_k_rows, idx, k_starts, k_lengths, k_shifts, firsts, lengths, blocks = _query_tile_keys(
         K_ROW_START,
@@ -393,10 +404,16 @@ def _xg_bwd_dq(
         p = tl.math.exp2(qk - m[:, None]) * inv_l[:, None]
 
         dp = tl.dot(do, tl.trans(v), input_precision=DOT_PRECISION)
-        ds = p * (dp - delta[:, None])
-        dq = tl.dot(ds.to(k.dtype), k, dq, input_precision=DOT_PRECISION)
+        ds = (p * (dp - delta[:, None])).to(k.dtype)
+        p = p.to(k.dtype)
+        ds_sum += tl.sum(ds.to(tl.float32), 1)
+        p_sum += tl.sum(p.to(tl.float32), 1)
+        dq = tl.dot(ds, k, dq, input_precision=DOT_PRECISION)
+        p_k = tl.dot(p, k, p_k, input_precision=DOT_PRECISION)
 
-    dq = dq * sm_scale
+    lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
+    tl.store(LAM + bh * Q_POINTS + q_tok, lam, mask=q_valid)
+    dq = (dq - lam[:, None] * p_k) * sm_scale
     tl.store(DQ + q_ptrs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
 
 
@@ -412,6 +429,7 @@ def _xg_bwd_dkdv(
     M,
     INV_L,
     DELTA,
+    LAM,
     Q_ROW_START,
     K_ROW_START,
     Q_ROW_SHIFT,
@@ -511,6 +529,7 @@ def _xg_bwd_dkdv(
         m = tl.load(M + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
         inv_l = tl.load(INV_L + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
         delta = tl.load(DELTA + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
+        lam = tl.load(LAM + bh * Q_POINTS + q_tok, mask=q_valid, other=0.0)
 
         row_seen = (k_rows >= q_window) & (k_rows < q_window + KERNEL_H)
         # Matching position of each query in each tile row, repeated for the points of that row.
@@ -527,10 +546,13 @@ def _xg_bwd_dkdv(
         qk_t = tl.where(keep, tl.dot(k, tl.trans(q), input_precision=DOT_PRECISION) * qk_scale, _MASKED)
         p_t = tl.math.exp2(qk_t - m[None, :]) * inv_l[None, :]
 
-        dv = tl.dot(p_t.to(do.dtype), do, dv, input_precision=DOT_PRECISION)
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
+        p_t = p_t.to(do.dtype)
+        dv = tl.dot(p_t, do, dv, input_precision=DOT_PRECISION)
+        # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero there too.
         dk = tl.dot(ds_t.to(q.dtype), q, dk, input_precision=DOT_PRECISION)
+        dk = tl.dot(p_t, (-lam[:, None] * q).to(q.dtype), dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
     tl.store(DK + k_ptrs, dk.to(DK.dtype.element_ty), mask=k_valid[:, None])
@@ -604,15 +626,15 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
         batch, heads, _, _ = q.shape
 
         do = do.contiguous()
-        delta = torch.empty_like(m)
+        delta, lam = torch.empty_like(m), torch.empty_like(m)
         dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
 
-        # The dQ kernel also writes delta, which the dK/dV kernel reads, so it runs first.
+        # The dQ kernel also writes delta and lam, which the dK/dV kernel reads, so it runs first.
         _xg_bwd_dq[_launch_grid(ctx.q_tiles, batch * heads)](
-            q, k, v, o, do, dq, m, inv_l, delta, *ctx.tables, ctx.sm_scale, **ctx.sizes
+            q, k, v, o, do, dq, m, inv_l, delta, lam, *ctx.tables, ctx.sm_scale, **ctx.sizes
         )
         _xg_bwd_dkdv[_launch_grid(ctx.k_tiles, batch * heads)](
-            q, k, v, do, dk, dv, m, inv_l, delta, *ctx.tables, ctx.sm_scale, **ctx.sizes
+            q, k, v, do, dk, dv, m, inv_l, delta, lam, *ctx.tables, ctx.sm_scale, **ctx.sizes
         )
         return dq, dk, dv, None, None, None, None
 
