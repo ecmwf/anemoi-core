@@ -85,7 +85,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 4,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "out_channels_dst": None,
                 "num_chunks": 1,
                 "num_heads": 2,
@@ -99,7 +99,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 8,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "out_channels_dst": 3,
                 "num_chunks": 1,
                 "num_heads": 2,
@@ -113,7 +113,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 4,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "out_channels_dst": None,
                 "num_chunks": 1,
                 "mlp_extra_layers": 1,
@@ -126,7 +126,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 8,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "out_channels_dst": 3,
                 "num_chunks": 1,
                 "mlp_extra_layers": 1,
@@ -139,7 +139,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 4,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "num_chunks": 1,
                 "num_heads": 2,
                 "mlp_hidden_ratio": 2,
@@ -154,7 +154,7 @@ def _layer_kernels():
             {
                 "in_channels_src": 8,
                 "in_channels_dst": 4,
-                "hidden_dim": 8,
+                "num_channels": 8,
                 "out_channels_dst": 3,
                 "num_chunks": 1,
                 "num_heads": 2,
@@ -209,7 +209,7 @@ def test_mapper_forward_uses_disabled_checkpoint_flag(monkeypatch):
     mapper = TransformerForwardMapper(
         in_channels_src=4,
         in_channels_dst=4,
-        hidden_dim=8,
+        num_channels=8,
         out_channels_dst=None,
         num_chunks=1,
         num_heads=2,

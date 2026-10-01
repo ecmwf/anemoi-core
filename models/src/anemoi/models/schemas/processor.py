@@ -1,4 +1,4 @@
-# (C) Copyright 2024-2026 Anemoi contributors.
+# (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
 # which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
@@ -30,6 +30,8 @@ class NoOpProcessorSchema(PydanticBaseModel):
 class GNNProcessorSchema(GNNModelComponent):
     target_: Literal["anemoi.models.layers.processor.GNNProcessor"] = Field(..., alias="_target_")
     "GNN Processor object from anemoi.models.layers.processor."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Number of channels in the GNN processor. Default to 512."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of GNN processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
@@ -39,6 +41,8 @@ class GNNProcessorSchema(GNNModelComponent):
 class GraphTransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.GraphTransformerProcessor"] = Field(..., alias="_target_")
     "Graph transformer processor object from anemoi.models.layers.processor."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Number of channels in the Graph Transformer processor. Default to 512."
     trainable_size: NonNegativeInt = Field(example=8)
     "Size of trainable parameters vector. Default to 8."
     sub_graph_edge_attributes: list[str] = Field(example=["edge_length", "edge_dir"])
@@ -74,6 +78,8 @@ class GraphTransformerProcessorSchema(TransformerModelComponent):
 class TransformerProcessorSchema(TransformerModelComponent):
     target_: Literal["anemoi.models.layers.processor.TransformerProcessor"] = Field(..., alias="_target_")
     "Transformer processor object from anemoi.models.layers.processor."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Number of channels in the Transformer processor. Default to 512."
     num_layers: NonNegativeInt = Field(example=16)
     "Number of layers of Transformer processor. Default to 16."
     num_chunks: NonNegativeInt = Field(example=2)
@@ -110,9 +116,11 @@ class TransformerProcessorSchema(TransformerModelComponent):
 
 class PointWiseMLPProcessorSchema(PointWiseModelComponent):
     target_: Literal["anemoi.models.layers.processor.PointWiseMLPProcessor"] = Field(..., alias="_target_")
-    "Transformer processor object from anemoi.models.layers.processor."
+    "PointWise MLP processor object from anemoi.models.layers.processor."
+    num_channels: NonNegativeInt = Field(example=512)
+    "Number of channels in the PointWise MLP processor. Default to 512."
     num_layers: NonNegativeInt = Field(example=16)
-    "Number of layers of Transformer processor."
+    "Number of layers of the PointWise MLP processor."
     mlp_hidden_ratio: NonNegativeInt = Field(example=4)
     "Ratio of the hidden dimension to the processor channel dimension."
     dropout_p: NonNegativeFloat = Field(default=0.0, example=0.0)

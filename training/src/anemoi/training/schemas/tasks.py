@@ -30,10 +30,10 @@ class RolloutSchema(BaseModel):
 
 
 class ForecasterSchema(BaseModel):
-    """Configuration for forecasting tasks."""
+    """Configuration for multistep forecasting tasks."""
 
     target_: Literal["anemoi.training.tasks.Forecaster"] = Field(..., alias="_target_")
-    "Task class path for the forecasting task."
+    "Task class path for the multistep forecasting task."
     multistep_input: PositiveInt = Field(example=2)
     "Number of input timesteps provided to the model."
     multistep_output: PositiveInt = Field(example=1)
@@ -42,8 +42,27 @@ class ForecasterSchema(BaseModel):
     "Timestep string (e.g. '6H') defining the frequency of the input and output steps."
     rollout: RolloutSchema = Field(...)
     "Rollout configuration for autoregressive training."
-    validation_rollout: NonNegativeInt | None = Field(default=None, example=[None, 6, 12])
-    "Number of rollouts to use for validation. If unset, validation uses the training rollout."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
+    "The val loss is averaged over the training rollout only."
+
+
+class OffsetForecasterSchema(BaseModel):
+    """Configuration for the offset-based forecasting task."""
+
+    target_: Literal["anemoi.training.tasks.OffsetForecaster"] = Field(..., alias="_target_")
+    "Task class path for the offset-based forecasting task."
+    input_offsets: list[str] = Field(example=["-6H", "0H"], min_length=1)
+    "Input time offsets as duration strings."
+    output_offsets: list[str] = Field(example=["6H"], min_length=1)
+    "Output time offsets as duration strings."
+    rollout_shift: str = Field(default="default", example="6H")
+    "Time shift applied to the offsets between rollout steps. 'default' infers the largest valid shift."
+    rollout: RolloutSchema = Field(...)
+    "Rollout configuration for autoregressive training."
+    validation_rollout: PositiveInt | None = Field(default=None, example=[None, 6, 12])
+    "Minimum number of rollout steps unrolled in validation; the training rollout is always unrolled. "
+    "The val loss is averaged over the training rollout only."
 
 
 class AutoencoderTaskSchema(BaseModel):
@@ -69,6 +88,6 @@ class TemporalDownscalerSchema(BaseModel):
 
 
 TaskSchema = Annotated[
-    ForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
+    ForecasterSchema | OffsetForecasterSchema | AutoencoderTaskSchema | TemporalDownscalerSchema,
     Discriminator("target_"),
 ]

@@ -11,8 +11,6 @@ import logging
 import os
 from pathlib import Path
 
-import torch
-
 from anemoi.graphs.plotting.displots import plot_distribution_edge_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_attributes
 from anemoi.graphs.plotting.displots import plot_distribution_node_derived_attributes
@@ -21,6 +19,7 @@ from anemoi.graphs.plotting.interactive_2d_html import plot_interactive_subgraph
 from anemoi.graphs.plotting.interactive_2d_html import plot_isolated_nodes_2d
 from anemoi.graphs.plotting.interactive_3d_html import plot_interactive_graph_3d
 from anemoi.graphs.processors.post_process import SubsetNodesInArea
+from anemoi.graphs.utils import load_graph_from_file
 
 LOGGER = logging.getLogger(__name__)
 
@@ -50,7 +49,7 @@ class GraphInspector:
         **kwargs,
     ):
         self.path = path
-        self.graph = torch.load(self.path, weights_only=False, map_location="cpu")
+        self.graph = load_graph_from_file(path)
         self.area = area
         self.output_path = output_path
         self.show_attribute_distributions = show_attribute_distributions

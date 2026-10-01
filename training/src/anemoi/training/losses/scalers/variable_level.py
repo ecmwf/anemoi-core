@@ -73,7 +73,7 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         ...
 
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
-        variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
+        variable_level_scaling = torch.ones((len(self.data_indices.model.output.full),), dtype=torch.float32)
 
         LOGGER.info(
             "Variable Level Scaling: Applying %s scaling to %s variables (%s)",

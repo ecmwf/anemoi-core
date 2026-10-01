@@ -1,6 +1,6 @@
-############
+#############
  Optimization
-############
+#############
 
 Optimization in ``anemoi-training`` covers the optimizer, learning rate,
 and LR scheduler. All three are configured together under the

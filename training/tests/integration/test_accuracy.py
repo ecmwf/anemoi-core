@@ -7,10 +7,12 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import json
 import logging
 import os
 from pathlib import Path
 from typing import Final
+from urllib.parse import quote
 
 os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
 # Required for deterministic cuBLAS (torch.use_deterministic_algorithms, enabled via
@@ -72,7 +74,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    reference_id: Final = "527c02a5f2554f1a96faa0f3e3a9f1a3"
+    reference_id: Final = "eddb276a2bbd40f6a856b465cc9a995d"
     metric: Final = "train_multi_dataset_loss_step"
 
     # Printed so a failing run's ID can be promoted to the new reference_id.
@@ -86,6 +88,13 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
                 "loss": [m.value for m in history],
             },
         ).set_index("step")
+
+    def comparison_url(*run_ids: str) -> str:
+        # MLflow UI page overlaying `metric` for the given runs; its query values are JSON.
+        experiment_ids = sorted({client.get_run(run_id).info.experiment_id for run_id in run_ids})
+        params = {"runs": list(run_ids), "metric": metric, "experiments": experiment_ids, "plot_metric_keys": [metric]}
+        query = "&".join(f"{key}={quote(json.dumps(value))}" for key, value in params.items())
+        return f"{mlflow_server.rstrip('/')}/#/metric?{query}&x_axis=step"
 
     def assert_similar(run_id1: str, run_id2: str) -> None:
         df1, df2 = get_loss_df(run_id1), get_loss_df(run_id2)
@@ -103,7 +112,10 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
         assert_close(
             aligned.loc[:, "loss_1"].to_numpy(),
             aligned.loc[:, "loss_2"].to_numpy(),
-            msg=lambda msg: f"Loss curve for run {trainer.run_id} does not match reference\n{msg}",
+            msg=lambda msg: (
+                f"Loss curve for run {run_id1} does not match reference {run_id2}\n{msg}\n"
+                f"Compare the runs at: {comparison_url(run_id1, run_id2)}"
+            ),
         )
 
     assert_similar(trainer.run_id, reference_id)

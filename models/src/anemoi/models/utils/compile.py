@@ -63,6 +63,9 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
     Modules are not compiled here. The compilation will occur
     automatically before the first forward iteration.
 
+    A module may define ``compile_for_training()`` to select what should
+    be compiled. All other modules use ``torch.nn.Module.compile()``.
+
     returns an updated model, with modules marked for compilation
     """
     if compile_config is None:
@@ -84,7 +87,11 @@ def mark_for_compilation(model: Module, compile_config: DictConfig | None) -> Mo
             # It is just marked for JIT-compilation later
             # It will be compiled before its first forward pass
 
-            module.compile(**options)
+            compile_for_training = getattr(module, "compile_for_training", None)
+            if compile_for_training is not None:
+                compile_for_training(**options)
+            else:
+                module.compile(**options)
 
             parts = name.split(".")
             parent = reduce(getattr, parts[:-1], model)

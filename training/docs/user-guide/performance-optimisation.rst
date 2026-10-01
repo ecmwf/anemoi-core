@@ -237,6 +237,17 @@ cannot load input data fast enough to keep up with your GPU. This
 results in your GPU stalling at the start of an iteration while it waits
 for the CPU to provide the next input batch.
 
+To determine whether a configuration is dataloader-bound, run the same
+configuration with ``dataloader.fake_dataloading=True``. This loads the
+first real sample and reuses it for subsequent batches, preserving valid
+shapes and numerical values while removing repeated dataset reads.
+A significant increase in throughput indicates that dataloading is the
+bottleneck. Possible fixes are to increase the number of workers when
+sufficient CPU memory is available, move the dataset to a faster or
+less congested filesystem, or rechunk the dataset along the grid
+dimension to better match the access pattern (if gpus_per_model is
+greater than 1).
+
 By default, each GPU will spawn 8 workers. Each worker will load data in
 parallel. You should try to increase this number until you run out of
 CPU memory. A CPU out of memory error looks like:

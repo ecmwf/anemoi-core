@@ -18,7 +18,6 @@ from torch.utils.checkpoint import checkpoint
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.train.methods.base import BaseTrainingModule
-from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -27,6 +26,7 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
     from torch_geometric.data import HeteroData
 
+    from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
 LOGGER = logging.getLogger(__name__)
@@ -100,12 +100,21 @@ class EnsembleTraining(BaseTrainingModule):
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
 
-        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy:
+        # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
+        # Defaults are the single-device values used by SingleDeviceStrategy,
+        # which does not set up communication groups. A ``None`` process group
+        # makes the ensemble gather a no-op (see gather_tensor).
         self.ens_comm_group = None
-        self.ens_comm_group_id = None
-        self.ens_comm_group_rank = None
-        self.ens_comm_num_groups = None
-        self.ens_comm_group_size = None
+        self.ens_comm_group_id = 0
+        self.ens_comm_group_rank = 0
+        self.ens_comm_num_groups = 1
+        self.ens_comm_group_size = 1
+
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = 0
+        self.ens_comm_subgroup_rank = 0
+        self.ens_comm_subgroup_num_groups = 1
+        self.ens_comm_subgroup_size = 1
 
     def set_ens_comm_group(
         self,
@@ -235,9 +244,7 @@ class EnsembleTraining(BaseTrainingModule):
         validation_mode: bool = False,
     ) -> TrainingStepOutput:
         """Training / validation step."""
-        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
-        metrics = {}
-        y_preds = []
+        step_losses, step_metrics, y_preds = [], [], []
 
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
         x = self._expand_ens_dim(x)
@@ -271,9 +278,8 @@ class EnsembleTraining(BaseTrainingModule):
                     grid_shard_slice=self.grid_shard_slice,
                 )
 
-            loss = loss + loss_next
-            metrics.update(metrics_next)
+            step_losses.append(loss_next)
+            step_metrics.append(metrics_next)
             y_preds.append(y_preds_next)
 
-        loss *= 1.0 / len(task_steps)
-        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
+        return self._combine_loss_and_metrics(step_losses, step_metrics, y_preds)

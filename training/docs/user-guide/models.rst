@@ -203,8 +203,8 @@ coarser grid:
 
 The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
 presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
-functions such as the ``AlmostFairKernelCRPSLoss`` to provide
-scale-aware model training.
+functions such as the ``CRPS`` loss to provide scale-aware model
+training.
 
 The wrapper is configured via a single ``multiscale_config`` key that
 supports two modes.
@@ -226,7 +226,8 @@ geometric progression of KNN smoothers:
              base_sigma: 0.1
              scale_factor: 2
            per_scale_loss:
-             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             _target_: anemoi.training.losses.CRPS
+             alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
 **File-based mode** — load pre-computed sparse matrices from disk:
@@ -247,7 +248,8 @@ geometric progression of KNN smoothers:
                - filter_2x.npz
                - null            # full resolution
            per_scale_loss:
-             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             _target_: anemoi.training.losses.CRPS
+             alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
 The loss at each scale is computed on the *residual* between successive
@@ -313,6 +315,11 @@ Under the 'compile' keyword, you provide a list of modules. These
 modules will be marked for compilation when the model is built. During
 their first forward pass, these modules will be compiled. No code
 modifications are required.
+
+Selected modules can define a training-specific compilation boundary. Graph
+score losses use this to compile their local score calculation while keeping
+model-parallel communication in eager mode. See :ref:`compiling-graph-scores`
+for a configuration example.
 
 You can optionally pass options to torch compile via the 'options'
 keyword. A full list of the possible options and their meanings can be

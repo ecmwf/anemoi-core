@@ -70,9 +70,9 @@ Once a checkpoint path is resolved, two loading modes are available:
 - **``load_weights_only: False``** — PyTorch Lightning restores the full
   training state (weights, optimizer, epoch counter) before validation.
 
-**************************
+***********************************
  Checkpointing and weight averaging
-**************************
+***********************************
 
 Checkpointing callbacks (:class:`~anemoi.training.diagnostics.callbacks.checkpoint.AnemoiCheckpoint`)
 and weight-averaging callbacks (SWA / EMA) are **automatically disabled**
