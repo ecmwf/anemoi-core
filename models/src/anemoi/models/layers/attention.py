@@ -156,6 +156,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
+            "triton_attention": TritonAttentionWrapper,
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
@@ -180,6 +181,14 @@ class MultiHeadSelfAttention(nn.Module):
             )
         else:
             self.attention = attn_funcs[self.attention_implementation]()
+
+        self.debug = False
+        if os.getenv("DEBUG_ATTN", "0") == "1":
+            self.debug = True
+            self.ref_attention = attn_funcs["flash_attention"](
+                use_rotary_embeddings=self.use_rotary_embeddings, head_dim=self.head_dim
+            )
+            LOGGER.info("Loading flash attention as reference attention for debugging purposes")
 
     def attention_computation(
         self,
@@ -241,6 +250,57 @@ class MultiHeadSelfAttention(nn.Module):
         out = self.projection(out)
 
         return out
+
+    def _save_debug_checkpoint(
+        self,
+        query: Tensor,
+        key: Tensor,
+        value: Tensor,
+        out: Tensor,
+        ref_out: Tensor,
+        batch_size: int,
+        dropout_p: float,
+    ) -> None:
+        """Save a checkpoint with all state needed to reproduce an attention mismatch.
+
+        The checkpoint is saved to a file named 'attn_debug_checkpoint_<N>.pt' in the
+        current working directory (or the path set via DEBUG_ATTN_CHECKPOINT_DIR env var).
+        """
+        import datetime
+
+        checkpoint_dir = os.environ.get("DEBUG_ATTN_CHECKPOINT_DIR", os.getcwd())
+        os.makedirs(checkpoint_dir, exist_ok=True)
+
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        path = os.path.join(checkpoint_dir, f"attn_debug_checkpoint_{timestamp}.pt")
+
+        checkpoint = {
+            # Input tensors (already in [batch, heads, grid, vars] layout)
+            "query": query.detach().cpu(),
+            "key": key.detach().cpu(),
+            "value": value.detach().cpu(),
+            # Outputs
+            "out": out.detach().cpu(),
+            "ref_out": ref_out.detach().cpu(),
+            # Attention parameters
+            "batch_size": batch_size,
+            "num_heads": self.num_heads,
+            "head_dim": self.head_dim,
+            "window_size": self.window_size,
+            "dropout_p": dropout_p,
+            "softcap": self.softcap,
+            "alibi_slopes": self.alibi_slopes.detach().cpu() if self.alibi_slopes is not None else None,
+            "is_causal": self.is_causal,
+            "qk_norm": self.qk_norm,
+            "use_rotary_embeddings": self.use_rotary_embeddings,
+            # Module states so we can reconstruct both attention wrappers
+            "attention_implementation": self.attention_implementation,
+            "attention_state_dict": self.attention.state_dict(),
+            "ref_attention_state_dict": self.ref_attention.state_dict(),
+        }
+
+        torch.save(checkpoint, path)
+        LOGGER.warning(f"Saved attention debug checkpoint to: {path}")
 
     def forward(
         self,
@@ -515,9 +575,77 @@ class FlashAttentionWrapper(nn.Module):
                 dropout_p=dropout_p,
                 softcap=softcap,
                 alibi_slopes=alibi_slopes,
+                # softmax_scale=1.0 / math.sqrt(query.shape[-1]),
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
         return out
+
+
+class TritonAttentionWrapper(nn.Module):
+    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
+
+    def __init__(self, _compile=True):
+        super().__init__()
+
+        # Helper function to check if triton is available
+        # Prevents strange errors from importing triton functions on unsupported systems
+        from anemoi.models.triton.utils import is_triton_available
+
+        if not is_triton_available():
+            raise ImportError(
+                "Triton is not supported on your system. Either it is not installed or no GPUs are available"
+            )
+
+        from anemoi.models.triton.attention import TritonAttention
+
+        self.attention = TritonAttention
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap=None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        self._not_implemented(causal, dropout_p, softcap, alibi_slopes)
+
+        if query.shape[-2] != key.shape[-2]:
+            # Cross attention between grids of different sizes (e.g. transformer mappers)
+            raise NotImplementedError(
+                "Cross attention between sequences of different lengths is not yet implemented in the Triton-Attention "
+                f"backend (query length {query.shape[-2]}, key/value length {key.shape[-2]}).\n"
+                "Please use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+
+        softmax_scale = 1 / math.sqrt(query.size(-1))
+
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
+
+        return out
+
+    def _not_implemented(self, causal: bool, dropout_p: float, softcap: float, alibi_slopes: torch.Tensor):
+        msg = ""
+        if dropout_p != 0.0:
+            msg += "dropout_p, "
+        if softcap is not None and softcap != 0.0:
+            msg += "softcap, "
+        if alibi_slopes is not None:
+            msg += "alibi slobes, "
+        if causal:
+            msg += "causal, "
+        if len(msg) > 0:
+            msg = (
+                "The following features you requested are not yet implemented in the Triton-Attention backend: "
+                + msg
+                + "\nPlease use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+            raise NotImplementedError(msg)
 
 
 class MultiHeadCrossAttention(MultiHeadSelfAttention):
