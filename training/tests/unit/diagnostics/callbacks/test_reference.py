@@ -156,4 +156,5 @@ def test_plot_renders(tmp_path: Path) -> None:
     callback.save_basedir = str(tmp_path)
     result = callback.compute(trainer, pl_module)
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
-    assert len(list((tmp_path / "plots").glob("ref_*_epoch000.jpg"))) == 2
+    # One figure per date holding every variable and step.
+    assert len(list((tmp_path / "plots").glob("ref_*_epoch000.jpg"))) == 1

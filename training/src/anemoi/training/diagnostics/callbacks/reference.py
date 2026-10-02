@@ -30,6 +30,7 @@ from pytorch_lightning.utilities import rank_zero_only
 from scipy.interpolate import griddata
 
 from anemoi.training.diagnostics.callbacks.plot import BasePerEpochPlotCallback
+from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
 from anemoi.training.diagnostics.evaluation.plotting.sample import single_plot
 from anemoi.training.diagnostics.evaluation.plotting.settings import LAYOUT
 from anemoi.training.diagnostics.evaluation.plotting.spectrum import compute_spectra
@@ -281,62 +282,45 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         epoch: int,
         result: dict,
     ) -> None:
+        """Render one figure per date: a row per (variable, step), columns pred | ref | diff | spectra."""
         del pl_module, dataset_names
         lat, lon = result["lat"], result["lon"]
-        plot_lon = np.where(lon > 180.0, lon - 360.0, lon)
+        # Project like the other plot callbacks, so the coastline overlay lines up with the data.
+        x, y = MapProjection.equirectangular().project(np.stack([lat, lon], axis=1))
         datashader = self.plotting_settings.datashader
 
         for date in self.dates:
             date_cases = [case for case in result["cases"] if case["date"] == date]
-            n_rows = len(date_cases)
-            for var in self.variables:
-                fig, axes = plt.subplots(n_rows, 4, figsize=(20, 3.6 * n_rows), layout=LAYOUT, squeeze=False)
-                for row, case in enumerate(date_cases):
-                    pred, ref = case["fields"][var]
-                    diff = pred - ref
-                    vmin, vmax = np.nanmin([pred.min(), ref.min()]), np.nanmax([pred.max(), ref.max()])
-                    dmax = float(np.nanmax(np.abs(diff))) or 1.0
-                    title = f"{var} {case['step']} valid {case['valid_time']}"
-                    norm = Normalize(vmin, vmax)
-                    single_plot(
-                        fig,
-                        axes[row, 0],
-                        plot_lon,
-                        lat,
-                        pred,
-                        norm=norm,
-                        title=f"pred {title}",
-                        datashader=datashader,
-                    )
-                    single_plot(
-                        fig,
-                        axes[row, 1],
-                        plot_lon,
-                        lat,
-                        ref,
-                        norm=norm,
-                        title="reference",
-                        datashader=datashader,
-                    )
-                    single_plot(
-                        fig,
-                        axes[row, 2],
-                        plot_lon,
-                        lat,
-                        diff,
-                        cmap="bwr",
-                        norm=Normalize(-dmax, dmax),
-                        title=f"pred - ref (rmse {np.sqrt(np.mean(diff**2)):.3g})",
-                        datashader=datashader,
-                    )
-                    spectra = regular_grid_spectra(lat, lon, [pred, ref, diff])
-                    ax = axes[row, 3]
-                    for spectrum, label in zip(spectra, ("pred", "reference", "pred - ref"), strict=True):
-                        ax.loglog(np.arange(1, len(spectrum)), spectrum[1:], label=label)
-                    ax.axvline(self.high_k, color="grey", lw=0.5, ls="--")
-                    ax.set_xlabel("$k$")
-                    ax.set_ylabel("$P(k)$")
-                    ax.legend()
-                    ax.set_title(f"spectra {var} {case['step']}")
-                tag = f"ref_{var}_{np.datetime_as_string(date, unit='h')}".replace(":", "")
-                self._output_figure(trainer.logger, fig, epoch=epoch, tag=tag, exp_log_tag=f"val_ref_{var}")
+            rows = [(var, case) for var in self.variables for case in date_cases]
+            fig, axes = plt.subplots(len(rows), 4, figsize=(20, 3.2 * len(rows)), layout=LAYOUT, squeeze=False)
+            for row, (var, case) in enumerate(rows):
+                pred, ref = case["fields"][var]
+                diff = pred - ref
+                vmin, vmax = np.nanmin([pred.min(), ref.min()]), np.nanmax([pred.max(), ref.max()])
+                dmax = float(np.nanmax(np.abs(diff))) or 1.0
+                norm = Normalize(vmin, vmax)
+                label = f"{var} {case['step']} ({case['valid_time']})"
+                single_plot(fig, axes[row, 0], x, y, pred, norm=norm, title=f"pred {label}", datashader=datashader)
+                single_plot(fig, axes[row, 1], x, y, ref, norm=norm, title=f"reference {var}", datashader=datashader)
+                single_plot(
+                    fig,
+                    axes[row, 2],
+                    x,
+                    y,
+                    diff,
+                    cmap="bwr",
+                    norm=Normalize(-dmax, dmax),
+                    title=f"pred - ref (rmse {np.sqrt(np.mean(diff**2)):.3g})",
+                    datashader=datashader,
+                )
+                spectra = regular_grid_spectra(lat, lon, [pred, ref, diff])
+                ax = axes[row, 3]
+                for spectrum, name in zip(spectra, ("pred", "reference", "pred - ref"), strict=True):
+                    ax.loglog(np.arange(1, len(spectrum)), spectrum[1:], label=name)
+                ax.axvline(self.high_k, color="grey", lw=0.5, ls="--")
+                ax.set_xlabel("$k$")
+                ax.set_ylabel("$P(k)$")
+                ax.legend()
+                ax.set_title(f"spectra {var} {case['step']}")
+            tag = f"ref_{np.datetime_as_string(date, unit='h')}".replace(":", "")
+            self._output_figure(trainer.logger, fig, epoch=epoch, tag=tag, exp_log_tag="val_ref")
