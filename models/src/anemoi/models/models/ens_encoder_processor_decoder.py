@@ -45,6 +45,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         n_step_output: int,
     ) -> None:
         self.condition_on_residual = DotDict(model_config).condition_on_residual
+        self._input_noise_config = model_config.get("input_noise", None)
         super().__init__(
             model_config=model_config,
             data_indices=data_indices,
@@ -52,6 +53,40 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
+        )
+
+    def _calculate_shapes_and_indices(self, data_indices: dict) -> None:
+        # The noise widens the encoder input, so it has to exist before input dims are computed.
+        self._build_input_noise()
+        super()._calculate_shapes_and_indices(data_indices)
+
+    def _build_input_noise(self) -> None:
+        """Instantiate the FourCastNet 3 style input perturbation, if configured."""
+        self.input_noise = None
+        self.input_noise_dataset = None
+        if self._input_noise_config is None:
+            return
+
+        dataset_name = self._input_noise_config.get("dataset", None)
+        if dataset_name is None:
+            if len(self.input_datasets) != 1:
+                raise ValueError(
+                    "model.input_noise.dataset must be set when the model has more than one "
+                    f"input dataset (got {self.input_datasets})."
+                )
+            dataset_name = self.input_datasets[0]
+        elif dataset_name not in self.input_datasets:
+            raise ValueError(
+                f"model.input_noise.dataset '{dataset_name}' is not an input dataset {self.input_datasets}."
+            )
+
+        self.input_noise_dataset = dataset_name
+        self.input_noise = instantiate(
+            self._input_noise_config,
+            _recursive_=False,
+            dataset=dataset_name,
+            num_time_steps=self.n_step_input,
+            num_grid_points=self.node_attributes.num_nodes[dataset_name],
         )
 
     def _build_networks(self, model_config: DotDict) -> None:
@@ -69,6 +104,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         base_input_dim += 1  # for forecast step (fcstep)
         if self.condition_on_residual:
             base_input_dim += self.num_input_channels_prognostic[dataset_name]
+        if self.input_noise is not None and dataset_name == self.input_noise_dataset:
+            base_input_dim += self.n_step_input * self.input_noise.n_channels
         return base_input_dim
 
     def _assemble_input(
@@ -79,6 +116,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
+        input_noise: torch.Tensor | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor, ShardSizes]:
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_ens_size)
@@ -93,6 +131,14 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+
+        if input_noise is not None:
+            # Appended per time step, so the "(time vars)" flattening below interleaves
+            # noise with data exactly as makani's flatten_history does.
+            input_noise = einops.rearrange(input_noise, "batch ensemble time vars grid -> batch time ensemble grid vars")
+            if grid_shard_sizes is not None:
+                input_noise = shard_tensor(input_noise, 3, grid_shard_sizes, model_comm_group)
+            x = torch.cat((x, input_noise.to(dtype=x.dtype)), dim=-1)
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
@@ -159,6 +205,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        ensemble_member_offset: int = 0,
+        ensemble_members_total: Optional[int] = None,
+        ensemble_group_id: int = 0,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -174,6 +223,14 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        ensemble_member_offset : int, optional
+            Global index of this rank's first ensemble member. Used to seed the
+            input noise so a realisation is independent of how members are spread
+            over devices.
+        ensemble_members_total : int, optional
+            Total number of ensemble members across the whole ensemble group.
+        ensemble_group_id : int, optional
+            Index of the ensemble communication group, decorrelating concurrent batches.
         **kwargs
             Additional keyword arguments
 
@@ -196,6 +253,21 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         for dataset_name in dataset_names:
             self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
 
+        # Driven by the unclamped step: fcstep 0 starts a new rollout and redraws the
+        # noise history, later steps advance the existing trajectory.
+        input_noise = None
+        if self.input_noise is not None:
+            self.input_noise.advance(
+                fcstep=fcstep,
+                batch_size=batch_size,
+                ensemble_size=ensemble_size,
+                member_offset=ensemble_member_offset,
+                num_members_total=ensemble_members_total,
+                group_id=ensemble_group_id,
+                device=x[self.input_noise_dataset].device,
+            )
+            input_noise = self.input_noise.sample()
+
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
@@ -217,6 +289,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 grid_shard_sizes=grid_shard_sizes,
                 model_comm_group=model_comm_group,
                 dataset_name=dataset_name,
+                input_noise=input_noise if dataset_name == self.input_noise_dataset else None,
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data

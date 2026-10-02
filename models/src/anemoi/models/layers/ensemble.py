@@ -11,9 +11,11 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
+from typing import Union
 
 import einops
 import torch
+from omegaconf import OmegaConf
 from torch import Tensor
 from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -27,10 +29,176 @@ from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.spherical_noise import BaseSphericalNoise
+from anemoi.models.layers.spherical_noise import build_inverse_sht
+from anemoi.models.layers.spherical_noise import build_noise
+from anemoi.models.layers.spherical_noise import noise_seeds_reflects
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
+
+
+class SphericalInputNoise(nn.Module):
+    r"""FourCastNet 3 style input perturbation.
+
+    Unlike :class:`NoiseConditioning`, which draws white noise on the hidden grid
+    and uses it to condition the processor, this module reproduces FourCastNet 3:
+    a spatially (and optionally temporally) correlated random field is generated
+    in spectral space, inverse-transformed onto the *data* grid, and concatenated
+    to the model input as extra channels -- one set per input time step. The
+    network itself is left untouched; FourCastNet 3 injects no noise internally.
+
+    The underlying field is built lazily, on the first :meth:`advance`, because
+    the ensemble layout (how many members this rank holds, and their global
+    indices) is only known once a batch arrives. The spherical harmonic basis is
+    built eagerly here and reused, since it is by far the expensive part.
+
+    Parameters
+    ----------
+    grid : str or int
+        Grid the data nodes live on, e.g. ``"n320"``. See
+        :func:`~anemoi.models.layers.spherical_noise.build_inverse_sht`.
+    noise : dict
+        Noise field configuration: ``type`` (``diffusion`` / ``white`` / ``dummy``)
+        plus the parameters of that type (``sigma``, ``kT``, ``lambd``, ``alpha``,
+        ``lmax``).
+    n_channels : int, optional
+        Number of noise channels appended per input time step. FourCastNet 3 uses
+        eight, each with a different spatial correlation length.
+    centered : bool, optional
+        Antithetic pairing of ensemble members. FourCastNet 3 pretrains with
+        ``False`` and fine-tunes with ``True``.
+    dataset : str, optional
+        Name of the dataset whose input the noise is appended to. Required when
+        the model has more than one input dataset.
+    default_lambd : float, optional
+        Temporal decorrelation default, ``dt / 6h`` in FourCastNet 3.
+    num_time_steps : int
+        Supplied by the model: ``multistep_input``, mirroring makani's
+        ``n_history + 1``.
+    num_grid_points : int, optional
+        Supplied by the model. Checked against the transform so a mismatched grid
+        fails at construction rather than producing a silently misaligned field.
+    """
+
+    def __init__(
+        self,
+        *,
+        grid: Union[str, int],
+        noise: dict,
+        n_channels: int = 1,
+        centered: bool = False,
+        dataset: Optional[str] = None,
+        default_lambd: float = 1.0,
+        num_time_steps: int = 1,
+        num_grid_points: Optional[int] = None,
+        **kwargs,
+    ) -> None:
+        super().__init__()
+
+        # Hydra hands over OmegaConf containers; resolve to plain Python once here so
+        # nothing downstream has to cope with ListConfig.
+        if OmegaConf.is_config(noise):
+            noise = OmegaConf.to_container(noise, resolve=True)
+        self.noise_params = dict(noise)
+        self.n_channels = n_channels
+        self.centered = centered
+        self.dataset = dataset
+        self.default_lambd = default_lambd
+        self.num_time_steps = num_time_steps
+
+        self._transform = build_inverse_sht(
+            grid,
+            lmax=self.noise_params.get("lmax", None),
+            use_graphed_irfft=self.noise_params.get("use_graphed_irfft", False),
+        )
+        _, self.lmax, self.num_grid_points = self._transform
+
+        if num_grid_points is not None and num_grid_points != self.num_grid_points:
+            raise ValueError(
+                f"SphericalInputNoise: grid '{grid}' has {self.num_grid_points} points but the "
+                f"'{dataset}' nodes have {num_grid_points}. The noise field would not align with "
+                "the data nodes."
+            )
+
+        self.noise: Optional[BaseSphericalNoise] = None
+        self._layout = None
+        self._autoregressive_seen = False
+
+        LOGGER.info(
+            "SphericalInputNoise: type=%s, %d channels x %d time steps on %s (%d points), lmax=%d, centered=%s",
+            self.noise_params.get("type"),
+            self.n_channels,
+            self.num_time_steps,
+            grid,
+            self.num_grid_points,
+            self.lmax,
+            self.centered,
+        )
+
+    def advance(
+        self,
+        *,
+        fcstep: int,
+        batch_size: int,
+        ensemble_size: int,
+        member_offset: int = 0,
+        num_members_total: Optional[int] = None,
+        group_id: int = 0,
+        device: Optional[torch.device] = None,
+    ) -> None:
+        r"""Step the noise process forward, ready for the next :meth:`sample`.
+
+        ``fcstep == 0`` starts a new rollout and redraws the history from the
+        stationary distribution; later steps take a single autoregressive step so
+        the perturbation stays correlated with the previous one. This mirrors
+        makani's stepper, which passes ``replace_state=True`` only on the first
+        step of a rollout.
+
+        ``member_offset``, ``num_members_total`` and ``group_id`` describe where
+        this rank's members sit in the *global* ensemble, so the realisation does
+        not depend on how members happen to be distributed over devices.
+        """
+        layout = (ensemble_size, member_offset, num_members_total, group_id)
+        if self.noise is None or layout != self._layout:
+            seeds, reflects = noise_seeds_reflects(
+                ensemble_size,
+                centered=self.centered,
+                member_offset=member_offset,
+                num_members_total=num_members_total,
+                group_id=group_id,
+            )
+            self.noise = build_noise(
+                self.noise_params,
+                transform=self._transform,
+                batch_size=batch_size,
+                ensemble_size=ensemble_size,
+                num_channels=self.n_channels,
+                num_time_steps=self.num_time_steps,
+                seeds=seeds,
+                reflects=reflects,
+                default_lambd=self.default_lambd,
+            ).to(device)
+            self._layout = layout
+            LOGGER.debug("SphericalInputNoise: built field with seeds=%s reflects=%s", seeds, reflects)
+
+        if fcstep > 0 and not self._autoregressive_seen:
+            # Only reachable with rollout > 1; worth one line of evidence that it ran.
+            self._autoregressive_seen = True
+            LOGGER.info(
+                "SphericalInputNoise: first autoregressive step (fcstep=%d), "
+                "advancing the noise trajectory with phi=exp(-lambd)",
+                fcstep,
+            )
+
+        self.noise.update(replace_state=(fcstep == 0), batch_size=batch_size)
+
+    def sample(self) -> Tensor:
+        """Current noise field, shape ``(batch, ensemble, time, channels, points)``."""
+        if self.noise is None:
+            raise RuntimeError("SphericalInputNoise.sample() called before advance().")
+        return self.noise()
 
 
 class BaseNoiseInjector(nn.Module, ABC):

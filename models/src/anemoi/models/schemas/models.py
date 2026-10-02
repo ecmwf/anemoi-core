@@ -300,9 +300,30 @@ NoiseInjectorUnion = Annotated[
 ]
 
 
+class SphericalInputNoiseSchema(BaseModel):
+    """Schema for SphericalInputNoise - FourCastNet 3 style input perturbation."""
+
+    target_: Literal["anemoi.models.layers.ensemble.SphericalInputNoise"] = Field(..., alias="_target_")
+    "Spherical input noise class"
+    grid: Union[str, int] = Field(example="n320")
+    "Grid the data nodes live on: 'nNNN' reduced Gaussian, 'oNNN' octahedral, or an integer nlat."
+    noise: dict = Field(...)
+    "Noise field configuration: 'type' (diffusion/white/dummy) plus that type's parameters."
+    n_channels: PositiveInt = Field(default=1)
+    "Number of noise channels appended per input time step."
+    centered: bool = Field(default=False)
+    "Antithetic pairing of ensemble members."
+    dataset: Optional[str] = Field(default=None)
+    "Dataset whose input the noise is appended to. Required if the model has multiple input datasets."
+    default_lambd: float = Field(default=1.0)
+    "Default temporal decorrelation rate, dt / 6h in FourCastNet 3."
+
+
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorUnion = Field(...)
     "Noise injection configuration. Use NoOpNoiseInjector to disable, NoiseConditioning for conditioning, or NoiseInjector for direct injection."
+    input_noise: Optional[SphericalInputNoiseSchema] = Field(default=None)
+    "FourCastNet 3 style spherical input perturbation, concatenated to the encoder input. None disables it."
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."
 

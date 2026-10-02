@@ -35,6 +35,15 @@ LOGGER = logging.getLogger(__name__)
 class EnsembleTraining(BaseTrainingModule):
     """Graph neural network forecaster for ensembles for PyTorch Lightning."""
 
+    # Ensemble communication groups are wired up later by DDPEnsGroupStrategy. These
+    # class-level single-device defaults mean the ensemble layout is always readable,
+    # even before the strategy has run.
+    ens_comm_group = None
+    ens_comm_group_id = 0
+    ens_comm_group_rank = 0
+    ens_comm_num_groups = 1
+    ens_comm_group_size = 1
+
     def __init__(
         self,
         *,
@@ -145,6 +154,21 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_subgroup_size = ens_comm_subgroup_size
 
     @property
+    def ensemble_member_offset(self) -> int:
+        """Global index of this rank's first ensemble member.
+
+        Ranks inside an ensemble group are laid out in blocks of
+        ``model_comm_group_size``; every rank of a model group holds the same
+        members, so they must agree on the offset.
+        """
+        return (self.ens_comm_group_rank // self.model_comm_group_size) * self.nens_per_device
+
+    @property
+    def ensemble_members_total(self) -> int:
+        """Number of ensemble members across the whole ensemble group."""
+        return self.nens_per_device * (self.ens_comm_group_size // self.model_comm_group_size)
+
+    @property
     def plot_adapter(self) -> EnsemblePlotAdapterWrapper:
         """Wrap the task's plot adapter with ensemble handling."""
         if not hasattr(self, "_ensemble_plot_adapter"):
@@ -230,6 +254,12 @@ class EnsembleTraining(BaseTrainingModule):
             kwargs["fcstep"] = rollout_step
         else:
             kwargs["fcstep"] = 0  # TODO(Mario,Simon): set the conditioning on the step optional
+
+        # Global ensemble indices, so noise realisations depend on which member a
+        # tensor slice *is*, not on how members happen to be spread over devices.
+        kwargs.setdefault("ensemble_member_offset", self.ensemble_member_offset)
+        kwargs.setdefault("ensemble_members_total", self.ensemble_members_total)
+        kwargs.setdefault("ensemble_group_id", self.ens_comm_group_id)
 
         return self.model(
             x,

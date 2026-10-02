@@ -15,8 +15,10 @@ from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransf
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
 from anemoi.models.layers.spectral_transforms import InverseReducedSHT
+from anemoi.models.layers.spectral_transforms import InverseRegularSHT
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_transforms import RegularSHT
 
 """
 Random array of complex spectral coefficients.
@@ -73,6 +75,7 @@ def _lons_per_lat(nlat: int, grid_kind: str) -> list[int]:
     [
         pytest.param(ReducedSHT, InverseReducedSHT, {"grid": "n320"}, id="reduced"),
         pytest.param(OctahedralSHT, InverseOctahedralSHT, {"nlat": 8}, id="octahedral"),
+        pytest.param(RegularSHT, InverseRegularSHT, {"nlat": 8}, id="regular"),
     ],
 )
 def test_sht_wrappers_preserve_axes_and_gradients(
@@ -89,8 +92,10 @@ def test_sht_wrappers_preserve_axes_and_gradients(
         lengths = [8, 12, 16, 20, 20, 16, 12, 8]
         latitudes = np.repeat(np.arange(nlat), lengths)
         monkeypatch.setattr("anemoi.transform.grids.named.lookup", lambda grid: {"latitudes": latitudes})
-    else:
+    elif direct_cls is OctahedralSHT:
         lengths = _lons_per_lat(nlat, "octahedral")
+    else:
+        lengths = _lons_per_lat(nlat, "regular")
     direct = direct_cls(**grid_kwargs, truncation=truncation).to(device)
     inverse = inverse_cls(**grid_kwargs, truncation=truncation).to(device)
     cdtype = torch.complex64 if dtype == torch.float32 else torch.complex128
