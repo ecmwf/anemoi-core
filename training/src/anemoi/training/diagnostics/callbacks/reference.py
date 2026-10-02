@@ -27,7 +27,7 @@ import numpy as np
 import torch
 from matplotlib.colors import Normalize
 from pytorch_lightning.utilities import rank_zero_only
-from scipy.interpolate import griddata
+from scipy.spatial import Delaunay
 
 from anemoi.training.diagnostics.callbacks.plot import BasePerEpochPlotCallback
 from anemoi.training.diagnostics.evaluation.geospatial.projections import MapProjection
@@ -43,12 +43,61 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def regular_grid_spectra(lat: np.ndarray, lon: np.ndarray, fields: list[np.ndarray]) -> list[np.ndarray]:
-    """Interpolate fields from scattered nodes to one regular lat-lon grid and return their spectra.
+class SpectralGrid:
+    """Linear interpolation from scattered nodes onto one regular lat-lon grid, triangulated once.
 
-    All fields share the same interpolation, so interpolation artefacts cancel when the spectra
-    are compared with each other. Nodes are padded by +-360 deg in longitude so the dateline is
-    interpolated rather than filled.
+    All fields share the same interpolation, so interpolation artefacts cancel when their spectra
+    are compared. Nodes within 30 deg of the dateline are duplicated at +-360 deg so it is
+    interpolated rather than filled. The Delaunay triangulation and the barycentric weights of
+    every target point are computed once; interpolating a field is then a cheap gather.
+
+    Parameters
+    ----------
+    lat, lon : np.ndarray
+        Node coordinates in degrees, shape (grid,).
+    """
+
+    def __init__(self, lat: np.ndarray, lon: np.ndarray) -> None:
+        lon = np.mod(np.asarray(lon, dtype=np.float64), 360.0)
+        lat = np.asarray(lat, dtype=np.float64)
+        # One output row per input latitude row (192 for O96), capped for scattered grids.
+        n_lat = min(len(np.unique(np.round(lat, 6))), 2 * int(np.sqrt(len(lat) / 2)))
+        n_lon = 2 * n_lat - 1  # Gauss-Legendre layout expected by compute_spectra
+        mesh_lon, mesh_lat = np.meshgrid(
+            np.linspace(0.0, 360.0, n_lon, endpoint=False),
+            np.linspace(lat.max(), lat.min(), n_lat),
+        )
+        self.shape = mesh_lon.shape
+
+        east, west = np.nonzero(lon > 330.0)[0], np.nonzero(lon < 30.0)[0]
+        self._source = np.concatenate((np.arange(len(lon)), east, west))
+        points = np.column_stack(
+            (np.concatenate((lon, lon[east] - 360.0, lon[west] + 360.0)), lat[self._source]),
+        )
+        tri = Delaunay(points)
+        targets = np.column_stack((mesh_lon.ravel(), mesh_lat.ravel()))
+        simplex = tri.find_simplex(targets)
+        self._inside = simplex >= 0
+        simplex = np.where(self._inside, simplex, 0)
+        transform = tri.transform[simplex]
+        bary = np.einsum("ijk,ik->ij", transform[:, :2], targets - transform[:, 2])
+        self._weights = np.column_stack((bary, 1.0 - bary.sum(axis=1)))
+        self._vertices = tri.simplices[simplex]
+
+    def interpolate(self, field: np.ndarray) -> np.ndarray:
+        """Return ``field`` on the regular grid; points outside the hull get the field mean."""
+        values = np.asarray(field, dtype=np.float64)[self._source]
+        regular = np.einsum("ij,ij->i", values[self._vertices], self._weights)
+        regular[~self._inside] = float(np.mean(field))
+        return regular.reshape(self.shape)
+
+    def spectra(self, fields: list[np.ndarray]) -> list[np.ndarray]:
+        """Return the power per total wavenumber of each field."""
+        return [np.asarray(compute_spectra(self.interpolate(field))) for field in fields]
+
+
+def regular_grid_spectra(lat: np.ndarray, lon: np.ndarray, fields: list[np.ndarray]) -> list[np.ndarray]:
+    """Spectra of ``fields`` after interpolation to a shared regular grid (see :class:`SpectralGrid`).
 
     Parameters
     ----------
@@ -62,23 +111,7 @@ def regular_grid_spectra(lat: np.ndarray, lon: np.ndarray, fields: list[np.ndarr
     list[np.ndarray]
         Power per total wavenumber for each field.
     """
-    lon = np.mod(lon, 360.0)
-    # One output row per input latitude row (192 for O96), capped for scattered grids.
-    n_lat = min(len(np.unique(np.round(lat, 6))), 2 * int(np.sqrt(len(lat) / 2)))
-    n_lon = 2 * n_lat - 1  # Gauss-Legendre layout expected by compute_spectra
-    grid_lat = np.linspace(lat.max(), lat.min(), n_lat)
-    grid_lon = np.linspace(0.0, 360.0, n_lon, endpoint=False)
-    mesh_lon, mesh_lat = np.meshgrid(grid_lon, grid_lat)
-
-    pad_lon = np.concatenate((lon - 360.0, lon, lon + 360.0))
-    pad_lat = np.concatenate((lat, lat, lat))
-    spectra = []
-    for field in fields:
-        values = np.concatenate((field, field, field))
-        regular = griddata((pad_lon, pad_lat), values, (mesh_lon, mesh_lat), method="linear")
-        regular = np.nan_to_num(regular, nan=float(np.nanmean(field)))
-        spectra.append(np.asarray(compute_spectra(regular)))
-    return spectra
+    return SpectralGrid(lat, lon).spectra(fields)
 
 
 class ReferenceComparisonPlot(BasePerEpochPlotCallback):
@@ -135,6 +168,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         self.grid_tolerance_deg = grid_tolerance_deg
         self._reference = None
         self._grid_checked = False
+        self._spectral_grid: SpectralGrid | None = None
 
     @property
     def reference(self) -> Any:
@@ -241,6 +275,17 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                     for var, ref_var in self.variables.items()
                 }
                 cases.append({"date": date, "step": label, "valid_time": valid_time, "fields": fields})
+
+        # All numerics stay here, on the training thread, done once: the plot executor thread only
+        # draws. SHTOOLS/FFTW planning and the shared BLAS pools are not safe to run concurrently on
+        # a background thread while the training loop forks dataloader workers each epoch (that
+        # combination hung debug jobs 33953861/33956258 after the first epoch's figures).
+        if self._spectral_grid is None:
+            self._spectral_grid = SpectralGrid(lat, lon)
+        for case in cases:
+            case["spectra"] = {
+                var: self._spectral_grid.spectra([pred, ref, pred - ref]) for var, (pred, ref) in case["fields"].items()
+            }
         return {"lat": lat, "lon": lon, "cases": cases}
 
     def scores(self, result: dict) -> dict[str, float]:
@@ -249,7 +294,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         for case in result["cases"]:
             for var, (pred, ref) in case["fields"].items():
                 diff = pred - ref
-                p_pred, p_ref = regular_grid_spectra(result["lat"], result["lon"], [pred, ref])
+                p_pred, p_ref, _ = case["spectra"][var]
                 k = slice(min(self.high_k, len(p_ref) - 1), None)
                 ratio = float(np.mean(p_pred[k] / np.maximum(p_ref[k], np.finfo(float).tiny)))
                 for metric, value in (
@@ -313,7 +358,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                     title=f"pred - ref (rmse {np.sqrt(np.mean(diff**2)):.3g})",
                     datashader=datashader,
                 )
-                spectra = regular_grid_spectra(lat, lon, [pred, ref, diff])
+                spectra = case["spectra"][var]
                 ax = axes[row, 3]
                 for spectrum, name in zip(spectra, ("pred", "reference", "pred - ref"), strict=True):
                     ax.loglog(np.arange(1, len(spectrum)), spectrum[1:], label=name)

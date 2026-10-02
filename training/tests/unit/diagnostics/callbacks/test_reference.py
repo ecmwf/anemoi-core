@@ -158,3 +158,39 @@ def test_plot_renders(tmp_path: Path) -> None:
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
     # One figure per date holding every variable and step.
     assert len(list((tmp_path / "plots").glob("ref_*_epoch000.jpg"))) == 1
+
+
+def test_spectral_grid_matches_scipy_griddata() -> None:
+    from scipy.interpolate import griddata
+
+    from anemoi.training.diagnostics.callbacks.reference import SpectralGrid
+
+    grid = SpectralGrid(LAT, LON)
+    field = FIELD["z_500"]
+    ours = grid.interpolate(field)
+    n_lat, n_lon = grid.shape
+    mesh_lon, mesh_lat = np.meshgrid(
+        np.linspace(0.0, 360.0, n_lon, endpoint=False),
+        np.linspace(LAT.max(), LAT.min(), n_lat),
+    )
+    pad = (np.concatenate((LON - 360.0, LON, LON + 360.0)), np.concatenate((LAT, LAT, LAT)))
+    reference = griddata(pad, np.concatenate((field, field, field)), (mesh_lon, mesh_lat), method="linear")
+    np.testing.assert_allclose(ours, reference, rtol=1e-10)
+
+
+def test_plot_thread_does_no_numerics(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Spectra are computed once in compute(); the plot executor thread only draws."""
+    from anemoi.training.diagnostics.callbacks import reference
+
+    callback, trainer, pl_module = _setup(steps=["rstep0"])
+    callback.save_basedir = str(tmp_path)
+    result = callback.compute(trainer, pl_module)
+
+    def _fail(*_args: Any, **_kwargs: Any) -> None:
+        msg = "numerics must not run on the plot thread"
+        raise AssertionError(msg)
+
+    monkeypatch.setattr(reference, "compute_spectra", _fail)
+    monkeypatch.setattr(reference.SpectralGrid, "spectra", _fail)
+    callback.scores(result)
+    callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
