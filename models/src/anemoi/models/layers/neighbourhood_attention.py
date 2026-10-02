@@ -251,6 +251,15 @@ class GridNeighbourhood:
         return GRID_KERNELS[self.family]
 
 
+def _gather_points(x: Tensor, order: Tensor) -> Tensor:
+    """The points (second-to-last dimension) of ``(batch, heads, points, head_dim)`` ``x`` in the order ``order``.
+
+    The result is stored point by point, all heads of a point together, the layout of the model's
+    ``(batch * points, heads * head_dim)`` features; the gather then moves whole rows of them.
+    """
+    return x.transpose(-3, -2).index_select(-3, order).transpose(-3, -2)
+
+
 class _ReorderPoints(torch.autograd.Function):
     """Puts the points (second-to-last dimension) in a new order.
 
@@ -262,12 +271,12 @@ class _ReorderPoints(torch.autograd.Function):
     @staticmethod
     def forward(ctx, x: Tensor, order: Tensor, inverse: Tensor) -> Tensor:
         ctx.save_for_backward(inverse)
-        return x.index_select(-2, order)
+        return _gather_points(x, order)
 
     @staticmethod
     def backward(ctx, grad: Tensor) -> tuple[Tensor, None, None]:
         (inverse,) = ctx.saved_tensors
-        return grad.index_select(-2, inverse), None, None
+        return _gather_points(grad, inverse), None, None
 
 
 class NeighbourhoodAttentionWrapper(nn.Module):
