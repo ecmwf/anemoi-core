@@ -415,6 +415,23 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         del pl_module
         return batch
 
+    def _adjust_predictions(
+        self,
+        pl_module: pl.LightningModule,
+        predictions: list[dict[str, torch.Tensor]],
+        batch: dict[str, torch.Tensor],
+    ) -> list[dict[str, torch.Tensor]]:
+        """Hook to transform the gathered predictions before plotting. Identity by default.
+
+        Runs on the training thread, before the plot is handed to the executor.
+        Anything that calls into the model must happen here rather than in
+        :meth:`_plot`: with asynchronous plotting, a ``torch.compile``'d module
+        traced on the plot thread patches ``nn.Module.__call__`` process-wide
+        and breaks the concurrent training forward.
+        """
+        del pl_module, batch
+        return predictions
+
     def on_validation_batch_end(
         self,
         trainer: pl.Trainer,
@@ -443,6 +460,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 }
                 for pred in preds
             ]
+            gathered_predictions = self._adjust_predictions(pl_module, gathered_predictions, batch)
             # When running in Async mode, it might happen that in the last epoch these tensors
             # have been moved to the cpu (and then the denormalising would fail as the 'input_tensor' would be on CUDA
             # but internal ones would be on the cpu), The lines below allow to address this problem
@@ -629,17 +647,6 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     #: prediction override this so their figures log separately.
     tag_prefix = "loss"
 
-    def _adjust_prediction(
-        self,
-        pl_module: pl.LightningModule,
-        dataset_name: str,
-        y_hat: torch.Tensor,
-        y_true: torch.Tensor,
-    ) -> torch.Tensor:
-        """Hook to transform the prediction before scoring. Identity by default."""
-        _ = pl_module, dataset_name, y_true
-        return y_hat
-
     def __init__(
         self,
         parameter_groups: dict[dict[str, list[str]]],
@@ -712,7 +719,6 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                     data_indices=pl_module.data_indices,
                     **task_kwargs,
                 )[dataset_name]
-                y_hat = self._adjust_prediction(pl_module, dataset_name, y_hat, y_true)
                 loss = reduce_to_last_dim(
                     self.loss[dataset_name](
                         y_hat,
@@ -784,27 +790,41 @@ class PlotLossCorrected(LossCurvePlot):
 
     tag_prefix = "loss_corrected"
 
-    def _adjust_prediction(
+    def _adjust_predictions(
         self,
         pl_module: pl.LightningModule,
-        dataset_name: str,
-        y_hat: torch.Tensor,
-        y_true: torch.Tensor,
-    ) -> torch.Tensor:
-        """Apply this dataset's corrector to the prediction, if it has one."""
-        correctors = getattr(pl_module, "corrector", {})
-        # correctors may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
-        corrector = correctors[dataset_name] if dataset_name in correctors else None  # noqa: SIM401
-        if corrector is None:
-            return y_hat
+        predictions: list[dict[str, torch.Tensor]],
+        batch: dict[str, torch.Tensor],
+    ) -> list[dict[str, torch.Tensor]]:
+        """Apply each dataset's corrector to the gathered predictions, if it has one."""
+        # Only rank 0 plots, so skip the corrector forward elsewhere.
+        if rank_zero_only.rank != 0:
+            return predictions
 
-        corrector_idx = pl_module.data_indices[dataset_name].data.input.corrector.to(device=y_true.device)
-        corrector_vars = y_true.index_select(-1, corrector_idx)
-        # Callback runs on gathered full-grid tensors on rank 0, so no
-        # comm group / shard sizes are needed. Plot-only: no backward pass
-        # follows, so skip building the autograd graph for this GNN forward.
-        with torch.no_grad():
-            return corrector(y_hat, corrector_vars)
+        correctors = getattr(pl_module, "corrector", {})
+        adjusted = [dict(pred) for pred in predictions]
+        for i, task_kwargs in enumerate(pl_module.task.steps("validation")):
+            if task_kwargs.get("is_da", False):
+                continue
+            for dataset_name in self.dataset_names:
+                # correctors may be an nn.ModuleDict (no .get()), so SIM401 does not apply here.
+                corrector = correctors[dataset_name] if dataset_name in correctors else None  # noqa: SIM401
+                if corrector is None:
+                    continue
+
+                y_true = pl_module.task.get_targets(
+                    batch={dataset_name: batch[dataset_name]},
+                    data_indices=pl_module.data_indices,
+                    **task_kwargs,
+                )[dataset_name]
+                corrector_idx = pl_module.data_indices[dataset_name].data.input.corrector.to(device=y_true.device)
+                corrector_vars = y_true.index_select(-1, corrector_idx)
+                # Gathered full-grid tensors on rank 0, so no comm group /
+                # shard sizes are needed. Plot-only: no backward pass follows,
+                # so skip building the autograd graph for this GNN forward.
+                with torch.no_grad():
+                    adjusted[i][dataset_name] = corrector(predictions[i][dataset_name], corrector_vars)
+        return adjusted
 
 
 class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
