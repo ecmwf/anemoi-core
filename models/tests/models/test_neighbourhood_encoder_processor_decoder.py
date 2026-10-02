@@ -121,7 +121,7 @@ def _build(graph: HeteroData | None = None, neighbourhood: dict | None = None) -
     # Checks the configuration as training does before building the model.
     BaseModelSchema(**OmegaConf.to_container(config.model))
     return AnemoiModelEncProcDec(
-        model_config=config,
+        model_config=config.model,
         data_indices=_data_indices(),
         statistics={"data": None},
         n_step_input=2,
@@ -187,7 +187,7 @@ def test_rotary_embeddings_reach_encoder_processor_and_decoder():
         part.rotary_embeddings = {"max_frequency": 30.0, "backend": "torch"}
     BaseModelSchema(**OmegaConf.to_container(config.model))
     model = AnemoiModelEncProcDec(
-        model_config=config,
+        model_config=config.model,
         data_indices=_data_indices(),
         statistics={"data": None},
         n_step_input=2,

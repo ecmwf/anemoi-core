@@ -126,7 +126,7 @@ def _build(case: str, num_bands: int, backend: str) -> AnemoiModelEncProcDec:
     data_config = DictConfig({"forcing": ["force"], "diagnostic": ["diag"], "target": []})
     data_indices = {"data": IndexCollection(data_config, {"prog0": 0, "prog1": 1, "force": 2, "diag": 3})}
     return AnemoiModelEncProcDec(
-        model_config=config,
+        model_config=config.model,
         data_indices=data_indices,
         statistics={"data": None},
         n_step_input=2,

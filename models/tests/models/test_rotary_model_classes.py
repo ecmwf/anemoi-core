@@ -130,7 +130,7 @@ def data_indices() -> dict[str, IndexCollection]:
 def build(model_class, config: DictConfig, hidden_names: list[str], **extra):
     torch.manual_seed(0)
     return model_class(
-        model_config=config,
+        model_config=config.model,
         data_indices=data_indices(),
         statistics={"data": None},
         n_step_input=2,
