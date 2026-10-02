@@ -34,6 +34,10 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
 
+    supports_shared_encoder_decoder = False
+    supports_multiple_hidden_meshes = False
+    supports_variable_io = True
+
     def __init__(
         self,
         *,
@@ -68,8 +72,29 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         base_input_dim = super()._calculate_input_dim(dataset_name)
         base_input_dim += 1  # for forecast step (fcstep)
         if self.condition_on_residual:
-            base_input_dim += self.num_input_channels_prognostic[dataset_name]
+            if self.variable_tokenizer is not None:
+                base_input_dim += self.variable_tokenizer.out_dim
+            else:
+                base_input_dim += self.num_input_channels_prognostic[dataset_name]
         return base_input_dim
+
+    def _apply_variable_dropout(
+        self,
+        x: torch.Tensor,
+        x_skip: torch.Tensor,
+        variable_names: list[str],
+        dataset_name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[str]]:
+
+        x, x_skip, variable_names, dropped_indices = super()._apply_variable_dropout(
+            x=x, x_skip=x_skip, variable_names=variable_names, dataset_name=dataset_name
+        )
+
+        keep = torch.ones(x_skip.shape[-1], dtype=torch.bool, device=x_skip.device)
+        keep[dropped_indices] = False
+
+        x_skip_cond = x_skip[..., keep]
+        return x, x_skip, x_skip_cond, variable_names
 
     def _assemble_input(
         self,
@@ -91,13 +116,33 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             n_step_output=self.n_step_output,
         )
 
+        variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
+
+        assert x.shape[-1] == len(variable_names)
+
+        x_skip_cond = x_skip
+        if self.variable_dropout is not None:
+            x, x_skip, x_skip_cond, variable_names = self._apply_variable_dropout(
+                x=x,
+                x_skip=x_skip,
+                variable_names=variable_names,
+                dataset_name=dataset_name,
+            )
+            assert x.shape[-1] == len(variable_names)
+
+        if self.variable_tokenizer is not None:
+            x = self.variable_tokenizer(x, variables=variable_names)
+
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
                 node_attributes_data,
                 torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
             ),
@@ -105,12 +150,21 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         )
 
         if self.condition_on_residual:
-            x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
+
+            if self.variable_tokenizer is not None:
+                # [B, T, E, G, V] -> [B, 1, E, G, V]
+                x_skip_cond = x_skip_cond[:, :1]
+                x_skip_cond = self.variable_tokenizer(x=x_skip_cond, variables=variable_names)
+                x_skip_cond = einops.rearrange(
+                    x_skip_cond,
+                    "batch time ensemble grid vars " "-> (batch ensemble grid) (time vars)",
+                )
+            else:
+                # [B, T, E, G, V] -> [B, E, G, V]
+                x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
+                x_skip_cond = einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars")
             x_data_latent = torch.cat(
-                (
-                    x_data_latent,
-                    einops.rearrange(x_skip_cond, "bse grid vars -> (bse grid) vars"),
-                ),
+                (x_data_latent, x_skip_cond),
                 dim=-1,
             )
 
@@ -126,6 +180,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         dataset_name: str | None = None,
     ):
         ensemble_size = batch_ens_size // batch_size
+        if self.variable_detokenizer is not None:
+            x_out = self._apply_detokenization(x_out, dataset_name=dataset_name)
+
         x_out = (
             einops.rearrange(
                 x_out,
@@ -194,7 +251,12 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             grid_shard_sizes=grid_shard_sizes,
         )
         for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+            self._assert_valid_sharding(
+                batch_size,
+                ensemble_size,
+                in_out_sharded[dataset_name],
+                model_comm_group,
+            )
 
         fcstep = min(1, fcstep)
         # Process each dataset through its corresponding encoder

@@ -34,8 +34,49 @@ LOGGER = logging.getLogger(__name__)
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
+    supports_shared_encoder_decoder = True
+    supports_variable_io = True
+
+    def _build_variable_io(self, model_config: DotDict) -> None:
+        """Build variable tokenizer, detokenizer, dropout, and vocabulary."""
+
+        super()._build_variable_io(model_config=model_config)
+
+        tokenizer_config = getattr(model_config, "variable_tokenizer", None)
+        detokenizer_config = getattr(model_config, "variable_detokenizer", None)
+        dropout_config = getattr(model_config, "variable_dropout", None)
+
+        self.variable_vocabulary = None
+        self.variable_tokenizer = None
+        self.variable_detokenizer = None
+        self.variable_dropout = None
+
+        if tokenizer_config or detokenizer_config:
+            from anemoi.models.variable.variablevocabular import VariableVocabulary
+
+            self.variable_vocabulary = VariableVocabulary.from_foundation(
+                data_indices=self.data_indices,
+                metadata=self.metadata,
+            )
+
+        if tokenizer_config:
+            self.variable_tokenizer = instantiate(
+                tokenizer_config,
+                vocabulary=self.variable_vocabulary,
+            )
+
+        if detokenizer_config:
+            self.variable_detokenizer = instantiate(
+                detokenizer_config,
+                vocabulary=self.variable_vocabulary,
+            )
+
+        if dropout_config:
+            self.variable_dropout = instantiate(dropout_config)
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
+
         # Encoder data -> hidden
         self.encoder_graph_provider = torch.nn.ModuleDict()
         for dataset_name in self.dataset_names:
@@ -128,15 +169,43 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 f"All datasets for decoder {decoder_name} must have the same output dimension, "
                 f"but got {decoder_output_channels_dst}."
             )
+            decoder_edge_dims = [self.decoder_graph_provider[d].edge_dim for d in decoder_config.target_datasets]
+            assert all(dim == decoder_edge_dims[0] for dim in decoder_edge_dims), (
+                f"All datasets for decoder {decoder_name} must have the same edge dimension, "
+                f"but got {decoder_edge_dims}."
+            )
+
+            out_channels_dst = None if self.variable_detokenizer is not None else decoder_output_channels_dst[0]
 
             self.decoder[decoder_name] = instantiate(
                 decoder_config.mapper,
                 _recursive_=False,  # Avoids instantiation of layer_kernels here
                 in_channels_src=self.latent_aggregator.hidden_dim,
                 in_channels_dst=decoder_in_channels_dst[0],
-                out_channels_dst=decoder_output_channels_dst[0],
-                edge_dim=self.decoder_graph_provider[decoder_config.target_datasets[0]].edge_dim,
+                out_channels_dst=out_channels_dst,
+                edge_dim=decoder_edge_dims[0],
             )
+
+    def _apply_variable_dropout(
+        self,
+        x: torch.Tensor,
+        x_skip: torch.Tensor,
+        variable_names: list[str],
+        dataset_name: str,
+    ) -> tuple[torch.Tensor, torch.Tensor, list[str], torch.Tensor]:
+
+        prognostic_indices = self.data_indices[dataset_name].model.input.prognostic
+
+        x, variable_names, dropped_indices = self.variable_dropout(
+            x,
+            names=variable_names,
+            prognostic_indices=prognostic_indices,
+        )
+
+        x_skip = x_skip.clone()
+        x_skip[..., dropped_indices] = 0
+
+        return x, x_skip, variable_names, dropped_indices
 
     def _assemble_input(
         self,
@@ -155,7 +224,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         -------
         tuple[Tensor, Tensor, ShardSizes]
             ``(x_data_latent, x_skip, grid_shard_sizes)`` where ``x_data_latent`` is the encoder
-            source input, and ``x_skip`` is the residual to add to the decoder output.
+            source input, ``x_skip`` is the residual to add to the decoder output.
         """
         assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
         node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
@@ -168,13 +237,32 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             n_step_output=self.n_step_output,
         )
 
+        variable_names = list(self.data_indices[dataset_name].model.input.name_to_index.keys())
+
+        assert x.shape[-1] == len(variable_names)
+
+        if self.variable_dropout is not None:
+            x, x_skip, variable_names, _ = self._apply_variable_dropout(
+                x=x,
+                x_skip=x_skip,
+                variable_names=variable_names,
+                dataset_name=dataset_name,
+            )
+            assert x.shape[-1] == len(variable_names)
+
+        if self.variable_tokenizer is not None:
+            x = self.variable_tokenizer(x, variables=variable_names)
+
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
@@ -217,6 +305,14 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         return x_target_latent, grid_shard_sizes
 
+    def _apply_detokenization(self, x_out: torch.Tensor, dataset_name: str) -> torch.Tensor:
+        output_indices = self.data_indices[dataset_name].model.output
+        output_names = list(output_indices.name_to_index.keys())
+
+        x_out = self.variable_detokenizer(x_out, variables=output_names)
+
+        return x_out
+
     def _assemble_output(
         self,
         x_out: torch.Tensor,
@@ -232,6 +328,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         ``x_skip`` on the prognostic channels, and applies the per-dataset ``boundings`` in
         config order.
         """
+        if self.variable_detokenizer is not None:
+            x_out = self._apply_detokenization(x_out, dataset_name=dataset_name)
+
         x_out = (
             einops.rearrange(
                 x_out,
@@ -252,7 +351,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 x_skip.shape[1] == x_out.shape[1]
             ), f"Residual time dimension ({x_skip.shape[1]}) must match output time dimension ({x_out.shape[1]})."
             x_out[..., self._internal_output_idx[dataset_name]] += x_skip[..., self._internal_input_idx[dataset_name]]
-
         for bounding in self.boundings[dataset_name]:
             # bounding performed in the order specified in the config file
             x_out = bounding(x_out)
@@ -314,7 +412,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             grid_shard_sizes=grid_shard_sizes,
         )
         for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+            self._assert_valid_sharding(
+                batch_size,
+                ensemble_size,
+                in_out_sharded[dataset_name],
+                model_comm_group,
+            )
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
