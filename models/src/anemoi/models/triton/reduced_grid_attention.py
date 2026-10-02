@@ -68,7 +68,7 @@ def _backward_configs() -> list[triton.Config]:
     ]
 
 
-_AUTOTUNE_KEY = ["NUM_ROWS", "NUM_POINTS", "HEAD_DIM", "KERNEL_H", "KERNEL_W", "DOT_PRECISION", "SHIFTED"]
+_AUTOTUNE_KEY = ["NUM_ROWS", "NUM_POINTS", "HEAD_DIM", "KERNEL_H", "KERNEL_W", "DOT_PRECISION", "SHIFTED", "WIDE"]
 
 
 # Room for the tables of many grids at once, as when attention runs over bands of rows.
@@ -120,6 +120,24 @@ def _tile_start(TILES, TILE_OFFSETS, TILE_H: tl.constexpr, TILE_W: tl.constexpr)
         shape = 5
     pid = tl.load(TILE_OFFSETS + shape) + tl.program_id(0)
     return tl.load(TILES + 2 * pid), tl.load(TILES + 2 * pid + 1)
+
+
+@triton.jit
+def _base(bh, heads, stride_b, stride_h):
+    """Offset of the first point of program ``bh`` (= batch entry * heads + head) in a strided tensor."""
+    return (bh // heads) * stride_b + (bh % heads) * stride_h
+
+
+@triton.jit
+def _rows(tok, stride, WIDE: tl.constexpr):
+    """Offsets of the points ``tok`` from the first point, the points being ``stride`` elements apart.
+
+    ``WIDE`` computes them in 64 bits, for tensors where they reach past 2**31.
+    """
+    if WIDE:
+        return tok.to(tl.int64) * stride
+    else:
+        return tok * stride
 
 
 @triton.jit
@@ -285,6 +303,19 @@ def _rg_fwd(
     TILES,
     TILE_OFFSETS,
     sm_scale,
+    heads,
+    stride_qb,  # strides of Q over batch, head and point; each point's head_dim values are contiguous
+    stride_qh,
+    stride_qn,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_ob,
+    stride_oh,
+    stride_on,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
@@ -292,6 +323,7 @@ def _rg_fwd(
     KERNEL_W: tl.constexpr,
     DOT_PRECISION: tl.constexpr,  # "ieee" for float32 inputs, so their products are not rounded to TF32
     SHIFTED: tl.constexpr,  # rows are shifted by half spacings (HEALPix); False compiles the shift handling away
+    WIDE: tl.constexpr,  # point offsets need 64 bits
     KEY_ROWS: tl.constexpr,  # KERNEL_H + largest TILE_H - 1, rounded up to a power of 2
     QUERY_ROWS: tl.constexpr,  # 2 * KERNEL_H + largest TILE_H - 2, rounded up to a power of 2
     TILE_H: tl.constexpr,
@@ -301,14 +333,17 @@ def _rg_fwd(
     """Each program computes the output of one tile of queries, for one batch entry and head."""
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
-    base = bh * NUM_POINTS * HEAD_DIM
+    q_base = _base(bh, heads, stride_qb, stride_qh)
+    k_base = _base(bh, heads, stride_kb, stride_kh)
+    v_base = _base(bh, heads, stride_vb, stride_vh)
+    o_base = _base(bh, heads, stride_ob, stride_oh)
     d = tl.arange(0, HEAD_DIM)
 
     first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
-    q = tl.load(Q + base + q_tok[:, None] * HEAD_DIM + d[None, :], mask=q_valid[:, None], other=0.0)
+    q = tl.load(Q + q_base + _rows(q_tok, stride_qn, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0)
     q_window = _row_window_start(q_rows, KERNEL_H, NUM_ROWS)
     if SHIFTED:
         tile_rows = first_row + tl.arange(0, TILE_H)
@@ -352,8 +387,8 @@ def _rg_fwd(
         k_valid = t < length
         k_pos = _wrap(first + t, other_n)
         k_tok = k_row_start + k_pos
-        k = tl.load(K + base + k_tok[:, None] * HEAD_DIM + d[None, :], mask=k_valid[:, None], other=0.0)
-        v = tl.load(V + base + k_tok[:, None] * HEAD_DIM + d[None, :], mask=k_valid[:, None], other=0.0)
+        k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
+        v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
         row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
         if SHIFTED:
@@ -373,7 +408,8 @@ def _rg_fwd(
 
     inv_l = 1.0 / l_i
     acc = acc * inv_l[:, None]
-    tl.store(OUT + base + q_tok[:, None] * HEAD_DIM + d[None, :], acc.to(OUT.dtype.element_ty), mask=q_valid[:, None])
+    o_offs = o_base + _rows(q_tok, stride_on, WIDE)[:, None] + d[None, :]
+    tl.store(OUT + o_offs, acc.to(OUT.dtype.element_ty), mask=q_valid[:, None])
     tl.store(M + bh * NUM_POINTS + q_tok, m_i, mask=q_valid)
     tl.store(INV_L + bh * NUM_POINTS + q_tok, inv_l, mask=q_valid)
 
@@ -396,6 +432,22 @@ def _rg_bwd_dq(
     TILES,
     TILE_OFFSETS,
     sm_scale,
+    heads,
+    stride_qb,
+    stride_qh,
+    stride_qn,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_dob,
+    stride_doh,
+    stride_don,
+    stride_ob,  # strides of OUT and DQ, which have the same layout
+    stride_oh,
+    stride_on,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
@@ -403,6 +455,7 @@ def _rg_bwd_dq(
     KERNEL_W: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     SHIFTED: tl.constexpr,
+    WIDE: tl.constexpr,
     KEY_ROWS: tl.constexpr,
     QUERY_ROWS: tl.constexpr,
     TILE_H: tl.constexpr,
@@ -412,17 +465,21 @@ def _rg_bwd_dq(
     """Each program computes dQ for one tile of queries, visiting the same keys as the forward pass."""
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
-    base = bh * NUM_POINTS * HEAD_DIM
+    q_base = _base(bh, heads, stride_qb, stride_qh)
+    k_base = _base(bh, heads, stride_kb, stride_kh)
+    v_base = _base(bh, heads, stride_vb, stride_vh)
+    do_base = _base(bh, heads, stride_dob, stride_doh)
+    o_base = _base(bh, heads, stride_ob, stride_oh)
     d = tl.arange(0, HEAD_DIM)
 
     first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     q_rows, q_pos, q_valid, q_n, q_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
-    q_ptrs = base + q_tok[:, None] * HEAD_DIM + d[None, :]
-    q = tl.load(Q + q_ptrs, mask=q_valid[:, None], other=0.0)
-    do = tl.load(DO + q_ptrs, mask=q_valid[:, None], other=0.0)
-    out = tl.load(OUT + q_ptrs, mask=q_valid[:, None], other=0.0)
+    o_offs = o_base + _rows(q_tok, stride_on, WIDE)[:, None] + d[None, :]
+    q = tl.load(Q + q_base + _rows(q_tok, stride_qn, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0)
+    do = tl.load(DO + do_base + _rows(q_tok, stride_don, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0)
+    out = tl.load(OUT + o_offs, mask=q_valid[:, None], other=0.0)
     delta = tl.sum(out.to(tl.float32) * do.to(tl.float32), axis=1)
     tl.store(DELTA + bh * NUM_POINTS + q_tok, delta, mask=q_valid)
     m = tl.load(M + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
@@ -485,8 +542,8 @@ def _rg_bwd_dq(
         k_valid = t < length
         k_pos = _wrap(first + t, other_n)
         k_tok = k_row_start + k_pos
-        k = tl.load(K + base + k_tok[:, None] * HEAD_DIM + d[None, :], mask=k_valid[:, None], other=0.0)
-        v = tl.load(V + base + k_tok[:, None] * HEAD_DIM + d[None, :], mask=k_valid[:, None], other=0.0)
+        k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
+        v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
 
         row_seen = (k_row >= q_window) & (k_row < q_window + KERNEL_H)
         if SHIFTED:
@@ -511,7 +568,7 @@ def _rg_bwd_dq(
     lam = tl.where(p_sum > 0, ds_sum / p_sum, 0.0)
     tl.store(LAM + bh * NUM_POINTS + q_tok, lam, mask=q_valid)
     dq = (dq - lam[:, None] * p_k) * sm_scale
-    tl.store(DQ + q_ptrs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
+    tl.store(DQ + o_offs, dq.to(DQ.dtype.element_ty), mask=q_valid[:, None])
 
 
 @triton.autotune(configs=_backward_configs(), key=_AUTOTUNE_KEY)
@@ -532,6 +589,22 @@ def _rg_bwd_dkdv(
     TILES,
     TILE_OFFSETS,
     sm_scale,
+    heads,
+    stride_qb,
+    stride_qh,
+    stride_qn,
+    stride_kb,
+    stride_kh,
+    stride_kn,
+    stride_vb,
+    stride_vh,
+    stride_vn,
+    stride_dob,
+    stride_doh,
+    stride_don,
+    stride_gb,  # strides of DK and DV, which have the same layout
+    stride_gh,
+    stride_gn,
     NUM_ROWS: tl.constexpr,
     NUM_POINTS: tl.constexpr,
     HEAD_DIM: tl.constexpr,
@@ -539,6 +612,7 @@ def _rg_bwd_dkdv(
     KERNEL_W: tl.constexpr,
     DOT_PRECISION: tl.constexpr,
     SHIFTED: tl.constexpr,
+    WIDE: tl.constexpr,
     KEY_ROWS: tl.constexpr,
     QUERY_ROWS: tl.constexpr,
     TILE_H: tl.constexpr,
@@ -548,16 +622,19 @@ def _rg_bwd_dkdv(
     """Each program computes dK and dV for one tile of keys, visiting every query whose window reaches it."""
     RADIUS_W: tl.constexpr = KERNEL_W // 2
     bh = tl.program_id(1).to(tl.int64)
-    base = bh * NUM_POINTS * HEAD_DIM
+    q_base = _base(bh, heads, stride_qb, stride_qh)
+    k_base = _base(bh, heads, stride_kb, stride_kh)
+    v_base = _base(bh, heads, stride_vb, stride_vh)
+    do_base = _base(bh, heads, stride_dob, stride_doh)
+    g_base = _base(bh, heads, stride_gb, stride_gh)
     d = tl.arange(0, HEAD_DIM)
 
     first_row, band = _tile_start(TILES, TILE_OFFSETS, TILE_H, TILE_W)
     k_rows, k_pos, k_valid, k_n, k_tok, lo_h, hi_h, lengths_h = _tile_points(
         ROW_START, first_row, band, NUM_ROWS, TILE_H, TILE_W
     )
-    k_ptrs = base + k_tok[:, None] * HEAD_DIM + d[None, :]
-    k = tl.load(K + k_ptrs, mask=k_valid[:, None], other=0.0)
-    v = tl.load(V + k_ptrs, mask=k_valid[:, None], other=0.0)
+    k = tl.load(K + k_base + _rows(k_tok, stride_kn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
+    v = tl.load(V + v_base + _rows(k_tok, stride_vn, WIDE)[:, None] + d[None, :], mask=k_valid[:, None], other=0.0)
     if SHIFTED:
         tile_rows = first_row + tl.arange(0, TILE_H)
         shift_h = tl.load(ROW_SHIFT + tile_rows, mask=tile_rows < NUM_ROWS, other=0)
@@ -623,8 +700,10 @@ def _rg_bwd_dkdv(
         q_valid = t < length
         q_pos = _wrap(first + t, n)
         q_tok = q_row_start + q_pos
-        q = tl.load(Q + base + q_tok[:, None] * HEAD_DIM + d[None, :], mask=q_valid[:, None], other=0.0)
-        do = tl.load(DO + base + q_tok[:, None] * HEAD_DIM + d[None, :], mask=q_valid[:, None], other=0.0)
+        q = tl.load(Q + q_base + _rows(q_tok, stride_qn, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0)
+        do = tl.load(
+            DO + do_base + _rows(q_tok, stride_don, WIDE)[:, None] + d[None, :], mask=q_valid[:, None], other=0.0
+        )
         m = tl.load(M + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
         inv_l = tl.load(INV_L + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
         delta = tl.load(DELTA + bh * NUM_POINTS + q_tok, mask=q_valid, other=0.0)
@@ -658,8 +737,9 @@ def _rg_bwd_dkdv(
         dk = tl.dot((p_t * -lam[None, :]).to(q.dtype), q, dk, input_precision=DOT_PRECISION)
 
     dk = dk * sm_scale
-    tl.store(DK + k_ptrs, dk.to(DK.dtype.element_ty), mask=k_valid[:, None])
-    tl.store(DV + k_ptrs, dv.to(DV.dtype.element_ty), mask=k_valid[:, None])
+    g_offs = g_base + _rows(k_tok, stride_gn, WIDE)[:, None] + d[None, :]
+    tl.store(DK + g_offs, dk.to(DK.dtype.element_ty), mask=k_valid[:, None])
+    tl.store(DV + g_offs, dv.to(DV.dtype.element_ty), mask=k_valid[:, None])
 
 
 def _launch_grid(tiles: dict, batch_heads: int):
@@ -669,12 +749,38 @@ def _launch_grid(tiles: dict, batch_heads: int):
     return grid
 
 
+def _strides(t: torch.Tensor) -> tuple[int, int, int]:
+    """Strides of a ``(batch, heads, points, head_dim)`` tensor over batch, head and point."""
+    return t.stride(0), t.stride(1), t.stride(2)
+
+
+def _rows_readable(t: torch.Tensor) -> torch.Tensor:
+    """``t`` as the kernels read it: any layout whose head_dim values of each point are contiguous."""
+    return t if t.stride(-1) == 1 else t.contiguous()
+
+
+def _point_major(batch: int, heads: int, points: int, head_dim: int, like: torch.Tensor) -> torch.Tensor:
+    """An empty ``(batch, heads, points, head_dim)`` tensor stored point by point, all heads of a point together.
+
+    This is the layout of the model's ``(batch * points, heads * head_dim)`` features, so turning the
+    result back into them needs no copy.
+    """
+    return torch.empty((batch, points, heads, head_dim), dtype=like.dtype, device=like.device).transpose(1, 2)
+
+
+def _needs_wide(*tensors: torch.Tensor) -> bool:
+    """Whether the offset of some point from the first point of its batch entry and head reaches 2**31."""
+    return any((t.shape[2] - 1) * t.stride(2) + t.shape[3] >= 2**31 for t in tensors)
+
+
 class ReducedGridAttentionTriton(torch.autograd.Function):
     """Neighbourhood attention on a reduced grid, computed with Triton kernels.
 
     Inputs are ``(batch, heads, points, head_dim)`` with the points stored as in
     :class:`anemoi.models.layers.reduced_grid.ReducedGrid`. ``head_dim`` must be a power of two
-    of at least 16.
+    of at least 16. The inputs may have any layout in which the head_dim values of each point are
+    contiguous, so views of the model's ``(batch * points, heads * head_dim)`` features are read as they
+    are; the output and the gradients are stored point by point, the layout of those features.
     """
 
     @staticmethod
@@ -688,8 +794,8 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         ), f"head_dim must be a power of 2 >= 16, got {head_dim}."
         assert kernel_size[0] <= len(row_lengths), "kernel_size[0] must not exceed the number of rows."
 
-        q, k, v = q.contiguous(), k.contiguous(), v.contiguous()
-        o = torch.empty_like(q)
+        q, k, v = (_rows_readable(t) for t in (q, k, v))
+        o = _point_major(batch, heads, num_points, head_dim, q)
         m = torch.empty((batch * heads, num_points), device=q.device, dtype=torch.float32)
         inv_l = torch.empty_like(m)
         row_starts, tiles = _grid_tables(tuple(row_lengths), q.device)
@@ -706,8 +812,11 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             QUERY_ROWS=triton.next_power_of_2(2 * kernel_size[0] + _MAX_TILE_H - 2),
         )
         tables = (row_starts, _shift_table(grid.shifts, q.device), *_packed_tiles(tuple(row_lengths), q.device))
+        strides = (*_strides(q), *_strides(k), *_strides(v), *_strides(o))
 
-        _rg_fwd[_launch_grid(tiles, batch * heads)](q, k, v, o, m, inv_l, *tables, sm_scale, **sizes)
+        _rg_fwd[_launch_grid(tiles, batch * heads)](
+            q, k, v, o, m, inv_l, *tables, sm_scale, heads, *strides, WIDE=_needs_wide(q, k, v, o), **sizes
+        )
         ctx.save_for_backward(q, k, v, o, m, inv_l)
         ctx.grid = grid
         ctx.sizes = sizes
@@ -719,9 +828,10 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         q, k, v, o, m, inv_l = ctx.saved_tensors
         batch, heads, _, _ = q.shape
 
-        do = do.contiguous()
+        do = _rows_readable(do)
         delta, lam = torch.empty_like(m), torch.empty_like(m)
-        dq, dk, dv = torch.empty_like(q), torch.empty_like(k), torch.empty_like(v)
+        dq = _point_major(*q.shape, q)
+        dk, dv = _point_major(*k.shape, k), _point_major(*v.shape, v)
         row_starts, tiles = _grid_tables(ctx.grid.row_lengths, q.device)
         tables = (
             row_starts,
@@ -730,9 +840,48 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
         )
         grid = _launch_grid(tiles, batch * heads)
 
+        inputs = (*_strides(q), *_strides(k), *_strides(v), *_strides(do))
+        wide = _needs_wide(q, k, v, o, do, dq, dk, dv)
+
         # The dQ kernel also writes delta and lam, which the dK/dV kernel reads, so it runs first.
-        _rg_bwd_dq[grid](q, k, v, o, do, dq, m, inv_l, delta, lam, *tables, ctx.sm_scale, **ctx.sizes)
-        _rg_bwd_dkdv[grid](q, k, v, do, dk, dv, m, inv_l, delta, lam, *tables, ctx.sm_scale, **ctx.sizes)
+        _rg_bwd_dq[grid](
+            q,
+            k,
+            v,
+            o,
+            do,
+            dq,
+            m,
+            inv_l,
+            delta,
+            lam,
+            *tables,
+            ctx.sm_scale,
+            heads,
+            *inputs,
+            *_strides(dq),
+            WIDE=wide,
+            **ctx.sizes,
+        )
+        _rg_bwd_dkdv[grid](
+            q,
+            k,
+            v,
+            do,
+            dk,
+            dv,
+            m,
+            inv_l,
+            delta,
+            lam,
+            *tables,
+            ctx.sm_scale,
+            heads,
+            *inputs,
+            *_strides(dk),
+            WIDE=wide,
+            **ctx.sizes,
+        )
         return dq, dk, dv, None, None, None
 
 
