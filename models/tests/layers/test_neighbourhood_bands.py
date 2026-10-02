@@ -17,6 +17,8 @@ import pytest
 import torch
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.point_ranges import PointRun
+from anemoi.models.distributed.point_ranges import assemble_point_run
 from anemoi.models.distributed.point_ranges import build_point_range_exchange
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -68,6 +70,9 @@ CASES = {
     "healpix self": ("healpix", ReducedGrid.healpix(8), None, (5, 5)),
     "healpix fine to coarse": ("healpix", ReducedGrid.healpix(4), ReducedGrid.healpix(8), (5, 5)),
     "healpix coarse to fine": ("healpix", ReducedGrid.healpix(8), ReducedGrid.healpix(4), (3, 5)),
+    "octahedral self O32": ("octahedral", ReducedGrid.octahedral(32), None, (7, 13)),
+    "octahedral O32 to O16": ("octahedral", ReducedGrid.octahedral(16), ReducedGrid.octahedral(32), (5, 5)),
+    "healpix self H16": ("healpix", ReducedGrid.healpix(16), None, (5, 5)),
 }
 
 
@@ -132,28 +137,59 @@ def _layer_kernels(conditional: bool):
     )
 
 
-def _neighbourhood_config(family: str, kernel_size, num_bands: int) -> dict:
-    return {"grid": family, "kernel_size": list(kernel_size), "backend": "sdpa", "num_bands": num_bands}
+# Bands against the whole grid: on CPU in float64 with the dense-mask backend, which must agree to
+# rounding; on GPU in float32 with the Triton kernels, where the bands use the cross-attention
+# kernel and the whole grid the self-attention one.
+SETTINGS = {
+    "sdpa": dict(device="cpu", dtype=torch.float64, rotary="torch", rtol=1e-10, atol=1e-10),
+    "triton": dict(device="cuda", dtype=torch.float32, rotary="triton", rtol=1e-4, atol=1e-5),
+}
+# A mapper block keeps the two layer norms of the self-attention block it builds on and never uses them.
+UNUSED_PARAMETERS = {
+    f"proc.{norm}.{p}" for norm in ("layer_norm_attention", "layer_norm_mlp") for p in ("weight", "bias")
+}
+UNUSED_PARAMETERS |= {
+    f"proc.{norm}.{lin}.{p}"
+    for norm in ("layer_norm_attention", "layer_norm_mlp")
+    for lin in ("scale", "bias")
+    for p in ("weight", "bias")
+}
+BACKEND_PARAMS = [
+    "sdpa",
+    pytest.param("triton", marks=pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU")),
+]
 
 
-def _same_results(make, run, num_bands: int, gradient_checkpointing: bool) -> None:
+def _neighbourhood_config(family: str, kernel_size, num_bands: int, backend: str = "sdpa") -> dict:
+    return {"grid": family, "kernel_size": list(kernel_size), "backend": backend, "num_bands": num_bands}
+
+
+def _same_results(make, run, num_bands: int, gradient_checkpointing: bool, backend: str) -> None:
     """Build the layer without and with bands, with the same weights, and compare outputs and all gradients."""
+    settings = SETTINGS[backend]
     torch.manual_seed(0)
-    whole = make(1).double()
-    banded = make(num_bands).double()
+    whole = make(1).to(settings["device"], settings["dtype"])
+    banded = make(num_bands).to(settings["device"], settings["dtype"])
     banded.load_state_dict(whole.state_dict())
-    assert banded.bands is not None and len(banded.bands.plans()[0].bands) > 1
+    assert banded.bands is not None and len(banded.bands.plans()[0].bands) >= min(num_bands, 4)
     for layer in (whole, banded):
         layer.gradient_checkpointing = gradient_checkpointing
 
-    inputs = run.inputs()
+    inputs = run.inputs(settings)
     out_whole, grads_whole = run.forward_backward(whole, inputs)
     out_banded, grads_banded = run.forward_backward(banded, inputs)
 
-    torch.testing.assert_close(out_banded, out_whole, rtol=1e-10, atol=1e-10)
+    rtol, atol = settings["rtol"], settings["atol"]
+    torch.testing.assert_close(out_banded, out_whole, rtol=rtol, atol=atol)
     assert grads_banded.keys() == grads_whole.keys()
+    without_grad = {name for name, _ in whole.named_parameters()} - grads_whole.keys()
+    assert without_grad <= UNUSED_PARAMETERS, f"parameters without gradient: {sorted(without_grad)}"
     for name in grads_whole:
-        torch.testing.assert_close(grads_banded[name], grads_whole[name], rtol=1e-9, atol=1e-10, msg=name)
+        # A parameter gradient sums over all points, so its rounding error scales with its largest entries.
+        scale = max(1.0, grads_whole[name].abs().max().item()) if not name.startswith("input") else 1.0
+        torch.testing.assert_close(
+            grads_banded[name], grads_whole[name], rtol=rtol, atol=atol * scale, msg=lambda m, n=name: f"{n}: {m}"
+        )
 
 
 class _Run:
@@ -163,33 +199,37 @@ class _Run:
         self.shapes = shapes
         self.call = call
 
-    def inputs(self) -> dict[str, torch.Tensor]:
+    def inputs(self, settings: dict) -> dict[str, torch.Tensor]:
         generator = torch.Generator().manual_seed(1)
         return {
-            name: torch.randn(shape, generator=generator, dtype=torch.float64) for name, shape in self.shapes.items()
+            name: torch.randn(shape, generator=generator, dtype=torch.float64).to(settings["device"], settings["dtype"])
+            for name, shape in self.shapes.items()
         }
 
     def forward_backward(self, layer, inputs):
         layer.zero_grad()
         inputs = {name: t.clone().requires_grad_(True) for name, t in inputs.items()}
         out = self.call(layer, inputs)
-        weights = torch.randn(out.shape, generator=torch.Generator().manual_seed(2), dtype=out.dtype)
-        (out * weights).sum().backward()
+        weights = torch.randn(out.shape, generator=torch.Generator().manual_seed(2), dtype=torch.float64)
+        (out * weights.to(out.device, out.dtype)).sum().backward()
         grads = {f"input {name}": t.grad for name, t in inputs.items()}
         grads |= {name: p.grad for name, p in layer.named_parameters() if p.grad is not None}
         return out.detach(), grads
 
 
 MAPPER_CASES = {
-    "octahedral": ("octahedral", ReducedGrid.octahedral(16), ReducedGrid.octahedral(8), (5, 7), (3, 5)),
-    "healpix": ("healpix", ReducedGrid.healpix(8), ReducedGrid.healpix(4), (5, 5), (3, 5)),
+    "octahedral": ("octahedral", ReducedGrid.octahedral(32), ReducedGrid.octahedral(16), (5, 7), (3, 5)),
+    "healpix": ("healpix", ReducedGrid.healpix(16), ReducedGrid.healpix(8), (5, 5), (3, 5)),
 }
 
 
+@pytest.mark.parametrize("backend", BACKEND_PARAMS)
 @pytest.mark.parametrize("case", MAPPER_CASES)
 @pytest.mark.parametrize("gradient_checkpointing", [True, False])
 @pytest.mark.parametrize("conditional", [False, True])
-def test_encoder_and_decoder_in_bands_match_the_whole_grid(case: str, gradient_checkpointing: bool, conditional: bool):
+def test_encoder_and_decoder_in_bands_match_the_whole_grid(
+    case: str, gradient_checkpointing: bool, conditional: bool, backend: str
+):
     family, data, hidden, encoder_kernel, decoder_kernel = MAPPER_CASES[case]
     batch = 2
 
@@ -203,8 +243,8 @@ def test_encoder_and_decoder_in_bands_match_the_whole_grid(case: str, gradient_c
             mlp_hidden_ratio=2,
             qk_norm=True,
             attention_implementation="neighbourhood",
-            neighbourhood=_neighbourhood_config(family, kernel_size, num_bands),
-            rotary_embeddings={"max_frequency": 20, "backend": "torch"},
+            neighbourhood=_neighbourhood_config(family, kernel_size, num_bands, backend),
+            rotary_embeddings={"max_frequency": 20, "backend": SETTINGS[backend]["rotary"]},
             layer_kernels=_layer_kernels(conditional),
         )
 
@@ -239,24 +279,27 @@ def test_encoder_and_decoder_in_bands_match_the_whole_grid(case: str, gradient_c
         return s
 
     encoder_run = _Run(shapes(5, data.num_points, hidden.num_points), call(data.num_points, hidden.num_points, True))
-    _same_results(make_encoder, encoder_run, 3, gradient_checkpointing)
+    _same_results(make_encoder, encoder_run, 8, gradient_checkpointing, backend)
 
     decoder_run = _Run(
         shapes(NUM_CHANNELS, hidden.num_points, data.num_points), call(hidden.num_points, data.num_points, False)
     )
-    _same_results(make_decoder, decoder_run, 5, gradient_checkpointing)
+    _same_results(make_decoder, decoder_run, 5, gradient_checkpointing, backend)
 
 
 PROCESSOR_CASES = {
-    "octahedral": ("octahedral", ReducedGrid.octahedral(12), (5, 7)),
-    "healpix": ("healpix", ReducedGrid.healpix(8), (3, 5)),
+    "octahedral": ("octahedral", ReducedGrid.octahedral(32), (7, 13)),
+    "healpix": ("healpix", ReducedGrid.healpix(16), (5, 5)),
 }
 
 
+@pytest.mark.parametrize("backend", BACKEND_PARAMS)
 @pytest.mark.parametrize("case", PROCESSOR_CASES)
 @pytest.mark.parametrize("gradient_checkpointing", [True, False])
 @pytest.mark.parametrize("conditional", [False, True])
-def test_processor_in_bands_matches_the_whole_grid(case: str, gradient_checkpointing: bool, conditional: bool):
+def test_processor_in_bands_matches_the_whole_grid(
+    case: str, gradient_checkpointing: bool, conditional: bool, backend: str
+):
     family, grid, kernel_size = PROCESSOR_CASES[case]
     batch = 2
 
@@ -269,8 +312,8 @@ def test_processor_in_bands_matches_the_whole_grid(case: str, gradient_checkpoin
             mlp_hidden_ratio=2,
             qk_norm=True,
             attention_implementation="neighbourhood",
-            neighbourhood=_neighbourhood_config(family, kernel_size, num_bands),
-            rotary_embeddings={"max_frequency": 20, "backend": "torch"},
+            neighbourhood=_neighbourhood_config(family, kernel_size, num_bands, backend),
+            rotary_embeddings={"max_frequency": 20, "backend": SETTINGS[backend]["rotary"]},
             node_coords=grid_coords(grid),
             layer_kernels=_layer_kernels(conditional),
         )
@@ -282,7 +325,7 @@ def test_processor_in_bands_matches_the_whole_grid(case: str, gradient_checkpoin
     shapes = {"x": (batch * grid.num_points, NUM_CHANNELS)}
     if conditional:
         shapes["cond"] = (batch * grid.num_points, COND_CHANNELS)
-    _same_results(make, _Run(shapes, run), 4, gradient_checkpointing)
+    _same_results(make, _Run(shapes, run), 8, gradient_checkpointing, backend)
 
 
 def _splits(num_points: int) -> list[list[int]]:
@@ -339,8 +382,26 @@ def test_point_range_exchange_gives_every_gpu_the_points_it_wants(num_points: in
             wanted.append(slice(first, stop))
         exchanges = [build_point_range_exchange(sizes, wanted, r, torch.device("cpu")) for r in range(len(sizes))]
         for rank, exchange in enumerate(exchanges):
-            # What halo_exchange returns on this GPU: its own points, then what each GPU sends it.
+            # What each other GPU sends this one, in rank order, as the exchange delivers it.
             received = [shards[other][exchanges[other].send_indices[rank]] for other in range(len(sizes))]
             assert [len(r) for r in received] == list(exchange.recv_counts)
-            halo_out = torch.cat([shards[rank], *received])
-            assert torch.equal(halo_out[exchange.order], values[wanted[rank]])
+            run = assemble_point_run(shards[rank][exchange.own_part], torch.cat(received), exchange)
+            assert run.own.data_ptr() == shards[rank][exchange.own_part].data_ptr(), "own points are copied"
+            assert torch.equal(run.take(wanted[rank]), values[wanted[rank]][None])
+            for _ in range(5):
+                first = int(torch.randint(wanted[rank].start, wanted[rank].stop, (1,), generator=generator))
+                stop = int(torch.randint(first + 1, wanted[rank].stop + 1, (1,), generator=generator))
+                assert torch.equal(run.take(slice(first, stop)), values[first:stop][None])
+
+
+def test_points_taken_from_a_run_always_depend_on_its_own_part() -> None:
+    """Every band depends on the exchange that holds the own points, so its backward runs after all bands."""
+    before = torch.randn(1, 4, 2, requires_grad=True)
+    own = torch.randn(1, 6, 2, requires_grad=True)
+    after = torch.randn(1, 3, 2, requires_grad=True)
+    run = PointRun(start=10, before=before, own=own, after=after)
+    for points in (slice(10, 13), slice(20, 23), slice(12, 16), slice(15, 18)):
+        own.grad = None
+        run.take(points).sum().backward()
+        assert own.grad is not None, f"the points {points} do not depend on the own part"
+    assert torch.equal(run.take(slice(11, 21)), torch.cat([before, own, after], dim=1)[:, 1:11])

@@ -21,6 +21,7 @@ from torch_geometric.typing import Adj
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.point_ranges import PointRun
 from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphConvProcessorBlock
@@ -361,8 +362,8 @@ class TransformerProcessor(BaseProcessor):
 
         When the points are split across GPUs, ``x`` holds this GPU's own points and so does the
         output. Before each layer the GPU fetches the inputs of the points its rows reach from the
-        GPUs that own them, one exchange per layer (see :class:`ShardPlan`); the bands then run
-        without communication.
+        GPUs that own them, one exchange per layer (see :class:`ShardPlan`), and reads its own
+        points in place; the bands then run without communication.
         """
         sharded = model_comm_group is not None and model_comm_group.size() > 1
         if sharded and shard_info.nodes is None:
@@ -372,26 +373,24 @@ class TransformerProcessor(BaseProcessor):
         plan = self.bands.plans(shard_sizes)[rank]
         exchange = self.bands.key_exchange(shard_sizes, shard_sizes, rank, x.device) if sharded else None
 
-        def inputs_of_key_points(t: Tensor) -> Tensor:
-            """``t`` for the key points this GPU's rows reach, laid out ``(batch, points, channels)``."""
+        def run_of_key_points(t: Tensor) -> PointRun:
+            """``t`` for the key points this GPU's rows reach, its own points read in place."""
             if exchange is None:
-                return t.view(batch_size, self.bands.num_key_points, -1)
-            return fetch_point_range(t, exchange, model_comm_group)[None]
+                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
+            return fetch_point_range(t, exchange, model_comm_group)
 
         num_own = plan.own_points.stop - plan.own_points.start
-        offset = plan.key_points.start
-        cond_keys = None if cond is None else inputs_of_key_points(cond)
+        cond_keys = None if cond is None else run_of_key_points(cond)
         for layer in self.proc:
-            x_keys = inputs_of_key_points(x)
+            x_keys = run_of_key_points(x)
             out = None
             for band in plan.bands:
-                keys = slice(band.key_points.start - offset, band.key_points.stop - offset)
                 out_band = maybe_checkpoint(
                     layer.forward_band,
                     self.gradient_checkpointing,
-                    x_keys[:, keys],
+                    x_keys.take(band.key_points),
                     band,
-                    None if cond_keys is None else cond_keys[:, keys],
+                    None if cond_keys is None else cond_keys.take(band.key_points),
                 )
                 if out is None:
                     out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])

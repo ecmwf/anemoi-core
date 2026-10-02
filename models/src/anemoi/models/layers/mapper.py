@@ -30,6 +30,7 @@ from anemoi.models.distributed.khop_edges import build_graph_partition_from_shar
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
+from anemoi.models.distributed.point_ranges import PointRun
 from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.block import GraphConvMapperBlock
@@ -1481,7 +1482,8 @@ class TransformerBaseMapper(BaseMapper, ABC):
         When the points are split across GPUs, each GPU works through the bands of the
         destination rows that hold its own destination points. It first fetches, from the GPUs
         that own them, the destination points of those whole rows and the source points they
-        reach (see :class:`ShardPlan`); the bands then run without communication. The output
+        reach (see :class:`ShardPlan`), and reads its own points in place; the bands then run
+        without communication. The output
         holds the GPU's own destination points, and is gathered onto every GPU unless
         ``keep_x_dst_sharded``.
         """
@@ -1504,34 +1506,31 @@ class TransformerBaseMapper(BaseMapper, ABC):
             src_exchange = self.bands.key_exchange(dst_sizes, src_sizes, rank, x_src.device)
             dst_exchange = self.bands.query_exchange(dst_sizes, rank, x_dst.device)
 
-        def inputs_of_src(t: Tensor) -> Tensor:
-            """``t`` for the source points this GPU's rows reach, laid out ``(batch, points, channels)``."""
+        def run_of_src(t: Tensor) -> PointRun:
+            """``t`` for the source points this GPU's rows reach, its own points read in place."""
             if not sharded:
-                return t.view(batch_size, self.bands.num_key_points, -1)
-            return fetch_point_range(t, src_exchange, model_comm_group)[None]
+                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
+            return fetch_point_range(t, src_exchange, model_comm_group)
 
-        def inputs_of_dst(t: Tensor) -> Tensor:
-            """``t`` for the destination points of this GPU's whole rows, laid out ``(batch, points, channels)``."""
+        def run_of_dst(t: Tensor) -> PointRun:
+            """``t`` for the destination points of this GPU's whole rows, its own points read in place."""
             if not sharded:
-                return t.view(batch_size, self.bands.num_query_points, -1)
-            return fetch_point_range(t, dst_exchange, model_comm_group)[None]
+                return PointRun.whole(t.view(batch_size, self.bands.num_query_points, -1))
+            return fetch_point_range(t, dst_exchange, model_comm_group)
 
-        x_src, x_dst = inputs_of_src(x_src), inputs_of_dst(x_dst)
+        x_src, x_dst = run_of_src(x_src), run_of_dst(x_dst)
         if cond is not None:
-            cond = (inputs_of_src(cond[0]), inputs_of_dst(cond[1]))
+            cond = (run_of_src(cond[0]), run_of_dst(cond[1]))
 
         num_own = plan.own_points.stop - plan.own_points.start
-        src_offset, dst_offset = plan.key_points.start, plan.query_points.start
         out = None
         for band in plan.bands:
-            src = slice(band.key_points.start - src_offset, band.key_points.stop - src_offset)
-            dst = slice(band.query_points.start - dst_offset, band.query_points.stop - dst_offset)
-            band_cond = None if cond is None else (cond[0][:, src], cond[1][:, dst])
+            band_cond = None if cond is None else (cond[0].take(band.key_points), cond[1].take(band.query_points))
             out_band = maybe_checkpoint(
                 self.forward_band,
                 self.gradient_checkpointing,
-                x_src[:, src],
-                x_dst[:, dst],
+                x_src.take(band.key_points),
+                x_dst.take(band.query_points),
                 band,
                 band_cond,
             )
