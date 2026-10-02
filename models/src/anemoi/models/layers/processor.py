@@ -21,15 +21,16 @@ from torch_geometric.typing import Adj
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
 from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
-from anemoi.models.layers.neighbourhood_attention import split_into_bands
+from anemoi.models.layers.neighbourhood_attention import write_own_points
 from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
@@ -308,14 +309,15 @@ class TransformerProcessor(BaseProcessor):
             rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
 
-        # With neighbourhood attention split into bands, every layer works through the points
-        # one band at a time (see forward_in_bands).
-        self.bands: Optional[list[NeighbourhoodBand]] = None
-        if grid_neighbourhood is not None and grid_neighbourhood.num_bands > 1:
-            if cpu_offload:
+        # Neighbourhood attention on nodes in grid order works through bands of whole rows (see
+        # forward_in_bands): on one GPU when num_bands > 1, and whenever the points are split across
+        # GPUs, with num_bands bands of each GPU's own rows.
+        self.bands: Optional[NeighbourhoodBands] = None
+        if grid_neighbourhood is not None and grid_neighbourhood.in_grid_order:
+            if cpu_offload and grid_neighbourhood.num_bands > 1:
                 raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
-            self.bands = split_into_bands(grid_neighbourhood, grid_neighbourhood.num_bands)
-            self.num_points = grid_neighbourhood.query_grid.num_points
+            if not cpu_offload:
+                self.bands = NeighbourhoodBands(grid_neighbourhood)
 
         self.offload_layers(cpu_offload)
 
@@ -335,8 +337,9 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
-        if self.bands is not None:
-            return self.forward_in_bands(x, batch_size, model_comm_group, cond=kwargs.get("cond"))
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if self.bands is not None and (self.bands.num_bands > 1 or sharded):
+            return self.forward_in_bands(x, batch_size, shard_info, model_comm_group, cond=kwargs.get("cond"))
 
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
@@ -346,36 +349,55 @@ class TransformerProcessor(BaseProcessor):
         self,
         x: Tensor,
         batch_size: int,
+        shard_info: GraphShardInfo,
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
     ) -> Tensor:
         """The layers worked through band by band, with one checkpoint per band of each layer.
 
-        Each band of a layer reads the band's points and the rows around them that its attention
-        reaches, and writes the band's points of the layer's output. Only one band is held in
-        memory at a time, besides the input and output of the layer.
-        """
-        if model_comm_group is not None and model_comm_group.size() > 1:
-            raise NotImplementedError("Neighbourhood attention in bands does not yet support sharding across GPUs.")
-        x = x.view(batch_size, self.num_points, -1)
-        if cond is not None:
-            cond = cond.view(batch_size, self.num_points, -1)
+        Each band of a layer reads the inputs of its key points, which include its query points,
+        and gives the outputs of its query points. Only one band is held in memory at a time,
+        besides the input and output of the layer.
 
+        When the points are split across GPUs, ``x`` holds this GPU's own points and so does the
+        output. Before each layer the GPU fetches the inputs of the points its rows reach from the
+        GPUs that own them, one exchange per layer (see :class:`ShardPlan`); the bands then run
+        without communication.
+        """
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if sharded and shard_info.nodes is None:
+            raise ValueError("Neighbourhood attention split across GPUs needs the processor input split as well.")
+        shard_sizes = shard_info.nodes if sharded else None
+        rank = model_comm_group.rank() if sharded else 0
+        plan = self.bands.plans(shard_sizes)[rank]
+        exchange = self.bands.key_exchange(shard_sizes, shard_sizes, rank, x.device) if sharded else None
+
+        def inputs_of_key_points(t: Tensor) -> Tensor:
+            """``t`` for the key points this GPU's rows reach, laid out ``(batch, points, channels)``."""
+            if exchange is None:
+                return t.view(batch_size, self.bands.num_key_points, -1)
+            return fetch_point_range(t, exchange, model_comm_group)[None]
+
+        num_own = plan.own_points.stop - plan.own_points.start
+        offset = plan.key_points.start
+        cond_keys = None if cond is None else inputs_of_key_points(cond)
         for layer in self.proc:
+            x_keys = inputs_of_key_points(x)
             out = None
-            for band in self.bands:
+            for band in plan.bands:
+                keys = slice(band.key_points.start - offset, band.key_points.stop - offset)
                 out_band = maybe_checkpoint(
                     layer.forward_band,
                     self.gradient_checkpointing,
-                    x[:, band.key_points],
+                    x_keys[:, keys],
                     band,
-                    None if cond is None else cond[:, band.key_points],
+                    None if cond_keys is None else cond_keys[:, keys],
                 )
                 if out is None:
-                    out = out_band.new_empty(batch_size, self.num_points, out_band.shape[-1])
-                out[:, band.query_points] = out_band
-            x = out
-        return x.view(batch_size * self.num_points, -1)
+                    out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
+                write_own_points(out, out_band, band, plan)
+            x = out.view(batch_size * num_own, -1)
+        return x
 
 
 class GNNProcessor(BaseProcessor):

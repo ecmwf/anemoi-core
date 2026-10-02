@@ -29,6 +29,11 @@ With ``num_bands`` above one, a model component works through its queries in ban
 latitude rows, each band with only the key rows its queries reach (see :func:`split_into_bands`).
 Each query attends to exactly the same keys, and only one band is held in memory at a time.
 
+When the points are split across GPUs, each GPU works through bands of the rows that hold its own
+points, with ``num_bands`` bands per GPU. Before each layer it fetches from its neighbours the
+points just outside its share that those rows reach (see :class:`ShardPlan`); attention itself
+needs no communication.
+
 The kernels compare queries and keys by content only; rotary position embeddings
 (:mod:`anemoi.models.layers.spherical_rotary`) add where each key lies relative to its query.
 """
@@ -36,6 +41,7 @@ The kernels compare queries and keys by content only; rotary position embeddings
 from __future__ import annotations
 
 import importlib
+import itertools
 import logging
 from dataclasses import dataclass
 from dataclasses import replace
@@ -46,6 +52,8 @@ import torch
 from torch import Tensor
 from torch import nn
 
+from anemoi.models.distributed.point_ranges import PointRangeExchange
+from anemoi.models.distributed.point_ranges import build_point_range_exchange
 from anemoi.models.layers.reduced_grid import ReducedGrid
 from anemoi.models.layers.reduced_grid import ReducedGridCrossNeighbourhoodMask
 from anemoi.models.layers.reduced_grid import ReducedGridNeighbourhoodMask
@@ -279,6 +287,11 @@ class GridNeighbourhood:
     def kernels(self) -> GridKernels:
         return GRID_KERNELS[self.family]
 
+    @property
+    def in_grid_order(self) -> bool:
+        """Whether the query and key nodes are stored in grid order, row by row from north to south."""
+        return self.query_order is None and self.key_order is None
+
 
 def _gather_points(x: Tensor, order: Tensor) -> Tensor:
     """The points (second-to-last dimension) of ``(batch, heads, points, head_dim)`` ``x`` in the order ``order``.
@@ -454,8 +467,39 @@ class NeighbourhoodBand:
     attention: NeighbourhoodAttentionWrapper
 
 
-def split_into_bands(neighbourhood: GridNeighbourhood, num_bands: int) -> list[NeighbourhoodBand]:
-    """Split the queries into bands of whole rows with about the same number of points.
+def window_start_rows(neighbourhood: GridNeighbourhood) -> Tensor:
+    """The first key row of each query row's window, kept inside the key grid as the attention rule does."""
+    query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
+    kernel_h = neighbourhood.kernel_size[0]
+    if neighbourhood.is_self_attention:
+        row_map = torch.arange(query_grid.num_rows)
+    else:
+        row_map = query_grid.nearest_rows(key_grid)
+    return (row_map - kernel_h // 2).clamp(0, key_grid.num_rows - kernel_h)
+
+
+def key_rows_reached(neighbourhood: GridNeighbourhood, first_row: int, end_row: int) -> tuple[int, int]:
+    """The key rows ``(first, end)`` that the query rows ``first_row`` to ``end_row - 1`` attend to."""
+    window_start = window_start_rows(neighbourhood)[first_row:end_row]
+    return int(window_start.min()), int(window_start.max()) + neighbourhood.kernel_size[0]
+
+
+def rows_holding(grid: ReducedGrid, points: slice) -> tuple[int, int]:
+    """The rows ``(first, end)`` of ``grid`` that hold any of the points ``points.start`` to ``points.stop - 1``."""
+    first = int(torch.searchsorted(grid.row_starts, points.start, right=True)) - 1
+    end = int(torch.searchsorted(grid.row_starts, points.stop - 1, right=True))
+    return first, end
+
+
+def points_of_rows(grid: ReducedGrid, first_row: int, end_row: int) -> slice:
+    """The points of the rows ``first_row`` to ``end_row - 1`` of ``grid``."""
+    return slice(int(grid.row_starts[first_row]), int(grid.row_starts[end_row]))
+
+
+def split_into_bands(
+    neighbourhood: GridNeighbourhood, num_bands: int, rows: Optional[tuple[int, int]] = None
+) -> list[NeighbourhoodBand]:
+    """Split query rows into bands of whole rows with about the same number of points.
 
     Each band attends to the rows of the key grid its queries reach, which themselves form a
     small grid. A query finds its key rows from its own latitude and its points from the lengths
@@ -468,33 +512,29 @@ def split_into_bands(neighbourhood: GridNeighbourhood, num_bands: int) -> list[N
     neighbourhood : GridNeighbourhood
         The neighbourhood of the whole grids, with the nodes in grid order.
     num_bands : int
-        Number of bands to aim for; there are fewer when the query grid has fewer rows.
+        Number of bands to aim for; there are fewer when there are fewer rows.
+    rows : tuple[int, int], optional
+        The query rows ``(first, end)`` to split; all rows by default.
 
     Returns
     -------
     list[NeighbourhoodBand]
-        The bands from north to south.
+        The bands from north to south. Their point ranges count from the first point of the whole grids.
     """
-    if neighbourhood.query_order is not None or neighbourhood.key_order is not None:
+    if not neighbourhood.in_grid_order:
         raise ValueError("Bands of rows need the query and key nodes stored in grid order.")
     query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
-    kernel_h = neighbourhood.kernel_size[0]
-    if neighbourhood.is_self_attention:
-        row_map = torch.arange(query_grid.num_rows)
-    else:
-        row_map = query_grid.nearest_rows(key_grid)
-    # First key row of each query row's window, kept inside the key grid as the attention rule does.
-    window_start = (row_map - kernel_h // 2).clamp(0, key_grid.num_rows - kernel_h)
+    first, end = rows if rows is not None else (0, query_grid.num_rows)
 
-    # Cut the query rows where the running number of points passes each equal share.
-    shares = torch.linspace(0, query_grid.num_points, num_bands + 1, dtype=torch.float64)
-    cuts = torch.searchsorted(query_grid.row_starts.to(torch.float64), shares)
-    cuts = torch.unique(torch.cat([torch.tensor([0, query_grid.num_rows]), cuts])).tolist()
+    # Cut the rows where the running number of points passes each equal share.
+    row_starts = query_grid.row_starts.to(torch.float64)
+    shares = torch.linspace(float(row_starts[first]), float(row_starts[end]), num_bands + 1, dtype=torch.float64)
+    cuts = torch.searchsorted(row_starts, shares).clamp(first, end)
+    cuts = torch.unique(torch.cat([torch.tensor([first, end]), cuts])).tolist()
 
     bands = []
     for first_row, end_row in zip(cuts[:-1], cuts[1:]):
-        first_key_row = int(window_start[first_row:end_row].min())
-        end_key_row = int(window_start[first_row:end_row].max()) + kernel_h
+        first_key_row, end_key_row = key_rows_reached(neighbourhood, first_row, end_row)
         band_neighbourhood = replace(
             neighbourhood,
             query_grid=query_grid.rows(first_row, end_row),
@@ -504,12 +544,127 @@ def split_into_bands(neighbourhood: GridNeighbourhood, num_bands: int) -> list[N
         )
         bands.append(
             NeighbourhoodBand(
-                query_points=slice(int(query_grid.row_starts[first_row]), int(query_grid.row_starts[end_row])),
-                key_points=slice(int(key_grid.row_starts[first_key_row]), int(key_grid.row_starts[end_key_row])),
+                query_points=points_of_rows(query_grid, first_row, end_row),
+                key_points=points_of_rows(key_grid, first_key_row, end_key_row),
                 attention=NeighbourhoodAttentionWrapper(band_neighbourhood),
             )
         )
     return bands
+
+
+@dataclass(frozen=True, eq=False)
+class ShardPlan:
+    """The work of one GPU: the outputs of its own query points, computed band by band.
+
+    When the points are split across GPUs, each GPU owns a run of consecutive query points (its
+    shard) and returns their outputs. A shard can start and end inside a row, but attention works
+    on whole rows, so the GPU computes every row that holds one of its points and keeps only its
+    own outputs. For that it needs the inputs of a run of points from its neighbours as well:
+    the query points of those whole rows and the key points their rows reach.
+
+    All point ranges count from the first point of the whole grids.
+    """
+
+    own_points: slice
+    "The GPU's own query points, whose outputs it returns."
+    query_points: slice
+    "The points of every query row that holds one of the GPU's own points."
+    key_points: slice
+    "The key points those query rows attend to."
+    bands: list[NeighbourhoodBand]
+    "Bands covering ``query_points``, from north to south."
+
+
+def plan_shard(neighbourhood: GridNeighbourhood, num_bands: int, own_points: slice) -> ShardPlan:
+    """The work of the GPU that owns the query points ``own_points`` (see :class:`ShardPlan`)."""
+    if own_points.stop <= own_points.start:
+        raise ValueError(f"Every GPU needs at least one query point, got the points {own_points}.")
+    first_row, end_row = rows_holding(neighbourhood.query_grid, own_points)
+    first_key_row, end_key_row = key_rows_reached(neighbourhood, first_row, end_row)
+    return ShardPlan(
+        own_points=own_points,
+        query_points=points_of_rows(neighbourhood.query_grid, first_row, end_row),
+        key_points=points_of_rows(neighbourhood.key_grid, first_key_row, end_key_row),
+        bands=split_into_bands(neighbourhood, num_bands, rows=(first_row, end_row)),
+    )
+
+
+class NeighbourhoodBands:
+    """The bands of one model component, for the query points each GPU owns.
+
+    On a single GPU there is one plan, owning every query point. When the query points are split
+    across GPUs in runs of consecutive points (``shard_sizes`` points each, in rank order), there
+    is one plan per GPU (see :class:`ShardPlan`). The plans for each way of splitting are worked
+    out once and kept.
+    """
+
+    def __init__(self, neighbourhood: GridNeighbourhood) -> None:
+        self.neighbourhood = neighbourhood
+        self.num_bands = neighbourhood.num_bands
+        self._plans: dict[tuple[int, ...], list[ShardPlan]] = {}
+        self._exchanges: dict[tuple, PointRangeExchange] = {}
+
+    def __getstate__(self) -> dict:
+        # The exchanges hold index tensors on a device; they are planned again where the model is loaded.
+        state = self.__dict__.copy()
+        state["_exchanges"] = {}
+        return state
+
+    @property
+    def num_query_points(self) -> int:
+        return self.neighbourhood.query_grid.num_points
+
+    @property
+    def num_key_points(self) -> int:
+        return self.neighbourhood.key_grid.num_points
+
+    def plans(self, shard_sizes: Optional[list[int]] = None) -> list[ShardPlan]:
+        """One plan per GPU, in rank order; a single plan for all query points if ``shard_sizes`` is None."""
+        sizes = tuple(shard_sizes) if shard_sizes is not None else (self.num_query_points,)
+        if sum(sizes) != self.num_query_points:
+            raise ValueError(
+                f"The shard sizes {list(sizes)} do not add up to the {self.num_query_points} query points."
+            )
+        if sizes not in self._plans:
+            starts = [0, *itertools.accumulate(sizes)]
+            self._plans[sizes] = [
+                plan_shard(self.neighbourhood, self.num_bands, slice(start, stop))
+                for start, stop in zip(starts[:-1], starts[1:])
+            ]
+        return self._plans[sizes]
+
+    def key_exchange(
+        self, query_shard_sizes: list[int], key_shard_sizes: list[int], rank: int, device: torch.device
+    ) -> PointRangeExchange:
+        """The exchange that brings every GPU the key points its query rows reach."""
+        return self._exchange("key", query_shard_sizes, key_shard_sizes, rank, device)
+
+    def query_exchange(self, query_shard_sizes: list[int], rank: int, device: torch.device) -> PointRangeExchange:
+        """The exchange that brings every GPU the query points of the whole rows holding its own points."""
+        return self._exchange("query", query_shard_sizes, query_shard_sizes, rank, device)
+
+    def _exchange(
+        self, side: str, query_shard_sizes: list[int], shard_sizes: list[int], rank: int, device: torch.device
+    ) -> PointRangeExchange:
+        cache_key = (side, tuple(query_shard_sizes), tuple(shard_sizes), rank, device)
+        if cache_key not in self._exchanges:
+            plans = self.plans(query_shard_sizes)
+            wanted = [plan.key_points if side == "key" else plan.query_points for plan in plans]
+            self._exchanges[cache_key] = build_point_range_exchange(list(shard_sizes), wanted, rank, device)
+        return self._exchanges[cache_key]
+
+
+def write_own_points(out: Tensor, band_out: Tensor, band: NeighbourhoodBand, plan: ShardPlan) -> None:
+    """Copy the outputs of the band's query points that the GPU owns into ``out``.
+
+    ``band_out`` holds the outputs of all of the band's query points and ``out`` those of the GPU's
+    own points, both laid out ``(batch, points, channels)``.
+    """
+    first = max(band.query_points.start, plan.own_points.start)
+    stop = min(band.query_points.stop, plan.own_points.stop)
+    if stop > first:
+        own_start, band_start = plan.own_points.start, band.query_points.start
+        out[:, first - own_start : stop - own_start] = band_out[:, first - band_start : stop - band_start]
 
 
 def build_grid_neighbourhood(

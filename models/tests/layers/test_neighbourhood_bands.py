@@ -9,16 +9,21 @@
 
 """Neighbourhood attention worked through bands of query rows gives the same results as on the whole grid."""
 
+import itertools
 import math
+from dataclasses import replace
 
 import pytest
 import torch
 
+from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
+from anemoi.models.distributed.point_ranges import build_point_range_exchange
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.mapper import TransformerBackwardMapper
 from anemoi.models.layers.mapper import TransformerForwardMapper
 from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
 from anemoi.models.layers.neighbourhood_attention import split_into_bands
 from anemoi.models.layers.processor import TransformerProcessor
 from anemoi.models.layers.reduced_grid import ReducedGrid
@@ -137,7 +142,7 @@ def _same_results(make, run, num_bands: int, gradient_checkpointing: bool) -> No
     whole = make(1).double()
     banded = make(num_bands).double()
     banded.load_state_dict(whole.state_dict())
-    assert banded.bands is not None and len(banded.bands) > 1
+    assert banded.bands is not None and len(banded.bands.plans()[0].bands) > 1
     for layer in (whole, banded):
         layer.gradient_checkpointing = gradient_checkpointing
 
@@ -278,3 +283,64 @@ def test_processor_in_bands_matches_the_whole_grid(case: str, gradient_checkpoin
     if conditional:
         shapes["cond"] = (batch * grid.num_points, COND_CHANNELS)
     _same_results(make, _Run(shapes, run), 4, gradient_checkpointing)
+
+
+def _splits(num_points: int) -> list[list[int]]:
+    """Ways of splitting the points across GPUs: balanced over 2 to 7 GPUs, and some uneven ones."""
+    splits = [get_balanced_partition_sizes(num_points, n) for n in range(2, 8)]
+    splits.append([1, num_points - 2, 1])
+    splits.append([num_points // 3, 5, num_points - num_points // 3 - 5])
+    return splits
+
+
+@pytest.mark.parametrize("case", CASES)
+@pytest.mark.parametrize("num_bands", [1, 3])
+def test_every_gpu_sees_the_keys_of_its_own_queries(case: str, num_bands: int) -> None:
+    family, query_grid, key_grid, kernel_size = CASES[case]
+    nb = replace(neighbourhood(family, query_grid, key_grid, kernel_size), num_bands=num_bands)
+    if nb.is_self_attention:
+        full = dense(ReducedGridNeighbourhoodMask(nb.query_grid, nb.kernel_size))
+    else:
+        full = dense(ReducedGridCrossNeighbourhoodMask(nb.query_grid, nb.key_grid, nb.kernel_size))
+
+    for sizes in _splits(nb.query_grid.num_points):
+        plans = NeighbourhoodBands(nb).plans(sizes)
+        assert [p.own_points.stop - p.own_points.start for p in plans] == sizes
+        for plan in plans:
+            own, rows, keys = plan.own_points, plan.query_points, plan.key_points
+            assert rows.start <= own.start and own.stop <= rows.stop
+            outside = full[own].clone()
+            outside[:, keys] = False
+            assert not outside.any(), "a query attends to a key the GPU does not fetch"
+            covered = torch.zeros(nb.query_grid.num_points, dtype=torch.long)
+            for band in plan.bands:
+                covered[band.query_points] += 1
+                assert keys.start <= band.key_points.start and band.key_points.stop <= keys.stop
+                band_nb = band.attention.neighbourhood
+                band_mask = dense(
+                    ReducedGridCrossNeighbourhoodMask(band_nb.query_grid, band_nb.key_grid, band_nb.kernel_size)
+                )
+                assert torch.equal(band_mask, full[band.query_points, band.key_points])
+            assert torch.equal(covered[rows], torch.ones(rows.stop - rows.start, dtype=torch.long))
+            assert covered.sum() == rows.stop - rows.start
+
+
+@pytest.mark.parametrize("num_points", [10, 97])
+def test_point_range_exchange_gives_every_gpu_the_points_it_wants(num_points: int) -> None:
+    generator = torch.Generator().manual_seed(0)
+    values = torch.randn(num_points, 3, generator=generator)
+    for sizes in _splits(num_points):
+        starts = [0, *itertools.accumulate(sizes)]
+        shards = [values[a:b] for a, b in zip(starts[:-1], starts[1:])]
+        wanted = []
+        for a, b in zip(starts[:-1], starts[1:]):
+            first = int(torch.randint(0, a + 1, (1,), generator=generator))
+            stop = int(torch.randint(b, num_points + 1, (1,), generator=generator))
+            wanted.append(slice(first, stop))
+        exchanges = [build_point_range_exchange(sizes, wanted, r, torch.device("cpu")) for r in range(len(sizes))]
+        for rank, exchange in enumerate(exchanges):
+            # What halo_exchange returns on this GPU: its own points, then what each GPU sends it.
+            received = [shards[other][exchanges[other].send_indices[rank]] for other in range(len(sizes))]
+            assert [len(r) for r in received] == list(exchange.recv_counts)
+            halo_out = torch.cat([shards[rank], *received])
+            assert torch.equal(halo_out[exchange.order], values[wanted[rank]])
