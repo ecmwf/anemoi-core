@@ -12,6 +12,7 @@ import torch
 
 from anemoi.models.layers.categorical import CategoricalEmbedding
 from anemoi.models.layers.categorical import build_categorical_embeddings
+from anemoi.models.layers.categorical import extend_categorical_state_dict
 
 CODES = [49001, 21009, 1004, 49003, 49002]
 
@@ -148,3 +149,21 @@ def test_unknown_codes_logged_once_outside_training(caplog: pytest.LogCaptureFix
     emb(torch.tensor([[7.0, 8.0]]))
     assert caplog.text.count("not in the vocabulary") == 1
     assert "mwt_reportype" in caplog.text and "[7, 8]" in caplog.text
+
+
+def test_extend_categorical_state_dict_survives_shape_filter() -> None:
+    old = torch.nn.ModuleDict({"rt": CategoricalEmbedding([10, 20], embedding_dim=3)})
+    new = torch.nn.ModuleDict({"rt": CategoricalEmbedding([10, 20, 30], embedding_dim=3)})
+    state_dict = dict(old.state_dict())
+    extend_categorical_state_dict(new, state_dict)
+    # A shape filter like transfer learning's now keeps every key.
+    target = new.state_dict()
+    assert all(state_dict[k].shape == target[k].shape for k in state_dict)
+    new.load_state_dict(state_dict)
+    torch.testing.assert_close(new["rt"].embedding.weight[:4], old["rt"].embedding.weight)
+
+    # A reordered vocabulary is left alone, so the filter drops it as before.
+    reordered = torch.nn.ModuleDict({"rt": CategoricalEmbedding([20, 10, 30], embedding_dim=3)})
+    state_dict = dict(old.state_dict())
+    extend_categorical_state_dict(reordered, state_dict)
+    assert state_dict["rt.embedding.weight"].shape[0] == 4

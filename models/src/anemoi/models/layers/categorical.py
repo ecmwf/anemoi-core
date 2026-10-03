@@ -155,24 +155,50 @@ class CategoricalEmbedding(nn.Module):
             idx = self._replace_with_unknown(idx)
         return self.embedding(idx)
 
-    def _load_from_state_dict(self, state_dict: dict, prefix: str, *args: Any, **kwargs: Any) -> None:
-        """Accept a checkpoint whose vocabulary is a prefix of this one.
+    def extend_state_dict(self, state_dict: dict, prefix: str = "") -> None:
+        """Pad a checkpoint whose vocabulary is a prefix of this one, in place.
 
         Rows for appended codes start as copies of the checkpoint's ``UNKNOWN`` row,
-        which is what those codes were mapped to before.
+        which is what those codes were mapped to before. Any other vocabulary is left
+        alone, so loading it fails on the shape mismatch as usual.
         """
         codes_key, weight_key = prefix + "codes", prefix + "embedding.weight"
         old_codes = state_dict.get(codes_key)
         old_weight = state_dict.get(weight_key)
-        if old_codes is not None and old_weight is not None and old_codes.numel() < self.num_codes:
-            n_old = old_codes.numel()
-            if torch.equal(old_codes.to(self.codes.device), self.codes[:n_old]):
-                n_new = self.num_codes - n_old
-                pad = old_weight[self.UNKNOWN].unsqueeze(0).expand(n_new, -1)
-                state_dict[weight_key] = torch.cat([old_weight, pad], dim=0)
-                state_dict[codes_key] = self.codes.clone()
-                LOGGER.info("%s: extended vocabulary by %d code(s), initialised from UNKNOWN.", prefix, n_new)
+        if old_codes is None or old_weight is None or old_codes.numel() >= self.num_codes:
+            return
+        n_old = old_codes.numel()
+        if not torch.equal(old_codes.to(self.codes.device), self.codes[:n_old]):
+            return
+        n_new = self.num_codes - n_old
+        pad = old_weight[self.UNKNOWN].unsqueeze(0).expand(n_new, -1)
+        state_dict[weight_key] = torch.cat([old_weight, pad], dim=0)
+        state_dict[codes_key] = self.codes.clone().to(old_codes.device)
+        LOGGER.info("%s: extended vocabulary by %d code(s), initialised from UNKNOWN.", prefix, n_new)
+
+    def _load_from_state_dict(self, state_dict: dict, prefix: str, *args: Any, **kwargs: Any) -> None:
+        """Accept a checkpoint whose vocabulary is a prefix of this one (see :meth:`extend_state_dict`)."""
+        self.extend_state_dict(state_dict, prefix)
         super()._load_from_state_dict(state_dict, prefix, *args, **kwargs)
+
+
+def extend_categorical_state_dict(model: nn.Module, state_dict: dict) -> None:
+    """Pad every :class:`CategoricalEmbedding` entry of ``state_dict`` whose vocabulary grew, in place.
+
+    For loaders that drop shape-mismatched keys before ``load_state_dict`` (e.g.
+    transfer learning), which would otherwise discard the old rows and re-initialise
+    the whole table. Call it before that filter.
+
+    Parameters
+    ----------
+    model : nn.Module
+        Module whose ``state_dict`` keys match ``state_dict``.
+    state_dict : dict
+        Checkpoint state dict, modified in place.
+    """
+    for name, module in model.named_modules():
+        if isinstance(module, CategoricalEmbedding):
+            module.extend_state_dict(state_dict, f"{name}." if name else "")
 
 
 def validate_codes(codes: Sequence[int]) -> list[int]:
