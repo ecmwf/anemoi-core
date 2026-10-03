@@ -135,3 +135,16 @@ def test_build_categorical_embeddings_overrides() -> None:
     assert built["b"].embedding_dim == 8 and built["b"].unknown_prob == 0.0
     overridden = build_categorical_embeddings(specs, embedding_dim=3, unknown_prob=0.2)
     assert all(e.embedding_dim == 3 and e.unknown_prob == 0.2 for e in overridden.values())
+
+
+def test_unknown_codes_logged_once_outside_training(caplog: pytest.LogCaptureFixture) -> None:
+    emb = CategoricalEmbedding(CODES, embedding_dim=2, name="mwt_reportype")
+    emb(torch.tensor([[7.0, 49001.0]]))  # training: silent
+    assert "not in the vocabulary" not in caplog.text
+
+    emb.eval()
+    caplog.set_level("INFO")
+    emb(torch.tensor([[7.0, 8.0, 0.0, 49001.0]]))
+    emb(torch.tensor([[7.0, 8.0]]))
+    assert caplog.text.count("not in the vocabulary") == 1
+    assert "mwt_reportype" in caplog.text and "[7, 8]" in caplog.text

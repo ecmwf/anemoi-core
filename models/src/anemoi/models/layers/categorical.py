@@ -52,13 +52,16 @@ class CategoricalEmbedding(nn.Module):
         Training-only probability of replacing a known code with ``UNKNOWN``. Drawn
         once per (batch sample, vocabulary entry) per forward call, so every cell of
         a sample carrying that code is replaced together. By default 0.0.
+    name : str, optional
+        Variable name, used in log messages.
     """
 
     MISSING = 0
     UNKNOWN = 1
 
-    def __init__(self, codes: Sequence[int], embedding_dim: int, unknown_prob: float = 0.0) -> None:
+    def __init__(self, codes: Sequence[int], embedding_dim: int, unknown_prob: float = 0.0, name: str = "") -> None:
         super().__init__()
+        self.name = name
         codes = validate_codes(codes)
         if embedding_dim < 1:
             msg = f"embedding_dim must be positive, got {embedding_dim}."
@@ -76,6 +79,7 @@ class CategoricalEmbedding(nn.Module):
         self.unknown_prob = float(unknown_prob)
         self.embedding = nn.Embedding(len(codes) + 2, embedding_dim)
         self._checked_integer = False
+        self._logged_unknown: set[int] = set()
 
     @property
     def num_codes(self) -> int:
@@ -107,7 +111,17 @@ class CategoricalEmbedding(nn.Module):
         pos = torch.searchsorted(self.sorted_codes, rounded).clamp(max=self.num_codes - 1)
         known = self.sorted_codes[pos] == rounded
         idx = torch.where(known, self.perm[pos] + 2, self.UNKNOWN)
-        return torch.where(rounded == 0, self.MISSING, idx)
+        idx = torch.where(rounded == 0, self.MISSING, idx)
+        if not self.training:
+            self._log_unknown_codes(rounded[idx == self.UNKNOWN])
+        return idx
+
+    def _log_unknown_codes(self, codes: Tensor) -> None:
+        """Log each out-of-vocabulary code once, the first time it is seen outside training."""
+        new = sorted(set(codes.unique().long().tolist()) - self._logged_unknown)
+        if new:
+            self._logged_unknown.update(new)
+            LOGGER.info("CategoricalEmbedding(%s): codes %s are not in the vocabulary, using UNKNOWN.", self.name, new)
 
     @staticmethod
     def _check_integer(r: Tensor, rounded: Tensor) -> None:
@@ -210,7 +224,7 @@ def build_categorical_embeddings(
     for name, spec in specs.items():
         dim = embedding_dim if embedding_dim is not None else spec.get("embedding_dim", 8)
         prob = unknown_prob if unknown_prob is not None else spec.get("unknown_prob", 0.0)
-        embeddings[name] = CategoricalEmbedding(list(spec["codes"]), int(dim), float(prob))
+        embeddings[name] = CategoricalEmbedding(list(spec["codes"]), int(dim), float(prob), name=name)
     return embeddings
 
 
