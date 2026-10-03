@@ -277,6 +277,23 @@ class Boolean1DSchema(BaseModel):
 OutputMaskSchemas = Union[NoOutputMaskSchema, Boolean1DSchema]
 
 
+class CategoricalEmbeddingSchema(BaseModel):
+    codes: list[int] = Field(min_length=1)
+    "Known codes. List order defines the embedding rows: append new codes, never reorder."
+    embedding_dim: PositiveInt = 8
+    "Width of each embedding vector."
+    unknown_prob: float = Field(default=0.0, ge=0.0, lt=1.0)
+    "Training-only probability of replacing a known code with UNKNOWN, per sample and code."
+
+    @model_validator(mode="after")
+    def check_codes(self) -> CategoricalEmbeddingSchema:
+        # Lazy import keeps the schemas importable without torch.
+        from anemoi.models.layers.categorical import validate_codes
+
+        validate_codes(self.codes)
+        return self
+
+
 class BaseModelSchema(PydanticBaseModel):
     num_channels: NonNegativeInt = Field(example=512)
     "Feature tensor size in the hidden space."
@@ -334,6 +351,8 @@ class BaseModelSchema(PydanticBaseModel):
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
+    categorical_embeddings: Optional[dict[str, dict[str, CategoricalEmbeddingSchema]]] = None
+    "Learned embeddings for integer-coded inputs, keyed by dataset then variable. Variables need the `none` normaliser."
 
 
 class NoOpNoiseInjectorSchema(BaseModel):

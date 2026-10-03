@@ -212,3 +212,52 @@ def build_categorical_embeddings(
         prob = unknown_prob if unknown_prob is not None else spec.get("unknown_prob", 0.0)
         embeddings[name] = CategoricalEmbedding(list(spec["codes"]), int(dim), float(prob))
     return embeddings
+
+
+def check_categorical_preprocessing(
+    dataset_name: str,
+    variables: Sequence[str],
+    processors: nn.Module,
+    data_indices: Any,
+) -> None:
+    """Check that the pre-processors hand raw codes to the embeddings.
+
+    Raises if a normaliser rescales a categorical variable (it must be in the
+    normaliser's ``none`` list). Warns if an ``InputOnlyImputer`` fills it with
+    anything other than 0.0, which is what marks a cell as MISSING.
+
+    Parameters
+    ----------
+    dataset_name : str
+        Dataset name, for messages.
+    variables : Sequence[str]
+        Categorical variable names.
+    processors : nn.Module
+        The dataset's pre-processors (``Processors``).
+    data_indices : Any
+        The dataset's ``IndexCollection``.
+    """
+    name_to_index = data_indices.data.input.name_to_index
+    for processor_name, processor in getattr(processors, "processors", {}).items():
+        norm_mul = getattr(processor, "_norm_mul", None)
+        norm_add = getattr(processor, "_norm_add", None)
+        if norm_mul is not None and norm_add is not None:
+            rescaled = [v for v in variables if norm_mul[name_to_index[v]] != 1.0 or norm_add[name_to_index[v]] != 0.0]
+            if rescaled:
+                msg = (
+                    f"Dataset '{dataset_name}': categorical variables {rescaled} are rescaled by the "
+                    f"'{processor_name}' processor. Add them to its `none` list so raw codes reach the embedding."
+                )
+                raise ValueError(msg)
+
+        fill = getattr(processor, "imputation_values_training", None)
+        if fill is not None:
+            other = [v for v in variables if not (torch.isnan(fill[name_to_index[v]]) or fill[name_to_index[v]] == 0.0)]
+            if other:
+                LOGGER.warning(
+                    "Dataset '%s': imputer '%s' fills categorical variables %s with a non-zero value, "
+                    "so imputed cells look like a real code instead of MISSING. Set their imputer value to 0.0.",
+                    dataset_name,
+                    processor_name,
+                    other,
+                )

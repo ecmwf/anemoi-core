@@ -16,6 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.layers.categorical import check_categorical_preprocessing
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.utils.config import get_multiple_datasets_config
@@ -204,6 +205,10 @@ class AnemoiModelInterface(torch.nn.Module):
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
+        for dataset_name, embeddings in getattr(self.model, "categorical_embeddings", {}).items():
+            check_categorical_preprocessing(
+                dataset_name, list(embeddings), self.pre_processors[dataset_name], self.data_indices[dataset_name]
+            )
 
         # Use the forward method of the model directly
         self.forward = self.model.forward
