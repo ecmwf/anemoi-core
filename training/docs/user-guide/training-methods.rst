@@ -153,6 +153,77 @@ multiple instances. Use ``graph_attention_backend: pyg`` for CPU execution.
 The training method checkpoints the complete corrector call; processor
 checkpointing can additionally be enabled through its configuration.
 
+Categorical corrector variables
+===============================
+
+Integer-coded metadata, such as a satellite report type, should not be fed
+as a scalar. A scalar implies an order and a distance between codes that
+mean nothing. Under ``bf16-mixed``, nearby mean-std normalised codes also
+become the same input: in one observation dataset, 26 microwave-temperature
+report types reached the network as only 7 distinct values. List such variables
+under ``model.categorical_embeddings`` and each one is replaced by a learned
+embedding, both in the encoder input and in any instrument corrector that
+reads it:
+
+.. code:: yaml
+
+   model:
+     categorical_embeddings:
+       data:                       # dataset name
+         mwt_reportype:
+           codes: [30002, 30003, 21009, 49001]   # append-only
+           embedding_dim: 8
+           unknown_prob: 0.1
+   training:
+     corrector:
+       categorical_embedding_dim: 8     # optional; defaults to each variable's
+       categorical_unknown_prob: 0.1    # optional; defaults to each variable's
+   data:
+     datasets:
+       data:
+         processors:
+           normalizer:
+             config:
+               none: [mwt_reportype]    # raw codes must reach the embedding
+
+Embedding rows are:
+
+- ``0`` (MISSING): raw value 0.0 or NaN. This is the ``InputOnlyImputer``
+  fill (keep its value at 0.0) and the forecast-phase zeroing of corrector
+  inputs, so the network can tell "no observation here" from any satellite.
+  Zero must therefore never be a real code.
+- ``1`` (UNKNOWN): a non-zero code that is not in ``codes``. During training
+  only, each known code is also sent to UNKNOWN with probability
+  ``unknown_prob``, drawn per batch sample and code, so that row learns an
+  average over satellites. New satellites in validation, operational or
+  future data then degrade gracefully instead of hitting an untrained row.
+  Outside training, each out-of-vocabulary code is logged once.
+- ``2`` onwards: the codes, in list order.
+
+Notes:
+
+- Build ``codes`` from the training period only, and leave out very rare
+  codes (a share below about 1e-4): they fall to UNKNOWN instead of keeping
+  a barely trained row.
+- The list is append-only. A checkpoint whose vocabulary is a prefix of the
+  configured one loads, with the new rows copied from UNKNOWN. Reordering or
+  removing codes breaks loading.
+- Each cell must carry one integer code. Non-integer values, as produced when
+  gridding averages several report types into one cell, raise an error.
+- Each variable needs the ``none`` normaliser; model construction fails
+  otherwise. The schema and model also reject codes of 0, duplicates and
+  variables that are not model inputs.
+- Each embedded variable widens the encoder input by ``embedding_dim - 1``
+  channels per input step, so checkpoints trained without the block do not
+  load strictly. Only ``AnemoiModelEncProcDec`` and the hierarchical model
+  support the block; other model classes raise ``NotImplementedError``.
+- The encoder and each corrector group own separate tables, so the
+  training-only corrector stays decoupled from the inference model.
+
+A scan of the dataset that writes per-code counts and dates can fill
+``codes``: keep the codes seen in the training period, in order of first
+appearance.
+
 
 .. _ensemble-crps-training:
 
