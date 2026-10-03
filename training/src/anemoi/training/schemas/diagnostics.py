@@ -56,6 +56,7 @@ class LossPlotFnSchema(GenericSchema):
     Built-in loss plot options
     --------------------------
     - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn``
+    - ``anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn``
 
     Custom functions are accepted — pass any dotted import path and bind
     extra kwargs via ``_partial_: true``.

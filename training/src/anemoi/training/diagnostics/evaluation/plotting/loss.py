@@ -28,6 +28,58 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+def assign_parameter_groups(
+    parameter_names: list[str],
+    parameter_groups: dict[str, list[str]] | None = None,
+) -> np.ndarray:
+    """Map each parameter name to a group label.
+
+    Parameters listed in ``parameter_groups`` take that group's label. The rest
+    are grouped by their name prefix (``cris_141`` -> ``cris``); prefix groups
+    with a single member are folded into ``"other"``.
+
+    Parameters
+    ----------
+    parameter_names : list[str]
+        Ordered list of parameter (variable) names.
+    parameter_groups : dict[str, list[str]] | None, optional
+        Explicit grouping of parameter names.
+
+    Returns
+    -------
+    np.ndarray
+        Group label per parameter, in the order of ``parameter_names``.
+    """
+    parameter_groups = parameter_groups or {}
+
+    def _auto_group(name: str) -> str:
+        parts = name.split("_")
+        return parts[0] if len(parts) == 1 else name[: -len(parts[-1]) - 1]
+
+    parameters_to_groups = np.array(
+        [
+            next(
+                (group_name for group_name, group_parameters in parameter_groups.items() if name in group_parameters),
+                _auto_group(name),
+            )
+            for name in parameter_names
+        ],
+    )
+
+    unique_group_list, group_inverse, group_counts = np.unique(
+        parameters_to_groups,
+        return_inverse=True,
+        return_counts=True,
+    )
+    unique_group_list = np.array(
+        [
+            (unique_group_list[tn] if count > 1 or unique_group_list[tn] in parameter_groups else "other")
+            for tn, count in enumerate(group_counts)
+        ],
+    )
+    return unique_group_list[group_inverse]
+
+
 def sort_and_color_by_parameter_group(
     parameter_names: list[str],
     parameter_groups: dict[str, list[str]] | None = None,
@@ -55,44 +107,12 @@ def sort_and_color_by_parameter_group(
         legend_patches : list[mpatches.Patch]
             Coloured legend patches, one per group.
     """
-    parameter_groups = parameter_groups or {}
-
-    def _auto_group(name: str) -> str:
-        parts = name.split("_")
-        return parts[0] if len(parts) == 1 else name[: -len(parts[-1]) - 1]
-
     if len(parameter_names) <= 15:
         parameters_to_groups = np.array(parameter_names)
         sort_by_parameter_group = np.arange(len(parameter_names), dtype=int)
     else:
-        parameters_to_groups = np.array(
-            [
-                next(
-                    (
-                        group_name
-                        for group_name, group_parameters in parameter_groups.items()
-                        if name in group_parameters
-                    ),
-                    _auto_group(name),
-                )
-                for name in parameter_names
-            ],
-        )
-
-        unique_group_list, group_inverse, group_counts = np.unique(
-            parameters_to_groups,
-            return_inverse=True,
-            return_counts=True,
-        )
-
-        unique_group_list = np.array(
-            [
-                (unique_group_list[tn] if count > 1 or unique_group_list[tn] in parameter_groups else "other")
-                for tn, count in enumerate(group_counts)
-            ],
-        )
-        parameters_to_groups = unique_group_list[group_inverse]
-        unique_group_list, group_inverse = np.unique(parameters_to_groups, return_inverse=True)
+        parameters_to_groups = assign_parameter_groups(parameter_names, parameter_groups)
+        _, group_inverse = np.unique(parameters_to_groups, return_inverse=True)
 
         sort_by_parameter_group = np.argsort(group_inverse, kind="stable")
 
@@ -206,3 +226,157 @@ def loss_plot_fn(
         parameter_groups or {},
     )
     return plot_loss(loss[sort_by_parameter_group], colors, xticks, legend_patches)
+
+
+def _group_colors(n_groups: int) -> np.ndarray:
+    """Return one colour per group, keeping neighbouring groups distinct.
+
+    ``tab20`` stores each hue as a dark/light pair, so neighbouring groups would
+    otherwise share a hue. Use all the dark shades first, then the light ones.
+    """
+    if n_groups <= 10:
+        return plt.get_cmap("tab10")(np.arange(n_groups))
+    if n_groups > 20:
+        LOGGER.warning("More than 20 groups detected, but colormap has only 20 colors.")
+    order = np.r_[np.arange(0, 20, 2), np.arange(1, 20, 2)]
+    return plt.get_cmap("tab20")(order[np.arange(n_groups) % 20])
+
+
+def loss_contribution_plot_fn(
+    loss: np.ndarray,
+    *,
+    parameter_names: list[str],
+    parameter_groups: dict[str, list[str]] | None = None,
+    metadata_variables: dict[str, Any] | None = None,
+    metric_name: str | None = None,
+    settings: PlottingSettings | None = None,  # noqa: ARG001
+    top_n: int = 25,
+    **_kwargs,
+) -> Figure:
+    """Plug-in function for :class:`LossCurvePlot` showing each variable's share of the loss.
+
+    Draws three panels:
+
+    - the share of the total loss from each parameter group, largest first,
+      labelled with the percentage and the number of variables in the group;
+    - the ``top_n`` variables by share of the total loss, coloured by group;
+    - every variable's loss on a log axis, grouped on shaded bands, so the
+      spread inside a group is visible.
+
+    The total loss is the mean (or sum) of the per-variable losses, so a
+    variable's share is its loss divided by the sum over variables. Non-finite
+    losses count as zero towards the shares.
+
+    Parameters
+    ----------
+    loss : np.ndarray
+        Per-variable loss of shape (n_parameters,), in model-output order.
+    parameter_names : list[str]
+        Variable names, in the same order as ``loss``.
+    parameter_groups : dict[str, list[str]] | None, optional
+        Explicit grouping, see :func:`assign_parameter_groups`.
+    metadata_variables : dict | None, optional
+        Variable metadata used to order variables by name and level.
+    metric_name : str | None, optional
+        Step suffix from the task (e.g. ``"_rstep0"``), used in the title.
+    settings : PlottingSettings | None, optional
+        Unused, accepted for protocol compatibility.
+    top_n : int, optional
+        Number of variables shown in the top-contributors panel, by default 25.
+
+    Returns
+    -------
+    Figure
+        The figure object handle.
+    """
+    parameter_names = list(parameter_names)
+    order = argsort_variablename_variablelevel(parameter_names, metadata_variables=metadata_variables)
+    names = np.array(parameter_names)[order]
+    loss = np.asarray(loss, dtype=float)[order]
+
+    group_names, group_index = np.unique(
+        assign_parameter_groups(list(names), parameter_groups),
+        return_inverse=True,
+    )
+    # Stable sort keeps the name/level order inside each group.
+    by_group = np.argsort(group_index, kind="stable")
+    names, loss, group_index = names[by_group], loss[by_group], group_index[by_group]
+
+    finite_loss = np.where(np.isfinite(loss), loss, 0.0)
+    total = finite_loss.sum()
+    share = 100 * finite_loss / total if total > 0 else np.zeros_like(finite_loss)
+    group_share = np.bincount(group_index, weights=share, minlength=len(group_names))
+    group_count = np.bincount(group_index, minlength=len(group_names))
+    colors = _group_colors(len(group_names))
+
+    fig = plt.figure(figsize=(14, 10), layout="constrained")
+    grid = fig.add_gridspec(2, 2, height_ratios=[3, 2])
+    title = "Loss contribution by variable"
+    if metric_name:
+        title += f" ({metric_name.lstrip('_')})"
+    fig.suptitle(f"{title}, total {total:.4g}")
+
+    # Panel 1: share of the total loss per group, largest at the top.
+    ax_group = fig.add_subplot(grid[0, 0])
+    group_order = np.argsort(group_share)
+    ax_group.barh(
+        np.arange(len(group_names)),
+        group_share[group_order],
+        color=colors[group_order],
+        edgecolor="white",
+    )
+    ax_group.set_yticks(np.arange(len(group_names)), group_names[group_order])
+    for y, g in enumerate(group_order):
+        ax_group.annotate(
+            f"{group_share[g]:.1f}% (n={group_count[g]})",
+            (group_share[g], y),
+            xytext=(3, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=8,
+        )
+    ax_group.set_xlim(0, max(group_share.max(), 1) * 1.3)
+    ax_group.set_xlabel("Share of total loss [%]")
+    ax_group.set_title("By group")
+
+    # Panel 2: the variables contributing most to the total loss.
+    ax_top = fig.add_subplot(grid[0, 1])
+    top = np.argsort(share)[::-1][: min(top_n, share.size)][::-1]
+    ax_top.barh(np.arange(top.size), share[top], color=colors[group_index[top]], edgecolor="white")
+    ax_top.set_yticks(np.arange(top.size), names[top], fontsize=8)
+    for y, v in enumerate(top):
+        ax_top.annotate(
+            f"{share[v]:.1f}%",
+            (share[v], y),
+            xytext=(3, 0),
+            textcoords="offset points",
+            va="center",
+            fontsize=8,
+        )
+    ax_top.set_xlim(0, max(share[top].max(), 1) * 1.2)
+    ax_top.set_xlabel("Share of total loss [%]")
+    ax_top.set_title(f"Top {top.size} variables")
+
+    # Panel 3: every variable, grouped on alternating bands with a gap between groups.
+    ax_all = fig.add_subplot(grid[1, :])
+    gap = max(1, round(0.01 * names.size))
+    x = np.arange(names.size) + gap * group_index
+    ax_all.bar(x, np.where(loss > 0, loss, np.nan), width=0.8, color=colors[group_index], log=True)
+    centres = []
+    for g in range(len(group_names)):
+        members = x[group_index == g]
+        lo, hi = members.min() - 0.5 - gap / 2, members.max() + 0.5 + gap / 2
+        if g % 2 == 0:
+            ax_all.axvspan(lo, hi, color="0.93", zorder=0, linewidth=0)
+        centres.append((lo + hi) / 2)
+    ax_all.set_xticks(centres, group_names, rotation=90, fontsize=8)
+    ax_all.set_xlim(x.min() - 0.5 - gap / 2, x.max() + 0.5 + gap / 2)
+    ax_all.set_ylabel("Loss")
+    ax_all.set_title("All variables")
+    ax_all.grid(axis="y", which="major", color="0.85", linewidth=0.5)
+    ax_all.set_axisbelow(True)
+
+    for ax in (ax_group, ax_top, ax_all):
+        ax.spines[["top", "right"]].set_visible(False)
+
+    return fig

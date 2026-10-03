@@ -1254,3 +1254,44 @@ def test_sample_plot_fn_global_non_equirectangular_projection_does_not_crash(pro
     assert fig is not None
     fig.clear()
     plt.close(fig)
+
+
+def test_assign_parameter_groups_explicit_prefix_and_other():
+    """assign_parameter_groups: explicit groups win, prefixes group, singletons fold into 'other'."""
+    from anemoi.training.diagnostics.evaluation.plotting.loss import assign_parameter_groups
+
+    names = ["tp", "cp", "cris_141", "cris_155", "t_850", "t_500", "msl"]
+    groups = assign_parameter_groups(names, {"moisture": ["tp", "cp"]})
+
+    assert groups.tolist() == ["moisture", "moisture", "cris", "cris", "t", "t", "other"]
+
+
+def test_loss_contribution_plot_fn_returns_figure_with_shares():
+    """loss_contribution_plot_fn: three panels, group shares sum to 100 %, NaN/zero losses tolerated."""
+    import matplotlib.pyplot as plt
+
+    from anemoi.training.diagnostics.evaluation.plotting.loss import loss_contribution_plot_fn
+
+    names = [f"cris_{c}" for c in range(10)] + [f"hirs_{c}" for c in range(5)] + ["t_850", "t_500", "msl"]
+    loss = np.linspace(0.1, 1.0, len(names))
+    loss[10:15] = 0.0
+    loss[-1] = np.nan
+
+    fig = loss_contribution_plot_fn(loss, parameter_names=names, metric_name="_rstep0", top_n=5)
+
+    ax_group, ax_top, ax_all = fig.axes
+    group_shares = [patch.get_width() for patch in ax_group.patches]
+    assert np.isclose(sum(group_shares), 100.0)
+    assert len(ax_top.patches) == 5
+    assert [t.get_text() for t in ax_all.get_xticklabels()] == ["cris", "hirs", "other", "t"]
+    assert "rstep0" in fig._suptitle.get_text()
+    plt.close(fig)
+
+
+def test_plot_loss_corrected_defaults_to_contribution_plot():
+    """PlotLossCorrected uses loss_contribution_plot_fn by default; LossCurvePlot keeps loss_plot_fn."""
+    from anemoi.training.diagnostics.callbacks.plot import PlotLossCorrected
+    from anemoi.training.diagnostics.evaluation.plotting.loss import loss_contribution_plot_fn
+
+    assert PlotLossCorrected(parameter_groups={}).plot_fn is loss_contribution_plot_fn
+    assert LossCurvePlot(parameter_groups={}).plot_fn is loss_plot_fn

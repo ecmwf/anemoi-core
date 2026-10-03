@@ -32,6 +32,7 @@ from pytorch_lightning.utilities import rank_zero_only
 
 from anemoi.training.diagnostics.evaluation.geospatial.focus_area import build_spatial_mask
 from anemoi.training.diagnostics.evaluation.plotting.graph import graph_plot_fn as _default_graph_plot_fn
+from anemoi.training.diagnostics.evaluation.plotting.loss import loss_contribution_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn as _default_loss_plot_fn
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_graph_inputs
 from anemoi.training.diagnostics.evaluation.plotting.model_introspection import extract_loss_inputs
@@ -647,6 +648,9 @@ class LossCurvePlot(BasePerBatchPlotCallback):
     #: prediction override this so their figures log separately.
     tag_prefix = "loss"
 
+    #: Plot function used when no ``plot_fn`` is configured.
+    default_plot_fn = staticmethod(_default_loss_plot_fn)
+
     def __init__(
         self,
         parameter_groups: dict[dict[str, list[str]]],
@@ -667,7 +671,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
             Dataset names, by default None
         plot_fn : Callable, optional
             Plug-in plot function. Typically a Hydra ``functools.partial``
-            (``_partial_: true``). Defaults to :func:`loss_plot_fn`.
+            (``_partial_: true``). Defaults to :attr:`default_plot_fn`.
         plotting_settings : PlottingSettings, optional
             Plotting configuration settings, by default None (uses defaults)
         """
@@ -680,7 +684,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
         self.dataset_names = dataset_names if dataset_names is not None else ["data"]
         if self.parameter_groups is None:
             self.parameter_groups = {}
-        self.plot_fn = plot_fn if plot_fn is not None else _default_loss_plot_fn
+        self.plot_fn = plot_fn if plot_fn is not None else type(self).default_plot_fn
         validate_plot_fn(self.plot_fn, LossPlotFn, "LossCurvePlot")
 
     def _plot(
@@ -786,9 +790,14 @@ class PlotLossCorrected(LossCurvePlot):
     the corrected loss the model is actually trained against. Falls back to the
     raw prediction (i.e. behaves like :class:`LossCurvePlot`) when no corrector
     is present.
+
+    Defaults to
+    :func:`anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn`,
+    which shows each group's and variable's share of the total loss.
     """
 
     tag_prefix = "loss_corrected"
+    default_plot_fn = staticmethod(loss_contribution_plot_fn)
 
     def _adjust_predictions(
         self,

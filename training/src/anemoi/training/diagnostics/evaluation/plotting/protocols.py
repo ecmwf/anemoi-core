@@ -175,7 +175,10 @@ KNOWN_PLOT_FN_TARGETS: dict[type, tuple[str, ...]] = {
         "anemoi.training.diagnostics.evaluation.plotting.batch_output.histogram_plot_fn",
         "anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn",
     ),
-    LossPlotFn: ("anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn",),
+    LossPlotFn: (
+        "anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn",
+        "anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn",
+    ),
     GraphPlotFn: ("anemoi.training.diagnostics.evaluation.plotting.graph.graph_plot_fn",),
 }
 
