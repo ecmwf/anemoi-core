@@ -363,3 +363,166 @@ def test_instrument_corrector_prefix_matching() -> None:
     )
     target_idx = corrector._target_idx_mwt.tolist()
     assert target_idx == [0, 1]  # mwt_1, mwt_2 matched by prefix, not "other"
+
+
+# ── categorical (embedded) corrector variables ─────────────────────────────
+
+_RT_CODES = [49001, 21009, 1004]
+
+
+def _make_categorical_mlp(unknown_prob: float = 0.0, embedding_dim: int = 3) -> InstrumentCorrectors:
+    return InstrumentCorrectors(
+        instrument_groups={"mwt": {"corrector_variables": ["geom", "rt"], "channels": None}},
+        all_corrector_names=["rt", "geom"],
+        output_name_to_index={"z": 0, "mwt_1": 1, "mwt_2": 2},
+        hidden_dim=8,
+        corrector_type="mlp",
+        categorical_specs={"rt": {"codes": _RT_CODES, "embedding_dim": 5, "unknown_prob": 0.5}},
+        categorical_embedding_dim=embedding_dim,
+        categorical_unknown_prob=unknown_prob,
+    )
+
+
+def _categorical_inputs() -> tuple[torch.Tensor, torch.Tensor]:
+    y_pred = torch.randn(2, 6, 3)
+    # (batch, grid, [rt, geom]): MISSING, UNKNOWN and each known code.
+    rt = torch.tensor([[0.0, 7.0, 49001.0, 21009.0, 1004.0, 0.0]]).expand(2, -1)
+    corrector_vars = torch.stack([rt, torch.randn(2, 6)], dim=-1)
+    return y_pred, corrector_vars
+
+
+def test_categorical_corrector_widths_and_zero_init() -> None:
+    corrector = _make_categorical_mlp()
+    # Corrector settings override the model spec: width 3, not 5.
+    embedding = corrector.categorical["mwt"]["rt"]
+    assert embedding.embedding_dim == 3
+    assert corrector._corrector_idx_mwt.tolist() == [1]  # geom stays continuous
+    assert corrector._categorical_idx_mwt.tolist() == [0]
+    # 2 targets + 1 continuous + 3 embedding channels
+    assert corrector.correctors["mwt"].hidden.in_features == 2 + 1 + 3
+
+    y_pred, corrector_vars = _categorical_inputs()
+    torch.testing.assert_close(corrector(y_pred, corrector_vars), y_pred)
+
+
+def test_categorical_corrector_routes_codes() -> None:
+    corrector = _make_categorical_mlp()
+    _, corrector_vars = _categorical_inputs()
+    idx = corrector.categorical["mwt"]["rt"].codes_to_index(corrector_vars[..., 0])
+    assert idx[0].tolist() == [0, 1, 2, 3, 4, 0]
+
+    group = corrector._append_embeddings("mwt", corrector_vars[..., [1]], corrector_vars)
+    weight = corrector.categorical["mwt"]["rt"].embedding.weight
+    torch.testing.assert_close(group[0, :, 1:], weight[idx[0]])
+
+
+def test_categorical_processor_corrector(processor_config: DictConfig) -> None:
+    provider = create_graph_provider(
+        graph=_make_graph(bidirectional=processor_config.get("shard_strategy") == "edges")["data", "to", "data"],
+        edge_attributes=["edge_attr"],
+        src_size=5,
+        dst_size=5,
+        trainable_size=0,
+    )
+    corrector = InstrumentCorrectors(
+        instrument_groups={"mwt": {"corrector_variables": ["rt"], "channels": None}},
+        all_corrector_names=["rt"],
+        output_name_to_index={"z": 0, "mwt_1": 1},
+        hidden_dim=8,
+        corrector_type="processor",
+        processor_config=processor_config,
+        graph_provider=provider,
+        categorical_specs={"rt": {"codes": _RT_CODES, "embedding_dim": 4}},
+    )
+    # A group may consist of categorical variables only.
+    assert corrector._corrector_idx_mwt.numel() == 0
+    assert corrector.correctors["mwt"].input_proj.in_features == 1 + 4
+
+    pred = torch.randn(1, 1, 1, 5, 2)
+    rt = torch.tensor([0.0, 49001.0, 21009.0, 7.0, 1004.0]).reshape(1, 1, 1, 5, 1)
+    torch.testing.assert_close(corrector(pred, rt), pred)
+    _activate_heads(corrector)
+    corrector(pred, rt).sum().backward()
+    assert corrector.categorical["mwt"]["rt"].embedding.weight.grad.abs().sum() > 0
+
+
+def test_categorical_replacement_active_only_in_training() -> None:
+    corrector = _make_categorical_mlp(unknown_prob=0.9)
+    corrector.correctors["mwt"].out.weight.data.normal_(std=0.5)
+    y_pred, corrector_vars = _categorical_inputs()
+
+    corrector.eval()
+    torch.testing.assert_close(corrector(y_pred, corrector_vars), corrector(y_pred, corrector_vars))
+
+    corrector.train()
+    torch.manual_seed(0)
+    outputs = [corrector(y_pred, corrector_vars) for _ in range(5)]
+    assert any(not torch.allclose(outputs[0], out) for out in outputs[1:])
+
+
+def test_categorical_replacement_checkpoint_gradients_match() -> None:
+    corrector = _make_categorical_mlp(unknown_prob=0.5).train()
+    corrector.correctors["mwt"].out.weight.data.normal_(std=0.5)
+    y_pred, corrector_vars = _categorical_inputs()
+
+    def grads(use_checkpoint: bool) -> list[torch.Tensor]:
+        corrector.zero_grad()
+        torch.manual_seed(1)
+        if use_checkpoint:
+            out = checkpoint(corrector, y_pred, corrector_vars, use_reentrant=False)
+        else:
+            out = corrector(y_pred, corrector_vars)
+        out.pow(2).sum().backward()
+        return [p.grad.clone() for p in corrector.parameters()]
+
+    for plain, ckpt in zip(grads(False), grads(True), strict=True):
+        torch.testing.assert_close(plain, ckpt)
+
+
+def test_da_initialiser_reads_model_vocabularies() -> None:
+    config = DictConfig(
+        {
+            "model": {
+                "categorical_embeddings": {
+                    "observations": {"rt": {"codes": _RT_CODES, "embedding_dim": 4, "unknown_prob": 0.1}},
+                },
+            },
+            "training": {
+                "corrector": {
+                    "type": "mlp",
+                    "hidden_dim": 8,
+                    "categorical_embedding_dim": 2,
+                    "instrument_groups": {"hirs": {"corrector_variables": ["geom", "rt"]}},
+                },
+            },
+        },
+    )
+    indices = SimpleNamespace(
+        data=SimpleNamespace(
+            input=SimpleNamespace(corrector=[1, 2], name_to_index={"hirs_1": 0, "geom": 1, "rt": 2}),
+        ),
+        model=SimpleNamespace(output=SimpleNamespace(name_to_index={"hirs_1": 0})),
+    )
+    module = SimpleNamespace(
+        config=config,
+        dataset_names=["observations"],
+        target_dataset_names=["observations"],
+        data_indices={"observations": indices},
+        corrector=torch.nn.ModuleDict(),
+    )
+    DASingleTraining._init_correctors(module, _make_graph())
+    embedding = module.corrector["observations"].categorical["hirs"]["rt"]
+    assert embedding.embedding_dim == 2  # training.corrector override
+    assert embedding.unknown_prob == 0.1  # model spec, no override
+    assert embedding.codes.tolist() == _RT_CODES
+
+
+def test_corrector_schema_categorical_fields() -> None:
+    schema = CorrectorSchema(
+        instrument_groups={"mwt": {"corrector_variables": ["rt"]}},
+        categorical_embedding_dim=8,
+        categorical_unknown_prob=0.1,
+    )
+    assert schema.categorical_embedding_dim == 8
+    with pytest.raises(ValueError, match="less than 1"):
+        CorrectorSchema(instrument_groups={"mwt": {"corrector_variables": ["rt"]}}, categorical_unknown_prob=1.0)

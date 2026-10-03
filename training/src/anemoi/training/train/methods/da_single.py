@@ -97,6 +97,11 @@ class DASingleTraining(SingleTraining):
                 "channels": list(channels) if channels is not None else None,
             }
 
+        # Categorical corrector variables share the model's vocabularies but get their own tables.
+        categorical_config = getattr(getattr(self.config, "model", None), "categorical_embeddings", None) or {}
+        categorical_embedding_dim = corrector_config.get("categorical_embedding_dim")
+        categorical_unknown_prob = corrector_config.get("categorical_unknown_prob")
+
         fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
         for dataset_name in self.target_dataset_names:
             corrector_indices = self.data_indices[dataset_name].data.input.corrector
@@ -137,6 +142,9 @@ class DASingleTraining(SingleTraining):
                 corrector_type=corrector_type,
                 processor_config=processor_config,
                 graph_provider=graph_provider,
+                categorical_specs=dict(categorical_config.get(dataset_name) or {}),
+                categorical_embedding_dim=categorical_embedding_dim,
+                categorical_unknown_prob=categorical_unknown_prob,
             )
 
     def _apply_corrector(

@@ -982,6 +982,10 @@ class CorrectorSchema(BaseModel):
     "Standard processor configuration, including graph features and layer kernels."
     instrument_groups: dict[str, CorrectorGroupSchema]
     "Mapping of instrument-group name to its corrector configuration."
+    categorical_embedding_dim: PositiveInt | None = None
+    "Embedding width for corrector variables in model.categorical_embeddings. None uses each variable's embedding_dim."
+    categorical_unknown_prob: float | None = Field(default=None, ge=0.0, lt=1.0)
+    "Training-only UNKNOWN replacement probability for those variables. None uses each variable's unknown_prob."
 
     @model_validator(mode="after")
     def check_processor(self) -> Self:
