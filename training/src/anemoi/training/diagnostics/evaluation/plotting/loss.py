@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+import textwrap
 from typing import TYPE_CHECKING
 from typing import Any
 
@@ -242,6 +243,47 @@ def _group_colors(n_groups: int) -> np.ndarray:
     return plt.get_cmap("tab20")(order[np.arange(n_groups) % 20])
 
 
+_LEGEND_NCOLS = 3
+_LEGEND_FONTSIZE = 7
+# Characters per wrapped legend line, sized for three columns on a 14-inch figure.
+_LEGEND_WRAP = 65
+
+
+def _variable_legend_labels(
+    names: np.ndarray,
+    group_index: np.ndarray,
+    group_names: np.ndarray,
+    group_count: np.ndarray,
+) -> tuple[list[str], float]:
+    """Build one wrapped legend label per group and the height in inches the legend needs.
+
+    ``names`` must already be in plotting order, so each label lists its
+    group's variables in the order of their bars.
+    """
+    labels = [
+        "\n".join(
+            textwrap.wrap(
+                f"{group} (n={count}): " + ", ".join(names[group_index == g]),
+                width=_LEGEND_WRAP,
+                break_on_hyphens=False,
+            ),
+        )
+        for g, (group, count) in enumerate(zip(group_names, group_count, strict=True))
+    ]
+    # The legend fills columns top to bottom, the first columns taking any extra entry.
+    line_counts = [label.count("\n") + 1 for label in labels]
+    entries_per_column = np.diff(np.linspace(0, len(labels), _LEGEND_NCOLS + 1).round()).astype(int)
+    entries_per_column = np.sort(entries_per_column)[::-1]
+    column_heights = []
+    start = 0
+    for n_entries in entries_per_column:
+        column = line_counts[start : start + n_entries]
+        # 1.2 line spacing per text line plus matplotlib's default 0.5 em label spacing.
+        column_heights.append(1.2 * sum(column) + 0.5 * len(column))
+        start += n_entries
+    return labels, max(column_heights) * _LEGEND_FONTSIZE / 72 + 0.2
+
+
 def loss_contribution_plot_fn(
     loss: np.ndarray,
     *,
@@ -251,6 +293,7 @@ def loss_contribution_plot_fn(
     metric_name: str | None = None,
     settings: PlottingSettings | None = None,  # noqa: ARG001
     top_n: int = 25,
+    variable_legend: bool = True,
     **_kwargs,
 ) -> Figure:
     """Plug-in function for :class:`LossCurvePlot` showing each variable's share of the loss.
@@ -262,6 +305,9 @@ def loss_contribution_plot_fn(
     - the ``top_n`` variables by share of the total loss, coloured by group;
     - every variable's loss on a log axis, grouped on shaded bands, so the
       spread inside a group is visible.
+
+    Below them, an optional legend lists each group's variables in the
+    left-to-right order of their bars in the last panel.
 
     The total loss is the mean (or sum) of the per-variable losses, so a
     variable's share is its loss divided by the sum over variables. Non-finite
@@ -283,6 +329,8 @@ def loss_contribution_plot_fn(
         Unused, accepted for protocol compatibility.
     top_n : int, optional
         Number of variables shown in the top-contributors panel, by default 25.
+    variable_legend : bool, optional
+        Whether to list each group's variables below the plots, by default True.
 
     Returns
     -------
@@ -309,8 +357,14 @@ def loss_contribution_plot_fn(
     group_count = np.bincount(group_index, minlength=len(group_names))
     colors = _group_colors(len(group_names))
 
-    fig = plt.figure(figsize=(14, 10), layout="constrained")
-    grid = fig.add_gridspec(2, 2, height_ratios=[3, 2])
+    # Height ratios in inches, so the legend row grows without squeezing the plots.
+    height_ratios = [6, 4]
+    legend_labels = []
+    if variable_legend:
+        legend_labels, legend_height = _variable_legend_labels(names, group_index, group_names, group_count)
+        height_ratios.append(legend_height)
+    fig = plt.figure(figsize=(14, sum(height_ratios)), layout="constrained")
+    grid = fig.add_gridspec(len(height_ratios), 2, height_ratios=height_ratios)
     title = "Loss contribution by variable"
     if metric_name:
         title += f" ({metric_name.lstrip('_')})"
@@ -378,5 +432,21 @@ def loss_contribution_plot_fn(
 
     for ax in (ax_group, ax_top, ax_all):
         ax.spines[["top", "right"]].set_visible(False)
+
+    # Legend: each group's variables in the order their bars appear in panel 3.
+    if legend_labels:
+        ax_legend = fig.add_subplot(grid[2, :])
+        ax_legend.axis("off")
+        ax_legend.legend(
+            handles=[mpatches.Patch(color=color) for color in colors],
+            labels=legend_labels,
+            loc="upper left",
+            bbox_to_anchor=(0, 0, 1, 1),
+            mode="expand",
+            ncols=_LEGEND_NCOLS,
+            fontsize=_LEGEND_FONTSIZE,
+            frameon=False,
+            borderaxespad=0,
+        )
 
     return fig

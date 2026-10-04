@@ -371,7 +371,8 @@ Contract notes:
 - ``loss`` and ``parameter_names`` share the same length and ordering.
 - ``loss_contribution_plot_fn`` shows each group's and each variable's share
   of the total loss (top ``top_n`` variables, default 25) above a grouped
-  per-variable bar chart. It is the default for
+  per-variable bar chart and a legend listing each group's variables in bar
+  order (``variable_legend: false`` to hide it). It is the default for
   :class:`~anemoi.training.diagnostics.callbacks.plot.PlotLossCorrected` and
   can be selected for ``LossCurvePlot`` with:
 
@@ -381,6 +382,7 @@ Contract notes:
        _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_contribution_plot_fn
        _partial_: true
        top_n: 25
+       variable_legend: true
 
 ``GraphFeaturePlot`` — graph node/edge feature plots
 ....................................................

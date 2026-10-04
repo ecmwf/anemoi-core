@@ -1267,7 +1267,7 @@ def test_assign_parameter_groups_explicit_prefix_and_other():
 
 
 def test_loss_contribution_plot_fn_returns_figure_with_shares():
-    """loss_contribution_plot_fn: three panels, group shares sum to 100 %, NaN/zero losses tolerated."""
+    """loss_contribution_plot_fn: three panels + variable legend, shares sum to 100 %, NaN/zero losses tolerated."""
     import matplotlib.pyplot as plt
 
     from anemoi.training.diagnostics.evaluation.plotting.loss import loss_contribution_plot_fn
@@ -1279,12 +1279,20 @@ def test_loss_contribution_plot_fn_returns_figure_with_shares():
 
     fig = loss_contribution_plot_fn(loss, parameter_names=names, metric_name="_rstep0", top_n=5)
 
-    ax_group, ax_top, ax_all = fig.axes
+    ax_group, ax_top, ax_all, ax_legend = fig.axes
     group_shares = [patch.get_width() for patch in ax_group.patches]
     assert np.isclose(sum(group_shares), 100.0)
     assert len(ax_top.patches) == 5
     assert [t.get_text() for t in ax_all.get_xticklabels()] == ["cris", "hirs", "other", "t"]
     assert "rstep0" in fig._suptitle.get_text()
+    # One legend entry per group, listing its variables in bar order.
+    legend_texts = [t.get_text().replace("\n", " ") for t in ax_legend.get_legend().get_texts()]
+    assert len(legend_texts) == 4
+    assert legend_texts[3] == "t (n=2): t_500, t_850"
+    plt.close(fig)
+
+    fig = loss_contribution_plot_fn(loss, parameter_names=names, variable_legend=False)
+    assert len(fig.axes) == 3
     plt.close(fig)
 
 
