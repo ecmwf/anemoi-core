@@ -35,6 +35,7 @@ from anemoi.graphs.create import validate_loaded_graph
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
 from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
+from anemoi.training.data.data_reader import is_synthetic_dataset
 from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.diagnostics.callbacks import CallbacksContext
 from anemoi.training.diagnostics.callbacks import get_callbacks
@@ -242,6 +243,11 @@ class AnemoiTrainer(ABC):
                             {k: v for k, v in dict(reader_cfg).items() if k not in _schema_keys and v is not None},
                         )
                     data_node_cfg.node_builder.dataset = graph_dataset_value
+                    if is_synthetic_dataset(dataset_path) and str(
+                        data_node_cfg.node_builder.get("_target_", ""),
+                    ).endswith("AnemoiDatasetNodes"):
+                        # No dataset on disk: build the data nodes from the synthetic grid.
+                        data_node_cfg.node_builder["_target_"] = "anemoi.training.data.data_reader.SyntheticGridNodes"
             else:
                 msg = (
                     "Multiple datasets require a fused graph config with one node group per dataset. "
