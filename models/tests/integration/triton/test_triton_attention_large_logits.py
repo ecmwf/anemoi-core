@@ -22,9 +22,11 @@ https://github.com/KohakuBlueleaf/KohakuFA, docs/precision.md). It names three c
 
 Each test below fails on a copy of the kernel with one of these put back in. The kernel is compared
 with attention in float64 on the same rounded inputs, and with what dense attention in float32 or an
-exact emulation of a correct 16-bit kernel reaches on those inputs.
+exact emulation of a correct 16-bit kernel reaches on those inputs. Float32 inputs run with PyTorch's
+float32 matmul precision at "highest", which the kernel follows with full float32 matrix products.
 """
 
+import contextlib
 import math
 
 import pytest
@@ -41,9 +43,26 @@ pytestmark = [
 ]
 
 MASKINGS = [(False, -1), (True, -1), (False, 32)]  # (causal, window): global, causal, sliding window
-DTYPES = [torch.float16, torch.bfloat16]
+DTYPES = [torch.float16, torch.bfloat16, torch.float32]
 # A multiple of the largest block, and a length that takes the kernel's path for a partly filled last block.
 LENGTHS = [256, 203]
+
+
+@contextlib.contextmanager
+def _float32_matmul_precision(precision):
+    """PyTorch's float32 matmul precision set to ``precision`` inside the block, put back afterwards."""
+    previous = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision(precision)
+    try:
+        yield
+    finally:
+        torch.set_float32_matmul_precision(previous)
+
+
+@pytest.fixture(autouse=True)
+def _full_float32_matmuls():
+    with _float32_matmul_precision("highest"):
+        yield
 
 
 def _visible(n, causal, window):
@@ -123,7 +142,7 @@ def test_two_keys_close_to_a_tie_at_large_scores(dtype, causal, window, n):
 
     reference = _dense(qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64)
     results = _kernel(qkv, grad_out, sm_scale, causal, window)
-    tolerance = 2e-3 if dtype == torch.float16 else 1e-2
+    tolerance = {torch.float16: 2e-3, torch.bfloat16: 1e-2, torch.float32: 1e-5}[dtype]
     for name, result, ref in zip(("out", "dq", "dk", "dv"), results, reference):
         scale = ref.abs().max()
         torch.testing.assert_close(result.double() / scale, ref / scale, rtol=0, atol=tolerance, msg=name)
@@ -222,6 +241,26 @@ def test_scores_far_below_zero(dtype, causal, window, n):
 
     reference = _dense(qkv, grad_out, sm_scale, _visible(n, causal, window), torch.float64)
     results = _kernel(qkv, grad_out, sm_scale, causal, window)
-    tolerance = 2e-3 if dtype == torch.float16 else 1e-2
+    # In float32, dq of keys that share an offset 100 times their spread is the limit (about 1e-3).
+    tolerance = {torch.float16: 2e-3, torch.bfloat16: 1e-2, torch.float32: 1e-3}[dtype]
     for name, result, ref in zip(("out", "dq", "dk", "dv"), results, reference):
         assert _error(result, ref) <= tolerance, name
+
+
+@pytest.mark.parametrize("causal,window", MASKINGS)
+def test_float32_follows_matmul_precision(causal, window):
+    """With float32 inputs the kernel's matrix products follow PyTorch's float32 matmul precision.
+
+    At "highest" its gradients are as accurate as dense float32 attention; at "high" PyTorch allows
+    TF32, whose 10-bit mantissa makes them about a thousand times less accurate.
+    """
+    qkv, grad_out = _clustered_inputs(1e2, torch.float32)
+    mask = _visible(grad_out.shape[2], causal, window)
+    reference = _dense(qkv, grad_out, 1 / 8, mask, torch.float64)
+    plain = _dense(qkv, grad_out, 1 / 8, mask, torch.float32)
+    full = _kernel(qkv, grad_out, 1 / 8, causal, window)
+    with _float32_matmul_precision("high"):
+        tf32 = _kernel(qkv, grad_out, 1 / 8, causal, window)
+    for name, result, rounded, ref, base in zip(("out", "dq", "dk", "dv"), full, tf32, reference, plain):
+        assert _error(result, ref) <= 2.5 * _error(base, ref), name
+        assert _error(rounded, ref) >= 100 * _error(base, ref), name

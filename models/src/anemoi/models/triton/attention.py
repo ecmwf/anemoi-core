@@ -115,6 +115,7 @@ def _attn_fwd_inner(
     lo,  # first key position this call iterates over, a multiple of BLOCK_ITER
     hi,  # end of the key positions this call iterates over
     dtype: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs
     qk_scale,  # scaling factor for the QK^T operation, contains the 1/log(2) factor for faster exponentant calculation
     BLOCK_FIXED: tl.constexpr,  # The size of BLOCK_FIXED, which determines how much of Q is loaded into shared memory and how much of the output is calculated by each block, determined by autotuning
     BLOCK_ITER: tl.constexpr,  # The size of BLOCK_ITER, which determines how much of K and V is iterated over in each block, determined by autotuning
@@ -160,7 +161,7 @@ def _attn_fwd_inner(
                 (curr_iter + offs_iter)[None, :] < N_CTX, k, 0.0
             )  # mask out-of-bounds k values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
 
-        qk = tl.dot(q, k)
+        qk = tl.dot(q, k, input_precision=INPUT_PRECISION)
 
         if MASKED:
             if UNEVEN_CTX and tail_iter_block:
@@ -203,7 +204,7 @@ def _attn_fwd_inner(
         p = p.to(dtype)
 
         # compute the final dot product and update accumulator
-        acc = tl.dot(p, v, acc)
+        acc = tl.dot(p, v, acc, input_precision=INPUT_PRECISION)
 
         # update m_i and l_i
         # place this at the end of the loop to reduce register pressure
@@ -314,7 +315,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 
 @triton.autotune(
     configs=_generate_configs(),
-    key=["N_CTX", "HEAD_DIM"],
+    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
@@ -339,6 +340,7 @@ def _attn_fwd(
     CAUSAL: tl.constexpr,  # whether to apply causal masking
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
     n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for calculating offsets and strides when UNEVEN_CTX is false
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER. padding, dynamic tensor descriptor block sizes and masked loads will be used to handle the uneven context
 ):
@@ -447,6 +449,7 @@ def _attn_fwd(
             lo,
             lo_in,
             dtype,
+            INPUT_PRECISION,
             qk_scale,
             BLOCK_FIXED,
             BLOCK_ITER,
@@ -470,6 +473,7 @@ def _attn_fwd(
             lo_in,
             hi_in,
             dtype,
+            INPUT_PRECISION,
             qk_scale,
             BLOCK_FIXED,
             BLOCK_ITER,
@@ -493,6 +497,7 @@ def _attn_fwd(
             hi_in,
             hi,
             dtype,
+            INPUT_PRECISION,
             qk_scale,
             BLOCK_FIXED,
             BLOCK_ITER,
@@ -536,6 +541,7 @@ def _attn_fwd(
             lo,
             hi,
             dtype,
+            INPUT_PRECISION,
             qk_scale,
             BLOCK_FIXED,
             BLOCK_ITER,
@@ -598,6 +604,7 @@ def _attn_bwd_dkdv_inner(
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs
     UNEVEN_CTX: tl.constexpr,
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
@@ -624,7 +631,7 @@ def _attn_bwd_dkdv_inner(
         else:
             m = tl.load(M + curr_offs)
             inv_l = tl.load(INV_L + curr_offs)
-        qkT = tl.dot(k, qT)
+        qkT = tl.dot(k, qT, input_precision=INPUT_PRECISION)
 
         # Apply masking.
         if MASKED:
@@ -650,7 +657,7 @@ def _attn_bwd_dkdv_inner(
             # mask out-of-bounds do values to 0, so they dont contribute to output. This is needed when N_CTX is not divisible by BLOCK_FIXED
             do = tl.where(curr_offs[:, None] < N_CTX, do, 0.0)
         # Compute dV.
-        dv += tl.dot(pT.to(dtype), do)
+        dv += tl.dot(pT.to(dtype), do, input_precision=INPUT_PRECISION)
         if tail_iter_block:
             Di = tl.load(D + curr_offs, mask=curr_offs < N_CTX, other=0.0)
             lam = tl.load(LAM + curr_offs, mask=curr_offs < N_CTX, other=0.0)
@@ -658,13 +665,13 @@ def _attn_bwd_dkdv_inner(
             Di = tl.load(D + curr_offs)
             lam = tl.load(LAM + curr_offs)
         # Compute dP and dS.
-        dpT = tl.dot(v, tl.trans(do)).to(tl.float32)
+        dpT = tl.dot(v, tl.trans(do), input_precision=INPUT_PRECISION).to(tl.float32)
         dsT = pT * (dpT - Di[None, :])
-        dk += tl.dot(dsT.to(dtype), tl.trans(qT))
+        dk += tl.dot(dsT.to(dtype), tl.trans(qT), input_precision=INPUT_PRECISION)
         # dk from ds - lam * p, with lam from the dQ kernel, so the rounded ds rows sum to zero here too.
         # The correction stays a product of its own: lam * p is far smaller than ds, and rounding
         # ds - lam * p to 16 bits would lose most of it.
-        dk += tl.dot((pT * -lam[None, :]).to(dtype), tl.trans(qT))
+        dk += tl.dot((pT * -lam[None, :]).to(dtype), tl.trans(qT), input_precision=INPUT_PRECISION)
 
         # Move to next iter block
         iter_offset += BLOCK_ITER
@@ -676,7 +683,7 @@ def _attn_bwd_dkdv_inner(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
-    key=["N_CTX", "HEAD_DIM"],
+    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
@@ -706,6 +713,7 @@ def _attn_bwd_dkdv(
     WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
     n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/L/D indexing
 ):
@@ -849,6 +857,7 @@ def _attn_bwd_dkdv(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -874,6 +883,7 @@ def _attn_bwd_dkdv(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             False,
         )
@@ -899,6 +909,7 @@ def _attn_bwd_dkdv(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -932,6 +943,7 @@ def _attn_bwd_dkdv(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -984,6 +996,7 @@ def _attn_bwd_dq_inner(
     WINDOW: tl.constexpr,
     WARP_SPECIALIZE: tl.constexpr,
     dtype: tl.constexpr,
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs
     UNEVEN_CTX: tl.constexpr,
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
@@ -1005,7 +1018,7 @@ def _attn_bwd_dq_inner(
             kT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, kT, 0.0)
             vT = tl.where((curr_iter + offs_iter)[None, :] < N_CTX, vT, 0.0)
 
-        qk = tl.dot(q, kT)
+        qk = tl.dot(q, kT, input_precision=INPUT_PRECISION)
 
         # apply masking
         if MASKED:
@@ -1033,7 +1046,7 @@ def _attn_bwd_dq_inner(
         # be applied here: v[j] lives in the iter tile while out[i] lives in
         # the fixed tile, so dot(do[i], v[j]-out[i]) cannot be expressed as a
         # single tl.dot without restructuring to a non-tiled per-query loop.
-        dp = tl.dot(do, vT).to(tl.float32)
+        dp = tl.dot(do, vT, input_precision=INPUT_PRECISION).to(tl.float32)
         ds = p * (dp - Di[:, None])
         # Compute dQ.
         # K is unscaled; apply the softmax chain-rule scale in the epilogue.
@@ -1041,8 +1054,8 @@ def _attn_bwd_dq_inner(
         p = p.to(dtype)
         ds_sum += tl.sum(ds.to(tl.float32), 1)
         p_sum += tl.sum(p.to(tl.float32), 1)
-        dq += tl.dot(ds, tl.trans(kT))
-        p_k += tl.dot(p, tl.trans(kT))
+        dq += tl.dot(ds, tl.trans(kT), input_precision=INPUT_PRECISION)
+        p_k += tl.dot(p, tl.trans(kT), input_precision=INPUT_PRECISION)
 
         # move to the next iter_block
         iter_offset += BLOCK_ITER
@@ -1054,7 +1067,7 @@ def _attn_bwd_dq_inner(
     # Autotuning is crucial to get good performance at larger head dims
     # For an o96 2048c configuration, got a 3x speedup from autotuning
     configs=_generate_configs(try_warp_spec=False),
-    key=["N_CTX", "HEAD_DIM"],
+    key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
 @triton.jit
@@ -1082,6 +1095,7 @@ def _attn_bwd_dq(
     WINDOW: tl.constexpr,  # sliding window size. If negative, no sliding window masking is applied
     WARP_SPECIALIZE: tl.constexpr,  # whether to use warp specialization
     dtype: tl.constexpr,  # output dtype
+    INPUT_PRECISION: tl.constexpr,  # precision of the matrix products for float32 inputs, see _dot_input_precision
     n_ctx_rounded: tl.constexpr,  # the next multiple of BLOCK_FIXED and BLOCK_ITER above N_CTX, used for M/D indexing
     UNEVEN_CTX: tl.constexpr,  # bool, true if N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
 ):
@@ -1241,6 +1255,7 @@ def _attn_bwd_dq(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -1267,6 +1282,7 @@ def _attn_bwd_dq(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             False,
         )
@@ -1293,6 +1309,7 @@ def _attn_bwd_dq(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -1327,6 +1344,7 @@ def _attn_bwd_dq(
             WINDOW,
             WARP_SPECIALIZE,
             dtype,
+            INPUT_PRECISION,
             UNEVEN_CTX,
             True,
         )
@@ -1414,6 +1432,20 @@ def _system_specific_settings(q, k, v, o, warp_specialize):
     return desc_q, desc_k, desc_v, desc_o, extra_kern_args
 
 
+def _dot_input_precision() -> str:
+    """Precision of the kernels' matrix products for float32 inputs, following PyTorch's float32 matmul setting.
+
+    "ieee" (full float32) unless PyTorch allows TF32 for matmuls, then "tf32". Inputs in 16 bits are
+    not affected. AMD GPUs run TF32 products only on some models, so there the products always run in
+    full float32.
+    """
+    if hasattr(torch.backends.cuda.matmul, "fp32_precision"):
+        allow_tf32 = torch.backends.cuda.matmul.fp32_precision == "tf32"
+    else:
+        allow_tf32 = torch.get_float32_matmul_precision() != "highest"
+    return "tf32" if allow_tf32 and not is_hip() else "ieee"
+
+
 class TritonAttention(torch.autograd.Function):
 
     @staticmethod
@@ -1424,6 +1456,12 @@ class TritonAttention(torch.autograd.Function):
         Sequence lengths are assumed to match for Q, K and V tensors.
 
         Input matrices are in the shape [BATCH, N_HEAD, N_CTX, HEAD_DIM]
+
+        Inputs may be float16, bfloat16 or float32. With float32 inputs the matrix products follow
+        PyTorch's float32 matmul precision (torch.backends.cuda.matmul.fp32_precision, or
+        torch.set_float32_matmul_precision): full float32 by default, TF32 when PyTorch allows it,
+        which is faster but rounds the inputs to a 10-bit mantissa. The setting in force at the
+        forward is also used for the backward. float16 and bfloat16 inputs are not affected.
         """
 
         # Ensure inputs are contiguous, important when working with pointers later
@@ -1462,6 +1500,7 @@ class TritonAttention(torch.autograd.Function):
         # Tensor descriptors encode the shape, stride and block shape and pass this information to the compiler, allowing further optimisations and use of hardware features like TMA.
         # and get any additional system-specific kernel arguments
         desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
+        input_precision = _dot_input_precision()
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU
         # (SMs are essentially processors on a GPU, with typically 1024 threads per SM)
@@ -1489,6 +1528,7 @@ class TritonAttention(torch.autograd.Function):
             WINDOW=window,  # window length for sliding window attention. If negative, no sliding window masking is applied
             CAUSAL=causal,  # whether to apply causal masking
             dtype=torch_dtype_to_triton(q.dtype),
+            INPUT_PRECISION=input_precision,
             n_ctx_rounded=n_ctx_rounded,  # rounded context length used for indexing in M and D tensors to avoid out-of-bounds when N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER
             UNEVEN_CTX=uneven_ctx,  # bool, whether N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, used to handle edge case with masked loads and stores
             **extra_kern_args,  # any additional system-specific kernel arguments
@@ -1499,6 +1539,7 @@ class TritonAttention(torch.autograd.Function):
         ctx.causal = causal
         ctx.window = window
         ctx.n_ctx = n_ctx
+        ctx.input_precision = input_precision  # the backward uses the forward's precision
 
         ctx.save_for_backward(q, k, v, o, M, inv_l)
 
@@ -1566,6 +1607,7 @@ class TritonAttention(torch.autograd.Function):
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            INPUT_PRECISION=ctx.input_precision,
             n_ctx_rounded=n_ctx_rounded,
             UNEVEN_CTX=uneven_ctx,
             **extra_kern_args,
@@ -1594,6 +1636,7 @@ class TritonAttention(torch.autograd.Function):
             CAUSAL=ctx.causal,  #
             WINDOW=ctx.window,  #
             dtype=torch_dtype_to_triton(q.dtype),
+            INPUT_PRECISION=ctx.input_precision,
             n_ctx_rounded=n_ctx_rounded,
             UNEVEN_CTX=uneven_ctx,
             **extra_kern_args,
