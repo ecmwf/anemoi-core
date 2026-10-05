@@ -88,6 +88,27 @@ def test_triton_matches_dense_mask(grid_name, kernel_size, head_dim, dtype, tole
         torch.testing.assert_close(result.double() / scale, reference / scale, rtol=tolerance, atol=tolerance, msg=name)
 
 
+@pytest.mark.parametrize("grid_name", ["O16", "H8"])
+def test_triton_float32_follows_torch_matmul_precision(grid_name):
+    """Float32 inputs multiply in full float32 at "highest" and in TF32 at "high", as PyTorch's matmuls do."""
+    grid, kernel_size = _grid(grid_name), (5, 7)
+    qkv = _qkv(grid.num_points, 32, torch.float32)
+    grad_out = torch.randn_like(qkv[0])
+    references = _run("sdpa", grid, kernel_size, [t.double() for t in qkv], grad_out.double())
+
+    full = _run("triton", grid, kernel_size, qkv, grad_out)
+    torch.set_float32_matmul_precision("high")
+    try:
+        tf32 = _run("triton", grid, kernel_size, qkv, grad_out)
+    finally:
+        torch.set_float32_matmul_precision("highest")
+    for name, a, b, reference in zip(("out", "dq", "dk", "dv"), full, tf32, references):
+        scale = reference.abs().max()
+        torch.testing.assert_close(a.double() / scale, reference / scale, rtol=1e-4, atol=1e-4, msg=name)
+        torch.testing.assert_close(b.double() / scale, reference / scale, rtol=1e-2, atol=1e-2, msg=name)
+        assert ((a - b).abs().max() / scale).item() > 1e-5, f"{name}: TF32 gave the full float32 result"
+
+
 def _relative_error(result, reference):
     return ((result.double() - reference).norm() / reference.norm()).item()
 

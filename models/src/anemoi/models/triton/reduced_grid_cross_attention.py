@@ -33,6 +33,7 @@ from anemoi.models.triton.reduced_grid_attention import _RCP_LN2
 from anemoi.models.triton.reduced_grid_attention import _backward_configs
 from anemoi.models.triton.reduced_grid_attention import _base
 from anemoi.models.triton.reduced_grid_attention import _configs
+from anemoi.models.triton.reduced_grid_attention import _dot_precision
 from anemoi.models.triton.reduced_grid_attention import _grid_tables
 from anemoi.models.triton.reduced_grid_attention import _launch_grid
 from anemoi.models.triton.reduced_grid_attention import _matching
@@ -711,8 +712,7 @@ class ReducedGridCrossAttentionTriton(torch.autograd.Function):
             HEAD_DIM=head_dim,
             KERNEL_H=kernel_size[0],
             KERNEL_W=kernel_size[1],
-            # Float32 inputs keep full precision in the matrix products; 16-bit inputs use tensor cores as usual.
-            DOT_PRECISION="ieee" if q.dtype == torch.float32 else "tf32",
+            DOT_PRECISION=_dot_precision(q.dtype),
             SHIFTED=query_grid.is_shifted or key_grid.is_shifted,
             KEY_ROWS=cross["KEY_ROWS"],
             QUERY_ROWS=cross["QUERY_ROWS"],

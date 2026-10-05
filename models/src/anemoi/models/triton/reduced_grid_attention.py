@@ -779,6 +779,20 @@ def _needs_wide(*tensors: torch.Tensor) -> bool:
     return any((t.shape[2] - 1) * t.stride(2) + t.shape[3] >= 2**31 for t in tensors)
 
 
+def _dot_precision(dtype: torch.dtype) -> str:
+    """How the kernels' matrix products treat float32 inputs, following torch.set_float32_matmul_precision.
+
+    Triton does not read PyTorch's setting, so it is passed on here: at "highest" (PyTorch's default) the
+    products keep full float32 precision, at "high" or "medium" they use TF32 on the tensor cores, as
+    PyTorch's own float32 matrix products do then. TF32 keeps 10 of the 23 mantissa bits of q and k, so
+    at large logits the scores are then about as coarse as with bfloat16 inputs. 16-bit inputs always
+    multiply in their own precision; the setting does not apply to them.
+    """
+    if dtype == torch.float32 and torch.get_float32_matmul_precision() == "highest":
+        return "ieee"
+    return "tf32"
+
+
 class ReducedGridAttentionTriton(torch.autograd.Function):
     """Neighbourhood attention on a reduced grid, computed with Triton kernels.
 
@@ -811,8 +825,7 @@ class ReducedGridAttentionTriton(torch.autograd.Function):
             HEAD_DIM=head_dim,
             KERNEL_H=kernel_size[0],
             KERNEL_W=kernel_size[1],
-            # Float32 inputs keep full precision in the matrix products; 16-bit inputs use tensor cores as usual.
-            DOT_PRECISION="ieee" if q.dtype == torch.float32 else "tf32",
+            DOT_PRECISION=_dot_precision(q.dtype),
             SHIFTED=grid.is_shifted,
             KEY_ROWS=triton.next_power_of_2(kernel_size[0] + _MAX_TILE_H - 1),
             QUERY_ROWS=triton.next_power_of_2(2 * kernel_size[0] + _MAX_TILE_H - 2),
