@@ -188,7 +188,15 @@ def test_multi_head_cross_attention_backward_sdpa(batch_size, num_heads, embed_d
     assert x.grad.shape == x.shape
 
 
-def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
+@pytest.fixture
+def default_device():
+    """The GPU if there is one, as torch's default device while the test runs."""
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    with torch.device(device):
+        yield device
+
+
+def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels, default_device):
     """Test that SDPA with window_size produces valid output and attends only within the window."""
     num_heads = 4
     embed_dim = 32
@@ -196,8 +204,7 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     grid = 16
     window_size = 4
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    torch.set_default_device(device)
+    device = default_device
 
     mhsa = MultiHeadSelfAttention(
         num_heads,
