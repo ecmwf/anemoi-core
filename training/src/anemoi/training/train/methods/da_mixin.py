@@ -15,6 +15,10 @@ concrete training method so that:
 - DA-cycle steps (``is_da``) are weighted by ``training.da_loss_weight`` (and
   skipped entirely when that weight is zero), while forecast steps use weight 1.
 - The total loss is averaged over the forecast steps only.
+- DA cycles before the last ``task.da_grad_cycles`` run under ``no_grad`` in
+  training, truncating backpropagation through the assimilation spin-up.
+- The model calls of the first ``task.checkpoint_steps`` grad-tracked steps are
+  activation-checkpointed to save memory without changing gradients.
 - A training-only per-instrument corrector network is applied to predictions
   before the loss (never for state advancement).
 
@@ -28,6 +32,8 @@ frames, so an extra ``__init__`` on the concrete class would add its locals to t
 recorded hyper-parameters; and ``super().__init__()`` must run before
 ``self.corrector`` is registered, or the module never enters the registry.
 """
+
+import contextlib
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -132,6 +138,11 @@ class DATrainingMixin:
                 "channels": list(channels) if channels is not None else None,
             }
 
+        # Categorical corrector variables share the model's vocabularies but get their own tables.
+        categorical_config = getattr(getattr(self.config, "model", None), "categorical_embeddings", None) or {}
+        categorical_embedding_dim = corrector_config.get("categorical_embedding_dim")
+        categorical_unknown_prob = corrector_config.get("categorical_unknown_prob")
+
         fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
         for dataset_name in self.target_dataset_names:
             corrector_indices = self.data_indices[dataset_name].data.input.corrector
@@ -172,6 +183,9 @@ class DATrainingMixin:
                 corrector_type=corrector_type,
                 processor_config=processor_config,
                 graph_provider=graph_provider,
+                categorical_specs=dict(categorical_config.get(dataset_name) or {}),
+                categorical_embedding_dim=categorical_embedding_dim,
+                categorical_unknown_prob=categorical_unknown_prob,
             )
 
     def _apply_corrector(
@@ -184,15 +198,8 @@ class DATrainingMixin:
         Corrector variables are read from the DATA_FULL target ``y`` at the
         target time. Datasets without a corrector network pass through unchanged.
 
-        The corrector runs under activation checkpointing during training: the
-        instrument processors retain graph activations at every forecast step.
-        Recomputing them in the backward pass reduces memory use at long rollouts.
-        Processor-level checkpointing can be configured independently.
-
-        Note: for the same reason as the encoder/decoder mapper blocks, no module
-        reachable from here may be passed to ``torch.compile`` via
-        ``model.compile`` -- compiling inside a non-reentrant checkpoint region
-        reorders the saved activations and raises ``CheckpointError``.
+        No activation checkpoint is applied here: memory for processor correctors
+        is governed by ``training.corrector.processor.gradient_checkpointing``.
 
         Parameters
         ----------
@@ -209,19 +216,6 @@ class DATrainingMixin:
         if len(self.corrector) == 0:
             return y_pred
 
-        if not torch.is_grad_enabled():
-            # Nothing to recompute for (validation / inference): no activations
-            # are stored, so checkpointing would only add overhead.
-            return self._corrector_forward(y_pred, y)
-
-        return checkpoint(self._corrector_forward, y_pred, y, use_reentrant=False)
-
-    def _corrector_forward(
-        self,
-        y_pred: dict[str, torch.Tensor],
-        y: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
-        """Run the corrector networks. See :meth:`_apply_corrector`."""
         y_for_loss = {}
         for dataset_name, pred in y_pred.items():
             # nn.ModuleDict has no .get(), so SIM401's suggestion does not apply here.
@@ -287,53 +281,75 @@ class DATrainingMixin:
             rollout_step = task_kwargs["rollout_step"]
             weight = self.task.da_loss_weight if is_da else 1.0
 
-            decoder_forcings = self.task.build_decoder_forcings(batch, data_indices=self.data_indices, **task_kwargs)
-            forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
-            if skip_input is not None:
-                forward_kwargs["skip_input"] = skip_input
-            forward_kwargs.update(self._step_forward_kwargs(task_kwargs))
-            y_pred = self(x, **forward_kwargs)
-            y = self.task.get_targets(batch, **task_kwargs)
-
-            if weight > 0:
-                # Corrector needs the full DATA_FULL target (reads input.corrector columns).
-                y_for_loss = self._apply_corrector(y_pred, y)
-                # Slice the target to data-output variables BEFORE the checkpoint so the
-                # activation checkpoint saves only the reduced target rather than every
-                # DATA_FULL channel (forcings/corrector) for each DA + rollout step.
-                y_target = {name: t.index_select(-1, self._loss_target_idx(name, t.device)) for name, t in y.items()}
-                loss_next, metrics_next, _ = checkpoint(
-                    self.compute_loss_metrics,
-                    y_for_loss,
-                    y_target,
-                    rollout_step=rollout_step,
-                    validation_mode=validation_mode,
-                    pred_layout=IndexSpace.MODEL_OUTPUT,
-                    target_layout=IndexSpace.DATA_OUTPUT,
-                    use_reentrant=False,
-                )
-                if loss_next is not None:
-                    loss = loss + weight * loss_next
-                metrics.update(metrics_next)
-
-            # Advance the input state only if another step follows; the final
-            # step's advanced state is never read. Advance with the RAW
-            # prediction, never the corrected tensor.
-            if i < len(task_steps) - 1:
-                x = self.task.advance_input(
-                    x,
-                    y_pred,
+            # Early DA cycles outside the last ``da_grad_cycles`` run as a no_grad
+            # spin-up. no_grad (not inference_mode): their outputs feed the later
+            # grad-tracked steps.
+            grad_ctx = (
+                torch.no_grad()
+                if not validation_mode and not self.task.step_requires_grad(**task_kwargs)
+                else contextlib.nullcontext()
+            )
+            with grad_ctx:
+                decoder_forcings = self.task.build_decoder_forcings(
                     batch,
-                    **task_kwargs,
                     data_indices=self.data_indices,
-                    output_mask=self.output_mask,
-                    grid_shard_slice=self.grid_shard_slice,
+                    **task_kwargs,
                 )
-                # A DA blend copied observations into x; hand the model the pre-copy
-                # background as the residual base for the next step. After a forecast
-                # advance x is already a raw prediction, so the default base is
-                # flow-dependent and no override is needed.
-                skip_input = self.task.build_skip_input(x, y_pred, self.data_indices) if is_da else None
+                forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
+                if skip_input is not None:
+                    forward_kwargs["skip_input"] = skip_input
+                forward_kwargs.update(self._step_forward_kwargs(task_kwargs))
+                if not validation_mode and self.task.step_uses_checkpoint(**task_kwargs):
+                    # Keep only the inputs and recompute this call in backward. advance_input
+                    # rebinds entries of the x dict in place, so hand the checkpoint its own
+                    # shallow copies: recompute must see this step's inputs, not the latest state.
+                    ckpt_kwargs = {k: dict(v) if isinstance(v, dict) else v for k, v in forward_kwargs.items()}
+                    y_pred = checkpoint(self, dict(x), use_reentrant=False, **ckpt_kwargs)
+                else:
+                    y_pred = self(x, **forward_kwargs)
+
+                if weight > 0:
+                    y = self.task.get_targets(batch, **task_kwargs)
+                    # Corrector needs the full DATA_FULL target (reads input.corrector columns).
+                    y_for_loss = self._apply_corrector(y_pred, y)
+                    # Slice the target to data-output variables BEFORE the checkpoint so the
+                    # activation checkpoint saves only the reduced target rather than every
+                    # DATA_FULL channel (forcings/corrector) for each DA + rollout step.
+                    y_target = {
+                        name: t.index_select(-1, self._loss_target_idx(name, t.device)) for name, t in y.items()
+                    }
+                    loss_next, metrics_next, _ = checkpoint(
+                        self.compute_loss_metrics,
+                        y_for_loss,
+                        y_target,
+                        rollout_step=rollout_step,
+                        validation_mode=validation_mode,
+                        pred_layout=IndexSpace.MODEL_OUTPUT,
+                        target_layout=IndexSpace.DATA_OUTPUT,
+                        use_reentrant=False,
+                    )
+                    if loss_next is not None:
+                        loss = loss + weight * loss_next
+                    metrics.update(metrics_next)
+
+                # Advance the input state only if another step follows; the final
+                # step's advanced state is never read. Advance with the RAW
+                # prediction, never the corrected tensor.
+                if i < len(task_steps) - 1:
+                    x = self.task.advance_input(
+                        x,
+                        y_pred,
+                        batch,
+                        **task_kwargs,
+                        data_indices=self.data_indices,
+                        output_mask=self.output_mask,
+                        grid_shard_slice=self.grid_shard_slice,
+                    )
+                    # A DA blend copied observations into x; hand the model the pre-copy
+                    # background as the residual base for the next step. After a forecast
+                    # advance x is already a raw prediction, so the default base is
+                    # flow-dependent and no override is needed.
+                    skip_input = self.task.build_skip_input(x, y_pred, self.data_indices) if is_da else None
 
             y_preds.append(self._output_prediction(y_pred, validation_mode))
 

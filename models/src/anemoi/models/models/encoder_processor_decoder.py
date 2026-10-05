@@ -34,6 +34,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
     supports_skip_input: bool = True
+    supports_categorical_embeddings: bool = True
 
     def __init_subclass__(cls, **kwargs) -> None:
         """Default subclasses that override ``forward`` to not supporting ``skip_input``.
@@ -48,6 +49,13 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         super().__init_subclass__(**kwargs)
         if "supports_skip_input" not in cls.__dict__ and cls.forward is not AnemoiModelEncProcDec.forward:
             cls.supports_skip_input = False
+        # Same reasoning for categorical embeddings: a subclass that rebuilds the encoder
+        # input or its width would otherwise feed raw codes into a mis-sized encoder.
+        if "supports_categorical_embeddings" not in cls.__dict__ and (
+            cls._assemble_input is not AnemoiModelEncProcDec._assemble_input
+            or cls._calculate_input_dim is not AnemoiModelEncProcDec._calculate_input_dim
+        ):
+            cls.supports_categorical_embeddings = False
 
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
@@ -135,6 +143,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+
+        # After the residual, which reads the raw columns: swap raw categorical codes for embeddings.
+        # getattr: models pickled before categorical embeddings existed lack the attribute.
+        if dataset_name in getattr(self, "categorical_embeddings", {}):
+            x = self._embed_categorical_inputs(x, dataset_name)
 
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(

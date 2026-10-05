@@ -13,7 +13,10 @@ from scipy.sparse import csr_matrix
 from scipy.sparse import save_npz
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.khop_edges import build_graph_partition
+from anemoi.models.layers import graph_provider as graph_provider_module
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
+from anemoi.models.layers.graph_provider import StaticGraphProvider
 
 
 def test_projection_graph_provider_preserves_row_normalized_weights() -> None:
@@ -208,3 +211,78 @@ def test_projection_graph_provider_loads_npz_as_csr(tmp_path) -> None:
     edges = provider.get_edges()
     assert edges.layout == torch.sparse_csr
     assert torch.allclose(edges.to_dense(), expected)
+
+
+@pytest.fixture
+def cpu_default_device():
+    """Pin CPU as default device; other tests in this directory leak a CUDA default."""
+    previous = torch.get_default_device()
+    torch.set_default_device("cpu")
+    yield
+    torch.set_default_device(previous)
+
+
+def _static_provider(trainable_size: int = 0) -> StaticGraphProvider:
+    edge_index = torch.tensor([[0, 1, 2, 3, 1, 2], [0, 0, 1, 2, 3, 3]])
+    graph = HeteroData()
+    graph.edge_index = edge_index
+    graph.edge_length = torch.arange(edge_index.shape[1], dtype=torch.float32).unsqueeze(-1)
+    return StaticGraphProvider(
+        graph=graph,
+        edge_attributes=["edge_length"],
+        src_size=4,
+        dst_size=4,
+        trainable_size=trainable_size,
+    )
+
+
+@pytest.mark.usefixtures("cpu_default_device")
+def test_static_graph_provider_sharded_edges_match_unsharded_when_not_distributed() -> None:
+    provider = _static_provider()
+    attr_sharded, index_sharded, sizes = provider.get_edges(batch_size=2)
+    attr_full, index_full, _ = provider.get_edges(batch_size=2, shard_edges=False)
+    assert sizes is None
+    torch.testing.assert_close(index_sharded, index_full)
+    torch.testing.assert_close(attr_sharded, attr_full)
+
+
+@pytest.mark.usefixtures("cpu_default_device")
+def test_static_graph_provider_caches_edge_sharding(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The edge partition is computed once per layout; later calls reuse it without host syncs."""
+    provider = _static_provider(trainable_size=2)
+    rank, comm_size = 1, 2
+
+    class _FakeGroup:
+        def size(self) -> int:
+            return comm_size
+
+    def _fake_shard(tensor: torch.Tensor, dim: int, sizes: list[int] | None, _group: object) -> torch.Tensor:
+        return torch.split(tensor, sizes, dim=dim)[rank]
+
+    partition_calls = []
+
+    def _counting_partition(*args: object, **kwargs: object) -> object:
+        partition_calls.append(1)
+        return build_graph_partition(*args, **kwargs)
+
+    monkeypatch.setattr(graph_provider_module, "model_is_distributed", lambda group: group is not None)
+    monkeypatch.setattr(graph_provider_module, "shard_tensor", _fake_shard)
+    monkeypatch.setattr(graph_provider_module, "build_graph_partition", _counting_partition)
+    monkeypatch.setattr(torch.distributed, "get_rank", lambda group=None: rank)  # noqa: ARG005
+
+    group = _FakeGroup()
+    first = provider.get_edges(batch_size=1, model_comm_group=group)
+    second = provider.get_edges(batch_size=1, model_comm_group=group)
+    assert len(partition_calls) == 1
+
+    # Reference: the uncached computation for rank 1 of 2.
+    attr_full, index_full, _ = provider.get_edges(batch_size=1, shard_edges=False)
+    expected_sizes = build_graph_partition(index_full, comm_size, (4, 4)).edge_splits
+    for attr, index, sizes in (first, second):
+        assert sizes == expected_sizes
+        torch.testing.assert_close(index, torch.split(index_full, expected_sizes, dim=1)[rank])
+        torch.testing.assert_close(attr, torch.split(attr_full, expected_sizes, dim=0)[rank])
+
+    # Trainable edge features are still recomputed per call, so gradients reach them.
+    second[0].sum().backward()
+    assert provider.trainable.trainable.grad is not None

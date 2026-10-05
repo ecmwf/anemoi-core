@@ -29,6 +29,7 @@ from torch_geometric.utils import is_undirected
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.utils import model_is_distributed
+from anemoi.models.layers.categorical import build_categorical_embeddings
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -144,6 +145,10 @@ class InstrumentCorrectors(nn.Module):
     ``graph_provider`` supplies the same edges and features to all instruments.
     Instrument groups select metadata via ``corrector_variables`` and outputs
     via explicit ``channels`` or the group's name as a channel prefix.
+
+    Corrector variables listed in ``categorical_specs`` (``{variable: {codes, ...}}``,
+    normally ``model.categorical_embeddings[dataset]``) are embedded with tables owned
+    by the group's corrector, after the group's continuous variables.
     """
 
     def __init__(
@@ -155,9 +160,14 @@ class InstrumentCorrectors(nn.Module):
         corrector_type: str = "mlp",
         processor_config: DictConfig | None = None,
         graph_provider: StaticGraphProvider | None = None,
+        categorical_specs: dict[str, dict] | None = None,
+        categorical_embedding_dim: int | None = None,
+        categorical_unknown_prob: float | None = None,
     ) -> None:
         super().__init__()
         self.correctors = nn.ModuleDict()
+        self.categorical = nn.ModuleDict()
+        categorical_specs = categorical_specs or {}
         self.corrector_type = corrector_type
 
         if corrector_type not in {"mlp", "processor"}:
@@ -185,19 +195,13 @@ class InstrumentCorrectors(nn.Module):
         for group_name, group_cfg in instrument_groups.items():
             group_corrector_vars = group_cfg["corrector_variables"]
 
-            # Find positions of this group's corrector vars in the full corrector tensor
-            corrector_positions = []
-            for v in group_corrector_vars:
-                if v not in corrector_name_to_pos:
-                    LOGGER.warning(
-                        "Corrector variable '%s' for group '%s' not found in data indices, skipping",
-                        v,
-                        group_name,
-                    )
-                    continue
-                corrector_positions.append(corrector_name_to_pos[v])
-
-            if not corrector_positions:
+            corrector_positions, categorical_positions = self._corrector_positions(
+                group_name,
+                group_corrector_vars,
+                corrector_name_to_pos,
+                categorical_specs,
+            )
+            if not corrector_positions and not categorical_positions:
                 LOGGER.warning("No valid corrector variables for group '%s', skipping", group_name)
                 continue
 
@@ -227,6 +231,19 @@ class InstrumentCorrectors(nn.Module):
                 torch.tensor(sorted(target_indices), dtype=torch.long),
             )
 
+            n_corrector = len(corrector_positions)
+            if categorical_positions:
+                self.categorical[group_name] = build_categorical_embeddings(
+                    {v: categorical_specs[v] for v in categorical_positions},
+                    embedding_dim=categorical_embedding_dim,
+                    unknown_prob=categorical_unknown_prob,
+                )
+                self.register_buffer(
+                    f"_categorical_idx_{group_name}",
+                    torch.tensor(list(categorical_positions.values()), dtype=torch.long),
+                )
+                n_corrector += sum(e.embedding_dim for e in self.categorical[group_name].values())
+
             if corrector_type == "processor":
                 processor = instantiate(
                     processor_config,
@@ -236,24 +253,53 @@ class InstrumentCorrectors(nn.Module):
                 )
                 self.correctors[group_name] = ProcessorCorrector(
                     n_target=len(target_indices),
-                    n_corrector=len(corrector_positions),
+                    n_corrector=n_corrector,
                     processor=processor,
                 )
             else:
                 self.correctors[group_name] = CorrectorMLP(
                     n_target=len(target_indices),
-                    n_corrector=len(corrector_positions),
+                    n_corrector=n_corrector,
                     hidden_dim=hidden_dim,
                 )
 
             LOGGER.info(
-                "Corrector group '%s' (type=%s): %d corrector vars -> %d output channels (hidden=%d)",
+                "Corrector group '%s' (type=%s): %d corrector vars (%d embedded) -> %d output channels (hidden=%d)",
                 group_name,
                 corrector_type,
-                len(corrector_positions),
+                len(corrector_positions) + len(categorical_positions),
+                len(categorical_positions),
                 len(target_indices),
                 hidden_dim,
             )
+
+    @staticmethod
+    def _corrector_positions(
+        group_name: str,
+        group_corrector_vars: list[str],
+        corrector_name_to_pos: dict[str, int],
+        categorical_specs: dict[str, dict],
+    ) -> tuple[list[int], dict[str, int]]:
+        """Positions of a group's corrector vars in the full corrector tensor.
+
+        Returns the continuous positions and a ``{name: position}`` mapping of the
+        categorical (embedded) ones, skipping variables absent from the data indices.
+        """
+        corrector_positions = []
+        categorical_positions = {}
+        for v in group_corrector_vars:
+            if v not in corrector_name_to_pos:
+                LOGGER.warning(
+                    "Corrector variable '%s' for group '%s' not found in data indices, skipping",
+                    v,
+                    group_name,
+                )
+                continue
+            if v in categorical_specs:
+                categorical_positions[v] = corrector_name_to_pos[v]
+            else:
+                corrector_positions.append(corrector_name_to_pos[v])
+        return corrector_positions, categorical_positions
 
     def forward(
         self,
@@ -305,10 +351,25 @@ class InstrumentCorrectors(nn.Module):
             target_idx = getattr(self, f"_target_idx_{group_name}")
 
             group_corrector = corrector_vars[..., corrector_idx]
+            if group_name in self.categorical:
+                group_corrector = self._append_embeddings(group_name, group_corrector, corrector_vars)
             y_subset = y_out[..., target_idx]
             correction = corrector(y_subset, group_corrector, **graph_kwargs)
             y_out[..., target_idx] = y_subset + correction
         return y_out
+
+    def _append_embeddings(
+        self,
+        group_name: str,
+        group_corrector: torch.Tensor,
+        corrector_vars: torch.Tensor,
+    ) -> torch.Tensor:
+        """Concatenate the group's categorical embeddings after its continuous variables."""
+        categorical_idx = getattr(self, f"_categorical_idx_{group_name}")
+        parts = [group_corrector]
+        for i, embedding in enumerate(self.categorical[group_name].values()):
+            parts.append(embedding(corrector_vars[..., categorical_idx[i]]).to(dtype=group_corrector.dtype))
+        return torch.cat(parts, dim=-1)
 
     def _node_shard_sizes(
         self,

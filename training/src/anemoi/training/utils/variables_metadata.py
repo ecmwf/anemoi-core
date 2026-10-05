@@ -35,9 +35,30 @@ def extract_variables_metadata_from_checkpoint(
     return ckpt_variables_metadata or None
 
 
+def _target_variables_to_ignore(
+    ckpt_target_variables: dict[str, list[str]] | None,
+    data_indices: dict[str, object] | None,
+) -> dict[str, list[str]]:
+    """Collect loss-only (``target``) variables from both the checkpoint and the current config.
+
+    A ``target`` variable is neither a model input nor a model output, so adding or removing one
+    leaves every model tensor untouched. Mirrors ``IndexCollection.compare_variables``, which
+    unions the checkpoint's targets with the current collection's own ``target`` list.
+    """
+    ignore: dict[str, list[str]] = {}
+    for dataset_name, names in (ckpt_target_variables or {}).items():
+        ignore[dataset_name] = list(names or [])
+    for dataset_name, indices in (data_indices or {}).items():
+        current = list(getattr(indices, "target", None) or [])
+        if current:
+            ignore[dataset_name] = sorted(set(ignore.get(dataset_name, [])) | set(current))
+    return ignore
+
+
 def check_variables_metadata_compatibility(
     ckpt_variables_metadata: dict[str, dict] | None,
     dataset_metadata: dict[str, dict],
+    ignore_variables: dict[str, list[str]] | list[str] | None = None,
     **options: object,
 ) -> None:
     """Check unit compatibility between checkpoint and dataset variables_metadata.
@@ -86,8 +107,27 @@ def check_variables_metadata_compatibility(
             )
             continue
 
-        ckpt_vars = {name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items()}
-        ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items()}
+        # Loss-only (``target``) variables may be added or removed without touching any model
+        # tensor, so they must not make the checkpoint look incompatible with the dataset.
+        if isinstance(ignore_variables, dict):
+            skip = set(ignore_variables.get(dataset_name) or [])
+        else:
+            skip = set(ignore_variables or [])
+        # Only drop a variable that is missing on one side; one present in both is still
+        # compared, so a genuine unit change is never hidden.
+        skip = {name for name in skip if (name in ckpt_var_meta) != (name in ds_var_meta)}
+        if skip:
+            LOG.info(
+                "Dataset '%s': ignoring loss-only (target) variables in the variables_metadata "
+                "compatibility check: %s",
+                dataset_name,
+                sorted(skip),
+            )
+
+        ckpt_vars = {
+            name: Variable.from_dict(name, data) for name, data in ckpt_var_meta.items() if name not in skip
+        }
+        ds_vars = {name: Variable.from_dict(name, data) for name, data in ds_var_meta.items() if name not in skip}
 
         try:
             Variable.check_compatibility(ckpt_vars, ds_vars, **options)

@@ -28,9 +28,12 @@ from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 from torch_geometric.typing import Adj
 
+from anemoi.models.distributed.graph import shard_tensor
+from anemoi.models.distributed.khop_edges import build_graph_partition
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph import TrainableTensor
 
 LOGGER = logging.getLogger(__name__)
@@ -202,10 +205,49 @@ class StaticGraphProvider(BaseGraphProvider):
 
         self._edge_dim = edge_attr_tensor.shape[1] + trainable_size
 
+        # Python-side copies of the graph sizes and a cache of the sharded edge index, so
+        # repeated get_edges calls on this fixed graph need no host syncs.
+        self._src_size = int(src_size)
+        self._dst_size = int(dst_size)
+        self._edge_shard_cache: dict[tuple, tuple[Adj, Optional[ShardSizes]]] = {}
+
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""
         return self._edge_dim
+
+    def _sharded_edge_index(
+        self,
+        batch_size: int,
+        model_comm_group: Optional[ProcessGroup],
+    ) -> tuple[Adj, Optional[ShardSizes]]:
+        """Return the expanded, sharded edge index and edge shard sizes, cached per layout.
+
+        The graph is fixed, so the result only depends on the batch size, the device and
+        this rank's place in the model communication group. Computing it needs host syncs
+        (``build_graph_partition``), which this cache limits to the first call.
+        """
+        distributed = model_is_distributed(model_comm_group)
+        key = (
+            batch_size,
+            self.edge_index_base.device,
+            model_comm_group.size() if distributed else 1,
+            torch.distributed.get_rank(group=model_comm_group) if distributed else 0,
+        )
+        cached = self._edge_shard_cache.get(key)
+        if cached is not None:
+            return cached
+
+        with torch.no_grad():
+            edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
+            edge_shard_sizes = None
+            if distributed:
+                num_nodes = (self._src_size * batch_size, self._dst_size * batch_size)
+                edge_shard_sizes = build_graph_partition(edge_index, model_comm_group.size(), num_nodes).edge_splits
+            edge_index = shard_tensor(edge_index, 1, edge_shard_sizes, model_comm_group)
+
+        self._edge_shard_cache[key] = (edge_index, edge_shard_sizes)
+        return edge_index, edge_shard_sizes
 
     def _expand_edges(self, edge_index: Adj, edge_inc: Tensor, batch_size: int) -> Adj:
         """Expand edge index.
@@ -238,19 +280,13 @@ class StaticGraphProvider(BaseGraphProvider):
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
         edge_attr = self.trainable(self.edge_attr, batch_size)
-        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
         if shard_edges:
-            src_size, dst_size = self.edge_inc[:, 0].tolist()
-            edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
-                edge_attr,
-                edge_index,
-                src_size * batch_size,
-                dst_size * batch_size,
-                model_comm_group,
-            )
+            edge_index, edge_shard_sizes = self._sharded_edge_index(batch_size, model_comm_group)
+            edge_attr = shard_tensor(edge_attr, 0, edge_shard_sizes, model_comm_group)
             return edge_attr, edge_index, edge_shard_sizes
 
+        edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
         return edge_attr, edge_index, None
 
     def get_edges(

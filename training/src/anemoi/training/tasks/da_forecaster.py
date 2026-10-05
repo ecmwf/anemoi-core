@@ -49,11 +49,25 @@ class DAForecaster(Forecaster):
         da_cycles: int = 0,
         da_loss_weight: float = 0.0,
         da_flow_dependent_skip: bool = False,
+        da_grad_cycles: int | None = None,
+        checkpoint_steps: int = 0,
         **kwargs,
     ) -> None:
         self.da_cycles = da_cycles
         self.da_loss_weight = da_loss_weight
         self.da_flow_dependent_skip = da_flow_dependent_skip
+        # Number of trailing DA cycles that backpropagate; earlier cycles run under
+        # no_grad as a spin-up. Unspecified means every cycle keeps gradients.
+        # A/B runs showed any value below da_cycles degrades validation; kept for
+        # experimentation, candidate for removal.
+        self.da_grad_cycles = da_cycles if da_grad_cycles is None else da_grad_cycles
+        if not 0 <= self.da_grad_cycles <= da_cycles:
+            msg = f"da_grad_cycles must be in [0, da_cycles={da_cycles}], got {self.da_grad_cycles}."
+            raise ValueError(msg)
+        # Number of leading grad-tracked steps (DA cycles first) whose model call is
+        # activation-checkpointed: only inputs are kept and the call is recomputed in
+        # backward. Trades compute for memory without changing gradients.
+        self.checkpoint_steps = checkpoint_steps
         super().__init__(
             multistep_input,
             multistep_output,
@@ -62,13 +76,31 @@ class DAForecaster(Forecaster):
             validation_rollout=validation_rollout,
             **kwargs,
         )
+        max_grad_steps = self.da_grad_cycles + self.rollout.maximum
+        if not 0 <= checkpoint_steps <= max_grad_steps:
+            msg = (
+                f"checkpoint_steps must be in [0, da_grad_cycles + rollout.maximum={max_grad_steps}], "
+                f"got {checkpoint_steps}."
+            )
+            raise ValueError(msg)
         if da_cycles > 0:
             LOGGER.info(
-                "DAForecaster: da_cycles=%d, da_loss_weight=%.3f, da_flow_dependent_skip=%s",
+                "DAForecaster: da_cycles=%d, da_grad_cycles=%d, checkpoint_steps=%d, da_loss_weight=%.3f, "
+                "da_flow_dependent_skip=%s",
                 da_cycles,
+                self.da_grad_cycles,
+                checkpoint_steps,
                 da_loss_weight,
                 da_flow_dependent_skip,
             )
+            if da_loss_weight > 0 and self.da_grad_cycles < da_cycles:
+                LOGGER.warning(
+                    "DAForecaster: da_loss_weight=%.3f but only the last %d of %d DA cycles backpropagate; "
+                    "the DA loss of earlier cycles contributes no gradient.",
+                    da_loss_weight,
+                    self.da_grad_cycles,
+                    da_cycles,
+                )
         elif da_flow_dependent_skip:
             LOGGER.warning(
                 "DAForecaster: da_flow_dependent_skip=True has no effect with da_cycles=0.",
@@ -84,6 +116,25 @@ class DAForecaster(Forecaster):
         if mode == "validation" and self.validation_rollout is not None:
             max_rollout = self.validation_rollout
         return tuple({"rollout_step": i, "is_da": i < self.da_cycles} for i in range(self.da_cycles + max_rollout))
+
+    def step_requires_grad(self, rollout_step: int = 0, is_da: bool = False, **_kwargs) -> bool:
+        """Whether a training step must track gradients.
+
+        Forecast steps always do; a DA cycle does only if it is among the last
+        ``da_grad_cycles`` cycles.
+        """
+        return not is_da or rollout_step >= self.da_cycles - self.da_grad_cycles
+
+    def step_uses_checkpoint(self, rollout_step: int = 0, is_da: bool = False, **_kwargs) -> bool:
+        """Whether a training step's model call should be activation-checkpointed.
+
+        True for the first ``checkpoint_steps`` grad-tracked steps. DA cycles come
+        first, so ``checkpoint_steps <= da_grad_cycles`` touches only DA cycles, whose
+        activations are needed only to backpropagate the forecast loss.
+        """
+        if not self.step_requires_grad(rollout_step=rollout_step, is_da=is_da):
+            return False
+        return rollout_step - (self.da_cycles - self.da_grad_cycles) < self.checkpoint_steps
 
     def get_metric_name(self, rollout_step: int = 0, is_da: bool = False, **_kwargs) -> str:
         """Get the metric name suffix for the current step."""
