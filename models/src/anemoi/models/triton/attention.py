@@ -314,7 +314,7 @@ def _maybe_make_tensor_descriptor(desc_or_ptr, shape, strides, block_shape):
 
 
 @triton.autotune(
-    configs=_generate_configs(),
+    configs=_generate_configs(try_warp_spec=False),
     key=["N_CTX", "HEAD_DIM", "INPUT_PRECISION"],
     cache_results=False,
 )
