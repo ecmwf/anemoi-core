@@ -261,7 +261,9 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             batch = {key: value.unsqueeze(0) for key, value in sample.items()}
             batch = pl_module.transfer_batch_to_device(batch, pl_module.device)
             batch = pl_module.on_after_batch_transfer(batch, 0)
-            with torch.no_grad():
+            # Callback hooks run outside Lightning's autocast, so re-enter the trainer's precision
+            # context explicitly (flash-attention rejects fp32 inputs under bf16/16-mixed).
+            with torch.no_grad(), trainer.precision_plugin.forward_context():
                 output = pl_module._step(batch, validation_mode=True)
 
             for step_kwargs, label, prediction in zip(task_steps, labels, output.predictions, strict=True):
