@@ -709,7 +709,9 @@ class TargetIdentityLossSchema(BaseLossSchema):
 
 
 _LOSS_DISCRIMINATOR_TAGS = {
+    # Both spellings ship in the config tree, and hydra resolves them to the same class.
     "anemoi.training.losses.combined.CombinedLoss": "combined",
+    "anemoi.training.losses.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
     "anemoi.training.losses.CRPS": "crps",
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
@@ -745,8 +747,11 @@ class CombinedLossSchema(BaseLossSchema):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
-    target_: Literal["anemoi.training.losses.combined.CombinedLoss"] = Field(..., alias="_target_")
-    "CombinedLoss target."
+    target_: Literal[
+        "anemoi.training.losses.combined.CombinedLoss",
+        "anemoi.training.losses.CombinedLoss",
+    ] = Field(..., alias="_target_")
+    "CombinedLoss target, in either the module-path or the re-exported spelling."
     scalers: list[str] = Field(default_factory=list, example=["variable"])
     "Optional top-level scalers propagated to sub-losses that don't define their own."
     losses: list[
@@ -956,6 +961,11 @@ class DASingleTrainingMethodSchema(BaseModel):
     "Hydra target for the DA single training method."
 
 
+class DAEnsembleTrainingMethodSchema(BaseModel):
+    target_: Literal["anemoi.training.train.methods.DAEnsembleTraining"] = Field(..., alias="_target_")
+    "Hydra target for the DA ensemble training method."
+
+
 class CorrectorGroupSchema(BaseModel):
     """One instrument group for the training-time corrector."""
 
@@ -1046,10 +1056,18 @@ class DASingleTrainingSchema(BaseTrainingSchema):
     "Optional training-time corrector networks applied to predictions for the loss."
 
 
+class DAEnsembleTrainingSchema(BaseTrainingSchema):
+    method: DAEnsembleTrainingMethodSchema
+    "Training method."
+    corrector: CorrectorSchema | None = None
+    "Optional training-time corrector networks applied to predictions for the loss."
+
+
 TrainingSchema = Annotated[
     Annotated[SingleTrainingSchema, Tag("anemoi.training.train.methods.SingleTraining")]
     | Annotated[EnsembleTrainingSchema, Tag("anemoi.training.train.methods.EnsembleTraining")]
     | Annotated[TransportTrainingSchema, Tag("anemoi.training.train.methods.TransportTraining")]
-    | Annotated[DASingleTrainingSchema, Tag("anemoi.training.train.methods.DASingleTraining")],
+    | Annotated[DASingleTrainingSchema, Tag("anemoi.training.train.methods.DASingleTraining")]
+    | Annotated[DAEnsembleTrainingSchema, Tag("anemoi.training.train.methods.DAEnsembleTraining")],
     Discriminator(_training_method_discriminator),
 ]

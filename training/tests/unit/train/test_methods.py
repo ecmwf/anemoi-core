@@ -37,6 +37,7 @@ from anemoi.training.tasks import DAForecaster
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.train.methods.da_ensemble import DAEnsembleTraining
 from anemoi.training.train.methods.da_single import DASingleTraining
 from anemoi.training.train.methods.edm_diffusion import EDMDiffusionTransportObjective
 from anemoi.training.train.methods.ensemble import EnsembleTraining
@@ -2562,3 +2563,240 @@ def test_check_bounding_normalisers_detects_mismatch() -> None:
     module.model = SimpleNamespace(model=SimpleNamespace(boundings={"data": [bounding_ok, bounding_bad]}))
     with pytest.raises(ValueError, match="z_500"):
         module._check_bounding_normalisers()
+
+
+# ── DAEnsembleTraining ────────────────────────────────────────────────────────
+
+
+def _make_da_ensemble_training(
+    task: Any,
+    data_indices: dict[str, IndexCollection],
+    nens_per_device: int = 2,
+) -> DAEnsembleTraining:
+    """Build a DAEnsembleTraining module wired for unit tests (no correctors)."""
+    module = DAEnsembleTraining.__new__(DAEnsembleTraining)
+    pl.LightningModule.__init__(module)
+    _wire_training_module(
+        module,
+        data_indices=data_indices,
+        config=_CFG_EMPTY,
+        n_step_input=task.num_input_timesteps,
+        n_step_output=task.num_output_timesteps,
+        task=task,
+    )
+    module.model = DummyModel(
+        num_output_variables=len(next(iter(data_indices.values())).model.output),
+        output_times=task.num_output_timesteps,
+    )
+    module.is_first_step = False
+    module.updating_scalars = {}
+    module.target_dataset_names = module.dataset_names
+    module.loss = {"data": DummyLoss()}
+    module.loss_supports_sharding = False
+    module.metrics_support_sharding = True
+    module.corrector = torch.nn.ModuleDict()
+    module._loss_target_idx_cache = {}
+    # Set by EnsembleTraining.__init__ / DDPEnsGroupStrategy in a real run.
+    module.nens_per_device = nens_per_device
+    module.ens_comm_subgroup = None
+    module.ens_comm_subgroup_size = 1
+    return module
+
+
+def test_da_ensemble_training_mirrors_da_single_but_for_members() -> None:
+    """The two DA methods share one implementation and differ only in the two hooks."""
+    assert DAEnsembleTraining._step is DASingleTraining._step
+    assert DAEnsembleTraining._apply_corrector is DASingleTraining._apply_corrector
+    # Neither may define __init__: an extra frame changes what save_hyperparameters
+    # records, and the corrector must be registered after super().__init__().
+    assert "__init__" not in DAEnsembleTraining.__dict__
+    assert "__init__" not in DASingleTraining.__dict__
+
+
+def test_da_ensemble_training_step_tiles_members(monkeypatch: pytest.MonkeyPatch) -> None:
+    """_step expands the state to nens_per_device and leaves the target at one member."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "maximum": 1},
+        da_cycles=1,
+        da_loss_weight=0.5,
+    )
+    module = _make_da_ensemble_training(task, data_indices, nens_per_device=3)
+    module.output_mask = {"data": NoOutputMask()}
+
+    target_shapes: list[torch.Size] = []
+
+    def _stub(y_pred: dict[str, torch.Tensor], y: dict[str, torch.Tensor], **_kw: Any) -> tuple:
+        target_shapes.append(next(iter(y.values())).shape)
+        ref = next(iter(y_pred.values()))
+        return torch.zeros(1, dtype=ref.dtype, device=ref.device), {}, y_pred
+
+    monkeypatch.setattr(module, "compute_loss_metrics", _stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+
+    b, g, v = 2, 4, len(_NAME_TO_INDEX)
+    batch = {"data": torch.randn(b, 3, 1, g, v)}
+    output = module._step(batch, validation_mode=False)
+
+    # 1 DA cycle + 1 forecast step, each predicting nens_per_device members.
+    assert len(output.predictions) == 2
+    for pred in output.predictions:
+        assert pred["data"].shape == (b, 1, 3, g, len(data_indices["data"].model.output))
+    # The target keeps a single member: kernel CRPS requires target ensemble dim == 1.
+    assert all(shape[2] == 1 for shape in target_shapes)
+
+
+def test_da_ensemble_training_skip_input_matches_tiled_state(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The step-0 residual base is built after tiling, so it matches x member for member.
+
+    build_skip_input returns zeros_like(x) at step 0 and the model asserts the two
+    shapes match, so tiling has to happen first.
+    """
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "maximum": 1},
+        da_cycles=2,
+        da_loss_weight=0.5,
+        da_flow_dependent_skip=True,
+    )
+    module = _make_da_ensemble_training(task, data_indices, nens_per_device=3)
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y))
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    forward_calls: list[dict[str, Any]] = []
+    original_forward = module.forward
+
+    def _recording_forward(x: dict[str, torch.Tensor], **kwargs: Any) -> dict[str, torch.Tensor]:
+        forward_calls.append({"x": x, **kwargs})
+        return original_forward(x, **kwargs)
+
+    monkeypatch.setattr(module, "forward", _recording_forward)
+
+    batch = {"data": torch.randn(1, 3, 1, 4, len(_NAME_TO_INDEX))}
+    module._step(batch, validation_mode=False)
+
+    assert forward_calls[0]["x"]["data"].shape[2] == 3
+    assert forward_calls[0]["skip_input"]["data"].shape == forward_calls[0]["x"]["data"].shape
+    assert torch.all(forward_calls[0]["skip_input"]["data"] == 0.0)
+
+
+def test_da_ensemble_training_forwards_rollout_step(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every forward carries rollout_step, which EnsembleTraining.forward turns into fcstep."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=2,
+        da_loss_weight=0.5,
+    )
+    module = _make_da_ensemble_training(task, data_indices)
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(module, "compute_loss_metrics", lambda *_a, **_kw: (torch.tensor(0.0), {}, dummy_y))
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    fcsteps: list[int] = []
+
+    class _FcstepRecorder:
+        """Wraps the stub model. __call__ must live on the class to be dispatched."""
+
+        def __init__(self, inner: Any) -> None:
+            self.inner = inner
+
+        def __call__(self, x: Any, **kwargs: Any) -> Any:
+            fcsteps.append(kwargs.get("fcstep"))
+            return self.inner(x, **kwargs)
+
+    module.model = _FcstepRecorder(module.model)
+
+    batch = {"data": torch.randn(1, 3, 1, 4, len(_NAME_TO_INDEX))}
+    module._step(batch, validation_mode=False)
+
+    # rollout_step is continuous over the 2 DA cycles and the 2 forecast steps.
+    assert fcsteps == [0, 1, 2, 3]
+    # DASingleTraining must NOT gain the kwarg: the deterministic model does not take it.
+    single = _make_da_single_training(task, data_indices)
+    assert single._step_forward_kwargs({"rollout_step": 3}) == {}
+
+
+def test_da_ensemble_training_da_weight_zero_normalises_by_forecast_steps(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """DA cycles are skipped at weight 0 and the mean is taken over forecast steps only."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 2, "maximum": 2},
+        da_cycles=2,
+        da_loss_weight=0.0,
+    )
+    module = _make_da_ensemble_training(task, data_indices)
+    module.output_mask = {"data": NoOutputMask()}
+
+    dummy_y = {"data": torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX))}
+    calls: list[int] = []
+
+    def _stub(y_pred: dict[str, torch.Tensor], _y: dict[str, torch.Tensor], **kwargs: Any) -> tuple:
+        calls.append(kwargs["rollout_step"])
+        return torch.ones(1), {}, y_pred
+
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+    monkeypatch.setattr(task, "get_targets", lambda *_a, **_kw: dummy_y)
+    monkeypatch.setattr(module, "compute_loss_metrics", _stub)
+    monkeypatch.setattr(task, "advance_input", lambda x, *_a, **_kw: x)
+
+    batch = {"data": torch.randn(1, 3, 1, 4, len(_NAME_TO_INDEX))}
+    output = module._step(batch, validation_mode=False)
+
+    # Only the 2 forecast steps (rollout_step 2 and 3) contribute.
+    assert calls == [2, 3]
+    # 2 steps x 1.0, averaged over n_forecast = 2.
+    assert torch.allclose(output.loss, torch.ones(1))
+
+
+def test_da_ensemble_training_target_layout_is_data_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ensemble binding keeps the DA layout contract: MODEL_OUTPUT vs DATA_OUTPUT."""
+    data_indices = _data_indices_single()
+    task = DAForecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 1, "maximum": 1},
+        da_cycles=1,
+        da_loss_weight=0.5,
+    )
+    module = _make_da_ensemble_training(task, data_indices)
+    module.output_mask = {"data": NoOutputMask()}
+
+    captured: dict[str, Any] = {}
+
+    def _stub(y_pred: dict[str, torch.Tensor], _y: dict[str, torch.Tensor], **kwargs: Any) -> tuple:
+        captured.update(kwargs)
+        return torch.zeros(1), {}, y_pred
+
+    monkeypatch.setattr(module, "compute_loss_metrics", _stub)
+    monkeypatch.setattr("torch.utils.checkpoint.checkpoint", lambda fn, *a, **kw: fn(*a, **kw))
+
+    batch = {"data": torch.randn(1, 3, 1, 4, len(_NAME_TO_INDEX))}
+    module._step(batch, validation_mode=False)
+
+    assert captured["pred_layout"] == IndexSpace.MODEL_OUTPUT
+    assert captured["target_layout"] == IndexSpace.DATA_OUTPUT

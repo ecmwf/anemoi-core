@@ -32,6 +32,7 @@ from anemoi.models.layers.residual import ClimatologySkipConnection
 from anemoi.models.layers.residual import SkipConnection
 from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
+from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 
 _BATCH, _TIME, _ENSEMBLE, _GRID, _VARS = 2, 3, 1, 5, 4
 _STEP_OUTPUT = 2
@@ -188,21 +189,39 @@ def test_base_model_does_not_advertise_skip_input() -> None:
     assert AnemoiModelEncProcDec.supports_skip_input is True
 
 
+# Subclasses that replace ``forward`` AND genuinely thread ``skip_input`` through to
+# ``_assemble_input``. Adding a name here is a claim that must be backed by a
+# behavioural test in this file, as AnemoiEnsModelEncProcDec is by
+# test_ens_skip_input_redirects_residual_but_not_encoder below.
+_VERIFIED_SKIP_INPUT_OVERRIDES = {"AnemoiEnsModelEncProcDec"}
+
+
 def test_forward_overrides_do_not_advertise_skip_input() -> None:
-    """No shipped subclass that replaces forward claims to support skip_input.
+    """No shipped subclass that replaces forward claims skip_input support unverified.
 
     Checked against the live subclass tree rather than a hand-written list, so a new
-    subclass is covered the moment it is defined.
+    subclass is covered the moment it is defined. A subclass that does thread
+    skip_input opts back in and is listed in _VERIFIED_SKIP_INPUT_OVERRIDES.
     """
     offenders = [
         cls.__name__
         for cls in _subclasses(AnemoiModelEncProcDec)
-        if cls.forward is not AnemoiModelEncProcDec.forward and cls.supports_skip_input
+        if cls.forward is not AnemoiModelEncProcDec.forward
+        and cls.supports_skip_input
+        and cls.__name__ not in _VERIFIED_SKIP_INPUT_OVERRIDES
     ]
     assert not offenders, (
         f"{offenders} override forward without threading skip_input to _assemble_input, "
         f"yet advertise support for it."
     )
+
+
+def test_verified_skip_input_overrides_are_live_and_opted_in() -> None:
+    """The allowlist cannot rot: every name on it must still exist and still opt in."""
+    live = {cls.__name__: cls for cls in _subclasses(AnemoiModelEncProcDec)}
+    for name in _VERIFIED_SKIP_INPUT_OVERRIDES:
+        assert name in live, f"{name} is allowlisted but no longer a subclass; drop it."
+        assert live[name].supports_skip_input, f"{name} is allowlisted but no longer opts in."
 
 
 def test_overriding_forward_opts_out_automatically() -> None:
@@ -230,3 +249,63 @@ def test_subclass_may_opt_back_in_explicitly() -> None:
             return x
 
     assert ThreadsItProperly.supports_skip_input is True
+
+
+# ── AnemoiEnsModelEncProcDec: the same contract, with members folded into the nodes ──
+
+
+def _make_ens_stub() -> SimpleNamespace:
+    """A stand-in exposing only what the ensemble ``_assemble_input`` reads."""
+    return SimpleNamespace(
+        residual={"data": SkipConnection()},
+        node_attributes=lambda _name, batch_size: torch.zeros(batch_size * _GRID, 2),
+        n_step_output=_STEP_OUTPUT,
+        condition_on_residual=False,
+    )
+
+
+def _assemble_ens(
+    x: torch.Tensor,
+    skip_input: torch.Tensor | None,
+    ensemble: int,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    x_data_latent, x_skip, _ = AnemoiEnsModelEncProcDec._assemble_input(
+        _make_ens_stub(),
+        x,
+        fcstep=0,
+        batch_ens_size=_BATCH * ensemble,
+        grid_shard_sizes=None,
+        dataset_name="data",
+        skip_input=skip_input,
+    )
+    return x_data_latent, x_skip
+
+
+def test_ens_skip_input_none_reads_x() -> None:
+    ens = 3
+    x = torch.randn(_BATCH, _TIME, ens, _GRID, _VARS)
+
+    _, x_skip = _assemble_ens(x, None, ens)
+
+    assert x_skip.shape == (_BATCH, _STEP_OUTPUT, ens, _GRID, _VARS)
+    assert torch.equal(x_skip, x[:, -1, ...].unsqueeze(1).expand(-1, _STEP_OUTPUT, -1, -1, -1))
+
+
+def test_ens_skip_input_redirects_residual_but_not_encoder() -> None:
+    """The ensemble model honours skip_input exactly as the deterministic one does.
+
+    This is what backs AnemoiEnsModelEncProcDec's entry in
+    _VERIFIED_SKIP_INPUT_OVERRIDES.
+    """
+    ens = 3
+    x = torch.randn(_BATCH, _TIME, ens, _GRID, _VARS)
+    background = torch.randn(_BATCH, _TIME, ens, _GRID, _VARS)
+
+    latent_default, skip_default = _assemble_ens(x, None, ens)
+    latent_override, skip_override = _assemble_ens(x, background, ens)
+
+    expected = background[:, -1, ...].unsqueeze(1).expand(-1, _STEP_OUTPUT, -1, -1, -1)
+    assert torch.equal(skip_override, expected)
+    assert not torch.equal(skip_override, skip_default)
+    # The encoder input, fcstep channel included, is untouched by the redirect.
+    assert torch.equal(latent_override, latent_default)

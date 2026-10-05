@@ -44,6 +44,7 @@ from anemoi.training.diagnostics.evaluation.plotting.settings import init_plot_s
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.utils import reduce_to_last_dim
 from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
@@ -800,6 +801,12 @@ class PlotLossCorrected(LossCurvePlot):
 
         corrector_idx = pl_module.data_indices[dataset_name].data.input.corrector.to(device=y_true.device)
         corrector_vars = y_true.index_select(-1, corrector_idx)
+        # The target carries a single member while an ensemble prediction carries several;
+        # the corrector concatenates the two along the variable axis, so broadcast the
+        # metadata across members (as DATrainingMixin._corrector_forward does).
+        n_members = y_hat.shape[TensorDim.ENSEMBLE_DIM]
+        if corrector_vars.shape[TensorDim.ENSEMBLE_DIM] != n_members:
+            corrector_vars = corrector_vars.expand(-1, -1, n_members, -1, -1)
         # Callback runs on gathered full-grid tensors on rank 0, so no
         # comm group / shard sizes are needed. Plot-only: no backward pass
         # follows, so skip building the autograd graph for this GNN forward.

@@ -9,6 +9,7 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
@@ -190,3 +191,70 @@ def test_target_dim_includes_decoder_forcing_channels() -> None:
     model = _build_dummy_model(_make_data_indices_with_decoder_forcing(n_df), n_step_output=n_step_output)
     assert model.num_decoder_forcing_channels["data"] == n_df
     assert model.target_dim["data"] == model.input_dim["data"] + n_step_output * n_df
+
+
+# ── _append_decoder_forcings ──────────────────────────────────────────────────
+
+
+def _df_stub(n_step_output: int = 2, n_df: int = 3) -> SimpleNamespace:
+    """Exposes only what _append_decoder_forcings reads."""
+    return SimpleNamespace(
+        n_step_output=n_step_output,
+        num_decoder_forcing_channels={"data": n_df},
+    )
+
+
+def _append(stub: SimpleNamespace, x_dst: torch.Tensor, forcings: dict | None, ensemble: int) -> torch.Tensor:
+    return BaseGraphModel._append_decoder_forcings(stub, x_dst, forcings, "data", ensemble)
+
+
+def test_append_decoder_forcings_is_a_noop_without_forcings() -> None:
+    stub = _df_stub()
+    x_dst = torch.randn(6, 4)
+    assert _append(stub, x_dst, None, 1) is x_dst
+    # A dict that does not mention this dataset is equally a no-op.
+    assert _append(stub, x_dst, {"other": torch.randn(1, 2, 1, 3, 3)}, 1) is x_dst
+
+
+def test_append_decoder_forcings_concatenates_time_major_channels() -> None:
+    batch, n_step_output, grid, n_df, channels = 2, 2, 3, 3, 4
+    stub = _df_stub(n_step_output=n_step_output, n_df=n_df)
+    x_dst = torch.randn(batch * 1 * grid, channels)
+    df = torch.randn(batch, n_step_output, 1, grid, n_df)
+
+    out = _append(stub, x_dst, {"data": df}, 1)
+
+    assert out.shape == (batch * grid, channels + n_step_output * n_df)
+    assert torch.equal(out[:, :channels], x_dst)
+
+
+def test_append_decoder_forcings_broadcasts_a_single_member() -> None:
+    """Forcings describe the grid point and time, so every member gets the same values."""
+    batch, n_step_output, grid, n_df, ensemble = 2, 2, 3, 3, 4
+    stub = _df_stub(n_step_output=n_step_output, n_df=n_df)
+    x_dst = torch.randn(batch * ensemble * grid, 5)
+    df = torch.randn(batch, n_step_output, 1, grid, n_df)
+
+    out = _append(stub, x_dst, {"data": df}, ensemble)
+
+    assert out.shape == (batch * ensemble * grid, 5 + n_step_output * n_df)
+    # Node order is (batch, ensemble, grid); members of the same sample must agree.
+    appended = out[:, 5:].reshape(batch, ensemble, grid, -1)
+    for member in range(1, ensemble):
+        torch.testing.assert_close(appended[:, 0], appended[:, member])
+
+
+def test_append_decoder_forcings_rejects_wrong_time_dim() -> None:
+    stub = _df_stub(n_step_output=2, n_df=3)
+    x_dst = torch.randn(6, 4)
+    df = torch.randn(2, 3, 1, 3, 3)  # 3 output times, not 2
+    with pytest.raises(AssertionError, match="decoder_forcings time dim"):
+        _append(stub, x_dst, {"data": df}, 1)
+
+
+def test_append_decoder_forcings_rejects_wrong_channel_count() -> None:
+    stub = _df_stub(n_step_output=2, n_df=3)
+    x_dst = torch.randn(6, 4)
+    df = torch.randn(2, 2, 1, 3, 5)  # 5 channels, not 3
+    with pytest.raises(AssertionError, match="decoder_forcings channels"):
+        _append(stub, x_dst, {"data": df}, 1)

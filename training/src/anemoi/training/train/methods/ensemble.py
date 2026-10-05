@@ -107,6 +107,15 @@ class EnsembleTraining(BaseTrainingModule):
         self.ens_comm_num_groups = None
         self.ens_comm_group_size = None
 
+        # Same for the subgroup, which compute_dataset_loss_metrics gathers members over.
+        # Without these a run under a strategy that never calls set_ens_comm_subgroup fails
+        # with AttributeError deep in the loss rather than at the gather.
+        self.ens_comm_subgroup = None
+        self.ens_comm_subgroup_id = None
+        self.ens_comm_subgroup_rank = None
+        self.ens_comm_subgroup_num_groups = None
+        self.ens_comm_subgroup_size = 1
+
     def set_ens_comm_group(
         self,
         ens_comm_group: ProcessGroup,

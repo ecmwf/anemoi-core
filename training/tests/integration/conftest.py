@@ -332,6 +332,31 @@ def handle_truncation_matrices(cfg: DictConfig, get_test_data: GetTestData) -> D
 
 
 @pytest.fixture
+def da_ensemble_config(
+    testing_modifications_with_temp_dir: DictConfig,
+    get_tmp_path: GetTmpPath,
+) -> tuple[DictConfig, str]:
+    """The DA forecaster with a kCRPS-scored ensemble.
+
+    The smallest configuration exercising DA cycling, the ensemble member gather and
+    kernel CRPS together. Two members are required: CRPS asserts ens_size > 1.
+    """
+    with initialize(version_base=None, config_path="../../src/anemoi/training/config", job_name="test_da_ensemble"):
+        template = compose(config_name="da_ensemble_crps")
+
+    use_case_modifications = OmegaConf.load(Path.cwd() / "training/tests/integration/config/test_da_ensemble.yaml")
+    assert isinstance(use_case_modifications, DictConfig)
+
+    tmp_dir_dataset, url_dataset = get_tmp_path(use_case_modifications.system.input.dataset)
+    use_case_modifications.system.input.dataset = str(tmp_dir_dataset)
+
+    cfg = OmegaConf.merge(template, testing_modifications_with_temp_dir, use_case_modifications)
+    OmegaConf.resolve(cfg)
+    assert isinstance(cfg, DictConfig)
+    return cfg, url_dataset
+
+
+@pytest.fixture
 def ensemble_config(
     testing_modifications_with_temp_dir: DictConfig,
     get_tmp_path: GetTmpPath,

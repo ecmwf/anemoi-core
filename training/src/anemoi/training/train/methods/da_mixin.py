@@ -1,0 +1,341 @@
+# (C) Copyright 2024- Anemoi contributors.
+#
+# This software is licensed under the terms of the Apache Licence Version 2.0
+# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
+#
+# In applying this licence, ECMWF does not waive the privileges and immunities
+# granted to it by virtue of its status as an intergovernmental organisation
+# nor does it submit to any jurisdiction.
+
+"""Shared data-assimilation training machinery.
+
+Pairs with :class:`anemoi.training.tasks.da_forecaster.DAForecaster`. Mixed into a
+concrete training method so that:
+
+- DA-cycle steps (``is_da``) are weighted by ``training.da_loss_weight`` (and
+  skipped entirely when that weight is zero), while forecast steps use weight 1.
+- The total loss is averaged over the forecast steps only.
+- A training-only per-instrument corrector network is applied to predictions
+  before the loss (never for state advancement).
+
+The mixin carries no ensemble concerns. Subclasses adapt it through three hooks,
+:meth:`_prepare_state`, :meth:`_step_forward_kwargs` and :meth:`_output_prediction`,
+which default to the deterministic behaviour.
+
+The mixin deliberately defines ``__init__`` itself rather than leaving it to the
+concrete method. Lightning's ``save_hyperparameters`` walks up the ``__init__``
+frames, so an extra ``__init__`` on the concrete class would add its locals to the
+recorded hyper-parameters; and ``super().__init__()`` must run before
+``self.corrector`` is registered, or the module never enters the registry.
+"""
+
+import torch
+from torch.utils.checkpoint import checkpoint
+from torch_geometric.data import HeteroData
+
+from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from anemoi.graphs.projection_helpers import uses_fused_dataset_graph
+from anemoi.models.layers.graph_provider import create_graph_provider
+from anemoi.training.train.methods.corrector import InstrumentCorrectors
+from anemoi.training.train.step_output import TrainingStepOutput
+from anemoi.training.utils.enums import TensorDim
+from anemoi.training.utils.index_space import IndexSpace
+
+
+class DATrainingMixin:
+    """Data-assimilation cycling and correctors, independent of the member layout."""
+
+    def __init__(self, *, graph_data: HeteroData, **kwargs) -> None:
+        super().__init__(graph_data=graph_data, **kwargs)
+        self.corrector = torch.nn.ModuleDict()
+        self._init_correctors(graph_data)
+        # Cache of DATA_FULL -> data-output column indices, keyed by dataset name,
+        # used to slice targets down to the loss-relevant variables (model outputs
+        # plus any ``target``-category observation columns) before the loss checkpoint.
+        self._loss_target_idx_cache: dict[str, torch.Tensor] = {}
+
+        # forward() swallows unknown kwargs, so a model that ignores skip_input would
+        # silently train against the observation-copied residual base instead.
+        if getattr(self.task, "da_flow_dependent_skip", False) and not getattr(
+            self.model.model,
+            "supports_skip_input",
+            False,
+        ):
+            msg = (
+                f"task.da_flow_dependent_skip=True requires a model supporting 'skip_input', "
+                f"but {type(self.model.model).__name__} does not."
+            )
+            raise ValueError(msg)
+
+    def _prepare_state(self, x: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        """Shape the initial input state before the first forward pass.
+
+        Identity for deterministic methods. Ensemble methods override this to add
+        the member dimension. It runs before the first :meth:`build_skip_input`, whose
+        result must match ``x`` in shape.
+        """
+        return x
+
+    def _step_forward_kwargs(self, task_kwargs: dict) -> dict:
+        """Extra keyword arguments for the forward call at this step.
+
+        Empty for deterministic methods, which take no step conditioning.
+        """
+        del task_kwargs
+        return {}
+
+    def _output_prediction(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        validation_mode: bool,
+    ) -> dict[str, torch.Tensor]:
+        """Shape the raw prediction returned in ``TrainingStepOutput.predictions``.
+
+        Identity for deterministic methods. Ensemble methods override this to gather
+        the members held on the other devices, which the plot and metric callbacks
+        need to score the full ensemble.
+        """
+        del validation_mode
+        return y_pred
+
+    def _init_correctors(self, graph_data: HeteroData) -> None:
+        """Build per-instrument corrector networks for each dataset with corrector variables.
+
+        Reads the ``training.corrector`` config section which defines instrument
+        groups (each with their own corrector variables and output channels) and
+        the corrector backend type (``"mlp"`` or ``"processor"``). For ``type: processor``,
+        data-to-data graph edges are extracted from the training graph.
+
+        Parameters
+        ----------
+        graph_data : HeteroData
+            The training graph, used to build the data-to-data graph provider.
+        """
+        corrector_config = getattr(self.config.training, "corrector", None)
+        if corrector_config is None:
+            return
+
+        hidden_dim = getattr(corrector_config, "hidden_dim", 64)
+        corrector_type = getattr(corrector_config, "type", "mlp")
+        processor_config = corrector_config.get("processor")
+        raw_groups = getattr(corrector_config, "instrument_groups", None)
+        if raw_groups is None:
+            return
+
+        instrument_groups = {}
+        for group_name in raw_groups:
+            group = raw_groups[group_name]
+            corrector_variables = list(getattr(group, "corrector_variables", []))
+            channels = getattr(group, "channels", None)
+            instrument_groups[group_name] = {
+                "corrector_variables": corrector_variables,
+                "channels": list(channels) if channels is not None else None,
+            }
+
+        fused = uses_fused_dataset_graph(graph_data, self.dataset_names)
+        for dataset_name in self.target_dataset_names:
+            corrector_indices = self.data_indices[dataset_name].data.input.corrector
+            if len(corrector_indices) == 0:
+                continue
+
+            name_to_index = self.data_indices[dataset_name].data.input.name_to_index
+            index_to_name = {v: k for k, v in name_to_index.items()}
+            all_corrector_names = [index_to_name[int(idx)] for idx in corrector_indices]
+
+            output_name_to_index = self.data_indices[dataset_name].model.output.name_to_index
+
+            graph_provider = None
+            if corrector_type == "processor":
+                node_name = dataset_name if fused else DEFAULT_DATASET_NAME
+                data_data_key = (node_name, "to", node_name)
+                if data_data_key not in graph_data.edge_types:
+                    msg = (
+                        f"Corrector type 'processor' requires data-to-data edges in the graph "
+                        f"(key {data_data_key}), but they were not found for dataset '{dataset_name}'. "
+                        f"Add a data->data edge builder (e.g. KNNEdges) to your graph config."
+                    )
+                    raise ValueError(msg)
+                num_nodes = graph_data[node_name].num_nodes
+                graph_provider = create_graph_provider(
+                    graph=graph_data[data_data_key],
+                    edge_attributes=processor_config.sub_graph_edge_attributes,
+                    src_size=num_nodes,
+                    dst_size=num_nodes,
+                    trainable_size=processor_config.trainable_size,
+                )
+
+            self.corrector[dataset_name] = InstrumentCorrectors(
+                instrument_groups=instrument_groups,
+                all_corrector_names=all_corrector_names,
+                output_name_to_index=output_name_to_index,
+                hidden_dim=hidden_dim,
+                corrector_type=corrector_type,
+                processor_config=processor_config,
+                graph_provider=graph_provider,
+            )
+
+    def _apply_corrector(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Apply the corrector networks to raw predictions for the loss only.
+
+        Corrector variables are read from the DATA_FULL target ``y`` at the
+        target time. Datasets without a corrector network pass through unchanged.
+
+        The corrector runs under activation checkpointing during training: the
+        instrument processors retain graph activations at every forecast step.
+        Recomputing them in the backward pass reduces memory use at long rollouts.
+        Processor-level checkpointing can be configured independently.
+
+        Note: for the same reason as the encoder/decoder mapper blocks, no module
+        reachable from here may be passed to ``torch.compile`` via
+        ``model.compile`` -- compiling inside a non-reentrant checkpoint region
+        reorders the saved activations and raises ``CheckpointError``.
+
+        Parameters
+        ----------
+        y_pred : dict[str, torch.Tensor]
+            Raw model output per dataset (MODEL_OUTPUT layout).
+        y : dict[str, torch.Tensor]
+            Targets per dataset (DATA_FULL layout) at the current step.
+
+        Returns
+        -------
+        dict[str, torch.Tensor]
+            Corrector-adjusted predictions per dataset.
+        """
+        if len(self.corrector) == 0:
+            return y_pred
+
+        if not torch.is_grad_enabled():
+            # Nothing to recompute for (validation / inference): no activations
+            # are stored, so checkpointing would only add overhead.
+            return self._corrector_forward(y_pred, y)
+
+        return checkpoint(self._corrector_forward, y_pred, y, use_reentrant=False)
+
+    def _corrector_forward(
+        self,
+        y_pred: dict[str, torch.Tensor],
+        y: dict[str, torch.Tensor],
+    ) -> dict[str, torch.Tensor]:
+        """Run the corrector networks. See :meth:`_apply_corrector`."""
+        y_for_loss = {}
+        for dataset_name, pred in y_pred.items():
+            # nn.ModuleDict has no .get(), so SIM401's suggestion does not apply here.
+            corrector = self.corrector[dataset_name] if dataset_name in self.corrector else None  # noqa: SIM401
+            if corrector is None:
+                y_for_loss[dataset_name] = pred
+                continue
+            corrector_idx = self.data_indices[dataset_name].data.input.corrector.to(device=pred.device)
+            corrector_vars = y[dataset_name].index_select(-1, corrector_idx)
+            # The target always carries a single member while the prediction may carry
+            # several. InstrumentCorrectors concatenates the two along the variable axis,
+            # which requires every other extent to match, so broadcast the metadata across
+            # members. The observations are the same for all of them.
+            n_members = pred.shape[TensorDim.ENSEMBLE_DIM]
+            if corrector_vars.shape[TensorDim.ENSEMBLE_DIM] != n_members:
+                corrector_vars = corrector_vars.expand(-1, -1, n_members, -1, -1)
+            y_for_loss[dataset_name] = corrector(
+                pred,
+                corrector_vars,
+                model_comm_group=self.model_comm_group,
+                grid_shard_sizes=self.grid_shard_sizes[dataset_name],
+            )
+        return y_for_loss
+
+    def _loss_target_idx(self, dataset_name: str, device: torch.device) -> torch.Tensor:
+        """Return (and cache) the DATA_FULL column indices of the data-output variables.
+
+        Selecting these columns from a DATA_FULL target yields the DATA_OUTPUT layout
+        (prognostic + diagnostic + ``target`` variables, in data order), so the sliced
+        tensor pairs with ``target_layout=IndexSpace.DATA_OUTPUT`` in the loss. Without
+        ``target`` variables this is exactly the model-output set, so the loss is
+        unchanged; with them, observation-operator losses can read their columns.
+        """
+        idx = self._loss_target_idx_cache.get(dataset_name)
+        if idx is None or idx.device != device:
+            positions = self.data_indices[dataset_name].data_output_positions_in_data_full
+            idx = torch.as_tensor(positions, dtype=torch.long, device=device)
+            self._loss_target_idx_cache[dataset_name] = idx
+        return idx
+
+    def _step(
+        self,
+        batch: dict[str, torch.Tensor],
+        validation_mode: bool = False,
+    ) -> TrainingStepOutput:
+        """Training / validation step with DA cycling and corrector-adjusted loss."""
+        loss = torch.zeros(1, dtype=next(iter(batch.values())).dtype, device=self.device, requires_grad=False)
+        metrics = {}
+        y_preds = []
+
+        x = self.task.get_inputs(batch, data_indices=self.data_indices)
+        # Shape the state before the residual base is built: build_skip_input mirrors
+        # the shape of x, and the model asserts the two match.
+        x = self._prepare_state(x)
+        # Step 0 has no background yet, so its residual base says "nothing known here".
+        skip_input = self.task.build_skip_input(x)
+
+        task_steps = self.task.steps("validation" if validation_mode else "training")
+        n_forecast = max(1, sum(1 for step in task_steps if not step.get("is_da", False)))
+
+        for i, task_kwargs in enumerate(task_steps):
+            is_da = task_kwargs.get("is_da", False)
+            rollout_step = task_kwargs["rollout_step"]
+            weight = self.task.da_loss_weight if is_da else 1.0
+
+            decoder_forcings = self.task.build_decoder_forcings(batch, data_indices=self.data_indices, **task_kwargs)
+            forward_kwargs = {} if decoder_forcings is None else {"decoder_forcings": decoder_forcings}
+            if skip_input is not None:
+                forward_kwargs["skip_input"] = skip_input
+            forward_kwargs.update(self._step_forward_kwargs(task_kwargs))
+            y_pred = self(x, **forward_kwargs)
+            y = self.task.get_targets(batch, **task_kwargs)
+
+            if weight > 0:
+                # Corrector needs the full DATA_FULL target (reads input.corrector columns).
+                y_for_loss = self._apply_corrector(y_pred, y)
+                # Slice the target to data-output variables BEFORE the checkpoint so the
+                # activation checkpoint saves only the reduced target rather than every
+                # DATA_FULL channel (forcings/corrector) for each DA + rollout step.
+                y_target = {name: t.index_select(-1, self._loss_target_idx(name, t.device)) for name, t in y.items()}
+                loss_next, metrics_next, _ = checkpoint(
+                    self.compute_loss_metrics,
+                    y_for_loss,
+                    y_target,
+                    rollout_step=rollout_step,
+                    validation_mode=validation_mode,
+                    pred_layout=IndexSpace.MODEL_OUTPUT,
+                    target_layout=IndexSpace.DATA_OUTPUT,
+                    use_reentrant=False,
+                )
+                if loss_next is not None:
+                    loss = loss + weight * loss_next
+                metrics.update(metrics_next)
+
+            # Advance the input state only if another step follows; the final
+            # step's advanced state is never read. Advance with the RAW
+            # prediction, never the corrected tensor.
+            if i < len(task_steps) - 1:
+                x = self.task.advance_input(
+                    x,
+                    y_pred,
+                    batch,
+                    **task_kwargs,
+                    data_indices=self.data_indices,
+                    output_mask=self.output_mask,
+                    grid_shard_slice=self.grid_shard_slice,
+                )
+                # A DA blend copied observations into x; hand the model the pre-copy
+                # background as the residual base for the next step. After a forecast
+                # advance x is already a raw prediction, so the default base is
+                # flow-dependent and no override is needed.
+                skip_input = self.task.build_skip_input(x, y_pred, self.data_indices) if is_da else None
+
+            y_preds.append(self._output_prediction(y_pred, validation_mode))
+
+        loss *= 1.0 / n_forecast
+        return TrainingStepOutput(loss=loss, metrics=metrics, predictions=y_preds)
