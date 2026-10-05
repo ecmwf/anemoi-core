@@ -9,8 +9,7 @@
 
 import pytest
 
-from anemoi.graphs.edges import KNNEdges
-from anemoi.graphs.edges import ReversedKNNEdges
+from anemoi.graphs.edges import KNNEdges, ReversedKNNEdges
 
 
 @pytest.mark.parametrize("edge_builder", [KNNEdges, ReversedKNNEdges])

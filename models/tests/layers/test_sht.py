@@ -11,12 +11,8 @@ import numpy as np
 import pytest
 import torch
 
-from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
-from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
-from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT
-from anemoi.models.layers.spectral_transforms import InverseReducedSHT
-from anemoi.models.layers.spectral_transforms import OctahedralSHT
-from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform, SphericalHarmonicTransform
+from anemoi.models.layers.spectral_transforms import InverseOctahedralSHT, InverseReducedSHT, OctahedralSHT, ReducedSHT
 
 """
 Random array of complex spectral coefficients.

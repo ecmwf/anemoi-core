@@ -17,8 +17,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.khop_edges import GraphPartition
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.models.distributed.shapes import GraphShardInfo, ShardSizes
 
 
 @dataclass(frozen=True)

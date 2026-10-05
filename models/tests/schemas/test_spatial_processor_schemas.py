@@ -17,7 +17,7 @@ _TARGET = "anemoi.models.preprocessing.cross_grid_projector.CrossGridProjector"
 
 class TestCrossGridProjectorSchema:
     def test_valid_with_file_path(self):
-        schema = CrossGridProjectorSchema(**{"_target_": _TARGET, "file_path": "/some/matrix.npz"})
+        schema = CrossGridProjectorSchema(_target_=_TARGET, file_path="/some/matrix.npz")
         assert schema.target_ == _TARGET
         assert schema.file_path == "/some/matrix.npz"
         assert schema.edges_name is None
@@ -26,11 +26,7 @@ class TestCrossGridProjectorSchema:
 
     def test_valid_with_edges_name(self):
         schema = CrossGridProjectorSchema(
-            **{
-                "_target_": _TARGET,
-                "edges_name": ("lowres", "to", "hires"),
-                "edge_weight_attribute": "weight",
-            }
+            _target_=_TARGET, edges_name=("lowres", "to", "hires"), edge_weight_attribute="weight"
         )
         assert schema.edges_name == ("lowres", "to", "hires")
         assert schema.edge_weight_attribute == "weight"
@@ -38,24 +34,20 @@ class TestCrossGridProjectorSchema:
 
     def test_error_when_neither_source_provided(self):
         with pytest.raises(ValidationError, match="exactly one of 'file_path' or 'edges_name'"):
-            CrossGridProjectorSchema(**{"_target_": _TARGET})
+            CrossGridProjectorSchema(_target_=_TARGET)
 
     def test_error_when_both_sources_provided(self):
         with pytest.raises(ValidationError, match="exactly one of 'file_path' or 'edges_name'"):
             CrossGridProjectorSchema(
-                **{
-                    "_target_": _TARGET,
-                    "file_path": "/some/matrix.npz",
-                    "edges_name": ("lowres", "to", "hires"),
-                }
+                _target_=_TARGET, file_path="/some/matrix.npz", edges_name=("lowres", "to", "hires")
             )
 
     def test_error_on_wrong_target(self):
         with pytest.raises(ValidationError):
             CrossGridProjectorSchema(
-                **{"_target_": "anemoi.models.preprocessing.some_other.Class", "file_path": "/m.npz"}
+                _target_="anemoi.models.preprocessing.some_other.Class", file_path="/m.npz"
             )
 
     def test_error_on_edges_name_wrong_length(self):
         with pytest.raises(ValidationError):
-            CrossGridProjectorSchema(**{"_target_": _TARGET, "edges_name": ("only_two", "items")})
+            CrossGridProjectorSchema(_target_=_TARGET, edges_name=("only_two", "items"))

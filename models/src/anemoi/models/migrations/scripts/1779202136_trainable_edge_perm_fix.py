@@ -12,8 +12,7 @@ import logging
 import torch
 
 from anemoi.models.layers.graph_provider import StaticGraphProvider
-from anemoi.models.migrations import CkptType
-from anemoi.models.migrations import MigrationMetadata
+from anemoi.models.migrations import CkptType, MigrationMetadata
 
 LOGGER = logging.getLogger(__name__)
 

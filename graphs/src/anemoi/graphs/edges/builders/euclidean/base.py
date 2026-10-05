@@ -9,8 +9,7 @@
 
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 import torch
@@ -18,9 +17,7 @@ from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
 from anemoi.graphs.edges.builders.masking import NodeMaskingMixin
-from anemoi.graphs.utils import PYG_INSTRUCTIONS
-from anemoi.graphs.utils import cuda_device_of
-from anemoi.graphs.utils import is_pyg_lib_available
+from anemoi.graphs.utils import PYG_INSTRUCTIONS, cuda_device_of, is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
 

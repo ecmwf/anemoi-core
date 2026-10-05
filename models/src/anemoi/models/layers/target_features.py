@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import logging
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from functools import cached_property
 from typing import TYPE_CHECKING
 

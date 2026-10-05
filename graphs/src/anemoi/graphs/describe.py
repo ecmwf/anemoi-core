@@ -12,10 +12,10 @@ from itertools import chain
 from pathlib import Path
 
 import torch
-
-from anemoi.graphs.utils import load_graph_from_file
 from anemoi.utils.humanize import bytes
 from anemoi.utils.text import table
+
+from anemoi.graphs.utils import load_graph_from_file
 
 
 class GraphDescriptor:

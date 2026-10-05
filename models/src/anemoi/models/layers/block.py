@@ -10,42 +10,25 @@
 
 import logging
 import os
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
-from typing import Union
+from abc import ABC, abstractmethod
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
-from torch_geometric.typing import Adj
-from torch_geometric.typing import OptPairTensor
-from torch_geometric.typing import Size
+from torch_geometric.typing import Adj, OptPairTensor, Size
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import halo_exchange
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.graph import sync_tensor
+from anemoi.models.distributed.graph import all_to_all_transpose, halo_exchange, shard_tensor, sync_tensor
 from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo, ShardSizes, get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed
-from anemoi.models.layers.attention import MultiHeadCrossAttention
-from anemoi.models.layers.attention import MultiHeadSelfAttention
-from anemoi.models.layers.conv import GraphConv
-from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.layers.mlp import MLP
-from anemoi.models.layers.mlp import MLPImplementation
-from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.attention import MultiHeadCrossAttention, MultiHeadSelfAttention
+from anemoi.models.layers.conv import GraphConv, GraphTransformerConv
+from anemoi.models.layers.mlp import MLP, MLPImplementation, build_feedforward_layer
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.triton.utils import edge_index_to_csc
-from anemoi.models.triton.utils import is_triton_available
-from anemoi.utils.config import DotDict
+from anemoi.models.triton.utils import edge_index_to_csc, is_triton_available
 
 if is_triton_available():
     from anemoi.models.triton.gt import graph_transformer_attention_conv
@@ -71,10 +54,10 @@ class BaseBlock(nn.Module, ABC):
         x: OptPairTensor,
         edge_attr: torch.Tensor,
         edge_index: Adj,
-        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
+        shard_info: GraphShardInfo | BipartiteGraphShardInfo,
         batch_size: int,
-        size: Optional[Size] = None,
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: Size | None = None,
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ) -> tuple[torch.Tensor, torch.Tensor]: ...
 
@@ -110,7 +93,7 @@ class PointWiseMLPProcessorBlock(BaseBlock):
         x: Tensor,
         shard_info: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor]:
         return (self.mlp(x),)
@@ -125,14 +108,14 @@ class TransformerProcessorBlock(BaseBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: Optional[int],
+        window_size: int | None,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -172,8 +155,8 @@ class TransformerProcessorBlock(BaseBlock):
         x: Tensor,
         shard_info: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[Tensor] = None,
+        model_comm_group: ProcessGroup | None = None,
+        cond: Tensor | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor]:
 
@@ -201,14 +184,14 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         num_channels: int,
         hidden_dim: int,
         num_heads: int,
-        window_size: Optional[int],
+        window_size: int | None,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         dropout_p: float = 0.0,
         qk_norm: bool = False,
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float | None = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -255,8 +238,8 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         x: OptPairTensor,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        model_comm_group: ProcessGroup | None = None,
+        cond: tuple[Tensor, Tensor] | None = None,
     ) -> tuple[Tensor, Tensor]:
         cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
         cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
@@ -282,7 +265,7 @@ class GraphConvBaseBlock(BaseBlock):
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = True,
         layer_kernels: DotDict,
-        edge_dim: Optional[int] = None,
+        edge_dim: int | None = None,
         **kwargs,
     ) -> None:
         """Initialize GNNBlock.
@@ -347,9 +330,9 @@ class GraphConvBaseBlock(BaseBlock):
         x: OptPairTensor,
         edge_attr: Tensor,
         edge_index: Adj,
-        shard_info: Union[GraphShardInfo, BipartiteGraphShardInfo],
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        shard_info: GraphShardInfo | BipartiteGraphShardInfo,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]: ...
 
@@ -361,8 +344,8 @@ class GraphConvProcessorBlock(GraphConvBaseBlock):
         edge_attr: Tensor,
         edge_index: Adj,
         shard_info: GraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
         if self.emb_edges is not None:
@@ -440,8 +423,8 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         edge_attr: Tensor,
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
-        model_comm_group: Optional[ProcessGroup] = None,
-        size: Optional[Size] = None,
+        model_comm_group: ProcessGroup | None = None,
+        size: Size | None = None,
         **layer_kwargs,
     ) -> tuple[Tensor, Tensor]:
 
@@ -491,7 +474,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         mlp_implementation: MLPImplementation = "mlp",
         update_src_nodes: bool = False,
         layer_kernels: DotDict,
-        attn_channels: Optional[int] = None,
+        attn_channels: int | None = None,
         graph_attention_backend: str = "triton",
         edge_pre_mlp: bool = False,
         **kwargs,
@@ -662,7 +645,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value: Tensor,
         edges: Tensor,
         edge_index: Adj,
-        size: Union[int, tuple[int, int]],
+        size: int | tuple[int, int],
         num_chunks: int,
         edges_are_dst_sorted: bool,
     ) -> Tensor:
@@ -690,7 +673,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edges: Tensor,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor, Tensor, Tensor, ShardSizes]:
         """Shards qkv and edges along head dimension using all_to_all_transpose."""
         if model_comm_group is not None:
@@ -731,8 +714,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup],
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None,
         num_chunks: int,
         edges_are_dst_sorted: bool,
     ) -> Tensor:
@@ -761,7 +744,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value: Tensor,
         edges: Tensor,
         edge_index: Adj,
-        size: Union[int, tuple[int, int]],
+        size: int | tuple[int, int],
         edges_are_dst_sorted: bool = True,
     ) -> Tensor:
         # self.conv requires size to be a tuple
@@ -793,7 +776,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         value: Tensor,
         edges: Tensor,
         edge_index: Adj,
-        size: Union[int, tuple[int, int]],
+        size: int | tuple[int, int],
         num_chunks: int,
         edges_are_dst_sorted: bool = True,
     ) -> Tensor:
@@ -837,7 +820,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         shard_info: BipartiteGraphShardInfo,
         head_shard_sizes: ShardSizes,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> Tensor:
         """Shards Tensor sequence dimension using all_to_all_transpose."""
         out = einops.rearrange(out, "(batch grid) heads vars -> batch heads grid vars", batch=batch_size)
@@ -857,8 +840,8 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
         **kwargs,
     ): ...
 
@@ -963,9 +946,9 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shard_info: BipartiteGraphShardInfo,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[tuple[Tensor, Tensor]] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
+        cond: tuple[Tensor, Tensor] | None = None,
         edges_are_dst_sorted: bool = True,
         **layer_kwargs,
     ):
@@ -1100,10 +1083,10 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shard_info: GraphShardInfo,
         batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
+        model_comm_group: ProcessGroup | None,
         num_chunks: int,
         edges_are_dst_sorted: bool,
-        halo_info: Optional[HaloInfo] = None,
+        halo_info: HaloInfo | None = None,
     ) -> Tensor:
         if model_is_distributed(model_comm_group) and halo_info is None:
             raise ValueError(
@@ -1141,8 +1124,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shard_info: GraphShardInfo,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup],
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None,
         num_chunks: int,
         edges_are_dst_sorted: bool,
     ) -> Tensor:
@@ -1175,11 +1158,11 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         edge_index: Adj,
         shard_info: GraphShardInfo,
         batch_size: int,
-        size: Union[int, tuple[int, int]],
-        model_comm_group: Optional[ProcessGroup] = None,
-        cond: Optional[Tensor] = None,
+        size: int | tuple[int, int],
+        model_comm_group: ProcessGroup | None = None,
+        cond: Tensor | None = None,
         edges_are_dst_sorted: bool = True,
-        halo_info: Optional[HaloInfo] = None,
+        halo_info: HaloInfo | None = None,
         **kwargs,
     ):
         x_skip = x

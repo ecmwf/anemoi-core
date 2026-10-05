@@ -13,16 +13,13 @@ import logging
 import os
 
 import torch
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from omegaconf import DictConfig, OmegaConf
 
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.normalization import ConditionalLayerNorm
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.models.utils.compile import _get_compile_entry
-from anemoi.models.utils.compile import _meets_library_versions_for_compile
-from anemoi.models.utils.compile import mark_for_compilation
+from anemoi.models.utils.compile import _get_compile_entry, _meets_library_versions_for_compile, mark_for_compilation
 
 HAS_ANEMOI_TRAINING = False
 if importlib.util.find_spec("anemoi.training") is not None:

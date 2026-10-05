@@ -8,13 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 
-from hypothesis import given
-from hypothesis import settings
+from hypothesis import given, settings
 from hypothesis import strategies as st
 
-from anemoi.models.layers.block import MLP
-from anemoi.models.layers.block import GraphConvMapperBlock
-from anemoi.models.layers.block import GraphConvProcessorBlock
+from anemoi.models.layers.block import MLP, GraphConvMapperBlock, GraphConvProcessorBlock
 from anemoi.models.layers.conv import GraphConv
 from anemoi.models.layers.utils import load_layer_kernels
 

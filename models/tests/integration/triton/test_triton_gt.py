@@ -7,18 +7,15 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from typing import Tuple
 
 import pytest
 import torch
 
 from anemoi.models.layers.conv import GraphTransformerConv
-from anemoi.models.triton.utils import edge_index_to_csc
-from anemoi.models.triton.utils import is_triton_available
+from anemoi.models.triton.utils import edge_index_to_csc, is_triton_available
 
 if is_triton_available():
-    from anemoi.models.triton.gt import graph_transformer_attention
-    from anemoi.models.triton.gt import graph_transformer_attention_conv
+    from anemoi.models.triton.gt import graph_transformer_attention, graph_transformer_attention_conv
 
 
 @pytest.fixture(autouse=True)
@@ -33,7 +30,7 @@ def setup_torch():
     yield
 
 
-def build_bipartite_graph(n_src: int, n_dst: int) -> Tuple[torch.Tensor, int]:
+def build_bipartite_graph(n_src: int, n_dst: int) -> tuple[torch.Tensor, int]:
     """Build random bipartite graph and return edge_index and number of edges."""
     edges = []
     for dst in range(n_dst):

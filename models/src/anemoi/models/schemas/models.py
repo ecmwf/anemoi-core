@@ -11,41 +11,37 @@ from __future__ import annotations
 
 import logging
 from enum import Enum
-from typing import Annotated
-from typing import Any
-from typing import Literal
-from typing import Optional
-from typing import Union
+from typing import Annotated, Any, Literal, Union
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
+from anemoi.utils.schemas import BaseModel
+from omegaconf import DictConfig, OmegaConf
 from pydantic import BaseModel as PydanticBaseModel
-from pydantic import Field
-from pydantic import NonNegativeFloat
-from pydantic import NonNegativeInt
-from pydantic import PositiveFloat
-from pydantic import PositiveInt
-from pydantic import model_validator
+from pydantic import Field, NonNegativeFloat, NonNegativeInt, PositiveFloat, PositiveInt, model_validator
 
 from anemoi.models.layers.target_features import VALID_TARGET_FEATURES
 from anemoi.models.schemas.schema_utils import DatasetDict
-from anemoi.utils.schemas import BaseModel
 
-from .aggregator import AggregatorSchema  # noqa: TC001
+from .aggregator import AggregatorSchema
 from .bounding import BoundingSchema
-from .decoder import GNNDecoderSchema  # noqa: TC001
-from .decoder import GraphTransformerDecoderSchema  # noqa: TC001
-from .decoder import PointWiseBackwardMapperSchema  # noqa: TC001
-from .decoder import TransformerDecoderSchema  # noqa: TC001
-from .encoder import GNNEncoderSchema  # noqa: TC001
-from .encoder import GraphTransformerEncoderSchema  # noqa: TC001
-from .encoder import PointWiseForwardMapperSchema  # noqa: TC001
-from .encoder import TransformerEncoderSchema  # noqa: TC001
-from .processor import GNNProcessorSchema  # noqa: TC001
-from .processor import GraphTransformerProcessorSchema  # noqa: TC001
-from .processor import NoOpProcessorSchema  # noqa: TC001
-from .processor import PointWiseMLPProcessorSchema  # noqa: TC001
-from .processor import TransformerProcessorSchema  # noqa: TC001
+from .decoder import (
+    GNNDecoderSchema,
+    GraphTransformerDecoderSchema,
+    PointWiseBackwardMapperSchema,
+    TransformerDecoderSchema,
+)
+from .encoder import (
+    GNNEncoderSchema,
+    GraphTransformerEncoderSchema,
+    PointWiseForwardMapperSchema,
+    TransformerEncoderSchema,
+)
+from .processor import (
+    GNNProcessorSchema,
+    GraphTransformerProcessorSchema,
+    NoOpProcessorSchema,
+    PointWiseMLPProcessorSchema,
+    TransformerProcessorSchema,
+)
 from .residual import ResidualConnectionSchema
 
 LOGGER = logging.getLogger(__name__)
@@ -164,12 +160,7 @@ class EncodersSchema(BaseModel):
     "List of datasets for which the encoder is applicable."
     dataset_fusing_strategy: Literal["not_supported"] = Field(default="not_supported")
     "Dataset fusing strategy. Default to 'not_supported'."
-    mapper: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
+    mapper: GNNEncoderSchema | GraphTransformerEncoderSchema | TransformerEncoderSchema | PointWiseForwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )
@@ -184,12 +175,7 @@ class DecodersSchema(BaseModel):
         default_factory=lambda: ["encoded_data"]
     )
     "Whether to use the encoded latents from the encoder."
-    mapper: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
+    mapper: GNNDecoderSchema | GraphTransformerDecoderSchema | TransformerDecoderSchema | PointWiseBackwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )
@@ -212,13 +198,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Add skip connection in latent space before/after processor."
     latent_aggregator: AggregatorSchema
     "Latent aggregator schema."
-    processor: Union[
-        NoOpProcessorSchema,
-        GNNProcessorSchema,
-        GraphTransformerProcessorSchema,
-        TransformerProcessorSchema,
-        PointWiseMLPProcessorSchema,
-    ] = Field(
+    processor: NoOpProcessorSchema | GNNProcessorSchema | GraphTransformerProcessorSchema | TransformerProcessorSchema | PointWiseMLPProcessorSchema = Field(
         ...,
         discriminator="target_",
     )
@@ -229,7 +209,7 @@ class BaseModelSchema(PydanticBaseModel):
     "Model decoders schemas."
     residual: DatasetDict[ResidualConnectionSchema]
     "Residual connection schema."
-    compile: Optional[list[dict[str, Any]]] = Field(None)
+    compile: list[dict[str, Any]] | None = Field(None)
     "Modules to be compiled"
     recompile_limit: PositiveInt = 8
     "How many times torch.compile will recompile a function for a given input shape."
@@ -265,13 +245,13 @@ class NoiseConditioningSchema(BaseModel):
     "Number of channels in the noise tensor."
     noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
     "Hidden dimension of the MLP used to process the noise."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
-    noise_matrix: Optional[str] = Field(default=None)
+    noise_matrix: str | None = Field(default=None)
     "Path to the noise projection matrix file (.npz). If None, no projection is applied."
-    noise_edges_name: Optional[tuple[str, str, str]] = Field(default=None)
+    noise_edges_name: tuple[str, str, str] | None = Field(default=None)
     "Edge type identifier (src, relation, dst) for graph-based noise projection."
-    edge_weight_attribute: Optional[str] = Field(default=None)
+    edge_weight_attribute: str | None = Field(default=None)
     "Optional edge attribute name for graph-based noise projection weights."
     row_normalize_noise_matrix: bool = Field(default=False)
     "Whether to row-normalize the noise projection matrix weights."
@@ -290,12 +270,12 @@ class NoiseInjectorSchema(BaseModel):
     "Number of channels in the noise tensor."
     noise_mlp_hidden_dim: NonNegativeInt = Field(example=8)
     "Hidden dimension of the MLP used to process the noise."
-    layer_kernels: Union[dict[str, dict], None] = Field(default_factory=dict)
+    layer_kernels: dict[str, dict] | None = Field(default_factory=dict)
     "Settings related to custom kernels for encoder processor and decoder blocks"
 
 
 NoiseInjectorUnion = Annotated[
-    Union[NoOpNoiseInjectorSchema, NoiseConditioningSchema, NoiseInjectorSchema],
+    NoOpNoiseInjectorSchema | NoiseConditioningSchema | NoiseInjectorSchema,
     Field(discriminator="target_"),
 ]
 
@@ -312,7 +292,7 @@ class TransportModelSchema(BaseModelSchema):
     "Transport model schema."
 
     @model_validator(mode="after")
-    def validate_no_bounding_for_transport(self) -> "TransportModelSchema":
+    def validate_no_bounding_for_transport(self) -> TransportModelSchema:
         if self.bounding:
             if "datasets" in self.bounding:
                 for dataset_name, bounding_list in self.bounding["datasets"].items():
@@ -343,22 +323,12 @@ class HierarchicalModelSchema(BaseModelSchema):
     "Toggle to do message passing at every downscaling and upscaling step"
     level_process_num_layers: NonNegativeInt = Field(default=1)
     "Number of message passing steps at each level"
-    upscale_mapper: Union[
-        GNNEncoderSchema,
-        GraphTransformerEncoderSchema,
-        TransformerEncoderSchema,
-        PointWiseForwardMapperSchema,
-    ] = Field(
+    upscale_mapper: GNNEncoderSchema | GraphTransformerEncoderSchema | TransformerEncoderSchema | PointWiseForwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )
     "Mapper used to upscale from a lower level to a higher level in the hierarchy."
-    downscale_mapper: Union[
-        GNNDecoderSchema,
-        GraphTransformerDecoderSchema,
-        TransformerDecoderSchema,
-        PointWiseBackwardMapperSchema,
-    ] = Field(
+    downscale_mapper: GNNDecoderSchema | GraphTransformerDecoderSchema | TransformerDecoderSchema | PointWiseBackwardMapperSchema = Field(
         ...,
         discriminator="target_",
     )

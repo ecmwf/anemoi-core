@@ -8,10 +8,8 @@
 # nor does it submit to any jurisdiction.
 """Configuration utilities for handling dataset-specific configurations."""
 
-from omegaconf import DictConfig
-from omegaconf import OmegaConf
-
 from anemoi.graphs.projection_helpers import DEFAULT_DATASET_NAME
+from omegaconf import DictConfig, OmegaConf
 
 
 # This function retrieves the configuration for multiple datasets, supporting both new and old config formats.

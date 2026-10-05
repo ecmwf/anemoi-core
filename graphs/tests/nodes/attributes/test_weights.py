@@ -13,12 +13,14 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.attributes import CosineLatWeightedAttribute
-from anemoi.graphs.nodes.attributes import IsolatitudeAreaWeights
-from anemoi.graphs.nodes.attributes import MaskedPlanarAreaWeights
-from anemoi.graphs.nodes.attributes import PlanarAreaWeights
-from anemoi.graphs.nodes.attributes import SphericalAreaWeights
-from anemoi.graphs.nodes.attributes import UniformWeights
+from anemoi.graphs.nodes.attributes import (
+    CosineLatWeightedAttribute,
+    IsolatitudeAreaWeights,
+    MaskedPlanarAreaWeights,
+    PlanarAreaWeights,
+    SphericalAreaWeights,
+    UniformWeights,
+)
 from anemoi.graphs.nodes.attributes.base_attributes import BaseNodeAttribute
 
 
@@ -152,8 +154,7 @@ def test_masked_planar_area_weights_subset():
 
 def test_voronoi_region_areas_matches_convexhull():
     """`_voronoi_region_areas` matches per-cell ConvexHull volumes, non-convex regions included."""
-    from scipy.spatial import ConvexHull
-    from scipy.spatial import Voronoi
+    from scipy.spatial import ConvexHull, Voronoi
 
     rng = np.random.default_rng(0)
     latlons = np.column_stack([rng.uniform(0.6, 0.9, 2000), rng.uniform(0.0, 0.4, 2000)])

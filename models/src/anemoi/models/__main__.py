@@ -7,8 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.utils.cli import cli_main
-from anemoi.utils.cli import make_parser
+from anemoi.utils.cli import cli_main, make_parser
 
 from . import __version__
 from .commands import COMMANDS

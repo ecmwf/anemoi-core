@@ -8,27 +8,22 @@
 # nor does it submit to any jurisdiction.
 
 import logging
-from abc import ABC
-from abc import abstractmethod
-from typing import Optional
+from abc import ABC, abstractmethod
 
 import einops
 import torch
-from torch import Tensor
-from torch import nn
+from anemoi.utils.config import DotDict
+from torch import Tensor, nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import all_to_all_transpose, shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.layers.utils import load_layer_kernels
-from anemoi.utils.config import DotDict
 
 LOGGER = logging.getLogger(__name__)
 
@@ -49,8 +44,8 @@ class BaseNoiseInjector(nn.Module, ABC):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+        model_comm_group: ProcessGroup | None = None,
+    ) -> tuple[Tensor, Tensor | None]:
         """Forward pass for noise injection.
 
         Parameters
@@ -99,7 +94,7 @@ class NoOpNoiseInjector(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, None]:
         """Pass through input unchanged with no noise."""
         return x, None
@@ -115,14 +110,14 @@ class NoiseConditioning(BaseNoiseInjector):
         noise_channels_dim: int,
         noise_mlp_hidden_dim: int,
         layer_kernels: DotDict,
-        noise_matrix: Optional[str] = None,
-        noise_edges_name: Optional[tuple[str, str, str]] = None,
-        edge_weight_attribute: Optional[str] = None,
+        noise_matrix: str | None = None,
+        noise_edges_name: tuple[str, str, str] | None = None,
+        edge_weight_attribute: str | None = None,
         row_normalize_noise_matrix: bool = False,
         autocast: bool = False,
         sparse_projector_num_chunks: int = 1,
-        num_channels: Optional[int] = None,
-        graph_data: Optional[HeteroData] = None,
+        num_channels: int | None = None,
+        graph_data: HeteroData | None = None,
     ) -> None:
         """Initialize NoiseConditioning."""
         super().__init__()
@@ -181,7 +176,7 @@ class NoiseConditioning(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, Tensor]:
 
         noise_shape = (
@@ -236,8 +231,8 @@ class NoiseInjector(BaseNoiseInjector):
         noise_mlp_hidden_dim: int,
         num_channels: int,
         layer_kernels: DotDict,
-        noise_matrix: Optional[str] = None,
-        graph_data: Optional[HeteroData] = None,
+        noise_matrix: str | None = None,
+        graph_data: HeteroData | None = None,
     ) -> None:
         """Initialize NoiseInjector.
 
@@ -279,7 +274,7 @@ class NoiseInjector(BaseNoiseInjector):
         grid_size: int,
         grid_shard_sizes: ShardSizes,
         noise_dtype: torch.dtype = torch.float32,
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
     ) -> tuple[Tensor, None]:
         """Generate noise and inject it into the input tensor.
 

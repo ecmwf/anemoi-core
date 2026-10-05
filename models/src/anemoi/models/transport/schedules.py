@@ -10,8 +10,7 @@
 from __future__ import annotations
 
 import math
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 
 import torch
 
@@ -48,7 +47,6 @@ class SamplingSchedule(ABC):
         dtype_compute: torch.dtype = torch.float64,
     ) -> torch.Tensor:
         """Generate schedule-specific values."""
-        pass
 
     @staticmethod
     def _validate_num_steps(num_steps: int) -> None:

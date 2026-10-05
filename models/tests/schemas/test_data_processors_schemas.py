@@ -7,12 +7,14 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from anemoi.models.schemas.data_processor import ImputerSchema
-from anemoi.models.schemas.data_processor import NormalizerSchema
-from anemoi.models.schemas.data_processor import PostprocessorSchema
-from anemoi.models.schemas.data_processor import PreprocessorSchema
-from anemoi.models.schemas.data_processor import PreprocessorTarget
-from anemoi.models.schemas.data_processor import RemapperSchema
+from anemoi.models.schemas.data_processor import (
+    ImputerSchema,
+    NormalizerSchema,
+    PostprocessorSchema,
+    PreprocessorSchema,
+    PreprocessorTarget,
+    RemapperSchema,
+)
 
 
 def test_preprocessor_with_raw_dict():
