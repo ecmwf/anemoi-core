@@ -20,6 +20,14 @@ except ImportError:
         "Error. The 'triton' backend was selected for the GraphTransformer but Triton is not installed. To use this backend please install Triton. Otherwise, select a different backend for the GraphTransformer in the models config."
     )
 
+# The forward and both backward kernels must compute each score q . (k + e) to the same bits. The
+# backward subtracts the row maximum saved by the forward, so if the winning edge's recomputed score
+# differs from it in the last bit, its probability is off by that rounding times the scale; with
+# nearly one-hot attention and large scores this is far beyond float32 accuracy (dV errors hundreds
+# of times those of plain float32 at scores around 1e4). The compiler merges multiplies and adds into
+# single fused operations differently in each kernel, so all three are compiled without that merging.
+_SAME_ROUNDING = dict(enable_fp_fusion=False)
+
 
 @triton.jit
 def build_masks_and_offsets(H: tl.constexpr, C: tl.constexpr, H_pad: tl.constexpr, C_pad: tl.constexpr):
@@ -84,7 +92,7 @@ def _gt_fwd(
     K_ptr,  # [N_src, H, C]
     V_ptr,  # [N_src, H, C]
     E_ptr,  # [M, H, C]
-    M_ptr,  # [M, H]
+    STATS_ptr,  # [N_dst, 2, H] row maximum of the unscaled scores q . (k + e), then inverse of the softmax sum
     ROW_ptr,  # [M]
     COLPTR_ptr,  # [N_dst+1]
     OUT_ptr,  # [N_dst, H, C]
@@ -110,9 +118,10 @@ def _gt_fwd(
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        zeros = tl.zeros((H_pad,), dtype=tl.float32)  # m initialised as torch.float32
-        M_off = M_ptr + dst_idx * H + tl.arange(0, H_pad)
-        tl.store(M_off, zeros, mask=H_mask)
+        zeros = tl.zeros((H_pad,), dtype=tl.float32)  # stats initialised as torch.float32
+        stats_off = STATS_ptr + dst_idx * 2 * H + tl.arange(0, H_pad)
+        tl.store(stats_off, zeros, mask=H_mask)
+        tl.store(stats_off + H, zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         OUT_off = OUT_ptr + dst_off
         tl.store(OUT_off, zeros, mask=H_C_mask)
@@ -126,7 +135,8 @@ def _gt_fwd(
     # helpers to avoid repeated computations/indexing:
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
-    qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
+    # 1 / sqrt(C) / ln 2: scales the scores and turns exp(x) into 2^(x / ln 2)
+    exp2_scale: tl.constexpr = 1.4426950408889634 / tl.sqrt(float(C))
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
@@ -142,11 +152,15 @@ def _gt_fwd(
         k_e = k + e
         v_e = v + e
 
-        qk = tl.sum(q * k_e, axis=-1) * qk_scale  # Shape: [H]
+        qk = tl.sum(q * k_e, axis=-1)  # Shape: [H]
 
+        # The running maximum is subtracted from the raw score before it is scaled. Near the maximum
+        # the difference is exact, so the rounding error in the exponent is relative to the gap from
+        # the maximum rather than to the score itself. See KohakuBlueleaf, KohakuFA,
+        # https://github.com/KohakuBlueleaf/KohakuFA (bug 2, scale before shift).
         m_ij = tl.maximum(m_i, qk)  # new running max
-        alpha_ij = tl.exp(qk - m_ij)  # attention weight for current edge
-        correction = tl.exp(m_i - m_ij)  # correction factor for previous accumulations
+        alpha_ij = tl.exp2((qk - m_ij) * exp2_scale)  # attention weight for current edge
+        correction = tl.exp2((m_i - m_ij) * exp2_scale)  # correction factor for previous accumulations
 
         # update accumulators with correction
         acc = acc * correction[:, None]
@@ -171,12 +185,14 @@ def _gt_fwd(
         mask=H_C_mask,
     )
 
-    # store m_i + log(l_i) for backward
-    m_start = dst_idx * H
-    m_off = m_start + tl.arange(0, H_pad)
-
-    m_i += tl.log(l_i)
-    tl.store(M_ptr + m_off, m_i, mask=H_mask)
+    # The row maximum and the inverse sum are saved as two numbers for the backward. Folded into one
+    # number, m + log(l), the log(l) part would be rounded away once the scores are large, and the
+    # probabilities recomputed in the backward would no longer sum to 1. See KohakuBlueleaf, KohakuFA,
+    # https://github.com/KohakuBlueleaf/KohakuFA (bug 1, combined row statistic). They sit next to each
+    # other, so the backward reads both for a destination node from one stretch of memory.
+    stats_off = STATS_ptr + dst_idx * 2 * H + tl.arange(0, H_pad)
+    tl.store(stats_off, m_i, mask=H_mask)
+    tl.store(stats_off + H, 1.0 / l_i, mask=H_mask)
 
 
 @triton.jit
@@ -186,7 +202,7 @@ def _gt_bwd_dst_pass(
     V_ptr,
     E_ptr,
     OUT_ptr,  # saved forward outputs o_i
-    M_ptr,  # saved m_i + ln l_i
+    STATS_ptr,  # saved row maximum of the unscaled scores and inverse softmax sum, [N_dst, 2, H]
     ROW_ptr,  # [M] (edge -> src)
     COLPTR_ptr,  # [N_dst + 1]
     D_OUT_ptr,  # [N_dst * H * C]
@@ -227,10 +243,13 @@ def _gt_bwd_dst_pass(
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    m_j = tl.load(STATS_ptr + dst_idx * 2 * H + tl.arange(0, H_pad), mask=H_mask)
+    inv_l_j = tl.load(STATS_ptr + dst_idx * 2 * H + H + tl.arange(0, H_pad), mask=H_mask)
 
     edge_ptr = E_ptr + neigh_start * H * C + H_C_off  # pointer to first edge_attr
     e_idx = neigh_start  # first edge index
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
+    exp2_scale: tl.constexpr = 1.4426950408889634 / tl.sqrt(float(C))  # qk_scale / ln 2, as exp(x) = 2^(x / ln 2)
 
     # for _ in tl.range(num_edges, warp_specialize=True):
     for _ in range(num_edges):
@@ -241,22 +260,22 @@ def _gt_bwd_dst_pass(
         k = tl.load(K_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
 
         ke = k + e
-        # score and alpha using saved M
-        m_j = tl.load(M_ptr + dst_idx * H + tl.arange(0, H_pad), mask=H_mask).to(tl.float32)
-        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
+        # Attention weight before dividing by the softmax sum; the division and the score scale are
+        # the same for every edge of this node, so they are applied to dq once after the loop.
+        s_ij = tl.sum(q * ke, axis=-1)
+        weight_ij = tl.exp2((s_ij - m_j) * exp2_scale)
 
         v = tl.load(V_ptr + src_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
-
-        dq += dS[:, None] * ke * qk_scale
+        dq += (weight_ij * (dalpha - Dj))[:, None] * ke
 
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
+
+    dq = dq * (inv_l_j * qk_scale)[:, None]
 
     # store D_j and dQ
     tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
@@ -279,7 +298,7 @@ def _gt_bwd_src_pass(
     EDGE_IDS_ptr,  # [M] edge id list grouped by src
     EDGE_DST_ptr,  # [M] dst node for each edge
     D_ptr,  # [N_dst * H] D_j from pass dst-pass
-    M_ptr,  # [N_dst * H] saved m_j from fwd
+    STATS_ptr,  # [N_dst * 2 * H] saved row maximum and inverse softmax sum from fwd
     D_OUT_ptr,  # [N_dst * H * C]
     D_K_ptr,  # [N_src * H * C]
     D_V_ptr,  # [N_src * H * C]
@@ -316,6 +335,7 @@ def _gt_bwd_src_pass(
     accV = tl.zeros((H_pad, C_pad), dtype=tl.float32)
 
     qk_scale: tl.constexpr = 1.0 / tl.sqrt(float(C))
+    exp2_scale: tl.constexpr = 1.4426950408889634 / tl.sqrt(float(C))  # qk_scale / ln 2, as exp(x) = 2^(x / ln 2)
 
     # note that edges aren't necessarily contiguous in memory here, use EDGE_IDS_ptr
     for i in range(num_edges):
@@ -328,7 +348,8 @@ def _gt_bwd_src_pass(
         dst_off = dst * H * C + H_C_off
         q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
-        m_j = tl.load(M_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
+        m_j = tl.load(STATS_ptr + dst * 2 * H + tl.arange(0, H_pad))
+        inv_l_j = tl.load(STATS_ptr + dst * 2 * H + H + tl.arange(0, H_pad))
         Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
 
         e_off = e_idx * H * C + H_C_off
@@ -338,14 +359,14 @@ def _gt_bwd_src_pass(
         ve = v + e
 
         # some recomputations from dst-pass
-        s_ij = tl.sum(q * ke, axis=-1) * qk_scale
-        alpha_ij = tl.exp(s_ij - m_j)
+        s_ij = tl.sum(q * ke, axis=-1)
+        alpha_ij = tl.exp2((s_ij - m_j) * exp2_scale) * inv_l_j
         dalpha = tl.sum(d_out * ve, axis=-1)
         dS = alpha_ij * (dalpha - Dj)
 
         # per-edge k, v contributions, summing up to per-edge e contribution
         dV_edge = alpha_ij[:, None] * d_out
-        dK_edge = dS[:, None] * q * qk_scale
+        dK_edge = (dS * qk_scale)[:, None] * q
         dE_edge = dV_edge + dK_edge
 
         tl.store(
@@ -401,23 +422,45 @@ def graph_transformer_attention(
 ) -> tuple[Tensor, Tensor, Tensor]:
     """Opaque custom op wrapping the Triton GraphTransformer attention.
 
+    Parameters
+    ----------
+    q : Tensor
+        Queries of the destination nodes, ``(N_dst, H, C)``.
+    k : Tensor
+        Keys of the source nodes, ``(N_src, H, C)``.
+    v : Tensor
+        Values of the source nodes, ``(N_src, H, C)``.
+    e : Tensor
+        Edge features in CSC order, ``(M, H, C)``, added to the keys and values of each edge.
+    row : Tensor
+        Source node of each edge, in CSC order.
+    colptr : Tensor
+        Start of each destination node's edges in CSC order, ``(N_dst + 1,)``.
+    rowptr : Tensor
+        Start of each source node's edges in ``edge_ids``, ``(N_src + 1,)``.
+    edge_ids : Tensor
+        Edges grouped by source node, as indices into the CSC order.
+    edge_dst : Tensor
+        Destination node of each edge, in CSC order.
+
     Returns
     -------
     out : Tensor
         Attention output cast back to ``q.dtype`` (the user-facing result).
     out_saved : Tensor
         Float32 attention output, kept for the backward pass.
-    m : Tensor
-        Float32 log-sum-exp normalizer, kept for the backward pass.
+    stats : Tensor
+        Float32 row maximum of the unscaled scores and inverse of the softmax sum, shape
+        ``(N_dst, 2, H)``, kept for the backward pass.
     """
     q, k, v, e = (x.contiguous() for x in (q, k, v, e))
     row, colptr = (x.contiguous() for x in (row, colptr))
 
     N_dst, H, C = q.shape
     out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
-    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+    stats = torch.empty((N_dst, 2, H), device=q.device, dtype=torch.float32)
 
-    _gt_fwd[(N_dst,)](q, k, v, e, m, row, colptr, out_saved, N_dst, H, C, tl.float32)
+    _gt_fwd[(N_dst,)](q, k, v, e, stats, row, colptr, out_saved, N_dst, H, C, tl.float32, **_SAME_ROUNDING)
 
     out = out_saved.to(q.dtype)
     # Custom-op outputs must not alias one another; ``.to`` returns ``self`` when
@@ -425,7 +468,7 @@ def graph_transformer_attention(
     if out is out_saved:
         out = out.clone()
 
-    return out, out_saved, m
+    return out, out_saved, stats
 
 
 @graph_transformer_attention.register_fake
@@ -443,8 +486,8 @@ def _graph_transformer_attention_fake(
     N_dst, H, C = q.shape
     out = torch.empty((N_dst, H, C), device=q.device, dtype=q.dtype)
     out_saved = torch.empty((N_dst, H, C), device=q.device, dtype=torch.float32)
-    m = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
-    return out, out_saved, m
+    stats = torch.empty((N_dst, 2, H), device=q.device, dtype=torch.float32)
+    return out, out_saved, stats
 
 
 # TODO(Jan): single bwd pass for non-bipartite graphs
@@ -456,7 +499,7 @@ def graph_transformer_attention_backward(
     v: Tensor,
     e: Tensor,
     out_saved: Tensor,
-    m: Tensor,
+    stats: Tensor,
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
@@ -492,10 +535,31 @@ def graph_transformer_attention_backward(
     D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
 
     # Pass A: destination nodes (computes D and dQ)
-    _gt_bwd_dst_pass[(N_dst,)](q, k, v, e, out_saved, m, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype)
+    _gt_bwd_dst_pass[(N_dst,)](
+        q, k, v, e, out_saved, stats, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype, **_SAME_ROUNDING
+    )
 
     # Pass B: source nodes (accumulate dK, dV, dE)
-    _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
+    _gt_bwd_src_pass[(N_src,)](
+        q,
+        k,
+        v,
+        e,
+        rowptr,
+        edge_ids,
+        edge_dst,
+        D,
+        stats,
+        d_out,
+        dK,
+        dV,
+        dE,
+        N_src,
+        H,
+        C,
+        grad_dtype,
+        **_SAME_ROUNDING,
+    )
 
     return dQ, dK, dV, dE
 
@@ -508,7 +572,7 @@ def _graph_transformer_attention_backward_fake(
     v: Tensor,
     e: Tensor,
     out_saved: Tensor,
-    m: Tensor,
+    stats: Tensor,
     row: Tensor,
     colptr: Tensor,
     rowptr: Tensor,
@@ -523,13 +587,13 @@ def _graph_transformer_attention_backward_fake(
     )
 
 
-def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
+def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_stats):
     # Only the gradient w.r.t. the user-facing ``out`` is used; ``out_saved`` and
-    # ``m`` are internal saved tensors that are not consumed downstream.
-    q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+    # ``stats`` are internal saved tensors that are not consumed downstream.
+    q, k, v, e, out_saved, stats, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
 
     dQ, dK, dV, dE = graph_transformer_attention_backward(
-        d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
+        d_out, q, k, v, e, out_saved, stats, row, colptr, rowptr, edge_ids, edge_dst
     )
 
     # Gradients for (q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst).
@@ -538,7 +602,7 @@ def _graph_transformer_attention_backward(ctx, d_out, _d_out_saved, _d_m):
 
 def _graph_transformer_attention_setup_context(ctx, inputs, output):
     q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst = inputs
-    _out, out_saved, m = output
+    _out, out_saved, stats = output
 
     # The forward op makes contiguous copies internally, but those are not the tensors
     # passed here (setup_context receives the original op inputs). Save contiguous
@@ -547,7 +611,7 @@ def _graph_transformer_attention_setup_context(ctx, inputs, output):
     q, k, v, e = (x.contiguous() for x in (q, k, v, e))
     row, colptr, rowptr, edge_ids, edge_dst = (x.contiguous() for x in (row, colptr, rowptr, edge_ids, edge_dst))
 
-    ctx.save_for_backward(q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst)
+    ctx.save_for_backward(q, k, v, e, out_saved, stats, row, colptr, rowptr, edge_ids, edge_dst)
 
 
 graph_transformer_attention.register_autograd(
@@ -572,5 +636,7 @@ def graph_transformer_attention_conv(
     """torch.compile-friendly GraphTransformer attention."""
     row, colptr = csc
     rowptr, edge_ids, edge_dst = reverse
-    out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
+    out, _out_saved, _stats = graph_transformer_attention(
+        query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst
+    )
     return out
