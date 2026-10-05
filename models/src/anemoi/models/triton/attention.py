@@ -139,7 +139,11 @@ def _attn_fwd_inner(
     Uneven context handling: When N_CTX is not divisible by BLOCK_FIXED or BLOCK_ITER, padding and masked loads are used to handle the "tail" of the context which doesnt fit into a full block.
 
     """
-    MINUS_INF: tl.constexpr = float(-1.0e8)
+    # Score given to hidden keys. It must lie below every score q . k can take, or a hidden key wins
+    # the row maximum over keys whose scores are all lower (scores of -1e8 are reached once the
+    # logits are large). It stays finite, so a row that has seen only hidden keys so far gives
+    # (s - m) = 0 rather than NaN; those keys drop out once a visible key sets the maximum.
+    MINUS_INF: tl.constexpr = float(-1.0e38)
 
     # Compute the starting offset of K and V
     iter_offset = iter_offset + lo
@@ -598,7 +602,7 @@ def _attn_bwd_dkdv_inner(
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dkdv over the blocks of Q between lo and hi."""
-    MINUS_INF: tl.constexpr = float(-1.0e8)
+    MINUS_INF: tl.constexpr = float(-1.0e38)  # score of hidden keys, see _attn_fwd_inner
     offs_iter = tl.arange(0, BLOCK_ITER)
 
     # skip up to 'lo'
@@ -984,7 +988,7 @@ def _attn_bwd_dq_inner(
     MASKED: tl.constexpr,  # False when every pair in [lo, hi) is inside the window and the context, so no mask is applied
 ):
     """Inner loop of _attn_bwd_dq over the blocks of K and V between lo and hi."""
-    MINUS_INF: tl.constexpr = float(-1.0e8)
+    MINUS_INF: tl.constexpr = float(-1.0e38)  # score of hidden keys, see _attn_fwd_inner
     offs_iter = tl.arange(0, BLOCK_ITER)
 
     # skip up to 'lo'
