@@ -232,6 +232,9 @@ class HydrostaticGeopotentialSchema(BaseModel):
     temperature_prefix: str = "t"
     humidity_prefix: str = "q"
     geopotential_units: Literal["m2/s2", "m"] = "m2/s2"
+    msl_anchor: Optional[str] = None
+    "Mean-sea-level pressure variable to diagnose the anchor from; None keeps z_<levels[0]> as a free anchor."
+    msl_units: Literal["Pa", "hPa"] = "Pa"
     check_finite: bool = False
     "Raise if the integrated column is non-finite (adds a device sync; debug only)."
     variables: Optional[list[str]] = None
@@ -244,6 +247,8 @@ class HydrostaticGeopotentialSchema(BaseModel):
             a > b for a, b in zip(self.levels[:-1], self.levels[1:])
         ), f"levels must be strictly decreasing, got {self.levels}"
         prefixes = (self.geopotential_prefix, self.temperature_prefix, self.humidity_prefix)
+        if self.msl_anchor is not None:
+            prefixes += (self.msl_anchor,)
         missing = [p for p in prefixes if p not in self.normalizer]
         assert not missing, f"normalizer must give a method for each of {prefixes}; missing {missing}"
         return self

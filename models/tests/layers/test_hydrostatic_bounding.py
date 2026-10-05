@@ -20,14 +20,17 @@ from anemoi.models.physics.constants import R_D
 from anemoi.models.physics.constants import VIRTUAL_TEMP_COEFF
 
 LEVELS = [1000, 850, 500]
-NAMES = [f"{p}_{lvl}" for p in ("z", "t", "q") for lvl in LEVELS] + ["other"]
+NAMES = [f"{p}_{lvl}" for p in ("z", "t", "q") for lvl in LEVELS] + ["other", "msl"]
 # Model-output order deliberately differs from ladder order and from the statistics order.
 NAME_TO_INDEX = {
     n: i
-    for i, n in enumerate(["other", "q_500", "z_500", "t_850", "z_1000", "q_1000", "t_500", "z_850", "t_1000", "q_850"])
+    for i, n in enumerate(
+        ["other", "q_500", "z_500", "t_850", "z_1000", "msl", "q_1000", "t_500", "z_850", "t_1000", "q_850"]
+    )
 }
 NAME_TO_INDEX_STATS = {n: i for i, n in enumerate(reversed(NAMES))}
 NORMALIZER = {"z": "min-max", "t": "mean-std", "q": "mean-std"}
+NORMALIZER_MSL = NORMALIZER | {"msl": "mean-std"}
 
 
 @pytest.fixture
@@ -48,6 +51,8 @@ def statistics() -> dict:
             mean[i], stdev[i] = 260.0, 10.0
         elif name.startswith("q_"):
             mean[i], stdev[i] = 3e-3, 2e-3
+        elif name == "msl":
+            mean[i], stdev[i] = 101300.0, 1000.0
         else:
             mean[i], stdev[i] = rng.normal(), 1.0
     return {"mean": mean, "stdev": stdev, "minimum": minimum, "maximum": maximum}
@@ -229,3 +234,76 @@ def test_hydra_instantiate(statistics: dict) -> None:
     x[:, NAME_TO_INDEX["t_850"]] = float("nan")
     with pytest.raises(RuntimeError, match="non-finite"):
         layer(x)
+
+
+def _isothermal_dry(t: float) -> dict[str, torch.Tensor]:
+    return {f"t_{lvl}": torch.tensor(t) for lvl in LEVELS} | {f"q_{lvl}": torch.tensor(0.0) for lvl in LEVELS}
+
+
+def test_msl_anchor_matches_closed_form(statistics: dict) -> None:
+    layer = _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL)
+    t = 280.0
+    phys = _isothermal_dry(t) | {"msl": torch.tensor([101300.0, 99000.0])}
+    phys |= {f"z_{lvl}": torch.tensor(-1.0) for lvl in LEVELS}  # every z head is overwritten, anchor included
+    x = _make_x(statistics, phys, (2,))
+    out = layer(x.clone())
+    expected_1000 = R_D * t * torch.log(phys["msl"].double() / 100000.0)
+    expected_850 = expected_1000 + R_D * t * math.log(1000 / 850)
+    torch.testing.assert_close(_read(layer, out, "z_1000", statistics).double(), expected_1000, rtol=1e-5, atol=0.5)
+    torch.testing.assert_close(_read(layer, out, "z_850", statistics).double(), expected_850, rtol=1e-5, atol=0.5)
+    # msl below 1000 hPa puts the 1000 hPa surface below sea level.
+    assert _read(layer, out, "z_1000", statistics)[1] < 0
+    torch.testing.assert_close(out[..., NAME_TO_INDEX["msl"]], x[..., NAME_TO_INDEX["msl"]])
+    assert layer.variables == ["z_1000", "z_850", "z_500"]
+    assert layer.normalizer_methods["msl"] == "mean-std"
+
+
+def test_msl_anchor_hpa_units(statistics: dict) -> None:
+    stats_hpa = {k: v.copy() for k, v in statistics.items()}
+    i = NAME_TO_INDEX_STATS["msl"]
+    stats_hpa["mean"][i], stats_hpa["stdev"][i] = 1013.0, 10.0
+    layer_pa = _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL)
+    layer_hpa = _layer(stats_hpa, msl_anchor="msl", normalizer=NORMALIZER_MSL, msl_units="hPa")
+    phys = _isothermal_dry(270.0)
+    out_pa = layer_pa(_make_x(statistics, phys | {"msl": torch.tensor(102000.0)}, (1,)))
+    out_hpa = layer_hpa(_make_x(stats_hpa, phys | {"msl": torch.tensor(1020.0)}, (1,)))
+    torch.testing.assert_close(
+        out_pa[..., layer_pa.data_index], out_hpa[..., layer_hpa.data_index], rtol=1e-5, atol=1e-5
+    )
+
+
+def test_msl_anchor_gradients_bypass_the_z_heads(statistics: dict) -> None:
+    layer = _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL)
+    leaf = torch.randn(1, 5, len(NAME_TO_INDEX), requires_grad=True)
+    layer(leaf.clone())[..., NAME_TO_INDEX["z_500"]].sum().backward()
+    g = leaf.grad[0]
+    for name in ("msl", "t_1000", "q_1000", "t_500"):
+        assert g[:, NAME_TO_INDEX[name]].abs().sum() > 0, name
+    for name in ("z_1000", "z_850", "z_500", "other"):
+        assert g[:, NAME_TO_INDEX[name]].abs().sum() == 0, name
+
+
+def test_msl_anchor_gradcheck_float64(statistics: dict) -> None:
+    layer = _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL).double()
+    x = torch.randn(3, len(NAME_TO_INDEX), dtype=torch.float64)
+    for name in ("msl", "t_1000", "q_1000", "t_850"):
+        idx = NAME_TO_INDEX[name]
+
+        def fn(v: torch.Tensor, idx: int = idx) -> torch.Tensor:
+            y = x.clone()
+            y[:, idx] = v
+            return layer.integrate(y)
+
+        assert torch.autograd.gradcheck(
+            fn, (x[:, idx].clone().requires_grad_(True),), eps=1e-6, atol=1e-6, rtol=1e-4
+        ), name
+
+
+def test_msl_anchor_contract(statistics: dict) -> None:
+    with pytest.raises(ValueError, match="msl"):
+        _layer(statistics, msl_anchor="msl")  # normaliser method for msl missing
+    with pytest.raises(ValueError, match="msl"):
+        _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL, msl_units="bar")
+    n2i = {k: v for k, v in NAME_TO_INDEX.items() if k != "msl"}
+    with pytest.raises(ValueError, match="msl"):
+        _layer(statistics, msl_anchor="msl", normalizer=NORMALIZER_MSL, name_to_index=n2i)

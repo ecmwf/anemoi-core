@@ -24,6 +24,7 @@ def test_hydrostatic_bounding_schema_in_union() -> None:
     schema = TypeAdapter(Bounding).validate_python(_CFG)
     assert schema.geopotential_units == "m2/s2"
     assert schema.check_finite is False
+    assert schema.msl_anchor is None and schema.msl_units == "Pa"
 
 
 @pytest.mark.parametrize(
@@ -34,6 +35,12 @@ def test_hydrostatic_bounding_schema_in_union() -> None:
         {"normalizer": {"z": "min-max", "t": "mean-std"}},
         {"normalizer": {"z": "cubic", "t": "mean-std", "q": "mean-std"}},
         {"geopotential_units": "km"},
+        {"msl_anchor": "msl"},
+        {
+            "msl_anchor": "msl",
+            "normalizer": {"z": "min-max", "t": "mean-std", "q": "mean-std", "msl": "mean-std"},
+            "msl_units": "bar",
+        },
     ],
 )
 def test_hydrostatic_bounding_schema_rejects(override: dict) -> None:
