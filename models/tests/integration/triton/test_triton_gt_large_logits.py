@@ -154,3 +154,57 @@ def test_gradients_stay_small_at_extreme_logits(dtype):
     for name, result, ref in zip(("out", "dq", "dk", "dv"), results, reference):
         assert torch.isfinite(result).all(), name
         assert _error(result, ref) <= 1e-2 * size, name
+
+
+def _clustered_inputs(logit_size: float, jitter: float, dtype: torch.dtype, clusters: int = 16):
+    """Queries and keys around a few shared directions, so most rows are nearly one-hot and some keys nearly tie.
+
+    The construction of KohakuFA's precision benchmark: every query and key picks one of ``clusters`` unit
+    directions, adds Gaussian noise of size ``jitter`` and is scaled so the largest scaled logit is about
+    ``logit_size``.
+    """
+    mask = _mask()
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    centers = torch.randn(HEADS, clusters, HEAD_DIM, generator=generator, device="cuda", dtype=torch.float64)
+    centers = centers / centers.norm(dim=-1, keepdim=True)
+    radius = math.sqrt(logit_size * math.sqrt(HEAD_DIM))
+
+    def around():
+        pick = torch.randint(0, clusters, (HEADS, NUM_NODES), generator=generator, device="cuda")
+        base = torch.gather(centers, 1, pick[..., None].expand(-1, -1, HEAD_DIM))
+        noise = torch.randn(base.shape, generator=generator, device="cuda", dtype=torch.float64)
+        return radius * (base + jitter * noise)
+
+    q, k = around(), around()
+    v = torch.randn(HEADS, NUM_NODES, HEAD_DIM, generator=generator, device="cuda", dtype=torch.float64)
+    grad_out = torch.randn(HEADS, NUM_NODES, HEAD_DIM, generator=generator, device="cuda", dtype=torch.float64)
+    return mask, [t.to(dtype) for t in (q, k, v)], grad_out.to(dtype)
+
+
+def _floor(mask, qkv, grad_out):
+    """dq and dk of exact attention from float32-rounded raw scores, rounded to the input precision.
+
+    The best a kernel that adds up the scores in float32 can do: at large logits the rounding of the
+    scores alone moves near-tie probabilities.
+    """
+    q, k, v = (t.double() for t in qkv)
+    scores = (q @ k.transpose(-1, -2)).float().double() / math.sqrt(HEAD_DIM)
+    p = torch.softmax(scores.masked_fill(~mask, float("-inf")), dim=-1)
+    dp = grad_out.double() @ v.transpose(-1, -2)
+    ds = p * (dp - (p * dp).sum(-1, keepdim=True)) / math.sqrt(HEAD_DIM)
+    return (ds @ k).to(qkv[0].dtype), (ds.transpose(-1, -2) @ q).to(qkv[0].dtype)
+
+
+@pytest.mark.parametrize(("dtype", "logit_size"), [(torch.bfloat16, 1e5), (torch.bfloat16, 1e6), (torch.float16, 1e5)])
+def test_nearly_one_hot_gradients_reach_the_float32_floor(dtype, logit_size):
+    """With nearly one-hot rows, dq and dk stay within a few times the best that float32 scores allow.
+
+    The backward forms D = dO . O from the saved output. Its rounding error, times the weighted mean
+    key, would dominate dq and dk here if the score gradients were not corrected to sum to zero.
+    """
+    mask, qkv, grad_out = _clustered_inputs(logit_size, 3e-2, dtype)
+    reference = _dense(mask, qkv, grad_out, torch.float64)
+    results = _kernel(mask, qkv, grad_out)
+    for name, result, ref, floor in zip(("dq", "dk"), results[1:3], reference[1:3], _floor(mask, qkv, grad_out)):
+        assert torch.isfinite(result).all(), name
+        assert _error(result, ref) <= 3 * _error(floor, ref), name

@@ -207,7 +207,7 @@ def _gt_bwd_dst_pass(
     COLPTR_ptr,  # [N_dst + 1]
     D_OUT_ptr,  # [N_dst * H * C]
     D_Q_ptr,  # OUT
-    D_ptr,  # [N_dst * H]
+    D_ptr,  # [N_dst, 2, H] written here: D_j = <d_out, out>, then the correction lam_j (see below)
     N_dst,
     H: tl.constexpr,
     C: tl.constexpr,
@@ -228,9 +228,10 @@ def _gt_bwd_dst_pass(
     num_edges = neigh_end - neigh_start
 
     if num_edges == 0:
-        # store D_j = <d_out, out> = 0 and dQ = 0
+        # store D_j = <d_out, out> = 0, lam_j = 0 and dQ = 0
         zeros = tl.zeros((H_pad,), dtype=tl.float32)
-        tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), zeros, mask=H_mask)
+        tl.store(D_ptr + dst_idx * 2 * H + tl.arange(0, H_pad), zeros, mask=H_mask)
+        tl.store(D_ptr + dst_idx * 2 * H + H + tl.arange(0, H_pad), zeros, mask=H_mask)
         zeros = tl.zeros((H_pad * C_pad,), dtype=out_dtype)
         tl.store(D_Q_ptr + dst_off, zeros, mask=H_C_mask)
         return
@@ -243,6 +244,17 @@ def _gt_bwd_dst_pass(
 
     q = tl.load(Q_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
     dq = tl.zeros((H_pad, C_pad), dtype=tl.float32)
+    # The exact score gradients of a node sum to zero over its edges, because D_j equals the
+    # attention-weighted sum of dalpha. Here D_j comes from the saved output, whose rounding leaves
+    # it off by a little; every score gradient then carries that error times its weight, and dq
+    # picks up the error times the weighted mean key, which is far larger than the true gradient
+    # once attention is nearly one-hot. The sums of the score gradients, of the weights
+    # and of the weighted keys are kept, and lam = the first over the second is the part to take
+    # away, so that the corrected gradients sum to zero again. The source pass uses the same lam.
+    # See Chen et al., "Broken symmetry in BF16 attention" (GProj), https://arxiv.org/abs/2609.34272.
+    ds_sum = tl.zeros((H_pad,), dtype=tl.float32)
+    weight_sum = tl.zeros((H_pad,), dtype=tl.float32)
+    weight_k = tl.zeros((H_pad, C_pad), dtype=tl.float32)
     m_j = tl.load(STATS_ptr + dst_idx * 2 * H + tl.arange(0, H_pad), mask=H_mask)
     inv_l_j = tl.load(STATS_ptr + dst_idx * 2 * H + H + tl.arange(0, H_pad), mask=H_mask)
 
@@ -269,16 +281,22 @@ def _gt_bwd_dst_pass(
         ve = v + e
 
         dalpha = tl.sum(d_out * ve, axis=-1)
-        dq += (weight_ij * (dalpha - Dj))[:, None] * ke
+        ds_ij = weight_ij * (dalpha - Dj)
+        dq += ds_ij[:, None] * ke
+        ds_sum += ds_ij
+        weight_sum += weight_ij
+        weight_k += weight_ij[:, None] * ke
 
         # move to next edge
         edge_ptr += H * C
         e_idx += 1
 
-    dq = dq * (inv_l_j * qk_scale)[:, None]
+    lam = ds_sum / weight_sum
+    dq = (dq - lam[:, None] * weight_k) * (inv_l_j * qk_scale)[:, None]
 
-    # store D_j and dQ
-    tl.store(D_ptr + dst_idx * H + tl.arange(0, H_pad), Dj, mask=H_mask)
+    # store D_j, lam_j and dQ
+    tl.store(D_ptr + dst_idx * 2 * H + tl.arange(0, H_pad), Dj, mask=H_mask)
+    tl.store(D_ptr + dst_idx * 2 * H + H + tl.arange(0, H_pad), lam, mask=H_mask)
     tl.store(
         D_Q_ptr + dst_off,
         dq.to(out_dtype).reshape(
@@ -297,7 +315,7 @@ def _gt_bwd_src_pass(
     ROWPTR_ptr,  # [N_src+1]
     EDGE_IDS_ptr,  # [M] edge id list grouped by src
     EDGE_DST_ptr,  # [M] dst node for each edge
-    D_ptr,  # [N_dst * H] D_j from pass dst-pass
+    D_ptr,  # [N_dst, 2, H] D_j and lam_j from the dst pass
     STATS_ptr,  # [N_dst * 2 * H] saved row maximum and inverse softmax sum from fwd
     D_OUT_ptr,  # [N_dst * H * C]
     D_K_ptr,  # [N_src * H * C]
@@ -350,7 +368,8 @@ def _gt_bwd_src_pass(
         d_out = tl.load(D_OUT_ptr + dst_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
         m_j = tl.load(STATS_ptr + dst * 2 * H + tl.arange(0, H_pad))
         inv_l_j = tl.load(STATS_ptr + dst * 2 * H + H + tl.arange(0, H_pad))
-        Dj = tl.load(D_ptr + dst * H + tl.arange(0, H_pad)).to(tl.float32)
+        Dj = tl.load(D_ptr + dst * 2 * H + tl.arange(0, H_pad))
+        lam_j = tl.load(D_ptr + dst * 2 * H + H + tl.arange(0, H_pad))
 
         e_off = e_idx * H * C + H_C_off
         e = tl.load(E_ptr + e_off, mask=H_C_mask).to(tl.float32).reshape((H_pad, C_pad))
@@ -362,7 +381,8 @@ def _gt_bwd_src_pass(
         s_ij = tl.sum(q * ke, axis=-1)
         alpha_ij = tl.exp2((s_ij - m_j) * exp2_scale) * inv_l_j
         dalpha = tl.sum(d_out * ve, axis=-1)
-        dS = alpha_ij * (dalpha - Dj)
+        # Score gradient with the dst pass's correction lam_j, so that it sums to zero there as well.
+        dS = alpha_ij * ((dalpha - Dj) - lam_j)
 
         # per-edge k, v contributions, summing up to per-edge e contribution
         dV_edge = alpha_ij[:, None] * d_out
@@ -532,9 +552,9 @@ def graph_transformer_attention_backward(
     dK = torch.empty_like(k)
     dV = torch.empty_like(v)
     dE = torch.empty_like(e)
-    D = torch.empty((N_dst, H), device=q.device, dtype=torch.float32)
+    D = torch.empty((N_dst, 2, H), device=q.device, dtype=torch.float32)
 
-    # Pass A: destination nodes (computes D and dQ)
+    # Pass A: destination nodes (computes D, the correction lam and dQ)
     _gt_bwd_dst_pass[(N_dst,)](
         q, k, v, e, out_saved, stats, row, colptr, d_out, dQ, D, N_dst, H, C, grad_dtype, **_SAME_ROUNDING
     )
