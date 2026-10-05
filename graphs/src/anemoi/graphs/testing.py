@@ -51,7 +51,6 @@ class _DatasetMock:
                 return self.data[key]
 
         self.variables = {
-            "vlon": MockVariable(np.array([0, 1, 1, 0, 2]), "radian", ("vertex",)),
             "vlon": MockVariable(np.array([0, 1, 1, 0, 0]), "radian", ("vertex",)),
             "vlat": MockVariable(np.array([1, 0, 1, 0, 2]), "radian", ("vertex",)),
             "clon": MockVariable(np.array([0.66, 0.33, 1.33]), "radian", ("cell",)),
