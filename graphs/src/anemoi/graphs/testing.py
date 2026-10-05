@@ -22,7 +22,7 @@ class _DatasetMock:
     Cell C2 with its additional vertex V4 and edges E4 and E5 were added as
     a first refinement.
 
-    [V1: 0, 1]🢀-E3--[V3: 1, 1]
+    [V1: 1, 0]🢀-E3--[V3: 1, 1]
       🢁      ╲             🢁     ╲
       |       ╲ [C1: ⅔, ⅔] |       ╲
       |        ╲           |        ╲
@@ -31,7 +31,7 @@ class _DatasetMock:
       |           ╲        |           ╲
       | [C2: ⅓, ⅓] ╲       | [C3: 1⅓, ⅓]\
       |             🢆     |             🢆
-    [V4: 0, 1]🢀-E4--[V2: 1, 1]🢀-E6--[V5: 2, 0]
+    [V4: 0, 0]🢀-E4--[V2: 0, 1]🢀-E6--[V5: 0, 2]
 
     Note: Triangular refinement does not actually work like this. This grid
     mock serves testing purposes only.
@@ -52,13 +52,14 @@ class _DatasetMock:
 
         self.variables = {
             "vlon": MockVariable(np.array([0, 1, 1, 0, 2]), "radian", ("vertex",)),
-            "vlat": MockVariable(np.array([1, 0, 1, 0, 0]), "radian", ("vertex",)),
+            "vlon": MockVariable(np.array([0, 1, 1, 0, 0]), "radian", ("vertex",)),
+            "vlat": MockVariable(np.array([1, 0, 1, 0, 2]), "radian", ("vertex",)),
             "clon": MockVariable(np.array([0.66, 0.33, 1.33]), "radian", ("cell",)),
             "clat": MockVariable(np.array([0.66, 0.33, 0.33]), "radian", ("cell",)),
             "edge_vertices": MockVariable(
-                np.array([[1, 2], [2, 3], [3, 1], [2, 4], [4, 1], [2, 5], [3, 5]]).T, "", ("nc", "edge")
+                np.array([[1, 2], [2, 3], [3, 1], [2, 4], [4, 1], [5, 2], [3, 5]]).T, "", ("nc", "edge")
             ),
-            "vertex_of_cell": MockVariable(np.array([[1, 2, 3], [1, 2, 4], [2, 4, 5]]).T, "", ("nv", "cell")),
+            "vertex_of_cell": MockVariable(np.array([[1, 2, 3], [1, 2, 4], [2, 3, 5]]).T, "", ("nv", "cell")),
             "refinement_level_v": MockVariable(np.array([0, 0, 0, 1, 2]), "", ("vertex",)),
             "refinement_level_c": MockVariable(np.array([0, 1, 2]), "", ("cell",)),
         }
