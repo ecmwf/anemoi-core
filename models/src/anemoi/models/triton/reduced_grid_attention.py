@@ -296,7 +296,7 @@ def _rg_fwd(
     K,
     V,
     OUT,
-    M,  # row maximum of the scaled scores of each query (in log2 units), shape (batch * heads, points)
+    M,  # row maximum of the unscaled scores q . k of each query, shape (batch * heads, points)
     INV_L,  # inverse of the softmax sum of each query, same shape as M
     ROW_START,
     ROW_SHIFT,
@@ -397,11 +397,17 @@ def _rg_fwd(
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
         keep = keep & row_seen[:, None] & k_valid[None, :]
-        qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION) * qk_scale, _MASKED)
+        qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
 
+        # The row maximum is subtracted from the raw scores before they are scaled. Near the maximum
+        # the difference is exact, so the rounding error in the exponent is relative to the gap from the
+        # maximum rather than to the score itself; with scaling first, large scores (around 1e5 and
+        # beyond) would lose the small gaps that decide the probabilities of the runner-up keys. The
+        # backward kernels recompute the probabilities the same way. See KohakuBlueleaf, KohakuFA,
+        # https://github.com/KohakuBlueleaf/KohakuFA (bug 2, scale before shift).
         m_new = tl.maximum(m_i, tl.max(qk, 1))
-        p = tl.math.exp2(qk - m_new[:, None])
-        alpha = tl.math.exp2(m_i - m_new)
+        p = tl.math.exp2((qk - m_new[:, None]) * qk_scale)
+        alpha = tl.math.exp2((m_i - m_new) * qk_scale)
         l_i = l_i * alpha + tl.sum(p, 1)
         acc = tl.dot(p.to(v.dtype), v, acc * alpha[:, None], input_precision=DOT_PRECISION)
         m_i = m_new
@@ -552,8 +558,8 @@ def _rg_bwd_dq(
             centre = _matching(q_pos, q_n, other_n)
         keep = _near_in_row(k_pos[None, :], centre[:, None], other_n, RADIUS_W)
         keep = keep & row_seen[:, None] & k_valid[None, :] & q_valid[:, None]
-        qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION) * qk_scale, _MASKED)
-        p = tl.math.exp2(qk - m[:, None]) * inv_l[:, None]
+        qk = tl.where(keep, tl.dot(q, tl.trans(k), input_precision=DOT_PRECISION), _MASKED)
+        p = tl.math.exp2((qk - m[:, None]) * qk_scale) * inv_l[:, None]
 
         dp = tl.dot(do, tl.trans(v), input_precision=DOT_PRECISION)
         ds = (p * (dp - delta[:, None])).to(k.dtype)
@@ -722,8 +728,8 @@ def _rg_bwd_dkdv(
         keep = _near_in_row(k_pos[:, None], centre, k_n[:, None], RADIUS_W)
         keep = keep & row_seen[:, None] & q_valid[None, :] & k_valid[:, None]
         # Scores laid out keys x queries.
-        qk_t = tl.where(keep, tl.dot(k, tl.trans(q), input_precision=DOT_PRECISION) * qk_scale, _MASKED)
-        p_t = tl.math.exp2(qk_t - m[None, :]) * inv_l[None, :]
+        qk_t = tl.where(keep, tl.dot(k, tl.trans(q), input_precision=DOT_PRECISION), _MASKED)
+        p_t = tl.math.exp2((qk_t - m[None, :]) * qk_scale) * inv_l[None, :]
 
         dp_t = tl.dot(v, tl.trans(do), input_precision=DOT_PRECISION)
         ds_t = p_t * (dp_t - delta[None, :])
