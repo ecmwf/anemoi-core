@@ -138,7 +138,7 @@ def _inputs(batch_size: int = 2) -> dict[str, torch.Tensor]:
 def test_every_attention_layer_uses_the_grid_neighbourhood():
     model = _build()
     wrappers = [m for m in model.modules() if isinstance(m, NeighbourhoodAttentionWrapper)]
-    # Encoder and decoder blocks each hold a self attention layer they replace with cross attention.
+    # Each attention layer has one neighbourhood, given by its query and key grids.
     grids = {(w.neighbourhood.query_grid, w.neighbourhood.key_grid) for w in wrappers}
     assert (HIDDEN_GRID, DATA_GRID) in grids  # encoder
     assert (HIDDEN_GRID, HIDDEN_GRID) in grids  # processor
