@@ -51,11 +51,12 @@ processor:
   attention_implementation: flash_attention # flash_attention, scaled_dot_product_attention
   qk_norm: True # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
-  use_alibi_slopes: False # Transformer only
   cpu_offload: ${model.cpu_offload}
   gradient_checkpointing: True
-  use_rotary_embeddings: False
   layer_kernels: ${model.layer_kernels}
+  rotary_embeddings: # rotary position embeddings from the positions of the nodes on the sphere; null switches them off
+    max_frequency: 100 # shortest wavelength ~ 40,000 km / max_frequency = 400 km
+    backend: triton # triton (GPU kernel) or torch (PyTorch, any device)
 
 encoder:
   _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper

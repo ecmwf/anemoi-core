@@ -75,3 +75,17 @@ def distributed_world_size(pytestconfig: pytest.Config) -> int:
 @pytest.fixture(scope="module")
 def device():
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+
+@pytest.fixture(autouse=True)
+def full_float32_matmuls():
+    """Every test runs with full float32 matrix products, PyTorch's default precision.
+
+    Training sets torch.set_float32_matmul_precision("high") for the whole process, and the Triton
+    attention kernels follow that setting; tests that compare float32 results with tight tolerances
+    would then see TF32 if training code ran earlier in the same process.
+    """
+    previous = torch.get_float32_matmul_precision()
+    torch.set_float32_matmul_precision("highest")
+    yield
+    torch.set_float32_matmul_precision(previous)

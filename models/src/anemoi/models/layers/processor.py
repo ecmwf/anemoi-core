@@ -21,12 +21,18 @@ from torch_geometric.typing import Adj
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
+from anemoi.models.distributed.point_ranges import PointRun
+from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
+from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.neighbourhood_attention import write_own_points
+from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -218,10 +224,12 @@ class TransformerProcessor(BaseProcessor):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
         window_size: Optional[int] = None,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        neighbourhood: Optional[dict] = None,
+        rotary_embeddings: Optional[dict] = None,
+        node_coords: Optional[Tensor] = None,
         **kwargs,
     ) -> None:
         """Initialize TransformerProcessor.
@@ -254,8 +262,6 @@ class TransformerProcessor(BaseProcessor):
             Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default None
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -263,6 +269,15 @@ class TransformerProcessor(BaseProcessor):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        neighbourhood : dict, optional
+            Grid family, kernel size and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        rotary_embeddings : dict, optional
+            Highest frequency and backend of rotary position embeddings, shared by all layers,
+            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
+        node_coords : Tensor, optional
+            Latitude and longitude of the processor nodes in radians, used by neighbourhood attention
+            and rotary embeddings
         """
         super().__init__(
             num_layers=num_layers,
@@ -277,6 +292,7 @@ class TransformerProcessor(BaseProcessor):
             **kwargs,
         )
 
+        grid_neighbourhood = build_grid_neighbourhood(attention_implementation, neighbourhood, node_coords)
         self.build_layers(
             TransformerProcessorBlock,
             num_channels=num_channels,
@@ -290,8 +306,19 @@ class TransformerProcessor(BaseProcessor):
             attention_implementation=attention_implementation,
             mlp_implementation=mlp_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
+            neighbourhood=grid_neighbourhood,
+            rotary=build_spherical_rotary(rotary_embeddings, (attn_channels or num_channels) // num_heads, node_coords),
         )
+
+        # Neighbourhood attention on nodes in grid order works through bands of whole rows (see
+        # forward_in_bands): on one GPU when num_bands > 1, and whenever the points are split across
+        # GPUs, with num_bands bands of each GPU's own rows.
+        self.bands: Optional[NeighbourhoodBands] = None
+        if grid_neighbourhood is not None and grid_neighbourhood.in_grid_order:
+            if cpu_offload and grid_neighbourhood.num_bands > 1:
+                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
+            if not cpu_offload:
+                self.bands = NeighbourhoodBands(grid_neighbourhood)
 
         self.offload_layers(cpu_offload)
 
@@ -311,8 +338,64 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if self.bands is not None and (self.bands.num_bands > 1 or sharded):
+            return self.forward_in_bands(x, batch_size, shard_info, model_comm_group, cond=kwargs.get("cond"))
+
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
+        return x
+
+    def forward_in_bands(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        model_comm_group: Optional[ProcessGroup] = None,
+        cond: Optional[Tensor] = None,
+    ) -> Tensor:
+        """The layers worked through band by band, with one checkpoint per band of each layer.
+
+        Each band of a layer reads the inputs of its key points, which include its query points,
+        and gives the outputs of its query points. Only one band is held in memory at a time,
+        besides the input and output of the layer.
+
+        When the points are split across GPUs, ``x`` holds this GPU's own points and so does the
+        output. Before each layer the GPU fetches the inputs of the points its rows reach from the
+        GPUs that own them, one exchange per layer (see :class:`ShardPlan`), and reads its own
+        points in place; the bands then run without communication.
+        """
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if sharded and shard_info.nodes is None:
+            raise ValueError("Neighbourhood attention split across GPUs needs the processor input split as well.")
+        shard_sizes = shard_info.nodes if sharded else None
+        rank = model_comm_group.rank() if sharded else 0
+        plan = self.bands.plans(shard_sizes)[rank]
+        exchange = self.bands.key_exchange(shard_sizes, shard_sizes, rank, x.device) if sharded else None
+
+        def run_of_key_points(t: Tensor) -> PointRun:
+            """``t`` for the key points this GPU's rows reach, its own points read in place."""
+            if exchange is None:
+                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
+            return fetch_point_range(t, exchange, model_comm_group)
+
+        num_own = plan.own_points.stop - plan.own_points.start
+        cond_keys = None if cond is None else run_of_key_points(cond)
+        for layer in self.proc:
+            x_keys = run_of_key_points(x)
+            out = None
+            for band in plan.bands:
+                out_band = maybe_checkpoint(
+                    layer.forward_band,
+                    self.gradient_checkpointing,
+                    x_keys.take(band.key_points),
+                    band,
+                    None if cond_keys is None else cond_keys.take(band.key_points),
+                )
+                if out is None:
+                    out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
+                write_own_points(out, out_band, band, plan)
+            x = out.view(batch_size * num_own, -1)
         return x
 
 

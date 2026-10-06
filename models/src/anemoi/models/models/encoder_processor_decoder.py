@@ -79,6 +79,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.num_channels,
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.encoder,
+                    src_node_coords=[dataset_name],
+                    dst_node_coords=[self._graph_name_hidden],
+                ),
             )
 
         # Processor hidden -> hidden
@@ -95,6 +100,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
+            **self._node_coords(model_config.model.processor, node_coords=[self._graph_name_hidden]),
         )
 
         # Decoder hidden -> data
@@ -117,7 +123,36 @@ class AnemoiModelEncProcDec(BaseGraphModel):
                 hidden_dim=self.num_channels,
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.decoder,
+                    src_node_coords=[self._graph_name_hidden],
+                    dst_node_coords=[dataset_name],
+                ),
             )
+
+    def _node_coords(self, component_config: DotDict, **node_names: list[str]) -> dict[str, Tensor]:
+        """Node coordinates for a model component, which neighbourhood attention and rotary embeddings need.
+
+        Each keyword names the graph nodes whose coordinates the component receives under that
+        keyword. Several names, for datasets sharing an encoder or decoder, must share one grid.
+        """
+        uses_positions = (
+            component_config.get("attention_implementation") == "neighbourhood"
+            or component_config.get("rotary_embeddings") is not None
+        )
+        if not uses_positions:
+            return {}
+        node_coords = {}
+        for keyword, names in node_names.items():
+            coords = self._graph_data[names[0]].x
+            for name in names[1:]:
+                other = self._graph_data[name].x
+                if other.shape != coords.shape or not torch.equal(other, coords):
+                    raise ValueError(
+                        f"Nodes {list(names)} share a model component that uses node positions, so they must be the same nodes."
+                    )
+            node_coords[keyword] = coords
+        return node_coords
 
     def _assemble_input(
         self,

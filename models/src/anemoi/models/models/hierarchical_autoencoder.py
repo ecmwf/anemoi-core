@@ -112,6 +112,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 in_channels_dst=self.input_dim_latent,
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
                 edge_dim=self.encoder_graph_provider[dataset_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.encoder,
+                    src_node_coords=[dataset_name],
+                    dst_node_coords=[self._graph_name_hidden[0]],
+                ),
             )
 
         # Level processors
@@ -139,6 +144,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
+                    **self._node_coords(model_config.model.processor, node_coords=[nodes_names]),
                 )
 
                 # Create graph providers for up level processor
@@ -156,6 +162,7 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
                     num_layers=model_config.model.level_process_num_layers,
+                    **self._node_coords(model_config.model.processor, node_coords=[nodes_names]),
                 )
 
         # Downscale
@@ -181,6 +188,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 in_channels_dst=self.node_attributes.attr_ndims[dst_nodes_name],
                 hidden_dim=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.downscale_graph_providers[src_nodes_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.encoder, src_node_coords=[src_nodes_name], dst_node_coords=[dst_nodes_name]
+                ),
             )
 
         # Upscale
@@ -207,6 +217,9 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 hidden_dim=self.hidden_dims[src_nodes_name],
                 out_channels_dst=self.hidden_dims[dst_nodes_name],
                 edge_dim=self.upscale_graph_providers[src_nodes_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.decoder, src_node_coords=[src_nodes_name], dst_node_coords=[dst_nodes_name]
+                ),
             )
 
         # Decoder hidden -> data
@@ -229,6 +242,11 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
                 hidden_dim=self.hidden_dims[self._graph_name_hidden[0]],
                 out_channels_dst=self.output_dim[dataset_name],
                 edge_dim=self.decoder_graph_provider[dataset_name].edge_dim,
+                **self._node_coords(
+                    model_config.model.decoder,
+                    src_node_coords=[self._graph_name_hidden[0]],
+                    dst_node_coords=[dataset_name],
+                ),
             )
 
     def forward(
@@ -243,17 +261,19 @@ class AnemoiModelHierarchicalAutoEncoder(AnemoiModelAutoEncoder):
         Parameters
         ----------
         x : dict[str, Tensor]
-            Input data
+            Input data.
         model_comm_group : Optional[ProcessGroup], optional
-            Model communication group, by default None
+            Model communication group, by default None.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        **kwargs
+            Further keyword arguments, not used by this model.
 
         Returns
         -------
         dict[str, Tensor]
-            Output of the model, with the same shape as the input (sharded if input is sharded)
+            Output of the model, with the same shape as the input (sharded if input is sharded).
         """
         dataset_names = list(x.keys())
 

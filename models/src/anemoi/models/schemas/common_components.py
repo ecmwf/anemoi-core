@@ -7,6 +7,7 @@
 # nor does it submit to any jurisdiction.
 #
 
+from typing import Any
 from typing import Literal
 from typing import Union
 
@@ -15,8 +16,60 @@ from pydantic import Field
 from pydantic import NonNegativeInt
 from pydantic import PositiveFloat
 from pydantic import PositiveInt
+from pydantic import field_validator
 
 from anemoi.utils.schemas import BaseModel
+
+
+class NeighbourhoodSchema(BaseModel):
+    grid: str = Field(example="octahedral")
+    "Grid family of the nodes, a key of anemoi.models.layers.neighbourhood_attention.GRID_KERNELS, e.g. 'octahedral' or 'healpix'."
+    kernel_size: tuple[PositiveInt, PositiveInt] = Field(example=(7, 13))
+    "Latitude rows and points per row each query attends to; both odd."
+    backend: Literal["triton", "flex", "sdpa"] = Field(default="triton")
+    "Kernels to use: 'triton' (GPU), 'flex' (flex attention) or 'sdpa' (dense mask, small grids). Default to 'triton'."
+    num_bands: PositiveInt = Field(default=1)
+    "Number of bands of query rows worked through one at a time, each with its own checkpoint, to save memory on large grids; per GPU when the points are split across GPUs. Each query attends to the same keys whatever the number. Default to 1."
+
+    @field_validator("grid")
+    @classmethod
+    def check_grid(cls, grid: str) -> str:
+        from anemoi.models.layers.neighbourhood_attention import GRID_KERNELS
+
+        if grid not in GRID_KERNELS:
+            raise ValueError(
+                f"No neighbourhood attention kernels for grid '{grid}'. Known grids: {list(GRID_KERNELS)}."
+            )
+        return grid
+
+    @field_validator("kernel_size")
+    @classmethod
+    def check_kernel_size(cls, kernel_size: tuple[int, int]) -> tuple[int, int]:
+        if any(k % 2 == 0 for k in kernel_size):
+            raise ValueError(f"kernel_size entries must be odd, got {kernel_size}.")
+        return kernel_size
+
+
+class RotaryEmbeddingsSchema(BaseModel):
+    max_frequency: float = Field(ge=1.0, example=100.0)
+    "Highest frequency of the rotary embeddings in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
+    backend: Literal["triton", "torch"] = Field(default="triton")
+    "Computes the turn with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
+
+
+def check_neighbourhood_attention(component: Any) -> Any:
+    """Check that the neighbourhood settings and the attention implementation of a component agree."""
+    if component.attention_implementation != "neighbourhood":
+        if component.neighbourhood is not None:
+            raise ValueError("'neighbourhood' is only used with attention_implementation 'neighbourhood'.")
+        return component
+    if component.neighbourhood is None:
+        raise ValueError("attention_implementation 'neighbourhood' needs a 'neighbourhood' section.")
+    if component.window_size is not None:
+        raise ValueError("Neighbourhood attention sets its own mask; window_size must be null.")
+    if component.softcap:
+        raise ValueError("Neighbourhood attention does not support softcap.")
+    return component
 
 
 class TransformerModelComponent(PydanticBaseModel):

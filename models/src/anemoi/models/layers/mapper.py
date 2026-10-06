@@ -30,12 +30,19 @@ from anemoi.models.distributed.khop_edges import build_graph_partition_from_shar
 from anemoi.models.distributed.khop_edges import ensure_edges_are_dst_sorted
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import shard_graph_to_local
+from anemoi.models.distributed.point_ranges import PointRun
+from anemoi.models.distributed.point_ranges import fetch_point_range
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.layers.block import GraphConvMapperBlock
 from anemoi.models.layers.block import GraphTransformerMapperBlock
 from anemoi.models.layers.block import TransformerMapperBlock
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBands
+from anemoi.models.layers.neighbourhood_attention import build_grid_neighbourhood
+from anemoi.models.layers.neighbourhood_attention import write_own_points
+from anemoi.models.layers.spherical_rotary import build_spherical_rotary
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
@@ -1277,10 +1284,12 @@ class TransformerBaseMapper(BaseMapper, ABC):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
         cpu_offload: bool = False,
         layer_kernels: DotDict,
+        neighbourhood: Optional[dict] = None,
+        rotary_embeddings: Optional[dict] = None,
+        src_node_coords: Optional[Tensor] = None,
+        dst_node_coords: Optional[Tensor] = None,
         **kwargs,
     ) -> None:
         """Initialize TransformerBaseMapper.
@@ -1313,8 +1322,6 @@ class TransformerBaseMapper(BaseMapper, ABC):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1322,6 +1329,18 @@ class TransformerBaseMapper(BaseMapper, ABC):
         layer_kernels : DotDict
             A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
             Defined in config/models/<model>.yaml
+        neighbourhood : dict, optional
+            Grid family, kernel size and backend for attention_implementation "neighbourhood",
+            see :func:`anemoi.models.layers.neighbourhood_attention.GridNeighbourhood.from_config`
+        rotary_embeddings : dict, optional
+            Highest frequency and backend of rotary position embeddings,
+            see :func:`anemoi.models.layers.spherical_rotary.build_spherical_rotary`
+        src_node_coords : Tensor, optional
+            Latitude and longitude of the source nodes (keys) in radians, used by neighbourhood attention
+            and rotary embeddings
+        dst_node_coords : Tensor, optional
+            Latitude and longitude of the destination nodes (queries) in radians, used by neighbourhood
+            attention and rotary embeddings
         """
         super().__init__(
             in_channels_src=in_channels_src,
@@ -1334,6 +1353,9 @@ class TransformerBaseMapper(BaseMapper, ABC):
             **kwargs,
         )
 
+        grid_neighbourhood = build_grid_neighbourhood(
+            attention_implementation, neighbourhood, src_node_coords, query_coords=dst_node_coords
+        )
         self.proc = TransformerMapperBlock(
             num_channels=hidden_dim,
             hidden_dim=compute_mlp_hidden_dim(hidden_dim, mlp_hidden_ratio),
@@ -1346,9 +1368,21 @@ class TransformerBaseMapper(BaseMapper, ABC):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=grid_neighbourhood,
+            rotary=build_spherical_rotary(
+                rotary_embeddings, (attn_channels or hidden_dim) // num_heads, dst_node_coords, src_node_coords
+            ),
         )
+
+        # Neighbourhood attention on nodes in grid order works through bands of whole destination
+        # rows (see forward_in_bands): on one GPU when num_bands > 1, and whenever the points are
+        # split across GPUs, with num_bands bands of each GPU's own destination rows.
+        self.bands: Optional[NeighbourhoodBands] = None
+        if grid_neighbourhood is not None and grid_neighbourhood.in_grid_order:
+            if cpu_offload and grid_neighbourhood.num_bands > 1:
+                raise ValueError("Neighbourhood attention in bands (num_bands > 1) does not work with cpu_offload.")
+            if not cpu_offload:
+                self.bands = NeighbourhoodBands(grid_neighbourhood)
 
         self.offload_layers(cpu_offload)
 
@@ -1405,6 +1439,11 @@ class TransformerBaseMapper(BaseMapper, ABC):
         edges_are_dst_sorted: bool = True,
         **kwargs,
     ) -> PairTensor:
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if self.bands is not None and (self.bands.num_bands > 1 or sharded):
+            return self.forward_in_bands(
+                x, batch_size, shard_info, model_comm_group, keep_x_dst_sharded, cond=kwargs.get("cond")
+            )
         return maybe_checkpoint(
             self.mapper_forward,
             self.gradient_checkpointing,
@@ -1415,6 +1454,97 @@ class TransformerBaseMapper(BaseMapper, ABC):
             keep_x_dst_sharded=keep_x_dst_sharded,
             **kwargs,
         )
+
+    def forward_in_bands(
+        self,
+        x: PairTensor,
+        batch_size: int,
+        shard_info: BipartiteGraphShardInfo,
+        model_comm_group: Optional[ProcessGroup] = None,
+        keep_x_dst_sharded: bool = False,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """The mapper worked through band by band, with one checkpoint per band.
+
+        Every band runs the whole mapper, from the embeddings to the output layer, for its
+        destination points and the source points they attend to, so only one band is held in
+        memory at a time.
+
+        When the points are split across GPUs, each GPU works through the bands of the
+        destination rows that hold its own destination points. It first fetches, from the GPUs
+        that own them, the destination points of those whole rows and the source points they
+        reach (see :class:`ShardPlan`), and reads its own points in place; the bands then run
+        without communication. The output
+        holds the GPU's own destination points, and is gathered onto every GPU unless
+        ``keep_x_dst_sharded``.
+        """
+        x_src, x_dst = x
+        sharded = model_comm_group is not None and model_comm_group.size() > 1
+        if sharded:
+            assert batch_size == 1, "Only batch size of 1 is supported when model is sharded across GPUs"
+            if cond is not None:
+                cond = (
+                    ensure_sharded(cond[0], 0, shard_info.src_nodes, model_comm_group)[0],
+                    ensure_sharded(cond[1], 0, shard_info.dst_nodes, model_comm_group)[0],
+                )
+            x_src, src_sizes = ensure_sharded(x_src, 0, shard_info.src_nodes, model_comm_group)
+            x_dst, dst_sizes = ensure_sharded(x_dst, 0, shard_info.dst_nodes, model_comm_group)
+            rank = model_comm_group.rank()
+        else:
+            dst_sizes, rank = None, 0
+        plan = self.bands.plans(dst_sizes)[rank]
+        if sharded:
+            src_exchange = self.bands.key_exchange(dst_sizes, src_sizes, rank, x_src.device)
+            dst_exchange = self.bands.query_exchange(dst_sizes, rank, x_dst.device)
+
+        def run_of_src(t: Tensor) -> PointRun:
+            """``t`` for the source points this GPU's rows reach, its own points read in place."""
+            if not sharded:
+                return PointRun.whole(t.view(batch_size, self.bands.num_key_points, -1))
+            return fetch_point_range(t, src_exchange, model_comm_group)
+
+        def run_of_dst(t: Tensor) -> PointRun:
+            """``t`` for the destination points of this GPU's whole rows, its own points read in place."""
+            if not sharded:
+                return PointRun.whole(t.view(batch_size, self.bands.num_query_points, -1))
+            return fetch_point_range(t, dst_exchange, model_comm_group)
+
+        x_src, x_dst = run_of_src(x_src), run_of_dst(x_dst)
+        if cond is not None:
+            cond = (run_of_src(cond[0]), run_of_dst(cond[1]))
+
+        num_own = plan.own_points.stop - plan.own_points.start
+        out = None
+        for band in plan.bands:
+            band_cond = None if cond is None else (cond[0].take(band.key_points), cond[1].take(band.query_points))
+            out_band = maybe_checkpoint(
+                self.forward_band,
+                self.gradient_checkpointing,
+                x_src.take(band.key_points),
+                x_dst.take(band.query_points),
+                band,
+                band_cond,
+            )
+            if out is None:
+                out = out_band.new_empty(batch_size, num_own, out_band.shape[-1])
+            write_own_points(out, out_band, band, plan)
+        out = out.view(batch_size * num_own, -1)
+
+        if sharded and not keep_x_dst_sharded:
+            out = gather_tensor(out, 0, dst_sizes, model_comm_group)
+        return out
+
+    def forward_band(
+        self,
+        x_src: Tensor,
+        x_dst: Tensor,
+        band: NeighbourhoodBand,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """The mapper for one band: embeddings, the transformer block and the output layer."""
+        x_src, x_dst = self.pre_process((x_src, x_dst))
+        x_dst = self.proc.forward_band((x_src, x_dst), band, cond=cond)
+        return self.post_process(x_dst)
 
 
 class TransformerForwardMapper(TransformerBaseMapper):
@@ -1436,10 +1566,8 @@ class TransformerForwardMapper(TransformerBaseMapper):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
-        use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -1473,8 +1601,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1500,8 +1626,6 @@ class TransformerForwardMapper(TransformerBaseMapper):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
             **kwargs,
         )
 
@@ -1559,10 +1683,8 @@ class TransformerBackwardMapper(TransformerBaseMapper):
         mlp_implementation: MLPImplementation = "mlp",
         attention_implementation: str = "flash_attention",
         softcap: float = None,
-        use_alibi_slopes: bool = False,
         cpu_offload: bool = False,
         window_size: Optional[int] = None,
-        use_rotary_embeddings: bool = False,
         layer_kernels: DotDict,
         **kwargs,  # accept not needed extra arguments like subgraph etc.
     ) -> None:
@@ -1596,8 +1718,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             implementation, by default "flash_attention"
         softcap : float, optional
             Anything > 0 activates softcapping flash attention, by default 0
-        use_alibi_slopes : bool
-            Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
             1/2 size of shifted window for attention computation, by default None
         cpu_offload : bool
@@ -1623,8 +1743,6 @@ class TransformerBackwardMapper(TransformerBaseMapper):
             mlp_implementation=mlp_implementation,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
             **kwargs,
         )
 

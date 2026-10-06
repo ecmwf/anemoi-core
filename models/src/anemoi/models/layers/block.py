@@ -45,6 +45,9 @@ from anemoi.models.layers.conv import GraphTransformerConv
 from anemoi.models.layers.mlp import MLP
 from anemoi.models.layers.mlp import MLPImplementation
 from anemoi.models.layers.mlp import build_feedforward_layer
+from anemoi.models.layers.neighbourhood_attention import GridNeighbourhood
+from anemoi.models.layers.neighbourhood_attention import NeighbourhoodBand
+from anemoi.models.layers.spherical_rotary import SphericalRotaryEmbedding
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.triton.utils import edge_index_to_csc
 from anemoi.models.triton.utils import is_triton_available
@@ -137,8 +140,8 @@ class TransformerProcessorBlock(BaseBlock):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[GridNeighbourhood] = None,
+        rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
         super().__init__()
 
@@ -157,8 +160,8 @@ class TransformerProcessorBlock(BaseBlock):
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
+            rotary=rotary,
         )
 
         self.mlp = MLP(
@@ -195,8 +198,34 @@ class TransformerProcessorBlock(BaseBlock):
         )
         return (x,)
 
+    def forward_band(self, x: Tensor, band: NeighbourhoodBand, cond: Optional[Tensor] = None) -> Tensor:
+        """The block for one band of points: the same steps as :meth:`forward` on the band.
 
-class TransformerMapperBlock(TransformerProcessorBlock):
+        Parameters
+        ----------
+        x : Tensor
+            Input of the band's key points, which include its query points, shape
+            ``(batch, band key points, num_channels)``.
+        band : NeighbourhoodBand
+            The band.
+        cond : Tensor, optional
+            Conditioning of the band's key points, laid out like ``x``.
+
+        Returns
+        -------
+        Tensor
+            Output of the band's query points, shape ``(batch, band query points, num_channels)``.
+        """
+        first = band.query_points.start - band.key_points.start
+        queries = slice(first, first + band.query_points.stop - band.query_points.start)
+        cond_kwargs = {"cond": cond} if cond is not None else {}
+        cond_query_kwargs = {"cond": cond[:, queries]} if cond is not None else {}
+
+        x_query = x[:, queries] + self.attention.forward_band(self.layer_norm_attention(x, **cond_kwargs), band)
+        return x_query + self.mlp(self.layer_norm_mlp(x_query, **cond_query_kwargs))
+
+
+class TransformerMapperBlock(BaseBlock):
     """Transformer mapper block with MultiHeadCrossAttention and MLPs."""
 
     def __init__(
@@ -213,24 +242,16 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         attention_implementation: str = "flash_attention",
         mlp_implementation: MLPImplementation = "mlp",
         softcap: Optional[float] = None,
-        use_alibi_slopes: bool = False,
-        use_rotary_embeddings: bool = False,
+        neighbourhood: Optional[GridNeighbourhood] = None,
+        rotary: Optional[SphericalRotaryEmbedding] = None,
     ):
-        super().__init__(
-            num_channels=num_channels,
-            hidden_dim=hidden_dim,
-            attn_channels=attn_channels,
-            num_heads=num_heads,
-            window_size=window_size,
-            layer_kernels=layer_kernels,
-            dropout_p=dropout_p,
-            qk_norm=qk_norm,
-            attention_implementation=attention_implementation,
-            mlp_implementation=mlp_implementation,
-            softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
-        )
+        super().__init__()
+
+        LayerNorm = layer_kernels.LayerNorm
+
+        self.layer_norm_attention_src = LayerNorm(normalized_shape=num_channels)
+        self.layer_norm_attention_dst = LayerNorm(normalized_shape=num_channels)
+        self.layer_norm_mlp = LayerNorm(normalized_shape=num_channels)
 
         self.attention = MultiHeadCrossAttention(
             num_heads=num_heads,
@@ -244,15 +265,19 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             layer_kernels=layer_kernels,
             attention_implementation=attention_implementation,
             softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
+            neighbourhood=neighbourhood,
+            rotary=rotary,
         )
 
-        LayerNorm = layer_kernels.LayerNorm
-
-        self.layer_norm_attention_src = LayerNorm(num_channels)
-        self.layer_norm_attention_dst = LayerNorm(num_channels)
-        self.layer_norm_mpl = LayerNorm(num_channels)
+        self.mlp = MLP(
+            in_features=num_channels,
+            hidden_dim=hidden_dim,
+            out_features=num_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
+        )
 
     def forward(
         self,
@@ -268,8 +293,39 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
         x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
         x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
-        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst, **cond_dst_kwargs))
+        x_dst = x_dst + self.mlp(self.layer_norm_mlp(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
+
+    def forward_band(
+        self,
+        x: OptPairTensor,
+        band: NeighbourhoodBand,
+        cond: Optional[tuple[Tensor, Tensor]] = None,
+    ) -> Tensor:
+        """The block for one band of destination points: the same steps as :meth:`forward` on the band.
+
+        Parameters
+        ----------
+        x : OptPairTensor
+            Source input of the band's key points, shape ``(batch, band key points, num_channels)``,
+            and destination input of its query points, shape ``(batch, band query points, num_channels)``.
+        band : NeighbourhoodBand
+            The band.
+        cond : tuple[Tensor, Tensor], optional
+            Conditioning of the band's source and destination points, laid out like ``x``.
+
+        Returns
+        -------
+        Tensor
+            Destination output of the band, shape ``(batch, band query points, num_channels)``.
+        """
+        cond_src_kwargs = {"cond": cond[0]} if cond is not None else {}
+        cond_dst_kwargs = {"cond": cond[1]} if cond is not None else {}
+
+        x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
+        x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
+        x_dst = x_dst + self.attention.forward_band((x_src, x_dst), band)
+        return x_dst + self.mlp(self.layer_norm_mlp(x_dst, **cond_dst_kwargs))
 
 
 class GraphConvBaseBlock(BaseBlock):
@@ -417,13 +473,13 @@ class GraphConvMapperBlock(GraphConvBaseBlock):
         out_channels : int
             Number of output channels.
         num_chunks : int
-            Number of chunks
+            Number of chunks.
         mlp_extra_layers : int, optional
-            Extra layers in MLP, by default 0
+            Extra layers in MLP, by default 0.
         update_src_nodes : bool, optional
-            Update src if src and dst nodes are given, by default True
+            Update src if src and dst nodes are given, by default True.
         layer_kernels : DotDict
-            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear".
         kwargs : dict
             Additional arguments for the base class.
         """

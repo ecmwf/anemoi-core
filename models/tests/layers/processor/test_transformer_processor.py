@@ -34,7 +34,6 @@ class TransformerProcessorConfig:
     dropout_p: float = 0.1
     attention_implementation: str = "scaled_dot_product_attention"
     softcap: Optional[float] = None
-    use_alibi_slopes: bool = False
     window_size: Optional[int] = None
     qk_norm: bool = True
     cpu_offload: bool = False
