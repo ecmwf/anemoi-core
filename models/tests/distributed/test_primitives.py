@@ -27,16 +27,17 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _alltoallwrapper
-from anemoi.models.distributed.primitives import _expand_sharded_tensor
-from anemoi.models.distributed.primitives import _gather
-from anemoi.models.distributed.primitives import _reduce
-from anemoi.models.distributed.primitives import _split
+from anemoi.models.distributed.primitives import (
+    _alltoall_transpose,
+    _alltoallwrapper,
+    _expand_sharded_tensor,
+    _gather,
+    _reduce,
+    _split,
+)
 
 from ._distributed_runner import _run_distributed_test
-from .distributed_test_utils import shard_sizes_from_pattern
-from .distributed_test_utils import torch_version_less_than
+from .distributed_test_utils import shard_sizes_from_pattern, torch_version_less_than
 
 GLOBAL_DEFAULT_ATOL = 1e-12
 GLOBAL_DEFAULT_RTOL = 1e-12

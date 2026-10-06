@@ -12,18 +12,21 @@ import torch
 
 import anemoi.models.layers.mapper as mapper_module
 import anemoi.models.layers.processor as processor_module
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
-from anemoi.models.distributed.shapes import GraphShardInfo
-from anemoi.models.layers.mapper import GNNBackwardMapper
-from anemoi.models.layers.mapper import GNNForwardMapper
-from anemoi.models.layers.mapper import GraphTransformerBackwardMapper
-from anemoi.models.layers.mapper import GraphTransformerForwardMapper
-from anemoi.models.layers.mapper import TransformerBackwardMapper
-from anemoi.models.layers.mapper import TransformerForwardMapper
-from anemoi.models.layers.processor import GNNProcessor
-from anemoi.models.layers.processor import GraphTransformerProcessor
-from anemoi.models.layers.processor import PointWiseMLPProcessor
-from anemoi.models.layers.processor import TransformerProcessor
+from anemoi.models.distributed.shapes import BipartiteGraphShardInfo, GraphShardInfo
+from anemoi.models.layers.mapper import (
+    GNNBackwardMapper,
+    GNNForwardMapper,
+    GraphTransformerBackwardMapper,
+    GraphTransformerForwardMapper,
+    TransformerBackwardMapper,
+    TransformerForwardMapper,
+)
+from anemoi.models.layers.processor import (
+    GNNProcessor,
+    GraphTransformerProcessor,
+    PointWiseMLPProcessor,
+    TransformerProcessor,
+)
 from anemoi.models.layers.utils import load_layer_kernels
 
 

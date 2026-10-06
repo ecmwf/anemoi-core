@@ -9,10 +9,8 @@
 
 from __future__ import annotations
 
-from abc import ABC
-from abc import abstractmethod
+from abc import ABC, abstractmethod
 from typing import Any
-from typing import Optional
 
 import torch
 from hydra.utils import instantiate
@@ -35,8 +33,8 @@ class BaseBounding(nn.Module, ABC):
         *,
         variables: list[str],
         name_to_index: dict,
-        statistics: Optional[dict] = None,
-        name_to_index_stats: Optional[dict] = None,
+        statistics: dict | None = None,
+        name_to_index_stats: dict | None = None,
     ) -> None:
         """Initializes the bounding strategy.
         Parameters
@@ -80,7 +78,6 @@ class BaseBounding(nn.Module, ABC):
         torch.Tensor
         A tensor with the bounding applied.
         """
-        pass
 
 
 class ReluBounding(BaseBounding):
@@ -233,8 +230,8 @@ class HardtanhBounding(BaseBounding):
         name_to_index: dict,
         min_val: float,
         max_val: float,
-        statistics: Optional[dict] = None,
-        name_to_index_stats: Optional[dict] = None,
+        statistics: dict | None = None,
+        name_to_index_stats: dict | None = None,
     ) -> None:
         super().__init__(variables=variables, name_to_index=name_to_index)
         self.min_val = min_val
@@ -285,8 +282,8 @@ class FractionBounding(BaseBounding):
         min_val: float,
         max_val: float,
         total_var: str,
-        statistics: Optional[dict] = None,
-        name_to_index_stats: Optional[dict] = None,
+        statistics: dict | None = None,
+        name_to_index_stats: dict | None = None,
     ) -> None:
         super().__init__(variables=variables, name_to_index=name_to_index)
         self.min_val = min_val
@@ -392,7 +389,7 @@ def build_boundings(
         configured classes.
     """
     bounding_modules = nn.ModuleDict()
-    for dataset_name in data_indices.keys():
+    for dataset_name in data_indices:
         bounding_modules[dataset_name] = _build_dataset_boundings(
             boundings_config.get(dataset_name, []),
             data_indices=data_indices[dataset_name],

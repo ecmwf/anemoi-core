@@ -9,15 +9,13 @@
 
 import pytest
 import torch
-import torch.nn as nn
 from hydra.errors import InstantiationException
 from hypothesis import given
 from hypothesis import strategies as st
 from omegaconf import OmegaConf
+from torch import nn
 
-from anemoi.models.layers.utils import CheckpointWrapper
-from anemoi.models.layers.utils import compute_mlp_hidden_dim
-from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.layers.utils import CheckpointWrapper, compute_mlp_hidden_dim, load_layer_kernels
 
 
 class TestLayerUtils:

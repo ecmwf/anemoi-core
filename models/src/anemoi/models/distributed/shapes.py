@@ -9,7 +9,6 @@
 
 
 from dataclasses import dataclass
-from typing import Optional
 from typing import Union
 
 import torch.distributed as dist
@@ -115,7 +114,7 @@ class BipartiteGraphShardInfo:
         return self.edges is not None
 
 
-def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: Optional[ProcessGroup] = None) -> ShardSizes:
+def get_shard_sizes(tensor: Tensor, dim: int, model_comm_group: ProcessGroup | None = None) -> ShardSizes:
     """Get per-rank shard sizes for a tensor split along a specific dimension."""
     validate_dim(tensor, dim)
 

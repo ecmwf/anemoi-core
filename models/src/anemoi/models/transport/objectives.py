@@ -11,15 +11,13 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from typing import Optional
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.samplers import transport_samplers
-from anemoi.models.transport.schedules import SIGMA_SCHEDULES
-from anemoi.models.transport.schedules import TIME_SCHEDULES
+from anemoi.models.transport.schedules import SIGMA_SCHEDULES, TIME_SCHEDULES
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,7 +27,7 @@ def _get_inference_defaults_section(model: Any, name: str) -> dict:
     return dict(section) if section is not None else {}
 
 
-def _get_inference_config(model: Any, section: str, overrides: Optional[dict]) -> dict:
+def _get_inference_config(model: Any, section: str, overrides: dict | None) -> dict:
     config = _get_inference_defaults_section(model, section)
     if overrides is not None:
         config.update(overrides)
@@ -50,7 +48,7 @@ def _build_inference_schedule(
     model: Any,
     registry: dict,
     context: str,
-    schedule_params: Optional[dict],
+    schedule_params: dict | None,
     device: torch.device,
 ) -> torch.Tensor:
     schedule_config = _get_inference_config(model, "sampling_schedule", schedule_params)
@@ -63,7 +61,7 @@ def _build_inference_sampler(
     model: Any,
     registry: dict,
     context: str,
-    sampler_params: Optional[dict],
+    sampler_params: dict | None,
     dtype: torch.dtype,
 ) -> Any:
     sampler_config = _get_inference_config(model, "sampler", sampler_params)
@@ -80,7 +78,7 @@ class TransportModelObjective:
         x: dict[str, torch.Tensor],
         conditioned_target: dict[str, torch.Tensor],
         condition: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
@@ -90,10 +88,10 @@ class TransportModelObjective:
         self,
         model: Any,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         raise NotImplementedError
@@ -108,29 +106,29 @@ class EDMDiffusionModelObjective(TransportModelObjective):
         x: dict[str, torch.Tensor],
         y_noised: dict[str, torch.Tensor],
         sigma: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
         c_skip, c_out, c_in, c_noise = self._get_preconditioning(model, sigma, model.edm.sigma_data)
         pred = model._forward_transport_network(
             x,
-            {key: c_in[key] * y_noised[key] for key in y_noised.keys()},
+            {key: c_in[key] * y_noised[key] for key in y_noised},
             c_noise,
             model_comm_group=model_comm_group,
             grid_shard_sizes=grid_shard_sizes,
             **kwargs,
         )
-        return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised.keys()}
+        return {key: c_skip[key] * y_noised[key] + c_out[key] * pred[key] for key in y_noised}
 
     def sample(
         self,
         model: Any,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Sample from an EDM diffusion model."""
@@ -164,7 +162,7 @@ class EDMDiffusionModelObjective(TransportModelObjective):
             x_arg: dict[str, torch.Tensor],
             y_arg: dict[str, torch.Tensor],
             sigma_arg: dict[str, torch.Tensor],
-            comm_arg: Optional[ProcessGroup] = None,
+            comm_arg: ProcessGroup | None = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
             return self.forward(
@@ -228,7 +226,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         x: dict[str, torch.Tensor],
         interpolant_state: dict[str, torch.Tensor],
         time_level: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs: Any,
     ) -> dict[str, torch.Tensor]:
@@ -245,10 +243,10 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
         self,
         model: Any,
         x: dict[str, torch.Tensor],
-        model_comm_group: Optional[ProcessGroup] = None,
+        model_comm_group: ProcessGroup | None = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
-        schedule_params: Optional[dict] = None,
-        sampler_params: Optional[dict] = None,
+        schedule_params: dict | None = None,
+        sampler_params: dict | None = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         x_device = next(iter(x.values())).device
@@ -272,7 +270,7 @@ class StochasticInterpolantModelObjective(TransportModelObjective):
             x_arg: dict[str, torch.Tensor],
             y_arg: dict[str, torch.Tensor],
             time_arg: dict[str, torch.Tensor],
-            comm_arg: Optional[ProcessGroup] = None,
+            comm_arg: ProcessGroup | None = None,
             shard_sizes_arg: DatasetShardSizes | None = None,
         ) -> dict[str, torch.Tensor]:
             return self.forward(

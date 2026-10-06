@@ -9,17 +9,13 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 import einops
 from torch import Tensor
 from torch_geometric.data import HeteroData
 
-from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import gather_tensor
-from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.distributed.graph import all_to_all_transpose, gather_tensor, shard_tensor
+from anemoi.models.distributed.shapes import ShardSizes, get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.sparse_projector import SparseProjector
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -62,11 +58,11 @@ class CrossGridProjector(SpatialPreprocessor):
 
     def __init__(
         self,
-        graph: Optional[HeteroData] = None,
-        edges_name: Optional[tuple[str, str, str]] = None,
-        edge_weight_attribute: Optional[str] = None,
-        src_node_weight_attribute: Optional[str] = None,
-        file_path: Optional[str | Path] = None,
+        graph: HeteroData | None = None,
+        edges_name: tuple[str, str, str] | None = None,
+        edge_weight_attribute: str | None = None,
+        src_node_weight_attribute: str | None = None,
+        file_path: str | Path | None = None,
         row_normalize: bool = True,
         autocast: bool = False,
     ) -> None:

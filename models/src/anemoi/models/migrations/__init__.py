@@ -7,17 +7,19 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .migrator import MIGRATION_PATH
-from .migrator import CkptType
-from .migrator import IncompatibleCheckpointException
-from .migrator import Migration
-from .migrator import MigrationMetadata
-from .migrator import MigrationOp
-from .migrator import MigrationVersions
-from .migrator import Migrator
-from .migrator import MissingAttribute
-from .migrator import SaveCkpt
-from .migrator import SerializedMigration
+from .migrator import (
+    MIGRATION_PATH,
+    CkptType,
+    IncompatibleCheckpointException,
+    Migration,
+    MigrationMetadata,
+    MigrationOp,
+    MigrationVersions,
+    Migrator,
+    MissingAttribute,
+    SaveCkpt,
+    SerializedMigration,
+)
 from .setup_context import MigrationContext
 
 __all__ = [
@@ -25,6 +27,7 @@ __all__ = [
     "CkptType",
     "IncompatibleCheckpointException",
     "Migration",
+    "MigrationContext",
     "MigrationMetadata",
     "MigrationOp",
     "MigrationVersions",
@@ -32,5 +35,4 @@ __all__ = [
     "MissingAttribute",
     "SaveCkpt",
     "SerializedMigration",
-    "MigrationContext",
 ]

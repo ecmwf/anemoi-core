@@ -23,8 +23,7 @@ from typing import Any
 from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE
-from anemoi.graphs.projection_helpers import DEFAULT_GAUSSIAN_NORM
+from anemoi.graphs.projection_helpers import DEFAULT_EDGE_WEIGHT_ATTRIBUTE, DEFAULT_GAUSSIAN_NORM
 
 LOGGER = logging.getLogger(__name__)
 

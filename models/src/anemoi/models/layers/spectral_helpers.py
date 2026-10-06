@@ -16,8 +16,7 @@ import numpy as np
 import torch
 from torch import Tensor
 from torch.cuda.graphs import make_graphed_callables
-from torch.nn import Module
-from torch.nn import ModuleList
+from torch.nn import Module, ModuleList
 from torch.nn import functional as F
 
 from anemoi.models.layers.ring_fft import RingFFT
@@ -139,7 +138,7 @@ def legpoly(
 
     # Fill the remaining values on the upper triangle and multiply b
     for n in range(2, nmax + 1):
-        for m in range(0, n - 1):
+        for m in range(n - 1):
             vdm[m, n, :] = (
                 x * np.sqrt((2 * n - 1) / (n - m) * (2 * n + 1) / (n + m)) * vdm[m, n - 1, :]
                 - np.sqrt((n + m - 1) / (n - m) * (2 * n + 1) / (2 * n - 3) * (n - m - 1) / (n + m)) * vdm[m, n - 2, :]

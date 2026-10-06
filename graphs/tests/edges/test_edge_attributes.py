@@ -12,13 +12,15 @@ import pytest
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.edges.attributes import AttributeFromSourceNode
-from anemoi.graphs.edges.attributes import AttributeFromTargetNode
-from anemoi.graphs.edges.attributes import DirectionalHarmonics
-from anemoi.graphs.edges.attributes import EdgeDirection
-from anemoi.graphs.edges.attributes import EdgeLength
-from anemoi.graphs.edges.attributes import GaussianDistanceWeights
-from anemoi.graphs.edges.attributes import RadialBasisFeatures
+from anemoi.graphs.edges.attributes import (
+    AttributeFromSourceNode,
+    AttributeFromTargetNode,
+    DirectionalHarmonics,
+    EdgeDirection,
+    EdgeLength,
+    GaussianDistanceWeights,
+    RadialBasisFeatures,
+)
 
 TEST_EDGES = ("test_nodes", "to", "test_nodes")
 

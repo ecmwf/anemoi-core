@@ -23,9 +23,7 @@ import torch
 import torch.distributed as dist
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
-from anemoi.models.distributed.primitives import _alltoall_op
-from anemoi.models.distributed.primitives import _alltoall_transpose
-from anemoi.models.distributed.primitives import _resolve_group_name
+from anemoi.models.distributed.primitives import _alltoall_op, _alltoall_transpose, _resolve_group_name
 
 from ._distributed_runner import _run_distributed_test
 

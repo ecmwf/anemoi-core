@@ -11,8 +11,7 @@
 import numpy as np
 import torch
 
-from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid
-from anemoi.graphs.generate.icon_mesh import ICONMultiMesh
+from anemoi.graphs.generate.icon_mesh import ICONCellDataGrid, ICONMultiMesh
 from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 

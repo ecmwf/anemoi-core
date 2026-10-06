@@ -181,7 +181,7 @@ def add_edges_to_children(
     elif depth_children == 0:
         return graph
 
-    for i_level, resolution_parent in enumerate(list(sorted(refinement_levels))[0:-1]):
+    for i_level, resolution_parent in enumerate(sorted(refinement_levels)[0:-1]):
         parent_nodes = select_nodes_from_graph_at_resolution(graph, resolution_parent)
 
         for parent_idx in parent_nodes:

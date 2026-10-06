@@ -11,16 +11,18 @@ import itertools
 import logging
 import uuid
 from functools import cached_property
+from typing import Self
 
 import netCDF4
 import numpy as np
 import scipy
 from typeguard import typechecked
-from typing_extensions import Self
 
-from anemoi.graphs.generate.utils import convert_adjacency_matrix_to_list
-from anemoi.graphs.generate.utils import convert_list_to_adjacency_matrix
-from anemoi.graphs.generate.utils import selection_matrix
+from anemoi.graphs.generate.utils import (
+    convert_adjacency_matrix_to_list,
+    convert_list_to_adjacency_matrix,
+    selection_matrix,
+)
 
 LOGGER = logging.getLogger(__name__)
 

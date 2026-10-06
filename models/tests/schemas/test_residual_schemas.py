@@ -10,9 +10,11 @@
 import pytest
 from pydantic import ValidationError
 
-from anemoi.models.schemas.residual import TruncatedConnectionSchema
-from anemoi.models.schemas.residual import TruncationConfigDiskSchema
-from anemoi.models.schemas.residual import TruncationConfigOnTheFlySchema
+from anemoi.models.schemas.residual import (
+    TruncatedConnectionSchema,
+    TruncationConfigDiskSchema,
+    TruncationConfigOnTheFlySchema,
+)
 
 
 def test_truncation_config_disk_valid() -> None:
@@ -36,22 +38,16 @@ def test_truncation_config_on_the_fly_requires_grid_or_node_builder() -> None:
 
 def test_truncated_connection_on_the_fly_valid() -> None:
     TruncatedConnectionSchema(
-        **{
-            "_target_": "anemoi.models.layers.residual.TruncatedConnection",
-            "truncation_config": {"grid": "o32", "num_nearest_neighbours": 3, "sigma": 1.0},
-        }
+        _target_="anemoi.models.layers.residual.TruncatedConnection", truncation_config={"grid": "o32", "num_nearest_neighbours": 3, "sigma": 1.0}
     )
 
 
 def test_truncated_connection_disk_valid() -> None:
     TruncatedConnectionSchema(
-        **{
-            "_target_": "anemoi.models.layers.residual.TruncatedConnection",
-            "truncation_config": {
+        _target_="anemoi.models.layers.residual.TruncatedConnection", truncation_config={
                 "truncation_up_file_path": "up.npz",
                 "truncation_down_file_path": "down.npz",
-            },
-        }
+            }
     )
 
 
@@ -59,12 +55,9 @@ def test_truncated_connection_mixed_mode_rejected() -> None:
     """grid (on-the-fly) and file paths (disk) must not coexist in truncation_config."""
     with pytest.raises(ValidationError):
         TruncatedConnectionSchema(
-            **{
-                "_target_": "anemoi.models.layers.residual.TruncatedConnection",
-                "truncation_config": {
+            _target_="anemoi.models.layers.residual.TruncatedConnection", truncation_config={
                     "grid": "o32",
                     "truncation_up_file_path": "up.npz",
                     "truncation_down_file_path": "down.npz",
-                },
-            }
+                }
         )

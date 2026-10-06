@@ -9,8 +9,6 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
-from typing import Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,12 +17,14 @@ import torch
 from matplotlib.colors import rgb2hex
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.plotting.prepare import compute_isolated_nodes
-from anemoi.graphs.plotting.prepare import compute_node_adjacencies
-from anemoi.graphs.plotting.prepare import coordinates_to_lat_lon
-from anemoi.graphs.plotting.prepare import edge_list
-from anemoi.graphs.plotting.prepare import edge_list_from_coordinates
-from anemoi.graphs.plotting.prepare import node_list
+from anemoi.graphs.plotting.prepare import (
+    compute_isolated_nodes,
+    compute_node_adjacencies,
+    coordinates_to_lat_lon,
+    edge_list,
+    edge_list_from_coordinates,
+    node_list,
+)
 
 annotations_style = {"text": "", "showarrow": False, "xref": "paper", "yref": "paper", "x": 0.005, "y": -0.002}
 plotly_axis_config = {"showgrid": False, "zeroline": False, "showticklabels": False}
@@ -36,10 +36,10 @@ def plot_edges_2d(
     source_coords: np.ndarray | torch.Tensor,
     target_coords: np.ndarray | torch.Tensor,
     edge_index: np.ndarray | torch.Tensor,
-    out_file: Optional[Union[str, Path]] = None,
+    out_file: str | Path | None = None,
     source_name: str = "source",
     target_name: str = "target",
-    title: Optional[str] = None,
+    title: str | None = None,
     show_nodes: bool = True,
     show: bool = True,
 ) -> go.Figure:
@@ -133,7 +133,7 @@ def plot_edges_2d(
 def plot_interactive_subgraph_2d(
     graph: HeteroData,
     edges_to_plot: tuple[str, str, str],
-    out_file: Optional[Union[str, Path]] = None,
+    out_file: str | Path | None = None,
 ) -> None:
     """Plots a bipartite graph (bi-graph).
 
@@ -219,7 +219,7 @@ def plot_interactive_subgraph_2d(
         fig.show()
 
 
-def plot_isolated_nodes_2d(graph: HeteroData, out_file: Optional[Union[str, Path]] = None) -> None:
+def plot_isolated_nodes_2d(graph: HeteroData, out_file: str | Path | None = None) -> None:
     """Plot isolated nodes.
 
     This method creates an interactive visualization of the isolated nodes in the graph.
@@ -271,7 +271,7 @@ def plot_isolated_nodes_2d(graph: HeteroData, out_file: Optional[Union[str, Path
         fig.show()
 
 
-def plot_interactive_nodes_2d(graph: HeteroData, nodes_name: str, out_file: Optional[str] = None) -> None:
+def plot_interactive_nodes_2d(graph: HeteroData, nodes_name: str, out_file: str | None = None) -> None:
     """Plot nodes.
 
     This method creates an interactive visualization of a set of nodes.

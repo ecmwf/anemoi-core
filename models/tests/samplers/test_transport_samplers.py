@@ -12,16 +12,20 @@ from collections.abc import Callable
 import pytest
 import torch
 
-from anemoi.models.samplers.transport_samplers import DPMpp2MSampler
-from anemoi.models.samplers.transport_samplers import EDMHeunSampler
-from anemoi.models.samplers.transport_samplers import VectorFieldEulerSampler
-from anemoi.models.samplers.transport_samplers import VectorFieldHeunSampler
-from anemoi.models.transport.schedules import DEFAULT_FINAL_SIGMA_EPS
-from anemoi.models.transport.schedules import CosineSigmaSchedule
-from anemoi.models.transport.schedules import ExponentialSigmaSchedule
-from anemoi.models.transport.schedules import KarrasSigmaSchedule
-from anemoi.models.transport.schedules import LinearSigmaSchedule
-from anemoi.models.transport.schedules import SigmaSchedule
+from anemoi.models.samplers.transport_samplers import (
+    DPMpp2MSampler,
+    EDMHeunSampler,
+    VectorFieldEulerSampler,
+    VectorFieldHeunSampler,
+)
+from anemoi.models.transport.schedules import (
+    DEFAULT_FINAL_SIGMA_EPS,
+    CosineSigmaSchedule,
+    ExponentialSigmaSchedule,
+    KarrasSigmaSchedule,
+    LinearSigmaSchedule,
+    SigmaSchedule,
+)
 
 DATASET_NAME = "test_dataset"
 
