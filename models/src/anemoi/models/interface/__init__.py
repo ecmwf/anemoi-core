@@ -219,6 +219,7 @@ class AnemoiModelInterface(torch.nn.Module):
             graph_data=self.graph_data,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
+            metadata=self.metadata
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 
