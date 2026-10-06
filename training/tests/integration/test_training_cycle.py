@@ -47,7 +47,8 @@ def assert_keys_exist(data: dict, schema: dict, path: str = "root", skip_keys: s
     Note that this does not ensure that changes in anemoi-core do not break anemoi-inference.
     """
     if skip_keys is None:
-        task = data.get("task")
+        task = data.get("metadata_inference", []).get("task")
+        assert task is not None, "metadata_inference.task must be populated"
         all_task_keys = set().union(*TASK_SPECIFIC_TIMESTEP_KEYS.values())
         skip_keys = all_task_keys - TASK_SPECIFIC_TIMESTEP_KEYS.get(task, set())
 
