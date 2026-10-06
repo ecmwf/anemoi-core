@@ -519,6 +519,12 @@ name and same shape — and skips the rest, instead of failing. Useful when you
 changed the architecture (added variables, resized a layer) but still want to
 reuse what you can.
 
+What transfers is whatever still fits. A change to ``num_channels`` reshapes
+every linear weight, bias and layer norm in the encoder, processor and decoder,
+so only the channel-free tensors survive: processor statistics, coordinate
+buffers and the trainable node and edge tensors. The loader logs every skipped
+parameter with its reason at WARNING and records them in the run metadata.
+
 .. code:: yaml
 
    training:
@@ -527,8 +533,9 @@ reuse what you can.
          _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
          skip_mismatched: true
 
--  ``skip_mismatched: true`` (default) — quietly skip layers whose shapes do
-   not match, and report which were transferred vs. skipped in the run metadata.
+-  ``skip_mismatched: true`` (default) — skip layers whose shapes do not
+   match, log them at WARNING, and report which were transferred vs. skipped
+   in the run metadata.
 -  ``skip_mismatched: false`` — treat a shape mismatch as an error
    (``CheckpointIncompatibleError``) instead of skipping it.
 
@@ -543,6 +550,13 @@ Resume an interrupted run so it continues exactly where it stopped. It takes
 no parameters, and it is a *marker*: selecting it tells the trainer to let
 PyTorch Lightning load the checkpoint. Leaving out the ``loading`` block
 altogether means the same thing.
+
+The model has to match the checkpoint exactly. Lightning loads the state dict
+strictly, so a model with a different architecture (an extra decoder, a
+resized layer) fails with ``Error(s) in loading state_dict`` naming the missing
+or unexpected keys. To continue from such a checkpoint use ``weights_only``
+with ``skip_mismatched: true`` or ``transfer_learning`` instead; both start a
+fresh optimiser.
 
 .. code:: yaml
 

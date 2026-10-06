@@ -1,5 +1,6 @@
 # Loading strategy — transfers matching parameters from a source checkpoint,
-# skipping any with shape mismatches. Does NOT change architecture. To freeze
+# skipping any with shape mismatches (each skip is logged at WARNING with its
+# reason and recorded in the run metadata). Does NOT change architecture. To freeze
 # transferred params or add adapters, chain a modifier stage after this loader.
 _target_: anemoi.training.checkpoint.loading.strategies.TransferLearningLoader
 skip_mismatched: true

@@ -220,7 +220,9 @@ class TransferLearningLoader(LoadingStrategy):
     Filters the source state dict to only include keys compatible with the
     target model (matching key names and tensor shapes), then loads the
     filtered weights. Keys that are missing in the target or have shape
-    mismatches are skipped rather than raising an error.
+    mismatches are skipped rather than raising an error; every skip is logged
+    at WARNING with its reason, because the counts alone hide that a resized
+    model may have transferred almost nothing.
 
     The filter is non-mutating: it builds a new dict and never modifies the
     original ``checkpoint_data["state_dict"]``.
@@ -283,8 +285,38 @@ class TransferLearningLoader(LoadingStrategy):
             len(filtered),
             len(skipped),
         )
+        if skipped:
+            self._warn_about_skipped(len(filtered), skipped)
 
         return context
+
+    @staticmethod
+    def _warn_about_skipped(transferred: int, skipped: dict[str, str]) -> None:
+        """Name every checkpoint tensor that did not transfer, and why.
+
+        A change to the model width reshapes nearly every tensor, so a run can
+        "load" a checkpoint and still train from random initialisation almost
+        everywhere while the counts read as a success. Shape mismatches leave the
+        matching model parameters at their initial values; keys the model does
+        not have are simply dropped.
+
+        Parameters
+        ----------
+        transferred : int
+            Number of parameters that were loaded.
+        skipped : dict[str, str]
+            Skipped checkpoint keys mapped to the reason from ``filter_state_dict``.
+        """
+        shape_mismatched = sum("Shape mismatch" in reason for reason in skipped.values())
+        headline = (
+            f"Transfer learning: {len(skipped)} checkpoint parameters did not transfer "
+            f"({shape_mismatched} shape-mismatched, left at random initialisation in the model; "
+            f"{len(skipped) - shape_mismatched} not present in the model)"
+        )
+        if len(skipped) > transferred:
+            headline += f", more than the {transferred} that did"
+        listing = "\n  ".join(f"{key}: {reason}" for key, reason in sorted(skipped.items()))
+        LOGGER.warning("%s:\n  %s", headline, listing)
 
 
 class WarmStartLoader(LoadingStrategy):
@@ -297,6 +329,11 @@ class WarmStartLoader(LoadingStrategy):
     is to make the checkpoint reachable as a local file (the source's ``resolve``
     step) and to run the modifier stages; the builder emits no loading stage, so
     this class's ``process`` never runs in a training run.
+
+    The model has to match the checkpoint exactly. Lightning's load is strict,
+    so a changed architecture (an extra decoder, a resized layer) fails naming
+    the missing or unexpected keys. ``WeightsOnlyLoader(skip_mismatched=True)``
+    and ``TransferLearningLoader`` are the strategies for a changed model.
 
     The class exists so ``training/checkpoint/loading=warm_start`` composes like
     every other strategy; :attr:`restores_training_state` is what the trainer and
