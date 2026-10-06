@@ -247,7 +247,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
     @model_validator(mode="after")
     def check_frequency_null_for_trajectory_datasets(self) -> Self:
         """Assert data.frequency is null when any trajectory (forecast) dataset is configured."""
-        from anemoi.training.schemas.dataloader import TrajectoryDatasetSchema
+        from anemoi.training.schemas.dataloader import TrajectoryDataReaderSchema
 
         all_splits = [
             self.dataloader.training,
@@ -255,7 +255,7 @@ class BaseSchema(SchemaCommonMixin, BaseModel):
             self.dataloader.test,
         ]
         uses_trajectory = any(
-            isinstance(dataset, TrajectoryDatasetSchema) and dataset.trajectory is not None
+            isinstance(dataset, TrajectoryDataReaderSchema) and dataset.trajectory is not None
             for split in all_splits
             for dataset in split.values()
         )

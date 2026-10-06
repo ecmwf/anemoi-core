@@ -29,7 +29,6 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.utils.time_indices import TimeIndices
-from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -611,58 +610,133 @@ class ObservationDataReader(BaseAnemoiReader):
         return tree
 
 
-class TrajectoryDataset(GriddedDataReader):
-    """Trajectory dataset."""
+class TrajectoryDataReader(BaseAnemoiReader):
+    """Trajectory dataset with an explicit lead-step axis.
+
+    Wraps a 5-D ``trajectories``-layout dataset opened through
+    :func:`anemoi.datasets.open_dataset` (on-disk shape
+    ``(base_dates, variables, ensembles, steps, cells)``).  Each base date
+    (forecast initialisation) is exposed as an independent sequence and the
+    forecast step is the within-sequence position, so a training sample is
+    always contained within a single forecast and never crosses initialisation
+    boundaries.
+
+    Step subsetting (``steps``, ``step_start``, ``step_end``,
+    ``step_frequency``) and base-date subsetting (``start``/``end`` on the
+    valid-time envelope, or ``base_start``/``base_end``) are handled by
+    ``open_dataset`` via the dataset configuration.
+    """
 
     def __init__(
         self,
-        trajectory_start: datetime.datetime,
-        trajectory_length: int,
         dataset: str | dict | None = None,
         dataset_config: str | dict | None = None,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
-    ):
-        super().__init__(dataset=dataset, dataset_config=dataset_config, start=start, end=end)
-        self.trajectory_start = trajectory_start
-        self.trajectory_length = trajectory_length
+        sampling: dict | None = None,
+    ) -> None:
+        source = dataset_config if dataset_config is not None else dataset
+        if source is None:
+            msg = "Either dataset or dataset_config must be provided."
+            raise ValueError(msg)
+
+        # Trajectory datasets derive their step frequency from the dataset itself.
+        # Passing data.frequency would be misleading and is not supported.
+        source_dict = _as_dict(source) if not isinstance(source, str) else {}
+        if isinstance(source_dict, dict) and source_dict.get("frequency") is not None:
+            msg = (
+                "TrajectoryDataReader does not accept a 'frequency' in dataset_config. "
+                "The step frequency is read directly from the dataset. "
+                "Set data.frequency: null in your config."
+            )
+            raise AssertionError(msg)
+
+        # Trajectory datasets use base_start/base_end to filter by initialisation date;
+        # passing start/end would trigger access to .dates which doesn't exist on them.
+        open_kwargs: dict = {}
+        if start is not None:
+            open_kwargs["base_start"] = start
+        if end is not None:
+            open_kwargs["base_end"] = end
+        self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
+        self.default_sampling = sampling if sampling is not None else {"stride": None}
 
     @property
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-        return True
+    def num_sequences(self) -> int:
+        """Number of forecast initialisations (base dates)."""
+        return self.data.shape[0]
+
+    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
+        """Return the number of forecast steps per initialisation."""
+        return self.data.shape[-2]
 
     @property
-    def trajectory_ids(self) -> list[str]:
-        trajectory_length_seconds = self.trajectory_length * frequency_to_seconds(self.frequency)
-        return (self.dates - np.datetime64(self.trajectory_start, "s")) // np.timedelta64(
-            trajectory_length_seconds,
-            "s",
+    def missing_sequences(self) -> set[int]:
+        """Return the base-date indices that are missing."""
+        return set(self.data.missing)
+
+    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
+        """Forecast datasets do not track per-step missing values."""
+        return set()
+
+    @property
+    def frequency(self) -> datetime.timedelta:
+        """Return the step frequency (spacing between consecutive forecast steps)."""
+        freq = self.data.step_frequency
+        if freq is not None:
+            return freq
+        msg = (
+            f"Cannot determine step frequency: data.step_frequency is None for dataset {self.data}. "
+            "Ensure that the dataset configuration includes a valid step_frequency (e.g. '6H')."
         )
+        raise ValueError(msg)
+
+    def get_sample(
+        self,
+        sequence: int,
+        positions: TimeIndices,
+        grid_shard_indices: np.ndarray | slice | None = None,
+    ) -> torch.Tensor:
+        """Load forecast steps ``positions`` of initialisation ``sequence``."""
+        if isinstance(positions, slice):
+            positions = list(range(*positions.indices(self.sequence_length(sequence))))
+        else:
+            positions = np.asarray(positions).tolist()
+
+        # data[sequence] -> (variables, ensembles, steps, cells)
+        x = self.data[sequence]
+        x = x[:, :, positions, :]
+        if grid_shard_indices is not None:
+            x = x[..., grid_shard_indices]
+
+        x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
+        return torch.from_numpy(x)
 
     def tree(self, prefix: str = "") -> Tree:
-        tree = super().tree(prefix)
-        tree.add(f"Trajectory start: {self.trajectory_start}")
-        tree.add(f"Trajectory length: {self.trajectory_length} steps")
+        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
+        tree.add(f"Dataset: {self.data}")
+        tree.add(f"Step frequency: {self.frequency}")
+        tree.add(f"Resolution: {self.resolution}")
+        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree.add(f"Num initialisations: {self.num_sequences}")
+        tree.add(f"Steps per initialisation: {self.sequence_length()}")
+        tree.add(f"Sampling: {self.default_sampling}")
         return tree
 
 
 def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
+    trajectory_config = _as_dict(dataset_config.pop("trajectory", None))
 
-    trajectory_config = dataset_config.pop("trajectory", {})
-    if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
-        LOGGER.info("Creating a TrajectoryDataset...")
-        return TrajectoryDataset(
-            **dataset_config,
-            trajectory_start=trajectory_config["start"],
-            trajectory_length=trajectory_config["length"],
-        )
+    if trajectory_config is not None:
+        sampling = _as_dict(trajectory_config.get("sampling")) if isinstance(trajectory_config, dict) else None
+        LOGGER.info("Creating TrajectoryDataReader...")
+        return TrajectoryDataReader(**dataset_config, sampling=sampling)
 
     if "window" in dataset_config["dataset_config"] and "frequency" in dataset_config["dataset_config"]:
         LOGGER.info("Creating ObservationDataReader...")
         return ObservationDataReader(**dataset_config)
 
-    LOGGER.info("Creating a GriddedDataReader...")
-    return GriddedDataReader(**dataset_config)
+    LOGGER.info("Creating NativeGridDataset...")
+    return NativeGridDataset(**dataset_config)

@@ -21,7 +21,7 @@ import pytest
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import TrajectoryDataset
+from anemoi.training.data.data_reader import TrajectoryDataReader
 from anemoi.training.data.usable_indices import compute_valid_data_indices
 
 FREQUENCY = datetime.timedelta(hours=6)
@@ -58,9 +58,9 @@ def _make_trajectory_reader(
     trajectory_length: int,
     trajectory_start: np.datetime64 = START,
     missing: set[int] | None = None,
-) -> TrajectoryDataset:
-    """Return a TrajectoryDataset over consecutive forecast runs of ``trajectory_length`` steps."""
-    reader = TrajectoryDataset.__new__(TrajectoryDataset)
+) -> TrajectoryDataReader:
+    """Return a TrajectoryDataReader over consecutive forecast runs of ``trajectory_length`` steps."""
+    reader = TrajectoryDataReader.__new__(TrajectoryDataReader)
     reader.data = _FakeData(num_trajectories * trajectory_length, missing or set())
     reader.trajectory_start = trajectory_start.astype(datetime.datetime)
     reader.trajectory_length = trajectory_length
@@ -118,7 +118,7 @@ class TestGriddedValidIndices:
 
 
 # ---------------------------------------------------------------------------
-# Tests: TrajectoryDataset (forecast runs)
+# Tests: TrajectoryDataReader (forecast runs)
 # ---------------------------------------------------------------------------
 
 

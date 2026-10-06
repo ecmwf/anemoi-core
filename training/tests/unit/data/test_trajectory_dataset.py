@@ -7,9 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Tests for TrajectoryDataset.
+"""Tests for TrajectoryDataReader.
 
-A TrajectoryDataset is a gridded reader over a date-indexed dataset whose dates form
+A TrajectoryDataReader is a gridded reader over a date-indexed dataset whose dates form
 consecutive forecast runs ("trajectories") of ``trajectory_length`` steps, counted from
 ``trajectory_start``. ``trajectory_ids`` labels each date with its run, so that sample
 windows never cross runs (see ``get_usable_indices`` and ``test_compute_valid_data_indices.py``).
@@ -25,7 +25,7 @@ from omegaconf import OmegaConf
 
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import TrajectoryDataset
+from anemoi.training.data.data_reader import TrajectoryDataReader
 from anemoi.training.data.data_reader import create_dataset
 
 # Naive, like the dataset dates (numpy datetime64).
@@ -75,11 +75,11 @@ def _make_trajectory_dataset(
     trajectory_length: int = 6,
     trajectory_start: datetime.datetime = START,
     **fake_kwargs,
-) -> TrajectoryDataset:
-    """Create a TrajectoryDataset backed by a fake dataset (no real file I/O)."""
+) -> TrajectoryDataReader:
+    """Create a TrajectoryDataReader backed by a fake dataset (no real file I/O)."""
     fake = FakeGriddedDataset(**fake_kwargs)
     with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake):
-        return TrajectoryDataset(
+        return TrajectoryDataReader(
             trajectory_start=trajectory_start,
             trajectory_length=trajectory_length,
             dataset="fake.zarr",
@@ -91,8 +91,8 @@ def _make_trajectory_dataset(
 # ---------------------------------------------------------------------------
 
 
-class TestTrajectoryDatasetProperties:
-    """Test TrajectoryDataset properties."""
+class TestTrajectoryDataReaderProperties:
+    """Test TrajectoryDataReader properties."""
 
     def test_is_a_gridded_reader_with_trajectories(self) -> None:
         ds = _make_trajectory_dataset()
@@ -166,7 +166,7 @@ class TestTrajectoryIds:
 # ---------------------------------------------------------------------------
 
 
-class TestTrajectoryDatasetGetSample:
+class TestTrajectoryDataReaderGetSample:
     """Test get_sample(time_indices)."""
 
     @pytest.mark.parametrize(
@@ -225,7 +225,7 @@ class TestCreateDatasetWithTrajectory:
     """Test that create_dataset routes on the ``trajectory`` key."""
 
     def test_create_dataset_selects_trajectory_reader(self) -> None:
-        """A ``trajectory`` section with ``start`` and ``length`` gives a TrajectoryDataset."""
+        """A ``trajectory`` section with ``start`` and ``length`` gives a TrajectoryDataReader."""
         config = OmegaConf.create(
             {
                 "dataset_config": {"dataset": "fake.zarr"},
@@ -235,7 +235,7 @@ class TestCreateDatasetWithTrajectory:
         with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeGriddedDataset()):
             ds = create_dataset(config)
 
-        assert isinstance(ds, TrajectoryDataset)
+        assert isinstance(ds, TrajectoryDataReader)
         assert ds.trajectory_length == 6
         np.testing.assert_array_equal(ds.trajectory_ids, np.repeat([0, 1, 2, 3], 6))
 

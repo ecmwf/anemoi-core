@@ -84,7 +84,7 @@ class MultiDataset(IterableDataset):
             LOGGER.info("Using fake dataloading")
 
         # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
+        # with multi-sequence (TrajectoryDataReader, init x step axes).  The anchor
         # intersection would silently keep only sequence-0 samples and produce
         # semantically meaningless alignment between the two encoders.
         single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]

@@ -28,7 +28,7 @@ at specified time indices.
 Trajectory Dataset
 ------------------
 
-The ``TrajectoryDataset`` class extends ``NativeGridDataset`` to support
+The ``TrajectoryDataReader`` class extends ``NativeGridDataset`` to support
 trajectory-based sampling, where data is organized into temporal
 trajectories. This is useful for tracking atmospheric features over time
 or for specialized training strategies that require trajectory awareness.
@@ -47,7 +47,7 @@ Multi-Dataset
 
 The ``MultiDataset`` class provides a higher-level wrapper that can
 synchronize and combine multiple datasets (either ``NativeGridDataset``
-or ``TrajectoryDataset`` instances). This is the primary interface used
+or ``TrajectoryDataReader`` instances). This is the primary interface used
 for training and supports:
 
 * Synchronizing samples across multiple datasets with different grids
