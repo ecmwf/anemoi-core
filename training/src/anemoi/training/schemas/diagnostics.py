@@ -224,11 +224,13 @@ class QueryDiagnosticsPlotSchema(PydanticBaseModel):
     every_n_epochs: PositiveInt = 1
     max_cases: PositiveInt = 2
     fixed_validation_cases: list[NonNegativeInt] = Field(default_factory=lambda: [0])
+    rotating_validation_case: bool = False
     changing_training_case: bool = False
     domain_plots: bool = True
     graph_plots: bool = True
     static_geometry_once: bool = False
     input_plots: bool = True
+    input_plots_once: bool = False
     regional_input_plots: bool = True
     global_input_plots: bool = True
     embedding_plots: bool = True

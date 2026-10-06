@@ -47,6 +47,11 @@ class QueryBatch:
     target: torch.Tensor | None = None
     target_mask: torch.Tensor | None = None
     loss_weight: torch.Tensor | None = None
+    residual_baseline_source: str | None = None
+    residual_baseline_input_column: int | torch.Tensor | None = None
+    residual_baseline_indices: torch.Tensor | None = None
+    residual_baseline_multiplier: torch.Tensor | None = None
+    residual_baseline_offset: torch.Tensor | None = None
     # Human-readable, CPU-only facts recorded by the sampler. The model never
     # consumes this mapping; diagnostics use it instead of reverse engineering
     # field order, valid times, units, and normalization from tensors.

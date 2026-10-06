@@ -24,6 +24,7 @@ class QueryForecasting:
         reference_provenance: str,
         output_frequency: str | None = None,
         target_variables: list[str] | None = None,
+        excluded_target_variables_by_provenance: dict[str, list[str]] | None = None,
         input_variables: list[str] | None = None,
         source_dropout: float = 0.0,
         field_dropout: float = 0.0,
@@ -31,11 +32,18 @@ class QueryForecasting:
         max_input_times: int = 4,
         input_context_margin_degrees: float = 0.0,
         global_context_sources: list[str] | None = None,
+        target_static_context: bool = False,
         target_regions: list[list[float]] | None = None,
         target_regions_by_provenance: dict[str, list[list[float]]] | None = None,
         variable_weights: dict[str, float] | None = None,
         provenance_weights: dict[str, float] | None = None,
+        sampling_strategy: str = "variable_provenance_level",
+        residual_baseline_source: str | None = None,
+        query_all_fields_per_provenance: bool = False,
+        full_valid_time_pass: bool = False,
         loss_weights: dict[str, float] | None = None,
+        precipitation_lsd_weight: float = 0.0,
+        precipitation_unit_scale_to_mm: dict[str, float] | None = None,
         spatial_weighting: str = "uniform",
         aliases: dict[str, str] | None = None,
         availability_policy: str = "retrospective",
@@ -46,8 +54,8 @@ class QueryForecasting:
         **_kwargs: Any,
     ) -> None:
         self.lead_times = [frequency_to_timedelta(value) for value in lead_times]
-        if any(value <= timedelta(0) for value in self.lead_times):
-            msg = "Query lead_times must all be positive."
+        if any(value < timedelta(0) for value in self.lead_times):
+            msg = "Query lead_times must all be nonnegative."
             raise ValueError(msg)
         self.output_frequency = None if output_frequency is None else frequency_to_timedelta(output_frequency)
         if self.output_frequency is not None and self.output_frequency <= timedelta(0):
@@ -57,6 +65,7 @@ class QueryForecasting:
         self.samples_per_epoch = samples_per_epoch
         self.reference_provenance = reference_provenance
         self.target_variables = target_variables
+        self.excluded_target_variables_by_provenance = excluded_target_variables_by_provenance or {}
         self.input_variables = input_variables
         self.source_dropout = source_dropout
         self.field_dropout = field_dropout
@@ -64,11 +73,31 @@ class QueryForecasting:
         self.max_input_times = max_input_times
         self.input_context_margin_degrees = input_context_margin_degrees
         self.global_context_sources = global_context_sources or []
+        self.target_static_context = target_static_context
         self.target_regions = target_regions or []
         self.target_regions_by_provenance = target_regions_by_provenance or {}
         self.variable_weights = variable_weights or {}
         self.provenance_weights = provenance_weights or {}
+        if sampling_strategy not in {
+            "variable_provenance_level",
+            "provenance_variable_level",
+            "provenance_field_cycle",
+        }:
+            msg = (
+                "Query sampling_strategy must be 'variable_provenance_level', "
+                "'provenance_variable_level', or 'provenance_field_cycle'."
+            )
+            raise ValueError(msg)
+        self.sampling_strategy = sampling_strategy
+        if residual_baseline_source is not None and residual_baseline_source not in self.global_context_sources:
+            msg = "Query residual_baseline_source must be one of global_context_sources."
+            raise ValueError(msg)
+        self.residual_baseline_source = residual_baseline_source
+        self.query_all_fields_per_provenance = query_all_fields_per_provenance
+        self.full_valid_time_pass = full_valid_time_pass
         self.loss_weights = loss_weights or {}
+        self.precipitation_lsd_weight = precipitation_lsd_weight
+        self.precipitation_unit_scale_to_mm = precipitation_unit_scale_to_mm or {}
         self.spatial_weighting = spatial_weighting
         self.aliases = aliases or {}
         self.availability_policy = availability_policy
@@ -101,6 +130,12 @@ class QueryForecasting:
             ),
             "input_history_seconds": int(self.input_history.total_seconds()),
             "reference_provenance": self.reference_provenance,
+            "sampling_strategy": self.sampling_strategy,
+            "residual_baseline_source": self.residual_baseline_source,
+            "query_all_fields_per_provenance": self.query_all_fields_per_provenance,
+            "full_valid_time_pass": self.full_valid_time_pass,
+            "precipitation_unit_scale_to_mm": dict(self.precipitation_unit_scale_to_mm),
+            "target_static_context": self.target_static_context,
             "availability_policy": self.availability_policy,
             "availability_lag_seconds": {
                 name: int(value.total_seconds()) for name, value in self.availability_lag.items()

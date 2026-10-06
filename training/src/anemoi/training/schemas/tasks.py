@@ -99,6 +99,8 @@ class QueryForecastingSchema(BaseModel):
     samples_per_epoch: PositiveInt
     reference_provenance: str
     target_variables: list[str] | None = None
+    excluded_target_variables_by_provenance: dict[str, list[str]] = Field(default_factory=dict)
+    "Variables excluded as targets for selected provenances while retaining the domain."
     input_variables: list[str] | None = None
     source_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
     field_dropout: float = Field(default=0.0, ge=0.0, lt=1.0)
@@ -106,13 +108,30 @@ class QueryForecastingSchema(BaseModel):
     max_input_times: PositiveInt = 4
     input_context_margin_degrees: float = Field(default=0.0, ge=0.0)
     global_context_sources: list[str] = Field(default_factory=list)
+    target_static_context: bool = False
     target_regions: list[list[float]] = Field(default_factory=list)
     target_regions_by_provenance: dict[str, list[list[float]]] = Field(
         default_factory=dict,
     )
     variable_weights: dict[str, float] = Field(default_factory=dict)
     provenance_weights: dict[str, float] = Field(default_factory=dict)
+    sampling_strategy: Literal[
+        "variable_provenance_level",
+        "provenance_variable_level",
+        "provenance_field_cycle",
+    ] = "variable_provenance_level"
+    "Order used to balance provenance, variable and physical-level target draws."
+    residual_baseline_source: str | None = None
+    "Global source used as an exact-semantic nearest-grid residual baseline at zero lead."
+    query_all_fields_per_provenance: bool = False
+    "Query every enabled field for one sampled target provenance in a shared domain pass."
+    full_valid_time_pass: bool = False
+    "Use every eligible provenance/valid-time bundle exactly once per shuffled epoch."
     loss_weights: dict[str, float] = Field(default_factory=dict)
+    precipitation_lsd_weight: float = Field(default=0.0, ge=0.0)
+    "Weight of the precipitation-only log-spectral-distance term."
+    precipitation_unit_scale_to_mm: dict[str, float] = Field(default_factory=dict)
+    "Per-provenance conversion from the archive's precipitation unit to millimetres."
     spatial_weighting: Literal["uniform", "cosine_latitude"] = "uniform"
     aliases: dict[str, str] = Field(default_factory=dict)
     availability_policy: Literal["retrospective"] = "retrospective"

@@ -116,6 +116,10 @@ class QueryModelConfig(BaseModel):
     decoder_chunk_size: PositiveInt = 512
     ensemble_noise_std: NonNegativeFloat = 0.0
     "Standard deviation of independent latent noise for ensemble query forecasts."
+    zero_initialize_decoder: bool = False
+    "Initialize the scalar decoder output at zero, useful for residual prediction."
+    bundle_outputs_by_provenance: bool = False
+    "Process one context graph once and decode a metadata-defined field bundle."
     stretched_grid: QueryStretchedGridConfig = Field(default_factory=QueryStretchedGridConfig)
 
 

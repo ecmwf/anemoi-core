@@ -15,6 +15,13 @@ target_variables: null
 input_variables: null
 variable_weights: {}
 provenance_weights: {}
+# Use provenance_variable_level when every regional product should receive
+# equal top-level representation before variables and physical levels are drawn.
+sampling_strategy: variable_provenance_level
+# Zero-lead targets with an exactly matching source field can learn only the
+# regional correction. Targets without an exact match remain direct forecasts.
+residual_baseline_source: null
+query_all_fields_per_provenance: false
 loss_weights: {}
 spatial_weighting: uniform  # Or cosine_latitude for regular latitude/longitude grids.
 

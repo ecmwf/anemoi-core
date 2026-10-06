@@ -112,6 +112,7 @@ class QueryDataModule(pl.LightningDataModule):
             weights,
             self.task.samples_per_epoch,
             self.task.seed,
+            full_valid_time_pass=self.task.full_valid_time_pass,
         )
 
     @cached_property
@@ -142,6 +143,7 @@ class QueryDataModule(pl.LightningDataModule):
             weights,
             self.task.validation_samples,
             self.task.validation_seed,
+            full_valid_time_pass=False,
         )
 
     @property

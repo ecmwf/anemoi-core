@@ -11,6 +11,7 @@ from typing import Any
 
 import numpy as np
 import torch
+from scipy.spatial import cKDTree
 from torch.utils.data import Dataset
 
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -35,6 +36,7 @@ class QueryDataset(Dataset):
         sampling_weights: dict[str, float],
         length: int,
         seed: int,
+        full_valid_time_pass: bool = False,
     ) -> None:
         self.readers = readers
         self.catalogue = catalogue
@@ -42,13 +44,25 @@ class QueryDataset(Dataset):
         self.sampling_weights = sampling_weights
         self.length = length
         self.seed = seed
+        self.full_valid_time_pass = full_valid_time_pass
         self.epoch = 0
         self.model_group_id = 0
         self.model_group_rank = 0
         self.sample_group_id = 0
+        self.sample_group_count = 1
         self.shard_sizes: dict[str, list[int]] | None = None
+        self._residual_baseline_tree = None
+        self._residual_baseline_index_cache: dict[tuple, np.ndarray] = {}
+        self._full_permutation_epoch: int | None = None
+        self._full_permutation: np.ndarray | None = None
 
         requested_fields = catalogue.restrict_targets(task.target_variables)
+        requested_fields = [
+            field
+            for field in requested_fields
+            if field.variable
+            not in task.excluded_target_variables_by_provenance.get(field.provenance, ())
+        ]
         if not requested_fields:
             msg = "No query targets remain after intersecting target_variables with catalogue availability."
             raise ValueError(msg)
@@ -63,6 +77,11 @@ class QueryDataset(Dataset):
             ]
             for name in readers
         }
+        if task.residual_baseline_source is not None:
+            source_reader = readers[task.residual_baseline_source]
+            self._residual_baseline_tree = cKDTree(
+                self._spherical_xyz(source_reader.data.latitudes, source_reader.data.longitudes),
+            )
         unavailable_context = [name for name in task.global_context_sources if not self.fields_by_dataset.get(name)]
         if unavailable_context:
             msg = f"Required global context sources have no selectable input fields: {unavailable_context}."
@@ -141,7 +160,7 @@ class QueryDataset(Dataset):
             )
         # A provenance weight of zero is the supported way to retain a source
         # as input context without supervising it as a target. Remove those
-        # options before the variable-first draw, otherwise a variable found
+        # options before the hierarchical draw, otherwise a variable found
         # only in a context source creates a zero-sum provenance distribution.
         self.sampling_options = [
             option
@@ -158,8 +177,156 @@ class QueryDataset(Dataset):
                 msg,
             )
 
+        self.full_samples: list[
+            tuple[CatalogueField, timedelta, tuple[float, float, float, float] | None, int]
+        ] = []
+        if self.full_valid_time_pass:
+            if not self.task.query_all_fields_per_provenance:
+                msg = "full_valid_time_pass requires query_all_fields_per_provenance=true."
+                raise ValueError(msg)
+            # A bundled example contains every configured field for one
+            # provenance.  Therefore the natural complete epoch is every
+            # eligible (provenance, lead, region, valid time) exactly once,
+            # rather than every scalar field/date combination.
+            representatives: dict[
+                tuple[str, str, int, tuple[float, float, float, float] | None],
+                tuple[CatalogueField, timedelta, tuple[float, float, float, float] | None],
+            ] = {}
+            for option in self.sampling_options:
+                field, lead_time, bbox = option
+                key = (
+                    field.dataset,
+                    field.provenance,
+                    int(lead_time.total_seconds() * 1e9),
+                    bbox,
+                )
+                representatives.setdefault(key, option)
+            for key in sorted(representatives, key=str):
+                field, lead_time, bbox = representatives[key]
+                lead_ns = int(lead_time.total_seconds() * 1e9)
+                self.full_samples.extend(
+                    (field, lead_time, bbox, int(target_position))
+                    for target_position in self.target_positions[field.dataset, lead_ns]
+                )
+            if not self.full_samples:
+                raise ValueError("full_valid_time_pass found no eligible bundled examples.")
+
     def __len__(self) -> int:
+        if self.full_valid_time_pass:
+            # Each model group consumes a different item at the same optimizer
+            # step.  Padding by at most group_count-1 examples keeps collective
+            # execution synchronized while covering the complete epoch.
+            return (len(self.full_samples) + self.sample_group_count - 1) // self.sample_group_count
         return self.length
+
+    @property
+    def full_sample_count(self) -> int | None:
+        """Number of unique bundled examples in a complete epoch, if enabled."""
+        return len(self.full_samples) if self.full_valid_time_pass else None
+
+    def _full_sample(
+        self,
+        index: int,
+    ) -> tuple[CatalogueField, timedelta, tuple[float, float, float, float] | None, int, int]:
+        if self._full_permutation_epoch != self.epoch or self._full_permutation is None:
+            self._full_permutation = np.random.default_rng(self.seed + self.epoch).permutation(
+                len(self.full_samples),
+            )
+            self._full_permutation_epoch = self.epoch
+        global_index = index * self.sample_group_count + self.sample_group_id
+        sample_index = int(self._full_permutation[global_index % len(self.full_samples)])
+        field, lead_time, bbox, target_position = self.full_samples[sample_index]
+        return field, lead_time, bbox, target_position, global_index
+
+    @staticmethod
+    def _spherical_xyz(latitudes: Any, longitudes: Any) -> np.ndarray:
+        latitude = np.deg2rad(np.asarray(latitudes, dtype=np.float64))
+        longitude = np.deg2rad(np.asarray(longitudes, dtype=np.float64))
+        return np.column_stack(
+            (
+                np.cos(latitude) * np.cos(longitude),
+                np.cos(latitude) * np.sin(longitude),
+                np.sin(latitude),
+            ),
+        )
+
+    @staticmethod
+    def _same_physical_field(first: Any, second: Any) -> bool:
+        """Match physical semantics while deliberately ignoring provenance and grid."""
+
+        def value(field: Any, name: str) -> Any:
+            return field.get(name) if isinstance(field, dict) else getattr(field, name)
+
+        names = (
+            "variable",
+            "level_type",
+            "pressure_pa",
+            "model_level",
+            "height_m",
+            "aggregation_type",
+            "temporal_aggregation_window_hours",
+        )
+        return all(value(first, name) == value(second, name) for name in names)
+
+    def _nearest_baseline_indices(
+        self,
+        dataset: str,
+        target_indices: np.ndarray,
+        shard_start: int,
+        shard_end: int,
+        bbox: tuple[float, float, float, float] | None,
+    ) -> np.ndarray:
+        if self._residual_baseline_tree is None:
+            raise RuntimeError("Residual baseline tree was not initialized.")
+        key = (dataset, shard_start, shard_end, bbox)
+        cached = self._residual_baseline_index_cache.get(key)
+        if cached is None:
+            reader = self.readers[dataset]
+            coordinates = self._spherical_xyz(
+                np.asarray(reader.data.latitudes)[target_indices],
+                np.asarray(reader.data.longitudes)[target_indices],
+            )
+            _, cached = self._residual_baseline_tree.query(coordinates, workers=-1)
+            cached = np.asarray(cached, dtype=np.int64)
+            self._residual_baseline_index_cache[key] = cached
+        return cached
+
+    def _forecast_query(
+        self,
+        field: CatalogueField,
+        lead_time: timedelta,
+        bbox: tuple[float, float, float, float] | None,
+    ) -> ForecastQuery:
+        reader = self.readers[field.dataset]
+        return ForecastQuery(
+            variable=field.variable,
+            lead_time=lead_time,
+            provenance=field.provenance,
+            unit=field.units or "unknown",
+            output_frequency=self.task.output_frequency or reader.frequency,
+            model_type={"surface": "sfc", "pressure": "pl", "model": "ml"}.get(
+                field.level_type,
+                field.level_type,
+            ),
+            level=(
+                field.pressure_pa / 100
+                if field.pressure_pa is not None
+                else field.model_level
+                if field.model_level is not None
+                else field.height_m
+            ),
+            level_unit=("hPa" if field.pressure_pa is not None else "m" if field.height_m is not None else None),
+            aggregation_type=field.aggregation_type,
+            temporal_aggregation_window=(
+                None
+                if field.temporal_aggregation_window_hours is None
+                else tuple(timedelta(hours=value) for value in field.temporal_aggregation_window_hours)
+            ),
+            bbox=bbox,
+            grid=field.dataset,
+            grid_spacing_km=field.resolution_km,
+            spatial_support_km=field.spatial_support_km,
+        )
 
     def set_epoch(self, epoch: int) -> None:
         self.epoch = epoch
@@ -209,10 +376,73 @@ class QueryDataset(Dataset):
             raise ValueError(msg)
         return get_partition_range(sizes, self.model_group_rank)
 
+    def _source_fields(self, source_name: str) -> list[CatalogueField]:
+        """Return input fields permitted for one source in the sampled query."""
+        fields = list(self.fields_by_dataset[source_name])
+        if self.task.target_static_context and source_name not in self.task.global_context_sources:
+            fields = [field for field in fields if field.time_invariant]
+        return fields
+
     def _sample_option(
         self,
         rng: np.random.Generator,
+        index: int | None = None,
     ) -> tuple[CatalogueField, timedelta, tuple[float, float, float, float] | None]:
+        if self.task.sampling_strategy == "provenance_field_cycle":
+            if index is None:
+                raise ValueError("provenance_field_cycle requires the dataset sample index.")
+            provenances = sorted({field.provenance for field in self.target_fields})
+            global_position = (
+                (self.epoch * self.length + index) * self.sample_group_count
+                + self.sample_group_id
+            )
+            provenance = provenances[global_position % len(provenances)]
+            candidates = [
+                option for option in self.sampling_options if option[0].provenance == provenance
+            ]
+            field_position = global_position // len(provenances)
+            cycle, offset = divmod(field_position, len(candidates))
+            stable_provenance = sum((position + 1) * ord(character) for position, character in enumerate(provenance))
+            permutation = np.random.default_rng(
+                self.seed + stable_provenance * 10_007 + cycle,
+            ).permutation(len(candidates))
+            return candidates[int(permutation[offset])]
+
+        if self.task.sampling_strategy == "provenance_variable_level":
+            provenances = sorted({field.provenance for field in self.target_fields})
+            provenance_weights = np.asarray(
+                [
+                    self.task.provenance_weights.get(provenance, 1.0)
+                    * self.sampling_weights[provenance]
+                    for provenance in provenances
+                ],
+                dtype=float,
+            )
+            provenance = provenances[
+                rng.choice(
+                    len(provenances),
+                    p=provenance_weights / provenance_weights.sum(),
+                )
+            ]
+            candidates = [option for option in self.sampling_options if option[0].provenance == provenance]
+            variables = sorted({option[0].variable for option in candidates})
+            variable_weights = np.asarray(
+                [self.task.variable_weights.get(name, 1.0) for name in variables],
+                dtype=float,
+            )
+            variable = variables[
+                rng.choice(
+                    len(variables),
+                    p=variable_weights / variable_weights.sum(),
+                )
+            ]
+            candidates = [option for option in candidates if option[0].variable == variable]
+            # The remaining options distinguish pressure/model/height levels,
+            # accumulation windows, leads and regions. A uniform final draw
+            # prevents variables with many levels from dominating the earlier
+            # provenance and variable choices.
+            return candidates[rng.integers(len(candidates))]
+
         variables = sorted({field.variable for field in self.target_fields})
         variable_weights = np.asarray(
             [self.task.variable_weights.get(name, 1.0) for name in variables],
@@ -250,10 +480,30 @@ class QueryDataset(Dataset):
         return (longitudes >= west) & (longitudes <= east) & (latitudes >= south) & (latitudes <= north)
 
     def __getitem__(self, index: int) -> QueryBatch:  # noqa: C901
-        rng = np.random.default_rng(
-            self.seed + self.epoch * self.length + index + self.sample_group_id * 1_000_003,
-        )
-        field, lead_time, bbox = self._sample_option(rng)
+        if self.full_valid_time_pass:
+            field, lead_time, bbox, target_position, global_sample_index = self._full_sample(index)
+            rng = np.random.default_rng(
+                self.seed + self.epoch * len(self.full_samples) + global_sample_index,
+            )
+        else:
+            rng = np.random.default_rng(
+                self.seed + self.epoch * self.length + index + self.sample_group_id * 1_000_003,
+            )
+            field, lead_time, bbox = self._sample_option(rng, index=index)
+            target_position = None
+        fields = [field]
+        if self.task.query_all_fields_per_provenance:
+            fields = sorted(
+                {
+                    option[0]
+                    for option in self.sampling_options
+                    if option[0].provenance == field.provenance
+                    and option[1] == lead_time
+                    and option[2] == bbox
+                },
+                key=lambda item: item.field_name,
+            )
+            field = fields[0]
         target_reader = self.readers[field.dataset]
         lead_ns = int(lead_time.total_seconds() * 1e9)
         target_candidates = self.target_positions[field.dataset, lead_ns]
@@ -265,44 +515,26 @@ class QueryDataset(Dataset):
             raise ValueError(
                 msg,
             )
-        target_position = int(rng.choice(target_candidates))
+        if target_position is None:
+            target_position = int(rng.choice(target_candidates))
+        else:
+            candidate_index = int(np.searchsorted(target_candidates, target_position))
+            if candidate_index == len(target_candidates) or target_candidates[candidate_index] != target_position:
+                msg = f"Scheduled target position {target_position} is not eligible for {field.dataset!r}."
+                raise RuntimeError(msg)
         valid_time = np.datetime64(target_reader.dates[target_position], "ns")
         origin = valid_time - np.timedelta64(lead_ns, "ns")
-        query = ForecastQuery(
-            variable=field.variable,
-            lead_time=lead_time,
-            provenance=field.provenance,
-            unit=field.units or "unknown",
-            output_frequency=self.task.output_frequency or target_reader.frequency,
-            model_type={"surface": "sfc", "pressure": "pl", "model": "ml"}.get(
-                field.level_type,
-                field.level_type,
-            ),
-            level=(
-                field.pressure_pa / 100
-                if field.pressure_pa is not None
-                else field.model_level
-                if field.model_level is not None
-                else field.height_m
-            ),
-            level_unit=("hPa" if field.pressure_pa is not None else "m" if field.height_m is not None else None),
-            aggregation_type=field.aggregation_type,
-            temporal_aggregation_window=(
-                None
-                if field.temporal_aggregation_window_hours is None
-                else tuple(timedelta(hours=value) for value in field.temporal_aggregation_window_hours)
-            ),
-            bbox=bbox,
-            grid=field.dataset,
-            grid_spacing_km=field.resolution_km,
-            spatial_support_km=field.spatial_support_km,
-        )
+        queries = [self._forecast_query(item, lead_time, bbox) for item in fields]
+        query = queries[0]
 
         inputs: dict[str, QueryInput] = {}
         input_context: dict[str, Any] = {}
         all_source_names = list(self.readers)
-        source_names = list(all_source_names)
-        if self.task.source_dropout and len(source_names) > 1:
+        if self.task.target_static_context:
+            source_names = list(dict.fromkeys([*self.task.global_context_sources, field.dataset]))
+        else:
+            source_names = list(all_source_names)
+        if self.task.source_dropout and len(source_names) > 1 and not self.task.target_static_context:
             source_names = [
                 name
                 for name in source_names
@@ -338,8 +570,10 @@ class QueryDataset(Dataset):
                 if not positions:
                     positions = [latest_position]
 
-            source_fields = list(self.fields_by_dataset[source_name])
+            source_fields = self._source_fields(source_name)
             available_field_count = len(source_fields)
+            if not source_fields:
+                continue
             if self.task.field_dropout and len(source_fields) > 1:
                 source_fields = [field_ for field_ in source_fields if rng.random() >= self.task.field_dropout]
                 if not source_fields:
@@ -448,21 +682,38 @@ class QueryDataset(Dataset):
 
         target_nodes = self._bbox_mask(target_reader, bbox)
         target_indices = np.flatnonzero(target_nodes)
-        # Select the single supervised variable before materialising the native
-        # grid. BaseAnemoiReader.get_sample intentionally loads all variables,
-        # which is appropriate for state training but needlessly expensive for
-        # a scalar query target (especially TITAN's hundreds of fields).
-        target_variable_index = target_reader.name_to_index[field.field_name]
-        target_native = np.asarray(
-            target_reader.data[
-                slice(target_position, target_position + 1),
-                slice(target_variable_index, target_variable_index + 1),
-                :,
-                :,
-            ],
+        target_shard_start, target_shard_end = self._grid_shard(
+            field.dataset,
+            target_reader.grid_size,
         )
-        target = torch.from_numpy(target_native)[0, 0, 0, target_indices].float()
-        target = (target - field.mean) / field.stdev
+        target_indices = target_indices[
+            (target_indices >= target_shard_start) & (target_indices < target_shard_end)
+        ]
+        local_target_indices = target_indices - target_shard_start
+        if len(fields) == 1:
+            target_variable_index = target_reader.name_to_index[field.field_name]
+            target_native = np.asarray(
+                target_reader.data[
+                    slice(target_position, target_position + 1),
+                    slice(target_variable_index, target_variable_index + 1),
+                    :,
+                    slice(target_shard_start, target_shard_end),
+                ],
+            )
+            target = torch.from_numpy(target_native)[0, 0, 0, local_target_indices].float()[None]
+        else:
+            # A bundled domain step intentionally materialises every enabled
+            # target field once on this rank's native-grid shard.
+            target_native = target_reader.get_sample(
+                0,
+                np.asarray([target_position]),
+                slice(target_shard_start, target_shard_end),
+            )[0, 0]
+            variable_indices = [target_reader.name_to_index[item.field_name] for item in fields]
+            target = target_native[local_target_indices][:, variable_indices].float().T
+        means = torch.tensor([item.mean for item in fields], dtype=target.dtype)[:, None]
+        stdevs = torch.tensor([item.stdev for item in fields], dtype=target.dtype)[:, None]
+        target = (target - means) / stdevs
         target_mask = torch.isfinite(target)
         target_latitudes = np.asarray(target_reader.data.latitudes)[target_indices]
         target_longitudes = (np.asarray(target_reader.data.longitudes)[target_indices] + 180) % 360 - 180
@@ -471,42 +722,118 @@ class QueryDataset(Dataset):
                 np.stack((target_latitudes, target_longitudes), axis=-1),
             ).float(),
         )
-        query_metadata = self.catalogue.encode_metadata(
-            query,
-            lead_time.total_seconds() / 3600,
+        query_metadata = np.stack(
+            [
+                self.catalogue.encode_metadata(item, lead_time.total_seconds() / 3600)
+                for item in queries
+            ],
         )
         target_geometry = self.catalogue.datasets[field.dataset]
         south, north = target_geometry["latitude_bounds_degrees"]
         west, east = target_geometry["longitude_bounds_degrees"]
         embedded_bbox = query.bbox or (west, south, east, north)
-        loss_weight = (
-            self.task.loss_weights.get(field.variable, 1.0)
-            * self.task.loss_weights.get(field.provenance, 1.0)
-            * self.task.loss_weights.get(f"{field.variable}@{field.provenance}", 1.0)
+        loss_weight = torch.tensor(
+            [
+                self.task.loss_weights.get(item.variable, 1.0)
+                * self.task.loss_weights.get(item.provenance, 1.0)
+                * self.task.loss_weights.get(f"{item.variable}@{item.provenance}", 1.0)
+                for item in fields
+            ],
+            dtype=torch.float32,
         )
+        baseline_source = None
+        baseline_column = None
+        baseline_indices = None
+        baseline_multiplier = None
+        baseline_offset = None
+        configured_baseline = self.task.residual_baseline_source
+        if configured_baseline is not None and lead_time == timedelta(0) and configured_baseline in inputs:
+            resolved = input_context[configured_baseline]["resolved_fields"]
+            columns = []
+            multipliers = []
+            offsets = []
+            matched_any = False
+            for target_field in fields:
+                matches = [
+                    (column, source_field)
+                    for column, source_field in enumerate(resolved)
+                    if source_field["time_offset_hours"] == 0.0
+                    and self._same_physical_field(source_field, target_field)
+                    and (source_field.get("units") or "unknown") == (target_field.units or "unknown")
+                ]
+                if len(matches) > 1:
+                    msg = f"Several exact residual baselines match target {target_field}."
+                    raise ValueError(msg)
+                if not matches:
+                    columns.append(-1)
+                    multipliers.append(0.0)
+                    offsets.append(0.0)
+                    continue
+                column, source_field = matches[0]
+                conversion = 1.0
+                if target_field.variable == "tp":
+                    source_scale = self.task.precipitation_unit_scale_to_mm.get(configured_baseline)
+                    target_scale = self.task.precipitation_unit_scale_to_mm.get(target_field.provenance)
+                    if source_scale is None or target_scale is None or source_scale <= 0 or target_scale <= 0:
+                        msg = (
+                            "Precipitation residual baselines require positive "
+                            "precipitation_unit_scale_to_mm entries for source and target."
+                        )
+                        raise ValueError(msg)
+                    conversion = float(source_scale) / float(target_scale)
+                matched_any = True
+                columns.append(column)
+                multipliers.append(float(source_field["stdev"]) * conversion / float(target_field.stdev))
+                offsets.append(
+                    (float(source_field["mean"]) * conversion - float(target_field.mean))
+                    / float(target_field.stdev),
+                )
+            if matched_any:
+                baseline_source = configured_baseline
+                baseline_column = torch.tensor(columns, dtype=torch.long)
+                baseline_indices = torch.from_numpy(
+                    self._nearest_baseline_indices(
+                        field.dataset,
+                        target_indices,
+                        target_shard_start,
+                        target_shard_end,
+                        bbox,
+                    ),
+                )
+                baseline_multiplier = torch.tensor(multipliers, dtype=torch.float32)
+                baseline_offset = torch.tensor(offsets, dtype=torch.float32)
         return QueryBatch(
             inputs=inputs,
-            query_metadata=torch.from_numpy(query_metadata)[None],
+            query_metadata=torch.from_numpy(query_metadata),
             query_variable_id=torch.tensor(
-                [self.catalogue.variable_to_id[field.variable]],
+                [self.catalogue.variable_to_id[item.variable] for item in fields],
             ),
             query_provenance_id=torch.tensor(
-                [self.catalogue.provenance_to_id[field.provenance]],
+                [self.catalogue.provenance_to_id[item.provenance] for item in fields],
             ),
             query_unit_id=torch.tensor(
-                [self.catalogue.unit_to_id[field.units or "unknown"]],
+                [self.catalogue.unit_to_id[item.units or "unknown"] for item in fields],
             ),
             query_grid_id=torch.tensor(
-                [self.catalogue.grid_to_id[field.dataset]],
+                [self.catalogue.grid_to_id[item.dataset] for item in fields],
             ),
             target_dataset=field.dataset,
             query=query.as_serialisable_dict(),
             output_coordinates=output_coordinates,
-            target=torch.nan_to_num(target)[None],
-            target_mask=target_mask[None],
-            loss_weight=torch.tensor(loss_weight, dtype=torch.float32),
+            target=torch.nan_to_num(target),
+            target_mask=target_mask,
+            loss_weight=loss_weight,
+            residual_baseline_source=baseline_source,
+            residual_baseline_input_column=baseline_column,
+            residual_baseline_indices=baseline_indices,
+            residual_baseline_multiplier=baseline_multiplier,
+            residual_baseline_offset=baseline_offset,
             diagnostic_context={
                 "sample_index": int(index),
+                "full_valid_time_pass": bool(self.full_valid_time_pass),
+                "full_unique_sample_count": self.full_sample_count,
+                "sample_group_id": int(self.sample_group_id),
+                "sample_group_count": int(self.sample_group_count),
                 "forecast_origin": str(origin),
                 "valid_time": str(valid_time),
                 "requested_query": query.as_serialisable_dict(),
@@ -520,16 +847,26 @@ class QueryDataset(Dataset):
                 },
                 "target": {
                     **asdict(field),
+                    "field_shape": list(target_reader.data.field_shape),
                     "native_index_count": len(target_indices),
                     "native_index_min": int(target_indices.min()),
                     "native_index_max": int(target_indices.max()),
                     "valid_node_count": int(target_mask.sum()),
                     "selected_node_count": len(target_indices),
+                    "shard_node_count": target_shard_end - target_shard_start,
+                    "shard_native_index_range": [target_shard_start, target_shard_end],
                 },
+                "bundle_fields": [asdict(item) for item in fields],
+                "bundle_size": len(fields),
                 "inputs": input_context,
                 "configured_sources": all_source_names,
                 "dataset_sampling_weights": dict(self.sampling_weights),
                 "active_sources": list(inputs),
+                "residual_baseline": {
+                    "source": baseline_source,
+                    "input_column": None if baseline_column is None else baseline_column.tolist(),
+                    "matched": baseline_source is not None,
+                },
                 "source_dropout_sources": [name for name in all_source_names if name not in source_names],
                 "unavailable_sources": [name for name in source_names if name not in inputs],
             },

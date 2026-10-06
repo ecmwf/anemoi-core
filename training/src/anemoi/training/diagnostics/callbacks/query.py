@@ -28,6 +28,14 @@ from anemoi.training.query.query import ForecastQuery
 
 LOGGER = logging.getLogger(__name__)
 EARTH_RADIUS_KM = 6371.0
+SOURCE_COLOURS = {
+    "IFS": "tab:blue",
+    "MEPS": "tab:orange",
+    "AROME_ARCTIC": "tab:green",
+    "CERRA": "tab:red",
+    "TITAN": "tab:purple",
+    "UWC_WEST": "tab:brown",
+}
 
 if TYPE_CHECKING:
     import pytorch_lightning as pl
@@ -52,11 +60,108 @@ def _bounded(size: int, limit: int) -> np.ndarray:
     return np.sort(rng.choice(size, limit, replace=False))
 
 
-def _degrees(value: torch.Tensor | np.ndarray) -> np.ndarray:
+def _degrees(
+    value: torch.Tensor | np.ndarray,
+    *,
+    preserve_native_longitude: bool = False,
+) -> np.ndarray:
+    """Convert radians to degrees, optionally retaining the source longitude convention."""
     array = _cpu(value) if isinstance(value, torch.Tensor) else np.asarray(value)
     result = np.rad2deg(array)
-    result[:, 1] = (result[:, 1] + 180) % 360 - 180
+    if not preserve_native_longitude:
+        result[:, 1] = (result[:, 1] + 180) % 360 - 180
     return result
+
+
+def _extent_mask(coordinates: np.ndarray, extent: list[float] | None) -> np.ndarray:
+    """Select lon/lat points inside an extent without rewriting source longitudes."""
+    if extent is None:
+        return np.ones(len(coordinates), dtype=bool)
+    west, east, south, north = extent
+    latitude = coordinates[:, 0]
+    longitude = coordinates[:, 1]
+    # Compare modulo 360 so a native IFS longitude such as 350 degrees is
+    # correctly selected by a regional extent whose western bound is -20.
+    # The stored/displayed source coordinate itself remains untouched.
+    arc = (east - west) % 360.0
+    if np.isclose(arc, 0.0) and not np.isclose(east, west):
+        longitude_inside = np.ones(len(longitude), dtype=bool)
+    else:
+        longitude_inside = ((longitude - west) % 360.0) <= arc
+    return longitude_inside & (latitude >= south) & (latitude <= north)
+
+
+def _regional_extent(coordinates: np.ndarray, padding_degrees: float = 0.0) -> list[float] | None:
+    """Return a useful regional extent, leaving global domains unrestricted."""
+    south, west = coordinates.min(axis=0)
+    north, east = coordinates.max(axis=0)
+    if east - west >= 180 or north - south >= 150:
+        return None
+    return [
+        max(-180.0, float(west) - padding_degrees),
+        min(180.0, float(east) + padding_degrees),
+        max(-90.0, float(south) - padding_degrees),
+        min(90.0, float(north) + padding_degrees),
+    ]
+
+
+def _field_semantic_rank(field: dict[str, Any], target: dict[str, Any]) -> tuple[float, ...]:
+    """Rank an input field by semantic proximity to a requested target.
+
+    This is used only to choose a diagnostic panel. In particular, it keeps
+    an unavailable 100-m wind query attached to the corresponding IFS 10-m
+    wind instead of falling back to an unrelated regional static field.
+    """
+
+    variable_mismatch = float(field.get("variable") != target.get("variable"))
+    level_type_mismatch = float(field.get("level_type") != target.get("level_type"))
+
+    level_distance = 0.0
+    if not level_type_mismatch:
+        level_key = {
+            "pressure": "pressure_pa",
+            "height": "height_m",
+            "model": "model_level",
+        }.get(str(target.get("level_type")))
+        if level_key is not None:
+            source_level, target_level = field.get(level_key), target.get(level_key)
+            if source_level is None or target_level is None:
+                level_distance = float(source_level != target_level)
+            elif float(source_level) > 0 and float(target_level) > 0:
+                level_distance = abs(math.log(float(source_level) / float(target_level)))
+            else:
+                level_distance = abs(float(source_level) - float(target_level))
+
+    aggregation_mismatch = float(field.get("aggregation_type") != target.get("aggregation_type"))
+    window_mismatch = float(
+        field.get("temporal_aggregation_window_hours") != target.get("temporal_aggregation_window_hours")
+    )
+    unit_mismatch = float((field.get("units") or "unknown") != (target.get("units") or "unknown"))
+    newest_first = -float(field.get("time_offset_hours", -math.inf))
+    return (
+        variable_mismatch,
+        level_type_mismatch,
+        level_distance,
+        aggregation_mismatch,
+        window_mismatch,
+        unit_mismatch,
+        newest_first,
+    )
+
+
+def _target_equivalent(field: dict[str, Any], target: dict[str, Any]) -> bool:
+    keys = (
+        "variable",
+        "level_type",
+        "pressure_pa",
+        "model_level",
+        "height_m",
+        "aggregation_type",
+        "temporal_aggregation_window_hours",
+    )
+    return all(field.get(key) == target.get(key) for key in keys) and (
+        field.get("units") or "unknown"
+    ) == (target.get("units") or "unknown")
 
 
 def _hours(value: str) -> float:
@@ -84,16 +189,20 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         every_n_epochs: int = 1,
         max_cases: int = 2,
         fixed_validation_cases: list[int] | None = None,
+        rotating_validation_case: bool = False,
         changing_training_case: bool = False,
         domain_plots: bool = True,
         graph_plots: bool = True,
         static_geometry_once: bool = False,
         input_plots: bool = True,
+        input_plots_once: bool = False,
         regional_input_plots: bool = True,
         global_input_plots: bool = True,
         embedding_plots: bool = True,
+        embedding_plots_once: bool = False,
         sensitivity_plots: bool = True,
         sampler_plots: bool = True,
+        sampler_plots_once: bool = False,
         sampler_every_n_epochs: int | None = None,
         lead_time_hours: list[float] | None = None,
         pressure_levels_hpa: list[float] | None = None,
@@ -111,16 +220,21 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         self.every_n_epochs = every_n_epochs
         self.max_cases = max_cases
         self.fixed_validation_cases = set([0] if fixed_validation_cases is None else fixed_validation_cases)
+        self.rotating_validation_case = rotating_validation_case
+        self._rotating_validation_index: int | None = None
         self.changing_training_case = changing_training_case
         self.domain_plots = domain_plots
         self.graph_plots = graph_plots
         self.static_geometry_once = static_geometry_once
         self.input_plots = input_plots
+        self.input_plots_once = input_plots_once
         self.regional_input_plots = regional_input_plots
         self.global_input_plots = global_input_plots
         self.embedding_plots = embedding_plots
+        self.embedding_plots_once = embedding_plots_once
         self.sensitivity_plots = sensitivity_plots
         self.sampler_plots = sampler_plots
+        self.sampler_plots_once = sampler_plots_once
         self.sampler_every_n_epochs = sampler_every_n_epochs or every_n_epochs
         self.lead_time_hours = lead_time_hours or []
         self.pressure_levels_hpa = pressure_levels_hpa
@@ -157,12 +271,22 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         return self.enabled and not trainer.sanity_checking and trainer.current_epoch % self.every_n_epochs == 0
 
     def _sampler_due(self, trainer: pl.Trainer) -> bool:
+        if self.sampler_plots_once:
+            return self.enabled and trainer.current_epoch == 0
         return self.enabled and (trainer.current_epoch + 1) % self.sampler_every_n_epochs == 0
 
     def on_train_epoch_start(self, trainer: pl.Trainer, _pl_module: pl.LightningModule) -> None:
         if self._due(trainer):
             self._captured_cases = 0
             self._seen_validation_cases.clear()
+            self._rotating_validation_index = None
+            if self.rotating_validation_case:
+                validation_count = len(trainer.datamodule.ds_valid)
+                candidates = [
+                    index for index in range(validation_count) if index not in self.fixed_validation_cases
+                ]
+                if candidates:
+                    self._rotating_validation_index = candidates[trainer.current_epoch % len(candidates)]
 
     def on_train_batch_start(
         self,
@@ -188,10 +312,11 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         _dataloader_idx: int = 0,
     ) -> None:
         index = int((batch.diagnostic_context or {}).get("sample_index", -1))
+        selected = index in self.fixed_validation_cases or index == self._rotating_validation_index
         if (
             self._due(trainer)
             and self._captured_cases < self.max_cases
-            and index in self.fixed_validation_cases
+            and selected
         ):
             self._seen_validation_cases.add(index)
             pl_module.request_query_diagnostic_prediction()
@@ -239,19 +364,27 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         query, context = batch.query, batch.diagnostic_context or {}
         self._dataset_sampling_weights.update(context.get("dataset_sampling_weights", {}))
         target = context.get("target", {})
-        if query.get("level") is not None:
-            suffix = "" if query.get("level_unit") is None else f" {query['level_unit']}"
-            level = f"{query.get('model_type')} {query['level']}{suffix}"
-        else:
-            level = str(query.get("model_type") or "sfc")
-        variable, provenance, lead = (
-            str(query["variable"]),
-            str(query["provenance"]),
-            f"{_hours(query['lead_time']):g} h",
-        )
-        for name, key in (("variable", variable), ("provenance", provenance), ("lead", lead), ("level", level)):
-            self._counts[name][key] += 1
-        self._counts["joint"][(provenance, variable)] += 1
+        bundle_fields = context.get("bundle_fields") or [query]
+        lead = f"{_hours(query['lead_time']):g} h"
+        for item in bundle_fields:
+            variable = str(item.get("variable", query["variable"]))
+            provenance = str(item.get("provenance", query["provenance"]))
+            level_type = item.get("level_type", item.get("model_type"))
+            if item.get("pressure_pa") is not None:
+                level = f"pl {float(item['pressure_pa']) / 100:g} hPa"
+            elif item.get("height_m") is not None:
+                level = f"{level_type} {float(item['height_m']):g} m"
+            elif item.get("model_level") is not None:
+                level = f"ml {int(item['model_level'])}"
+            elif item.get("level") is not None:
+                suffix = "" if item.get("level_unit") is None else f" {item['level_unit']}"
+                level = f"{level_type} {item['level']}{suffix}"
+            else:
+                level = str(level_type or "sfc")
+            for name, key in (("variable", variable), ("provenance", provenance), ("lead", lead), ("level", level)):
+                self._counts[name][key] += 1
+            self._counts["joint"][(provenance, variable)] += 1
+        variable, provenance = str(query["variable"]), str(query["provenance"])
         output_frequency = query.get("output_frequency")
         if output_frequency is not None:
             self._counts["output_frequency"][f"{_hours(output_frequency):g} h"] += 1
@@ -340,6 +473,39 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         model, context = pl_module.model, batch.diagnostic_context or {}
         target_info = context.get("target", {})
         mean, stdev = float(target_info.get("mean", 0)), float(target_info.get("stdev", 1))
+        prediction = step["prediction"][0]
+        target = None if batch.target is None else batch.target[0]
+        target_mask = None if batch.target_mask is None else batch.target_mask[0]
+        coordinates = batch.output_coordinates
+        if batch.query.get("bbox") is None and getattr(pl_module, "model_comm_group_size", 1) > 1:
+            shard_sizes = pl_module.shard_sizes[batch.target_dataset]
+            if prediction.shape[0] in shard_sizes:
+                prediction = self._full_native_tensor(
+                    pl_module,
+                    batch.target_dataset,
+                    prediction,
+                )
+            if target is not None and target.shape[0] in shard_sizes:
+                target = self._full_native_tensor(
+                    pl_module,
+                    batch.target_dataset,
+                    target,
+                )
+            if target_mask is not None and target_mask.shape[0] in shard_sizes:
+                target_mask = self._full_native_tensor(
+                    pl_module,
+                    batch.target_dataset,
+                    target_mask.to(torch.uint8),
+                ).bool()
+            if coordinates is not None and coordinates.shape[0] in shard_sizes:
+                coordinates = self._full_native_tensor(
+                    pl_module,
+                    batch.target_dataset,
+                    coordinates,
+                )
+        include_input_details = self.input_plots and (
+            not self.input_plots_once or int(pl_module.current_epoch) == 0
+        )
         payload = {
             "kind": "case",
             "stage": stage,
@@ -347,12 +513,12 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "sample_index": int(context.get("sample_index", -1)),
             "query": dict(batch.query),
             "context": context,
-            "prediction": _cpu(step["prediction"])[0] * stdev + mean,
-            "target": None if batch.target is None else _cpu(batch.target)[0] * stdev + mean,
-            "target_mask": None if batch.target_mask is None else _cpu(batch.target_mask)[0].astype(bool),
-            "coordinates": _degrees(batch.output_coordinates),
+            "prediction": _cpu(prediction) * stdev + mean,
+            "target": None if target is None else _cpu(target) * stdev + mean,
+            "target_mask": None if target_mask is None else _cpu(target_mask).astype(bool),
+            "coordinates": _degrees(coordinates),
             "input": self._representative_input(pl_module, batch, context),
-            "input_details": self._input_payload(pl_module, batch, context) if self.input_plots else None,
+            "input_details": self._input_payload(pl_module, batch, context) if include_input_details else None,
             "graph": None,
             "embeddings": None,
             "sensitivity": None,
@@ -361,10 +527,13 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if (self.domain_plots or self.graph_plots) and include_geometry:
             payload["graph"] = self._graph_payload(pl_module, batch, context)
             self._static_geometry_captured = True
-        if self.embedding_plots or (self.sensitivity_plots and stage == "val"):
+        include_embeddings = self.embedding_plots and (
+            not self.embedding_plots_once or int(pl_module.current_epoch) == 0
+        )
+        if include_embeddings or (self.sensitivity_plots and stage == "val"):
             catalogue = QueryCatalogue.from_snapshot(model.query_catalogue)
             variants = self._variants(catalogue, batch.query, pl_module.task)
-            if self.embedding_plots:
+            if include_embeddings:
                 payload["embeddings"] = self._embedding_payload(
                     model,
                     batch,
@@ -389,7 +558,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         source: str,
         value: torch.Tensor,
     ) -> torch.Tensor:
-        """Gather one bounded diagnostic vector, never the full field tensor."""
+        """Gather a native-grid diagnostic tensor across the model group."""
         if getattr(pl_module, "model_comm_group_size", 1) <= 1:
             return value
         return gather_tensor(
@@ -452,7 +621,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 {
                     "source": source,
                     "field": field,
-                    "coordinates": _degrees(coordinates_rad),
+                    "coordinates": _degrees(
+                        coordinates_rad,
+                        preserve_native_longitude=source in pl_module.task.global_context_sources,
+                    ),
                     "physical": physical,
                     "valid": valid,
                     "mapping": mapping,
@@ -494,7 +666,10 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if ifs is not None:
             tensor = batch.inputs[ifs]
             fields = context.get("inputs", {}).get(ifs, {}).get("resolved_fields", [])
-            coordinates = _degrees(model.node_attributes.get_coordinates(ifs))
+            coordinates = _degrees(
+                model.node_attributes.get_coordinates(ifs),
+                preserve_native_longitude=True,
+            )
             context_bbox = context.get("inputs", {}).get(ifs, {}).get("context_bbox_degrees")
             if context_bbox is None:
                 selected_geometry = np.ones(len(coordinates), dtype=bool)
@@ -519,7 +694,21 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 missing_counts = ((~tensor.mask[0]) & local_geometry[:, None]).sum(dim=0)
                 if getattr(pl_module, "model_comm_group_size", 1) > 1:
                     torch.distributed.all_reduce(missing_counts, group=pl_module.model_comm_group)
-                column = int(missing_counts.argmax().item())
+                target = context.get("target", {})
+                matching_columns = [
+                    column
+                    for column, field in enumerate(fields)
+                    if _target_equivalent(field, target)
+                ]
+                if matching_columns:
+                    column = max(
+                        matching_columns,
+                        key=lambda value: float(fields[value].get("time_offset_hours", -math.inf)),
+                    )
+                    selection_reason = "target-equivalent IFS field"
+                else:
+                    column = min(range(len(fields)), key=lambda value: _field_semantic_rank(fields[value], target))
+                    selection_reason = "nearest semantic IFS field; not target-equivalent"
                 normalized = _cpu(self._full_native_tensor(pl_module, ifs, tensor.values[0, :, column]))
                 validity = _cpu(self._full_native_tensor(pl_module, ifs, tensor.mask[0, :, column])).astype(bool)
                 field = fields[column]
@@ -540,8 +729,21 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                     "available_field_count": int(
                         context.get("inputs", {}).get(ifs, {}).get("available_field_count", len(fields)),
                     ),
+                    "selection_reason": selection_reason,
                 }
-        output = _degrees(batch.output_coordinates)
+        output_coordinates = batch.output_coordinates
+        if (
+            output_coordinates is not None
+            and batch.query.get("bbox") is None
+            and getattr(pl_module, "model_comm_group_size", 1) > 1
+            and output_coordinates.shape[0] in pl_module.shard_sizes[batch.target_dataset]
+        ):
+            output_coordinates = self._full_native_tensor(
+                pl_module,
+                batch.target_dataset,
+                output_coordinates,
+            )
+        output = _degrees(output_coordinates)
         requested_bbox = (context.get("requested_query") or {}).get("bbox")
         resolved_query = context.get("resolved_query") or batch.query
         bbox = requested_bbox or resolved_query.get("embedded_bbox") or resolved_query.get("bbox")
@@ -573,30 +775,40 @@ class QueryDiagnosticsPlot(BasePlotCallback):
     ) -> dict[str, Any] | None:
         model = pl_module.model
         target, candidates = context.get("target", {}), []
-        for source in batch.inputs:
+        input_sources = list(batch.inputs)
+        if self.global_input_plots:
+            global_sources = [
+                source
+                for source in input_sources
+                if source in pl_module.task.global_context_sources
+                or source.upper() == "IFS"
+                or "IFS" in source.upper()
+            ]
+            if global_sources:
+                input_sources = global_sources
+        for source in input_sources:
             regional_only = self.regional_input_plots and not self.global_input_plots
             if regional_only and source in pl_module.task.global_context_sources:
                 continue
             fields = context.get("inputs", {}).get(source, {}).get("resolved_fields", [])
             for column, field in enumerate(fields):
-                exact = all(
-                    field.get(key) == target.get(key)
-                    for key in ("variable", "level_type", "pressure_pa", "height_m", "aggregation_type")
-                )
-                candidates.append((exact, float(field.get("time_offset_hours", -math.inf)), source, column, field))
+                candidates.append((_field_semantic_rank(field, target), source, column, field))
         if not candidates:
             return None
-        exact, _offset, source, column, field = max(candidates)
+        _rank, source, column, field = min(candidates, key=lambda item: item[0])
         tensor = batch.inputs[source]
         values = self._full_native_tensor(pl_module, source, tensor.values[0, :, column])
         mask = self._full_native_tensor(pl_module, source, tensor.mask[0, :, column])
         return {
             "source": source,
             "field": field,
-            "coordinates": _degrees(model.node_attributes.get_coordinates(source)),
+            "coordinates": _degrees(
+                model.node_attributes.get_coordinates(source),
+                preserve_native_longitude=source in pl_module.task.global_context_sources,
+            ),
             "values": _cpu(values) * float(field["stdev"]) + float(field["mean"]),
             "mask": _cpu(mask).astype(bool),
-            "matches_target": bool(exact and field.get("units") == target.get("units")),
+            "matches_target": _target_equivalent(field, target),
         }
 
     def _graph_payload(self, pl_module: pl.LightningModule, batch: Any, context: dict[str, Any]) -> dict[str, Any]:
@@ -1008,8 +1220,17 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if self.sensitivity_plots and payload["sensitivity"]:
             self._plot_sensitivity(trainer, payload)
 
-    def _map(self, reference: np.ndarray, shape: tuple[int, int]) -> tuple[Any, np.ndarray, MapProjection, Any]:
-        projection = MapProjection.from_kind(reference, self.plotting_settings.projection_kind)
+    def _map(
+        self,
+        reference: np.ndarray,
+        shape: tuple[int, int],
+        *,
+        projection_kind: str | None = None,
+    ) -> tuple[Any, np.ndarray, MapProjection, Any]:
+        projection = MapProjection.from_kind(
+            reference,
+            projection_kind or self.plotting_settings.projection_kind,
+        )
         subplot_kw = {"projection": projection.axes_crs()} if projection.axes_crs() is not None else {}
         fig, axes = plt.subplots(*shape, figsize=(5 * shape[1], 3.5 * shape[0]), subplot_kw=subplot_kw)
         data_crs = None
@@ -1066,12 +1287,37 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         vmin: float | None = None,
         vmax: float | None = None,
         extent: list[float] | None = None,
+        minimum_marker_area: float = 2.0,
     ) -> None:
         valid = np.isfinite(values) if mask is None else mask & np.isfinite(values)
-        available = np.flatnonzero(valid)
+        # Crop first and only then take a bounded diagnostic sample. Otherwise
+        # a global source such as N320 IFS contributes almost no visible points
+        # to a regional panel, and regional projections can render the global
+        # remainder as long wedges at their boundary.
+        visible = valid & _extent_mask(coordinates, extent)
+        available = np.flatnonzero(visible)
         selected = available[_bounded(len(available), self.max_points)]
         x, y = self._xy(coordinates[selected], projection)
-        kwargs = {"c": values[selected], "s": 2, "cmap": cmap, "vmin": vmin, "vmax": vmax, "rasterized": True}
+        # Increase marker area when a dense native grid is downsampled.  A
+        # fixed tiny marker made the white background between sampled nodes
+        # look like missing target values even when the validity mask was
+        # entirely true.
+        sampling_ratio = len(available) / max(len(selected), 1)
+        # Native N320 regional subsets contain only O(10k) nodes. A sub-pixel
+        # marker floor made a complete, correctly located GLOB field look
+        # blank. Retain the historical visible marker area for unsampled
+        # coarse inputs while still increasing it for downsampled fine grids.
+        marker_area = max(minimum_marker_area, min(12.0, 0.16 * sampling_ratio))
+        kwargs = {
+            "c": values[selected],
+            "s": marker_area,
+            "linewidths": 0,
+            "edgecolors": "none",
+            "cmap": cmap,
+            "vmin": vmin,
+            "vmax": vmax,
+            "rasterized": True,
+        }
         if data_crs is not None:
             kwargs["transform"] = data_crs
         artist = ax.scatter(x, y, **kwargs)
@@ -1088,7 +1334,11 @@ class QueryDiagnosticsPlot(BasePlotCallback):
     def _plot_example(self, trainer: pl.Trainer, payload: dict[str, Any]) -> None:
         coordinates, prediction = payload["coordinates"], payload["prediction"]
         target, mask = payload["target"], payload["target_mask"]
+        # Retain the configured regional projection. Global IFS coordinates
+        # remain in their native 0--360 convention and Cartopy performs the
+        # periodic transform into this Lambert view.
         fig, axes, projection, data_crs = self._map(coordinates, (2, 3))
+        display_extent = _regional_extent(coordinates)
         comparable = prediction[mask] if mask is not None else prediction
         if target is not None:
             comparable = np.concatenate((comparable, target[mask]))
@@ -1106,11 +1356,19 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 input_["values"],
                 projection,
                 data_crs,
-                f"input {field['variable']} · {input_['source']} · {field['actual_time']}\n"
-                f"{'matching semantics' if input_['matches_target'] else 'representative; not target-equivalent'}",
+                f"input {field.get('field_name', field['variable'])} · {input_['source']} · {field['actual_time']}\n"
+                f"{'matching semantics' if input_['matches_target'] else 'nearest semantic field; not target-equivalent'}\n"
+                +
+                (
+                    "IFS native longitude convention retained"
+                    if str(input_["source"]).upper() == "IFS"
+                    else "source-native coordinates"
+                ),
                 mask=input_["mask"],
                 vmin=low if input_["matches_target"] else None,
                 vmax=high if input_["matches_target"] else None,
+                extent=display_extent,
+                minimum_marker_area=9.0 if str(input_["source"]).upper() == "IFS" else 2.0,
             )
         self._scatter(
             fig,
@@ -1122,6 +1380,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             "prediction · physical units",
             vmin=low,
             vmax=high,
+            extent=display_extent,
         )
         if target is None:
             axes[0, 2].text(0.5, 0.5, "NO REFERENCE TARGET", ha="center")
@@ -1129,6 +1388,8 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             axes[0, 2].axis("off")
             axes[1, 0].axis("off")
         else:
+            valid_count = int(mask.sum())
+            selected_count = int(mask.size)
             self._scatter(
                 fig,
                 axes[0, 2],
@@ -1136,10 +1397,12 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 target,
                 projection,
                 data_crs,
-                "exact matching target · physical units",
+                f"exact matching target · physical units\n"
+                f"valid target nodes: {valid_count:,}/{selected_count:,}",
                 mask=mask,
                 vmin=low,
                 vmax=high,
+                extent=display_extent,
             )
             error = prediction - target
             limit = max(float(np.nanpercentile(np.abs(error[mask]), 98)), np.finfo(np.float32).eps)
@@ -1155,6 +1418,7 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 cmap="RdBu_r",
                 vmin=-limit,
                 vmax=limit,
+                extent=display_extent,
             )
         if input_ is not None:
             self._scatter(
@@ -1164,10 +1428,12 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 input_["mask"].astype(float),
                 projection,
                 data_crs,
-                "input validity (zero is valid)",
+                "input validity mask (1 = valid; data value 0 is allowed)",
                 cmap="gray_r",
                 vmin=0,
                 vmax=1,
+                extent=display_extent,
+                minimum_marker_area=9.0 if str(input_["source"]).upper() == "IFS" else 2.0,
             )
         self._scatter(
             fig,
@@ -1176,10 +1442,12 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             mask.astype(float),
             projection,
             data_crs,
-            "target validity / coverage",
+            f"target validity / coverage mask (1 = valid)\n"
+            f"{int(mask.sum()):,}/{int(mask.size):,} valid",
             cmap="gray_r",
             vmin=0,
             vmax=1,
+            extent=display_extent,
         )
         context = payload["context"]
         query = context.get("resolved_query", payload["query"])
@@ -1337,7 +1605,13 @@ class QueryDiagnosticsPlot(BasePlotCallback):
             ax.axis("off")
         else:
             coordinates = data["coordinates"]
-            fig, axes, projection, data_crs = self._map(coordinates, (2, 2))
+            fig, axes, projection, data_crs = self._map(
+                coordinates,
+                (2, 2),
+                # Cartopy accepts the native IFS 0--360 degrees directly and
+                # renders a readable global field without changing ordering.
+                projection_kind="robinson",
+            )
             field = data["field"]
             selected = data["selected_geometry"]
             valid = data["valid"]
@@ -1394,7 +1668,9 @@ class QueryDiagnosticsPlot(BasePlotCallback):
                 f"IFS pre-network field · {field['field_name']} / {field['variable']} · {field['actual_time']} · "
                 f"missing inside selected context={data['missing_count']:,}/{data['selected_count']:,}\n"
                 f"selected fields={data['selected_field_count']}/{data['available_field_count']} · "
-                "unselected fields are absent columns; invalid values retain a separate Boolean mask",
+                f"selection={data['selection_reason']} · "
+                "native IFS longitudes retained · unselected fields are absent columns; "
+                "invalid values retain a separate Boolean mask",
                 fontsize=9,
             )
             fig.tight_layout(rect=(0, 0, 1, 0.91))
@@ -1458,16 +1734,19 @@ class QueryDiagnosticsPlot(BasePlotCallback):
         if bbox is not None or refinement_area is not None:
             axes[0, 0].legend(fontsize=6)
         axes[0, 0].set_title(f"global hidden mesh ({len(hidden):,}) + output ({len(output):,})")
-        colours = plt.get_cmap("tab10")
         for number, (name, source) in enumerate(graph["sources"].items()):
             if source["active"] is None:
                 continue
             indices = np.flatnonzero(source["active"])
+            if region is not None:
+                regional_indices = indices[_extent_mask(source["coordinates"][indices], region)]
+                if len(regional_indices):
+                    indices = regional_indices
             indices = indices[_bounded(len(indices), max(1, self.max_points // len(graph["sources"])))]
             x, y = self._xy(source["coordinates"][indices], projection)
             kwargs = {
                 "s": 2,
-                "color": colours(number),
+                "color": SOURCE_COLOURS.get(name, plt.get_cmap("tab10")(number)),
                 "label": f"{name} ({source['active'].sum():,}/{len(source['active']):,})",
             }
             if data_crs is not None:

@@ -154,6 +154,7 @@ class QueryForecaster(nn.Module):
         self.query_to_latent = nn.Linear(adapter_hidden, hidden)
         self.ensemble_noise_std = float(model_config.query.ensemble_noise_std)
         self.dynamic_encoder = bool(model_config.query.dynamic_encoder)
+        self.bundle_outputs_by_provenance = bool(model_config.query.bundle_outputs_by_provenance)
 
         self.encoder_graph_provider = nn.ModuleDict()
         for name in self.dataset_names:
@@ -211,11 +212,300 @@ class QueryForecaster(nn.Module):
             model_config.decoders.shared.mapper,
             _recursive_=False,
             in_channels_src=hidden,
-            in_channels_dst=adapter_hidden
-            + self.node_attributes.attr_ndims[self.dataset_names[0]],
-            out_channels_dst=1,
+            in_channels_dst=(
+                self.node_attributes.attr_ndims[self.dataset_names[0]]
+                if self.bundle_outputs_by_provenance
+                else adapter_hidden + self.node_attributes.attr_ndims[self.dataset_names[0]]
+            ),
+            out_channels_dst=hidden if self.bundle_outputs_by_provenance else 1,
             edge_dim=next(iter(self.decoder_graph_provider.values())).edge_dim,
         )
+        self.bundle_query_head = nn.Linear(adapter_hidden, hidden + 1) if self.bundle_outputs_by_provenance else None
+        if model_config.query.zero_initialize_decoder and self.bundle_outputs_by_provenance:
+            nn.init.zeros_(self.bundle_query_head.weight)
+            nn.init.zeros_(self.bundle_query_head.bias)
+        elif model_config.query.zero_initialize_decoder:
+            output_layer = self.decoder.node_data_extractor[-1]
+            if not isinstance(output_layer, nn.Linear) or output_layer.out_features != 1:
+                raise TypeError("Query residual initialization requires a scalar linear decoder output layer.")
+            nn.init.zeros_(output_layer.weight)
+            if output_layer.bias is not None:
+                nn.init.zeros_(output_layer.bias)
+
+    def encode_query_inputs(
+        self,
+        inputs: dict[str, Any],
+        model_comm_group: Any = None,
+        grid_shard_sizes: dict[str, list[int]] | None = None,
+    ) -> tuple[Tensor, Tensor, list[int]]:
+        """Encode physical-query input tensors once for repeated output requests.
+
+        The returned latent precedes query injection and the processor. It is
+        therefore safe to reuse for several variables requested from the same
+        input state, while each variable still receives its own complete
+        query-conditioned processor and decoder pass.
+        """
+
+        batch_size = 1
+        hidden_nodes = self.node_attributes(self.hidden_name, batch_size)
+        hidden_shard_sizes = get_shard_sizes(hidden_nodes, 0, model_comm_group)
+        hidden_nodes = shard_tensor(hidden_nodes, 0, hidden_shard_sizes, model_comm_group)
+        source_latents = []
+        source_coverages = []
+        for name, source in inputs.items():
+            if name not in self.encoder_graph_provider:
+                raise KeyError(f"Input source {name!r} has no registered training geometry.")
+            pooled = self.value_adapter(
+                source.values,
+                source.metadata,
+                source.variable_ids,
+                source.provenance_ids,
+                source.unit_ids,
+                source.mask,
+            )
+            pooled = pooled.reshape(-1, pooled.shape[-1])
+            source_coverage = pooled[:, -1]
+            source_shard_sizes = None if grid_shard_sizes is None else grid_shard_sizes.get(name)
+            source_attributes = self.node_attributes(name, batch_size)
+            if source_shard_sizes is not None:
+                source_attributes = shard_tensor(source_attributes, 0, source_shard_sizes, model_comm_group)
+            if source_attributes.shape[0] != source_coverage.shape[0]:
+                raise ValueError(
+                    f"Input shard for {name!r} has {source_coverage.shape[0]} nodes, "
+                    f"but its coordinate shard has {source_attributes.shape[0]}."
+                )
+            source_nodes = torch.cat((pooled, source_attributes * source_coverage[:, None]), dim=-1)
+            full_source_coverage = source_coverage.detach()
+            if source_shard_sizes is not None:
+                full_source_coverage = gather_tensor(
+                    full_source_coverage,
+                    0,
+                    source_shard_sizes,
+                    model_comm_group,
+                )
+            provider = self.encoder_graph_provider[name]
+            if self.dynamic_encoder:
+                edge_attr, edge_index, _ = provider.get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                    shard_edges=False,
+                )
+                active_edges = full_source_coverage[edge_index[0]].bool()
+                edge_attr = edge_attr[active_edges]
+                edge_index = edge_index[:, active_edges]
+                if not edge_index.shape[1]:
+                    continue
+                edge_attr, edge_index, edge_sizes = shard_edges_1hop(
+                    edge_attr,
+                    edge_index,
+                    self.node_attributes.num_nodes[name],
+                    self.node_attributes.num_nodes[self.hidden_name],
+                    model_comm_group,
+                )
+            else:
+                edge_attr, edge_index, edge_sizes = provider.get_edges(
+                    batch_size=batch_size,
+                    model_comm_group=model_comm_group,
+                )
+            coverage = torch.zeros(
+                self.node_attributes.num_nodes[self.hidden_name],
+                dtype=pooled.dtype,
+                device=pooled.device,
+            )
+            coverage.index_add_(0, edge_index[1], full_source_coverage[edge_index[0]].to(coverage.dtype))
+            if model_comm_group is not None and model_comm_group.size() > 1:
+                torch.distributed.all_reduce(coverage, group=model_comm_group)
+                group_rank = model_comm_group.rank()
+                start = sum(hidden_shard_sizes[:group_rank])
+                coverage = coverage[start : start + hidden_shard_sizes[group_rank]]
+            _, latent = self.encoder(
+                (source_nodes, hidden_nodes),
+                batch_size=batch_size,
+                shard_info=BipartiteGraphShardInfo(
+                    src_nodes=source_shard_sizes,
+                    dst_nodes=hidden_shard_sizes,
+                    edges=edge_sizes,
+                ),
+                edge_attr=edge_attr,
+                edge_index=edge_index,
+                model_comm_group=model_comm_group,
+                keep_x_dst_sharded=True,
+            )
+            source_latents.append(latent)
+            source_coverages.append((coverage > 0).to(latent.dtype)[:, None])
+        if not source_latents:
+            raise ValueError("At least one registered input source is required.")
+        coverages = torch.stack(source_coverages)
+        latent = (torch.stack(source_latents) * coverages).sum(dim=0) / coverages.sum(dim=0).clamp_min(1)
+        return latent, hidden_nodes, hidden_shard_sizes
+
+    def decode_query_latent(
+        self,
+        encoded: tuple[Tensor, Tensor, list[int]],
+        query: dict[str, Any],
+        output_coordinates: Tensor | None = None,
+        model_comm_group: Any = None,
+    ) -> Tensor:
+        """Apply one query-conditioned processor and decoder to a cached input latent."""
+
+        if self.bundle_outputs_by_provenance:
+            return self.decode_query_bundle(
+                encoded,
+                query,
+                output_coordinates=output_coordinates,
+                model_comm_group=model_comm_group,
+            )
+
+        latent, hidden_nodes, hidden_shard_sizes = encoded
+        query_embedding = self.query_adapter(
+            query["metadata"],
+            query["variable_id"],
+            query["provenance_id"],
+            query["unit_id"],
+            query["grid_id"],
+        )
+        conditioned = latent + self.query_to_latent(query_embedding).repeat_interleave(hidden_nodes.shape[0], dim=0)
+        if self.ensemble_noise_std:
+            conditioned = conditioned + torch.randn_like(conditioned) * self.ensemble_noise_std
+        edge_attr, edge_index, edge_sizes = self.processor_graph_provider.get_edges(
+            batch_size=1,
+            model_comm_group=model_comm_group,
+        )
+        processed = self.processor(
+            x=conditioned,
+            batch_size=1,
+            shard_info=GraphShardInfo(nodes=hidden_shard_sizes, edges=edge_sizes),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+        )
+        if self.latent_skip:
+            processed = processed + conditioned
+
+        target_name = query.get("grid")
+        if output_coordinates is None:
+            if target_name not in self.decoder_graph_provider:
+                raise ValueError(
+                    "Query grid must name a registered geometry or output_coordinates must be supplied."
+                )
+            target_coordinates = self.node_attributes.get_coordinates(target_name)
+            target_nodes = self.node_attributes(target_name, 1)
+            provider = self.decoder_graph_provider[target_name]
+            edge_attr, edge_index, edge_sizes = provider.get_edges(
+                batch_size=1,
+                model_comm_group=model_comm_group,
+            )
+        else:
+            target_coordinates = output_coordinates.to(device=processed.device, dtype=processed.dtype)
+            target_nodes = torch.cat((torch.sin(target_coordinates), torch.cos(target_coordinates)), dim=-1)
+            provider = self.dynamic_decoder_graph_provider
+            edge_attr, edge_index, edge_sizes = provider.get_edges(
+                batch_size=1,
+                src_coords=self.node_attributes.get_coordinates(self.hidden_name),
+                dst_coords=target_coordinates,
+                model_comm_group=model_comm_group,
+            )
+        target_query = query_embedding.repeat_interleave(target_coordinates.shape[0], dim=0)
+        destination = torch.cat((target_query, target_nodes), dim=-1)
+        target_shard_sizes = get_shard_sizes(destination, 0, model_comm_group)
+        destination = shard_tensor(destination, 0, target_shard_sizes, model_comm_group)
+        output = self.decoder(
+            (processed, destination),
+            batch_size=1,
+            shard_info=BipartiteGraphShardInfo(
+                src_nodes=hidden_shard_sizes,
+                dst_nodes=target_shard_sizes,
+                edges=edge_sizes,
+            ),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+        )
+        return output.reshape(1, -1)
+
+    def process_query_context(
+        self,
+        encoded: tuple[Tensor, Tensor, list[int]],
+        model_comm_group: Any = None,
+    ) -> tuple[Tensor, Tensor, list[int]]:
+        """Run the expensive graph processor once without field-specific conditioning."""
+
+        latent, hidden_nodes, hidden_shard_sizes = encoded
+        edge_attr, edge_index, edge_sizes = self.processor_graph_provider.get_edges(
+            batch_size=1,
+            model_comm_group=model_comm_group,
+        )
+        processed = self.processor(
+            x=latent,
+            batch_size=1,
+            shard_info=GraphShardInfo(nodes=hidden_shard_sizes, edges=edge_sizes),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+        )
+        if self.latent_skip:
+            processed = processed + latent
+        return processed, hidden_nodes, hidden_shard_sizes
+
+    def decode_query_bundle(
+        self,
+        encoded: tuple[Tensor, Tensor, list[int]],
+        query: dict[str, Any],
+        output_coordinates: Tensor | None = None,
+        model_comm_group: Any = None,
+    ) -> Tensor:
+        """Decode every metadata row after one shared processor and graph-decoder pass."""
+
+        if not self.bundle_outputs_by_provenance or self.bundle_query_head is None:
+            raise RuntimeError("Bundled query decoding is disabled by the model configuration.")
+        processed, _, hidden_shard_sizes = self.process_query_context(encoded, model_comm_group)
+        query_embedding = self.query_adapter(
+            query["metadata"],
+            query["variable_id"],
+            query["provenance_id"],
+            query["unit_id"],
+            query["grid_id"],
+        )
+        target_name = query.get("grid")
+        if output_coordinates is None:
+            if target_name not in self.decoder_graph_provider:
+                raise ValueError(
+                    "Query grid must name a registered geometry or output_coordinates must be supplied.",
+                )
+            target_coordinates = self.node_attributes.get_coordinates(target_name)
+            target_nodes = self.node_attributes(target_name, 1)
+            provider = self.decoder_graph_provider[target_name]
+            edge_attr, edge_index, edge_sizes = provider.get_edges(
+                batch_size=1,
+                model_comm_group=model_comm_group,
+            )
+        else:
+            target_coordinates = output_coordinates.to(device=processed.device, dtype=processed.dtype)
+            target_nodes = torch.cat((torch.sin(target_coordinates), torch.cos(target_coordinates)), dim=-1)
+            provider = self.dynamic_decoder_graph_provider
+            edge_attr, edge_index, edge_sizes = provider.get_edges(
+                batch_size=1,
+                src_coords=self.node_attributes.get_coordinates(self.hidden_name),
+                dst_coords=target_coordinates,
+                model_comm_group=model_comm_group,
+            )
+        target_shard_sizes = get_shard_sizes(target_nodes, 0, model_comm_group)
+        destination = shard_tensor(target_nodes, 0, target_shard_sizes, model_comm_group)
+        target_features = self.decoder(
+            (processed, destination),
+            batch_size=1,
+            shard_info=BipartiteGraphShardInfo(
+                src_nodes=hidden_shard_sizes,
+                dst_nodes=target_shard_sizes,
+                edges=edge_sizes,
+            ),
+            edge_attr=edge_attr,
+            edge_index=edge_index,
+            model_comm_group=model_comm_group,
+        ).reshape(-1, processed.shape[-1])
+        coefficients = self.bundle_query_head(query_embedding)
+        weights, bias = coefficients[:, :-1], coefficients[:, -1:]
+        return (weights @ target_features.T) / (weights.shape[-1] ** 0.5) + bias
 
     def _forward_tensors(
         self,
@@ -225,6 +515,18 @@ class QueryForecaster(nn.Module):
         model_comm_group: Any = None,
         grid_shard_sizes: dict[str, list[int]] | None = None,
     ) -> Tensor:
+        if self.bundle_outputs_by_provenance:
+            encoded = self.encode_query_inputs(
+                inputs,
+                model_comm_group=model_comm_group,
+                grid_shard_sizes=grid_shard_sizes,
+            )
+            return self.decode_query_bundle(
+                encoded,
+                query,
+                output_coordinates=output_coordinates,
+                model_comm_group=model_comm_group,
+            )
         batch_size = 1
         hidden_nodes = self.node_attributes(self.hidden_name, batch_size)
         hidden_shard_sizes = get_shard_sizes(hidden_nodes, 0, model_comm_group)

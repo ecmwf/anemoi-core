@@ -28,6 +28,7 @@ HEIGHT_LEVEL_TYPES = {"hl", "heightAboveGround", "heightAboveSea", "height"}
 SURFACE_LEVEL_TYPES = {"sfc", "surface", "meanSea"}
 LAYER_LEVEL_TYPES = {"sol", "soil", "depthBelowLandLayer", "depth_below_land_layer", "layer"}
 ACCUMULATED_PARAMETERS = {"tp"}
+PRESSURE_LEVEL_PARAMETERS = {"q", "t", "u", "v", "w", "z"}
 
 
 def _hours(value: Any) -> float:
@@ -130,6 +131,30 @@ def _height_parameter(value: str) -> tuple[str, float] | None:
     """Map established near-surface short names such as 2t and 10u."""
     match = re.match(r"^(\d+(?:\.\d+)?)(t|d|u|v)$", value)
     return None if match is None else (match.group(2), float(match.group(1)))
+
+
+def _implicit_pressure_level(
+    field_name: str,
+    variable: str,
+    raw_level_type: Any,
+    level: Any,
+) -> float | None:
+    """Recover pressure semantics from established ``variable_level`` names.
+
+    Some regional archives retain the parameter and a name such as ``t_500``
+    but lose ``levtype=pl`` and ``levelist=500`` while being assembled.  The
+    compact name is unambiguous for the atmospheric pressure-level parameters;
+    near-surface fields use names such as ``2t`` and ``10u`` instead.
+    """
+    if raw_level_type is not None or level is not None or variable not in PRESSURE_LEVEL_PARAMETERS:
+        return None
+    prefix = f"{variable}_"
+    if not field_name.startswith(prefix):
+        return None
+    candidate = _level_from_field_name(field_name)
+    if candidate is None or candidate <= 0 or candidate > 1100:
+        return None
+    return candidate
 
 
 @dataclass(frozen=True)
@@ -260,8 +285,19 @@ class QueryCatalogue:
                     mars.get("param") or field_metadata.get("param") or field_name,
                 )
                 variable = self.aliases.get(variable, variable)
-                raw_level_type = mars.get("levtype") or field_metadata.get("level_type") or "sfc"
+                declared_level_type = mars.get("levtype") or field_metadata.get("level_type")
                 level = mars.get("levelist", field_metadata.get("level"))
+                implicit_pressure_level = _implicit_pressure_level(
+                    field_name,
+                    variable,
+                    declared_level_type,
+                    level,
+                )
+                if implicit_pressure_level is not None:
+                    raw_level_type = "pl"
+                    level = implicit_pressure_level
+                else:
+                    raw_level_type = declared_level_type or "sfc"
                 pressure_pa = None
                 model_level = None
                 height_m = None
