@@ -840,11 +840,12 @@ decoder.
    ``decoder`` — two attribute hops below the LightningModule the pipeline
    passes around. Without it nothing resolves.
 
-   ``encoder`` and ``decoder`` are keyed by **dataset name**, so
-   ``encoder.global`` above assumes a dataset named ``global``. On a
-   single-dataset configuration that name is ``data``, giving ``encoder.data``
-   and ``decoder.data``. Use the keys of your own
-   ``dataloader.training`` datasets.
+   ``encoder`` and ``decoder`` are ``ModuleDict`` s keyed by the **names you
+   give them** under ``model.encoders`` and ``model.decoders`` in the model
+   config, so ``encoder.global`` above assumes an encoder named ``global``.
+   The shipped ``graphtransformer.yaml`` names its single encoder and decoder
+   ``"0"``, giving ``encoder.0`` and ``decoder.0``; the multi-dataset presets
+   use ``global`` and ``regional``. Use the keys of your own model config.
 
 .. note::
 

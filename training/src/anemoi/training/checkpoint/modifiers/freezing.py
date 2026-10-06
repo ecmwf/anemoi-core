@@ -30,7 +30,7 @@ class FreezingModifierStage(ModelModifier):
     """Freezes specified submodules. Native PipelineStage — full feature port.
 
     Submodules are addressed by their full path *within the root*: an exact
-    child name or a dot-separated path (e.g., "processor", "encoder.data").
+    child name or a dot-separated path (e.g., "processor", "encoder.global").
     A bare name does not match nested submodules — the full dot-path
     resolution introduced in #1159.
 

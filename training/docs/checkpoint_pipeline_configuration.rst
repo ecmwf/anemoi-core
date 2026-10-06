@@ -167,7 +167,7 @@ training (add a modifier after any loading strategy):
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
            submodule_root: model.model
-           submodules_to_freeze: [encoder.data]
+           submodules_to_freeze: ["encoder.0"]   # the encoder key from your model config
 
 Load weights from S3 or a URL
 =============================
@@ -598,7 +598,7 @@ fixed during training (it sets ``requires_grad=False``):
        modifiers:
          - _target_: anemoi.training.checkpoint.modifiers.freezing.FreezingModifierStage
            submodule_root: model.model
-           submodules_to_freeze: [encoder.data, "processor.proc.0"]
+           submodules_to_freeze: ["encoder.0", "processor.proc.0"]
            strict: false
            validate_gradients: true
 
@@ -623,9 +623,10 @@ fixed during training (it sets ``requires_grad=False``):
       -  ``[]``
       -  Names of the parts to freeze, in **dot notation**, relative to
          ``submodule_root``. Names are exact — there are no wildcards.
-         ``encoder`` and ``decoder`` are keyed by dataset name
-         (``encoder.data`` on a single-dataset run), and the processor's layers
-         live under ``proc`` (``processor.proc.0``).
+         ``encoder`` and ``decoder`` are keyed by the names given under
+         ``model.encoders`` / ``model.decoders`` in the model config
+         (``encoder.0`` with the shipped ``graphtransformer.yaml``), and the
+         processor's layers live under ``proc`` (``processor.proc.0``).
 
    -  -  ``strict``
       -  ``false``
