@@ -192,7 +192,7 @@ class TransformerProcessorBlock(BaseBlock):
         return (x,)
 
 
-class TransformerMapperBlock(TransformerProcessorBlock):
+class TransformerMapperBlock(BaseBlock):
     """Transformer mapper block with MultiHeadCrossAttention and MLPs."""
 
     def __init__(
@@ -212,21 +212,13 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
-        super().__init__(
-            num_channels=num_channels,
-            hidden_dim=hidden_dim,
-            attn_channels=attn_channels,
-            num_heads=num_heads,
-            window_size=window_size,
-            layer_kernels=layer_kernels,
-            dropout_p=dropout_p,
-            qk_norm=qk_norm,
-            attention_implementation=attention_implementation,
-            mlp_implementation=mlp_implementation,
-            softcap=softcap,
-            use_alibi_slopes=use_alibi_slopes,
-            use_rotary_embeddings=use_rotary_embeddings,
-        )
+        super().__init__()
+
+        LayerNorm = layer_kernels.LayerNorm
+
+        self.layer_norm_attention_src = LayerNorm(normalized_shape=num_channels)
+        self.layer_norm_attention_dst = LayerNorm(normalized_shape=num_channels)
+        self.layer_norm_mlp = LayerNorm(normalized_shape=num_channels)
 
         self.attention = MultiHeadCrossAttention(
             num_heads=num_heads,
@@ -244,11 +236,15 @@ class TransformerMapperBlock(TransformerProcessorBlock):
             use_rotary_embeddings=use_rotary_embeddings,
         )
 
-        LayerNorm = layer_kernels.LayerNorm
-
-        self.layer_norm_attention_src = LayerNorm(num_channels)
-        self.layer_norm_attention_dst = LayerNorm(num_channels)
-        self.layer_norm_mpl = LayerNorm(num_channels)
+        self.mlp = MLP(
+            in_features=num_channels,
+            hidden_dim=hidden_dim,
+            out_features=num_channels,
+            layer_kernels=layer_kernels,
+            n_extra_layers=0,
+            layer_norm=False,
+            mlp_implementation=mlp_implementation,
+        )
 
     def forward(
         self,
@@ -264,7 +260,7 @@ class TransformerMapperBlock(TransformerProcessorBlock):
         x_src = self.layer_norm_attention_src(x[0], **cond_src_kwargs)
         x_dst = self.layer_norm_attention_dst(x[1], **cond_dst_kwargs)
         x_dst = x_dst + self.attention((x_src, x_dst), shard_info, batch_size, model_comm_group=model_comm_group)
-        x_dst = x_dst + self.mlp(self.layer_norm_mpl(x_dst, **cond_dst_kwargs))
+        x_dst = x_dst + self.mlp(self.layer_norm_mlp(x_dst, **cond_dst_kwargs))
         return (x_src, x_dst), None  # logic expects return of edge_attr
 
 
