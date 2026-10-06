@@ -51,7 +51,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        metadata: Optional[dict]
+        metadata: Optional[dict],
     ) -> None:
         """Initializes the graph neural network.
 
