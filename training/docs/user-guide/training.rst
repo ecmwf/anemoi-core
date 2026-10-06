@@ -648,7 +648,11 @@ The recommended restart recipe is:
 1. Restart from a checkpoint saved at the end of an epoch.
 2. Keep ``rollout.start``, ``epoch_increment``, and ``maximum``
    **unchanged** in your configuration.
-3. Configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
+3. Use non-persistent dataloader workers. Anemoi applies this automatically
+   when ``rollout.epoch_increment > 0``.
+4. Reuse the original ``ANEMOI_BASE_SEED``, dataloader configuration, and
+   distributed configuration.
+5. Configure ``training.checkpoint.source`` as a ``RunIdSource`` with the
    ``run_id`` of the interrupted job (and ``fork: false`` to resume it).
 
 By default, Anemoi saves each epoch checkpoint after validation. At that point,
@@ -672,9 +676,11 @@ used.
    ``rollout.step`` overrides ``rollout.start`` from the current configuration.
    Resetting the rollout step while restoring optimiser and scheduler state is
    not currently supported. To start from ``rollout.start`` in the current
-   configuration, set ``training.load_weights_only: true``; this restores the
-   model weights but initializes new optimiser and scheduler state from the
-   current configuration.
+   configuration, load the checkpoint with the ``WeightsOnlyLoader`` instead
+   (``training/checkpoint/loading=weights_only``); this restores the model
+   weights but initialises new optimiser and scheduler state from the current
+   configuration. The legacy ``training.load_weights_only`` key is rejected
+   at config validation.
 
 *******************
  Transfer Learning
