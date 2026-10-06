@@ -9,6 +9,8 @@ __pycache__/
 # Distribution / packaging
 .Python
 config/
+# Packaged configuration presets are source files.
+!src/anemoi/training/config/
 build/
 develop-eggs/
 dist/
