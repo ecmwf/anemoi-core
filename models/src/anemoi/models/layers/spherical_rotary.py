@@ -14,7 +14,7 @@ on where its point lies makes the score of a pair depend also on where the key l
 query, which graph transformers get from their edge features. A model component switches it on with::
 
     rotary_embeddings:
-      max_frequency: 100
+      max_frequency: 10000
       backend: triton
 
 It works with every attention implementation (scaled dot product, flash and neighbourhood attention)
@@ -42,7 +42,7 @@ def rotary_angles(coords: Tensor, head_dim: int, max_frequency: float) -> Tensor
     ``max_frequency``. After rotating queries and keys, the score of a pair depends on the straight
     line from the query to the key, ``(x_q - x_k, y_q - y_k, z_q - z_k)``, at every frequency; the
     channels left over are not rotated. A frequency ``w`` repeats every ``2 pi / w`` Earth radii, about
-    ``40,000 km / w``, so ``max_frequency`` 100 reaches down to offsets of a few hundred km. The
+    ``40,000 km / w``, so ``max_frequency`` 10000 reaches down to offsets of a few km. The
     frequencies do not depend on the grid, so a model keeps its embeddings when it is moved to another
     resolution.
 

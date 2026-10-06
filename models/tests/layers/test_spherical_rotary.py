@@ -372,6 +372,6 @@ def test_schemas_accept_rotary_settings(schema, target, extra):
 
 
 def test_forty_thousand_km_over_the_frequency_is_one_turn():
-    # The config documentation's rule of thumb: max_frequency 100 repeats every ~400 km.
+    # The config documentation's rule of thumb: max_frequency 10000 repeats every ~4 km.
     earth_radius_km = 6371.0
-    assert math.isclose(2 * math.pi * earth_radius_km / 100, 400, rel_tol=0.01)
+    assert math.isclose(2 * math.pi * earth_radius_km / 10000, 4, rel_tol=0.01)

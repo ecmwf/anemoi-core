@@ -51,7 +51,7 @@ class NeighbourhoodSchema(BaseModel):
 
 
 class RotaryEmbeddingsSchema(BaseModel):
-    max_frequency: float = Field(ge=1.0, example=100.0)
+    max_frequency: float = Field(ge=1.0, example=10000.0)
     "Highest frequency of the rotary embeddings in radians per Earth radius; it repeats every 40,000 km / max_frequency. The lowest is 1."
     backend: Literal["triton", "torch"] = Field(default="triton")
     "Computes the turn with a Triton kernel ('triton', GPU) or with PyTorch ('torch', any device). Default to 'triton'."
