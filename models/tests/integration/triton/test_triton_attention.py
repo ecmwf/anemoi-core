@@ -211,6 +211,9 @@ BLOCK_SIZES = [(16, 16), (16, 128), (128, 16), (64, 32), (128, 128)]
 @pytest.fixture
 def block_sizes(request):
     """Runs the forward and both backward kernels with the given (BLOCK_FIXED, BLOCK_ITER) pair."""
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
     block_fixed, block_iter = request.param
     config = triton.Config(
         dict(BLOCK_FIXED=block_fixed, BLOCK_ITER=block_iter, WARP_SPECIALIZE=False),
@@ -238,9 +241,6 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
     ones that end inside a block, so the partly filled last block and the window edges are
     exercised for every pair.
     """
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
-
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (2, 3, n_ctx, 64)
     q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator).to(torch.bfloat16) for _ in range(4))
