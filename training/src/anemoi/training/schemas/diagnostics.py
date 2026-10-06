@@ -535,6 +535,7 @@ class ProgressBarSchema(BaseModel):
         "pytorch_lightning.callbacks.TQDMProgressBar",
         "pytorch_lightning.callbacks.RichProgressBar",
         "anemoi.training.diagnostics.profilers.ProfilerProgressBar",
+        "anemoi.training.diagnostics.progress.RecentBatchRateTQDMProgressBar",
     ] = Field(alias="_target_")
     "TQDMProgressBar object from pytorch lightning."
     refresh_rate: PositiveInt = Field(default=1)
