@@ -405,7 +405,7 @@ def test_plot_sample_uses_auxiliary_output_from_validation_output():
 
     batch_size, n_ens, nlatlon, nvar = 2, 1, 20, 2
     pl_module = _make_pl_module_forecaster(validation_rollout=1, nlatlon=nlatlon)
-    pl_module.allgather_batch = lambda tensor, _dataset_name: tensor
+    pl_module.allgather_batch = lambda tensor, _grid_shard_sizes: tensor
     pl_module.model.post_processors = {"data": _IdentityProcessor()}
     conditioned_target = {"data": torch.full((batch_size, 1, n_ens, nlatlon, nvar), 3.0)}
 

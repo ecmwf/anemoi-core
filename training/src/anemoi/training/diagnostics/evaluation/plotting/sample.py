@@ -127,6 +127,7 @@ def single_plot(
             scatter_kwargs["transform"] = data_crs
         psc = ax.scatter(lon, lat, **scatter_kwargs)
     else:
+        # Imported lazily: datashader is an optional dependency (anemoi-training[plotting]).
         import datashader as dsh
         import pandas as pd
         from datashader.mpl_ext import dsshow

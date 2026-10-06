@@ -14,8 +14,8 @@ from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 from anemoi.graphs.create import GraphCreator
-from anemoi.graphs.create import load_graph_from_file
-from anemoi.graphs.create import validate_loaded_graph
+from anemoi.graphs.utils import load_graph_from_file
+from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import NativeGridDataset
 from anemoi.training.data.data_reader import create_dataset

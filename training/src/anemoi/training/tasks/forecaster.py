@@ -99,7 +99,7 @@ class BaseForecaster(BaseTask):
         """Return the current steps configuration based on the rollout step."""
         max_rollout = self.rollout.step
         if mode == "validation" and self.validation_rollout is not None:
-            max_rollout = self.validation_rollout
+            max_rollout = max(max_rollout, self.validation_rollout)
         return tuple({"rollout_step": i} for i in range(max_rollout))
 
     def get_metric_name(self, rollout_step: int = 0, **_kwargs) -> str:
@@ -116,18 +116,15 @@ class BaseForecaster(BaseTask):
         return sorted(all_offsets)
 
     def get_offsets(self, mode: str | None = None) -> list[datetime.timedelta]:
-        if mode == "training":
-            rollout_step = self.rollout.step
-        elif mode == "validation":
-            rollout_step = self.rollout.step if self.validation_rollout is None else self.validation_rollout
+        if mode in ("training", "validation"):
+            rollout_step = len(self.steps(mode))
         else:
             LOGGER.debug(
                 "Unknown mode '%s' for %s.get_offsets(); using offsets for the longest configured rollout.",
                 mode,
                 self.__class__.__name__,
             )
-            validation_rollout = self.rollout.maximum if self.validation_rollout is None else self.validation_rollout
-            rollout_step = max(self.rollout.maximum, validation_rollout)
+            rollout_step = max(self.rollout.maximum, self.validation_rollout or 0)
 
         return self._compute_rollout_offsets(rollout_step)
 

@@ -247,9 +247,8 @@ def get_callbacks(context: CallbacksContext) -> list[Callback]:
     E.g.:
     ```
     callbacks:
-        - _target_: anemoi.training.diagnostics.callbacks.RolloutEval
-          rollout: 1
-          frequency: 12
+        - _target_: anemoi.training.diagnostics.callbacks.per_timestep_metrics.PerTimestepMetrics
+          every_n_batches: 12
     ```
 
     Set `context.diagnostics.plot.callbacks` to a list of plot callback configurations.
