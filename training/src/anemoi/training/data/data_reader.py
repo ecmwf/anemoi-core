@@ -12,7 +12,6 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
-from typing import Sequence
 
 import numpy as np
 import torch
@@ -29,8 +28,8 @@ from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
-from anemoi.training.utils.time_indices import TimeIndices
 from anemoi.training.data.usable_indices import get_usable_indices
+from anemoi.training.utils.time_indices import TimeIndices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -183,6 +182,7 @@ def _to_local_window_shard_data(
 
 class BaseAnemoiReader(ABC):
     """Generic anemoi data reader."""
+
     sample_type: type[SourceSample]
     has_trajectories: bool = False
 
@@ -525,7 +525,6 @@ class GriddedDataReader(BaseAnemoiReader):
             coordinates=self.get_coordinates(),
             shard_sizes=self.grid_shard_sizes,
         )
-
 
 
 class TabularDataReader(BaseAnemoiReader):
