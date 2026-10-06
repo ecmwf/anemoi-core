@@ -187,7 +187,7 @@ class BaseGraphModel(nn.Module):
 
         model_config = DotDict(model_config)
         model_graph_config = DotDict(model_graph_config)
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.model.hidden_nodes_name
 
         if model_graph_config.get("nodes"):
             static_graph_config, dynamic_graph_config = split_graph_config(

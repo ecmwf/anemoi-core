@@ -12,6 +12,7 @@ import logging
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
+from typing import Sequence
 
 import numpy as np
 import torch
@@ -29,6 +30,7 @@ from anemoi.models.distributed.balanced_partition import get_balanced_partition_
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.utils.time_indices import TimeIndices
+from anemoi.training.data.usable_indices import get_usable_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -150,7 +152,7 @@ def _to_local_window_shard_data(
     coord_parts: list[torch.Tensor] = []
     td_parts: list[torch.Tensor] = []
     boundaries_local: list[slice] = []
-    window_shard_sizes_all: list[ShardSizes] = [] if reader_group_size > 1 else None
+    window_shard_sizes_all: list[ShardSizes] = []
 
     offset = 0
     for boundary in boundaries:
@@ -164,8 +166,7 @@ def _to_local_window_shard_data(
         coord_parts.append(coordinates[local_slice])
         td_parts.append(timedeltas[local_slice])
         boundaries_local.append(slice(offset, offset + local_size))
-        if window_shard_sizes_all is not None:
-            window_shard_sizes_all.append(window_shard_sizes)
+        window_shard_sizes_all.append(window_shard_sizes)
         offset += local_size
 
     if data_parts:
@@ -182,6 +183,8 @@ def _to_local_window_shard_data(
 
 class BaseAnemoiReader(ABC):
     """Generic anemoi data reader."""
+    sample_type: type[SourceSample]
+    has_trajectories: bool = False
 
     def __init__(
         self,
@@ -195,11 +198,8 @@ class BaseAnemoiReader(ABC):
         assert dataset or dataset_config, "Either dataset or dataset_config must be provided."
 
         source: dict = _normalize_dataset_config(dataset_config or dataset)
-        source |= {"start": start, "end": end}
-        # start and end arguments have to be passed at the same level as the window and frequency arguments for
-        # tabular datasets
-
-        self.data = open_dataset(source)
+        # start/end must sit next to window/frequency for tabular datasets
+        self.data = open_dataset(source | {"start": start, "end": end})
 
         # lazy init reader group info (will be set by DDPGroupStrategy)
         self.reader_group_rank = 0
@@ -207,10 +207,85 @@ class BaseAnemoiReader(ABC):
         self.grid_shard_sizes = None
         self.grid_shard_slice = None
 
+        #: Sampling config used by :meth:`compute_anchors`.
+        #: ``{"stride": 1}`` keeps every valid position;
+        #: ``{"stride": None}`` uses stride = window size (non-overlapping).
+        self.default_sampling = dict(stride=1)
+
     @property
     def num_sequences(self) -> int:
         """Number of independent sequences in the dataset."""
         return 1
+
+    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
+        """Return the number of positions in ``sequence``."""
+        return len(self.dates)
+
+    @property
+    def missing_sequences(self) -> set[int]:
+        """Return sequences that are entirely missing and must not be sampled."""
+        return set()
+
+    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
+        """Return positions within ``sequence`` that are missing."""
+        return set(self.missing)
+
+    def compute_anchors(
+        self,
+        relative_indices: list[int] | np.ndarray,
+        sampling: dict | None = None,
+    ) -> np.ndarray:
+        """Return the valid ``(sequence, position)`` anchors for a relative window.
+
+        Parameters
+        ----------
+        relative_indices : list[int] | np.ndarray
+            Relative offsets (in positions) requested around each anchor.
+        sampling : dict | None
+            Sampling configuration with key ``"stride"``.
+            ``{"stride": None}`` uses stride = window size (non-overlapping);
+            ``{"stride": 1}`` keeps every valid position;
+            ``{"stride": 6}`` steps anchors by 6.
+            Defaults to :attr:`default_sampling`.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape ``(n_anchors, 2)`` with ``(sequence, position)`` rows.
+        """
+        sampling = sampling or self.default_sampling
+
+        rel = np.asarray(list(relative_indices), dtype=np.int64)
+        window = int(rel.max()) - int(rel.min()) + 1
+
+        # Resolve stride from sampling dict; None → window size (non-overlapping)
+        raw_stride = sampling.get("stride") if isinstance(sampling, dict) else None
+        stride = window if raw_stride is None else int(raw_stride)
+        if stride < 1:
+            msg = f"trajectory_sampling.stride must be >= 1, got {stride}."
+            raise ValueError(msg)
+
+        anchors: list[np.ndarray] = []
+        for sequence in range(self.num_sequences):
+            if sequence in self.missing_sequences:
+                continue
+
+            positions = get_usable_indices(
+                self.missing_positions(sequence),
+                self.sequence_length(sequence),
+                rel,
+            )
+
+            if stride > 1 and positions.size:
+                positions = positions[(positions - positions[0]) % stride == 0]
+
+            if positions.size:
+                seq_col = np.full(positions.size, sequence, dtype=np.int64)
+                anchors.append(np.stack([seq_col, positions], axis=1))
+
+        if not anchors:
+            return np.empty((0, 2), dtype=np.int64)
+        return np.concatenate(anchors, axis=0)
 
     @property
     def dates(self) -> np.ndarray:
@@ -248,22 +323,6 @@ class BaseAnemoiReader(ABC):
         """Layout of one sample, independent of whether its coordinates change."""
 
     @property
-    @abstractmethod
-    def is_static_grid(self) -> bool:
-        """Whether the reader exposes a single, time-invariant grid.
-
-        ``True`` when one set of latitudes/longitudes is shared by every
-        sample; ``False`` when coordinates can change between samples.
-        Tensor structure is described separately by :attr:`layout`. Used by
-        :class:`~anemoi.training.data.multidataset.MultiDataset` to decide
-        whether to share coordinate tensors by reference across the batch.
-        """
-
-    #: The :class:`~anemoi.models.data.SourceSample` subclass returned by :meth:`get_sample`.
-    #: This is the only record of whether the dataset is gridded or tabular.
-    sample_type: type[SourceSample]
-
-    @property
     def is_tabular(self) -> bool:
         """Return whether the reader produces tabular (observation) samples."""
         return issubclass(self.sample_type, TabularSourceSample)
@@ -298,11 +357,6 @@ class BaseAnemoiReader(ABC):
         """Return dataset resolution."""
         return self.data.resolution
 
-    @property
-    @abstractmethod
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-
     def set_reader_group_info(self, reader_group_rank: int, reader_group_size: int) -> None:
         """Set reader communication group information (called by DDPGroupStrategy).
 
@@ -328,7 +382,8 @@ class BaseAnemoiReader(ABC):
     @abstractmethod
     def get_sample(
         self,
-        time_indices: TimeIndices,
+        sequence: int,
+        positions: TimeIndices,
     ) -> SourceSample:
         """Return a single per-sample payload.
 
@@ -356,7 +411,7 @@ class BaseAnemoiReader(ABC):
         return tree
 
 
-class GriddedDataReader(BaseAnemoiReader, ABC):
+class GriddedDataReader(BaseAnemoiReader):
     """Gridded dataset reader with static grid."""
 
     sample_type = GriddedSourceSample
@@ -370,11 +425,6 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def grid_size(self) -> int:
         """Return dataset grid size."""
         return self.data.shape[-1]
-
-    @property
-    def is_static_grid(self) -> bool:
-        """Gridded readers expose a single, time-invariant grid."""
-        return True
 
     @property
     def supporting_arrays(self) -> dict:
@@ -394,11 +444,6 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
     def longitudes(self) -> np.ndarray:
         """Return per-grid-point longitudes in **radians**."""
         return np.deg2rad(np.asarray(self.data.longitudes, dtype=np.float32))
-
-    @property
-    def has_trajectories(self) -> bool:
-        """Return whether the dataset has trajectories."""
-        return False
 
     @cached_property
     def cutout_mask(self) -> np.ndarray:
@@ -434,41 +479,24 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
 
     def get_data(
         self,
-        time_indices: TimeIndices,
+        sequence: int,
+        positions: TimeIndices,
     ) -> torch.Tensor:
         """Return data tensor for the requested time/grid slice.
 
         Output shape: ``(dates, ensemble, gridpoints, variables)``.
         """
+        del sequence
         if self.grid_shard_slice is not None:
-            x = self.data[time_indices, :, :, self.grid_shard_slice]
+            x = self.data[positions, :, :, self.grid_shard_slice]
         else:
-            x = self.data[time_indices, :, :, :]
+            x = self.data[positions, :, :, :]
 
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 
-    def get_coordinates(
-        self,
-        time_indices: TimeIndices | None = None,
-    ) -> torch.Tensor:
-        """Return per-grid-point ``(latitude, longitude)`` coordinates.
-
-        For a static grid the ``time_indices`` argument is ignored and the
-        full grid is returned. Subclasses with dynamic grids must override.
-
-        Parameters
-        ----------
-        time_indices : TimeIndices, optional
-            Time indices; ignored on static grids.
-
-        Returns
-        -------
-        torch.Tensor
-            Tensor of shape ``(N, 2)`` stacking ``(latitudes, longitudes)``
-            along the trailing dimension, in **radians**.
-        """
-        del time_indices  # unused for static grids
+    def get_coordinates(self) -> torch.Tensor:
+        """Return the local shard's ``(N, 2)`` ``(latitude, longitude)`` coordinates in **radians**."""
         lats = self.latitudes
         lons = self.longitudes
 
@@ -484,26 +512,23 @@ class GriddedDataReader(BaseAnemoiReader, ABC):
 
     def get_sample(
         self,
-        time_indices: TimeIndices,
+        sequence: int,
+        positions: TimeIndices,
     ) -> GriddedSourceSample:
         """Return the per-sample payload in the unified contract."""
         return GriddedSourceSample(
-            data=self.get_data(time_indices),
+            data=self.get_data(sequence, positions),
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
             grid_size=self.grid_size,
-            coordinates=self.get_coordinates(time_indices),
+            coordinates=self.get_coordinates(),
             shard_sizes=self.grid_shard_sizes,
         )
 
-    def tree(self, prefix: str = "") -> Tree:
-        tree = super().tree(prefix)
-        tree.add(f"Resolution: {self.resolution}")
-        return tree
 
 
-class ObservationDataReader(BaseAnemoiReader):
+class TabularDataReader(BaseAnemoiReader):
     """Observation dataset reader (e.g. from tabular zarrs).
 
     Each sample is built from a single round-trip ``self.data[time_indices, ...]``
@@ -521,11 +546,6 @@ class ObservationDataReader(BaseAnemoiReader):
         return TensorLayout(ensemble=0, grid=1, variables=2)
 
     @property
-    def is_static_grid(self) -> bool:
-        """Observation readers have a per-sample (dynamic) coordinate set."""
-        return False
-
-    @property
     def grid_size(self) -> None:
         """Return None — observation datasets have no static grid."""
         return None
@@ -534,11 +554,6 @@ class ObservationDataReader(BaseAnemoiReader):
     def supporting_arrays(self) -> dict:
         """Observations do not have supporting_arrays."""
         return {}
-
-    @property
-    def has_trajectories(self) -> bool:
-        """Observation datasets do not have trajectories."""
-        return False
 
     def statistics_tendencies(
         self,
@@ -556,13 +571,14 @@ class ObservationDataReader(BaseAnemoiReader):
 
     def get_sample(
         self,
-        time_indices: TimeIndices,
+        sequence: int,
+        positions: TimeIndices,
     ) -> TabularSourceSample:
         """Get a sample from the observation dataset.
 
         Parameters
         ----------
-        time_indices : TimeIndices
+        positions : TimeIndices
             Time windows and shard selection for the observation sample.
 
         Returns
@@ -572,8 +588,9 @@ class ObservationDataReader(BaseAnemoiReader):
             coordinates in **radians** to match the gridded reader convention, ``(N,)``
             timedeltas and the per-window ``boundaries``.
         """
+        del sequence
         # should return list(window_shard_sizes)
-        x = self.data[time_indices]
+        x = self.data[positions]
 
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
@@ -606,11 +623,11 @@ class ObservationDataReader(BaseAnemoiReader):
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
         if hasattr(self.data, "window"):
-            tree.add(f"Window: {self.window}")
+            tree.add(f"Window: {self.data.window}")
         return tree
 
 
-class TrajectoryDataReader(BaseAnemoiReader):
+class TrajectoryDataReader(GriddedDataReader):
     """Trajectory dataset with an explicit lead-step axis.
 
     Wraps a 5-D ``trajectories``-layout dataset opened through
@@ -627,6 +644,8 @@ class TrajectoryDataReader(BaseAnemoiReader):
     ``open_dataset`` via the dataset configuration.
     """
 
+    has_trajectories = True
+
     def __init__(
         self,
         dataset: str | dict | None = None,
@@ -635,15 +654,11 @@ class TrajectoryDataReader(BaseAnemoiReader):
         end: datetime.datetime | int | None = None,
         sampling: dict | None = None,
     ) -> None:
-        source = dataset_config if dataset_config is not None else dataset
-        if source is None:
-            msg = "Either dataset or dataset_config must be provided."
-            raise ValueError(msg)
+        assert not (dataset and dataset_config), "Only one of dataset or dataset_config should be provided."
+        assert dataset or dataset_config, "Either dataset or dataset_config must be provided."
 
-        # Trajectory datasets derive their step frequency from the dataset itself.
-        # Passing data.frequency would be misleading and is not supported.
-        source_dict = _as_dict(source) if not isinstance(source, str) else {}
-        if isinstance(source_dict, dict) and source_dict.get("frequency") is not None:
+        source: dict = _normalize_dataset_config(dataset_config or dataset)
+        if source.get("frequency") is not None:
             msg = (
                 "TrajectoryDataReader does not accept a 'frequency' in dataset_config. "
                 "The step frequency is read directly from the dataset. "
@@ -651,15 +666,17 @@ class TrajectoryDataReader(BaseAnemoiReader):
             )
             raise AssertionError(msg)
 
-        # Trajectory datasets use base_start/base_end to filter by initialisation date;
-        # passing start/end would trigger access to .dates which doesn't exist on them.
-        open_kwargs: dict = {}
-        if start is not None:
-            open_kwargs["base_start"] = start
-        if end is not None:
-            open_kwargs["base_end"] = end
-        self.data = open_dataset(_normalize_dataset_config(source), **open_kwargs)
+        # Trajectory datasets filter by initialisation date; passing start/end
+        # would trigger access to .dates, which they do not have.
+        open_kwargs = {key: value for key, value in (("base_start", start), ("base_end", end)) if value is not None}
+        self.data = open_dataset(source, **open_kwargs)
         self.default_sampling = sampling if sampling is not None else {"stride": None}
+
+        # lazy init reader group info (will be set by DDPGroupStrategy)
+        self.reader_group_rank = 0
+        self.reader_group_size = 1
+        self.grid_shard_sizes = None
+        self.grid_shard_slice = None
 
     @property
     def num_sequences(self) -> int:
@@ -691,33 +708,27 @@ class TrajectoryDataReader(BaseAnemoiReader):
         )
         raise ValueError(msg)
 
-    def get_sample(
-        self,
-        sequence: int,
-        positions: TimeIndices,
-        grid_shard_indices: np.ndarray | slice | None = None,
-    ) -> torch.Tensor:
-        """Load forecast steps ``positions`` of initialisation ``sequence``."""
+    def get_data(self, sequence: int, positions: TimeIndices) -> torch.Tensor:
+        """Return steps ``positions`` of initialisation ``sequence`` as ``(steps, ensemble, grid, variables)``."""
         if isinstance(positions, slice):
             positions = list(range(*positions.indices(self.sequence_length(sequence))))
         else:
             positions = np.asarray(positions).tolist()
 
         # data[sequence] -> (variables, ensembles, steps, cells)
-        x = self.data[sequence]
-        x = x[:, :, positions, :]
-        if grid_shard_indices is not None:
-            x = x[..., grid_shard_indices]
+        x = self.data[sequence][:, :, positions, :]
+        if self.grid_shard_slice is not None:
+            x = x[..., self.grid_shard_slice]
 
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
 
+    def get_sample(self, sequence: int, positions: TimeIndices) -> GriddedSourceSample:
+        """Return forecast steps ``positions`` of initialisation ``sequence``."""
+        return self._build_sample(self.get_data(sequence, positions))
+
     def tree(self, prefix: str = "") -> Tree:
-        tree = Tree(prefix + " 💾 " + f"{self.__class__.__name__}")
-        tree.add(f"Dataset: {self.data}")
-        tree.add(f"Step frequency: {self.frequency}")
-        tree.add(f"Resolution: {self.resolution}")
-        tree.add(f"Num variables: {len(self.name_to_index)}")
+        tree = super().tree(prefix)
         tree.add(f"Num initialisations: {self.num_sequences}")
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
         tree.add(f"Sampling: {self.default_sampling}")
@@ -735,8 +746,8 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
         return TrajectoryDataReader(**dataset_config, sampling=sampling)
 
     if "window" in dataset_config["dataset_config"] and "frequency" in dataset_config["dataset_config"]:
-        LOGGER.info("Creating ObservationDataReader...")
-        return ObservationDataReader(**dataset_config)
+        LOGGER.info("Creating TabularDataReader...")
+        return TabularDataReader(**dataset_config)
 
-    LOGGER.info("Creating NativeGridDataset...")
-    return NativeGridDataset(**dataset_config)
+    LOGGER.info("Creating GriddedDataReader...")
+    return GriddedDataReader(**dataset_config)

@@ -23,7 +23,7 @@ from torch.utils.data import IterableDataset
 from anemoi.models.data import SourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
-from anemoi.training.data.usable_indices import compute_valid_data_indices
+from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
@@ -72,9 +72,6 @@ class MultiDataset(IterableDataset):
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
 
-        self.static_coord_datasets: tuple[str, ...] = tuple(
-            name for name, reader in data_readers.items() if getattr(reader, "is_static_grid", True)
-        )
         self.epoch = epoch
         self.rollout = rollout
         self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
@@ -89,7 +86,7 @@ class MultiDataset(IterableDataset):
         # semantically meaningless alignment between the two encoders.
         single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
         multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if False:  # single_seq and multi_seq: # TODO(Mario): Fix temporal downscaler with forecast data
+        if single_seq and multi_seq:
             msg = (
                 "Currently mixing single-sequence datasets (global time axis) with "
                 "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
@@ -115,7 +112,10 @@ class MultiDataset(IterableDataset):
             return
 
         # Refresh which sample dates can provide the currently required time steps.
-        self.valid_date_indices = compute_valid_data_indices(self.data_readers, relative_date_indices)
+        # A valid (sequence, position) anchor is a tuple identifying a specific position within a sequence.
+        # The flat index over them allows the shuffle/shard logic to operate efficiently.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
@@ -192,11 +192,6 @@ class MultiDataset(IterableDataset):
                 freq_ref = freq
             assert freq == freq_ref, f"Data reader '{name}' has different frequency than other data readers"
         return freq_ref
-
-    @property
-    def is_static_dataset(self) -> dict[str, bool]:
-        """Return whether each underlying reader exposes a static grid."""
-        return {name: bool(getattr(dataset, "is_static_grid", True)) for name, dataset in self.data_readers.items()}
 
     def set_comm_group_info(
         self,
@@ -352,17 +347,12 @@ class MultiDataset(IterableDataset):
         Each value is the reader's :class:`~anemoi.models.data.SourceSample`, so that
         the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
         """
+        sequence, position = (int(v) for v in self.anchors[index])
+
         x: dict[str, SourceSample] = {}
-        for name, dataset in self.data_readers.items():
-            time_steps = offset_time_indices(index, self.relative_date_indices[name])
-            x[name] = dataset.get_sample(time_steps)
-            LOGGER.debug(
-                "Worker %d (pid %d) read sample for dataset '%s' : %s",
-                self.worker_id,
-                os.getpid(),
-                name,
-                x[name],
-            )
+        for name, data_reader in self.data_readers.items():
+            time_steps = offset_time_indices(position, self.relative_date_indices[name])
+            x[name] = data_reader.get_sample(sequence, time_steps)
 
         return x
 

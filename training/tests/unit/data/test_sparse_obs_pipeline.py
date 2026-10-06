@@ -11,7 +11,7 @@
 
 Covers:
 
-* :meth:`ObservationDataReader.get_sample` — single-round-trip unpack.
+* :meth:`TabularDataReader.get_sample` — single-round-trip unpack.
 * :meth:`Batch.collate` on a mixed gridded + sparse batch.
 * :meth:`Batch.to` on the same mixed batch (CPU-only round-trip; the
   test asserts behaviour, not GPU availability).
@@ -30,7 +30,7 @@ from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.training.data.data_reader import ObservationDataReader
+from anemoi.training.data.data_reader import TabularDataReader
 
 _DATASET_NAME = "npp_atms"
 
@@ -39,7 +39,7 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _make_obs_payload(v=5)
     dataset = _make_obs_reader(payload).data
     monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
-    reader = ObservationDataReader(dataset_config={"dataset": "test-observations"})
+    reader = TabularDataReader(dataset_config={"dataset": "test-observations"})
 
     sample = reader.get_sample(slice(0, 2))
 
@@ -88,13 +88,13 @@ def _make_obs_payload(n: int = 5, v: int = 3, n_times: int = 2) -> SimpleNamespa
     )
 
 
-def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
+def _make_obs_reader(payload: SimpleNamespace) -> TabularDataReader:
     """Attach controlled dataset output to the real reader."""
     dataset = MagicMock()
     dataset.__getitem__.return_value = payload
     dataset.variables = [f"variable_{i}" for i in range(payload.data.shape[1])]
     dataset.statistics = {"mean": np.zeros(payload.data.shape[1], dtype=np.float32)}
-    reader = ObservationDataReader.__new__(ObservationDataReader)
+    reader = TabularDataReader.__new__(TabularDataReader)
     reader.data = dataset
     reader.reader_group_rank = 0
     reader.reader_group_size = 1
@@ -102,7 +102,7 @@ def _make_obs_reader(payload: SimpleNamespace) -> ObservationDataReader:
 
 
 def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> TabularSourceSample:
-    """Build a sparse sample matching the ObservationDataReader contract."""
+    """Build a sparse sample matching the TabularDataReader contract."""
     return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(slice(0, n_times))
 
 
@@ -119,7 +119,7 @@ def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> 
     )
 
 
-# ---------------------------------------------- ObservationDataReader.get_sample
+# ---------------------------------------------- TabularDataReader.get_sample
 
 
 def test_get_sample_returns_unified_contract() -> None:
@@ -160,9 +160,9 @@ def test_get_sample_returns_unified_contract() -> None:
     assert all(isinstance(s, slice) for s in sample.boundaries)
 
 
-def test_observation_reader_is_not_static_grid() -> None:
-    reader = ObservationDataReader.__new__(ObservationDataReader)
-    assert reader.is_static_grid is False
+def test_tabular_reader_is_tabular() -> None:
+    reader = TabularDataReader.__new__(TabularDataReader)
+    assert reader.is_tabular is True
 
 
 # ----------------------------------------------- Batch.collate (mixed batch)

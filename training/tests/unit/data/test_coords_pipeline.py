@@ -68,22 +68,21 @@ def test_reader_get_coordinates_with_grid_shard(mocker: MockFixture) -> None:
     np.testing.assert_allclose(coords[:, 0].numpy(), reader.latitudes[4:8])
 
 
-def test_reader_is_static_grid_default_true(mocker: MockFixture) -> None:
+def test_gridded_reader_is_not_tabular(mocker: MockFixture) -> None:
     reader = _make_reader(grid=3, mocker=mocker)
-    assert reader.is_static_grid is True
+    assert reader.is_tabular is False
 
 
 # -------------------------------------------------------- MultiDataset coords
 
 
-def _make_mock_reader(mocker: MockFixture, grid: int, *, static: bool) -> MockFixture:
+def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader = mocker.MagicMock()
     reader.missing = set()
     reader.dates = list(range(20))
     reader.has_trajectories = False
     reader.num_sequences = 1
     reader.frequency = "3h"
-    reader.is_static_grid = static
     reader.get_sample.return_value = GriddedSourceSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],
@@ -94,16 +93,11 @@ def _make_mock_reader(mocker: MockFixture, grid: int, *, static: bool) -> MockFi
     return reader
 
 
-def _make_multidataset(
-    mocker: MockFixture,
-    *,
-    a_static: bool = True,
-    b_static: bool = True,
-) -> MultiDataset:
+def _make_multidataset(mocker: MockFixture) -> MultiDataset:
     ds = MultiDataset(
         data_readers={
-            "a": _make_mock_reader(mocker, grid=6, static=a_static),
-            "b": _make_mock_reader(mocker, grid=4, static=b_static),
+            "a": _make_mock_reader(mocker, grid=6),
+            "b": _make_mock_reader(mocker, grid=4),
         },
         relative_date_indices={"a": [0, 1], "b": [0, 1]},
     )
@@ -119,11 +113,6 @@ def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> 
     assert sample["a"].coordinates.shape == (6, 2)
     # Relative indices [0, 1] are normalized to a slice and offset by the reference index.
     ds.data_readers["a"].get_sample.assert_called_with(slice(0, 2, 1))
-
-
-def test_multidataset_static_dataset_detection(mocker: MockFixture) -> None:
-    ds = _make_multidataset(mocker, a_static=True, b_static=False)
-    assert ds.static_coord_datasets == ("a",)
 
 
 def test_multidataset_collates_to_batch(mocker: MockFixture) -> None:
@@ -159,7 +148,7 @@ def test_datamodule_collate_factory_returns_batch(mocker: MockFixture) -> None:
 
 def test_static_coords_share_same_object_through_full_pipeline(mocker: MockFixture) -> None:
     """End-to-end: the static reader's coord tensor object survives collate."""
-    ds = _make_multidataset(mocker, a_static=True, b_static=True)
+    ds = _make_multidataset(mocker)
     s1 = ds.get_sample(0)
     s2 = ds.get_sample(0)
     batch = Batch.collate([s1, s2])

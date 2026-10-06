@@ -12,12 +12,10 @@ import datetime
 import numpy as np
 import pytest
 import torch
-from omegaconf import OmegaConf
 from pydantic import ValidationError
 
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import TrajectoryDataReader
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
@@ -447,26 +445,6 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
     )
 
     assert cfg.dataset_config == {"invalid_key": "not_supported"}
-
-
-@skip_if_offline
-def test_create_dataset_selects_trajectory_reader(dataset_path: str) -> None:
-    """A ``trajectory`` section with ``start`` and ``length`` creates a TrajectoryDataReader."""
-    dataset_reader_cfg = OmegaConf.create(
-        {
-            "dataset_config": {"dataset": dataset_path, "frequency": "6h"},
-            "start": None,
-            "end": None,
-            "trajectory": {"start": "2017-01-01T00:00:00", "length": 4},
-        },
-    )
-
-    dataset = create_dataset(dataset_reader_cfg)
-
-    assert isinstance(dataset, TrajectoryDataReader)
-    assert dataset.has_trajectories
-    assert dataset.trajectory_length == 4
-    assert len(dataset.trajectory_ids) == len(dataset.dates)
 
 
 @skip_if_offline

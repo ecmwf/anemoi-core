@@ -32,7 +32,6 @@ class TestMultiDataset:
         reader.frequency = "3h"
         reader.num_sequences = 1
         reader.has_trajectories = False
-        reader.is_static_grid = True
         return reader
 
     @pytest.fixture
