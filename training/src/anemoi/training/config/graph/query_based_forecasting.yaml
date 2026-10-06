@@ -1,5 +1,0 @@
-# The query data module expands this from the enabled native geometries.
-overwrite: false
-nodes: null
-edges: null
-post_processors: []

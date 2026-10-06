@@ -1,4 +1,0 @@
-# Query-first multi-archive training on a stretched global-to-Norway processor mesh.
-defaults:
-  - query_based_forecasting
-  - _self_

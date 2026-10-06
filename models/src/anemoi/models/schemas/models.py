@@ -67,9 +67,6 @@ class DefinedModels(str, Enum):
     )
     ANEMOI_TRANSPORT_TEND_MODEL_ENC_PROC_DEC_SHORT = "anemoi.models.models.AnemoiTransportTendModelEncProcDec"
 
-    QUERY_FORECASTER = "anemoi.models.models.QueryForecaster"
-    QUERY_FORECASTER_LONG = "anemoi.models.models.query_forecaster.QueryForecaster"
-
 
 class Model(BaseModel):
     target_: DefinedModels = Field(..., alias="_target_")
@@ -85,42 +82,6 @@ class Model(BaseModel):
 class SparseProjectorSchema(BaseModel):
     num_chunks: PositiveInt = Field(default=1, examples=[1])
     "Number of chunks to use for sparse projection matmuls."
-
-
-class QueryStretchedGridConfig(BaseModel):
-    """A fixed transferable processor mesh refined over one configured area."""
-
-    enabled: bool = False
-    context_source: Literal["ERA5", "IFS"] = "ERA5"
-    area: list[float] | None = Field(default=None, min_length=4, max_length=4)
-    """Refinement bbox, or ``None`` to derive the union of regional source footprints."""
-    global_resolution: PositiveInt = 3
-    local_resolution: PositiveInt = 6
-    margin_radius_km: PositiveFloat = 100.0
-
-
-class QueryModelConfig(BaseModel):
-    """Dimensions and geometry choices specific to the experimental query model."""
-
-    metadata_hidden_dim: PositiveInt = 64
-    lead_time_fourier_features: PositiveInt = 8
-    "Number of log-spaced Fourier periods used by the continuous query lead-time encoder."
-    lead_time_min_period_hours: PositiveFloat = 1.0
-    lead_time_max_period_hours: PositiveFloat = 168.0
-    adapter_node_chunk_size: PositiveInt = 4096
-    processor_mesh_resolution: PositiveInt = 5
-    encoder_neighbours: PositiveInt = 12
-    dynamic_encoder: bool = True
-    "Filter cached encoder candidates using the source nodes valid in each query."
-    decoder_neighbours: PositiveInt = 4
-    decoder_chunk_size: PositiveInt = 512
-    ensemble_noise_std: NonNegativeFloat = 0.0
-    "Standard deviation of independent latent noise for ensemble query forecasts."
-    zero_initialize_decoder: bool = False
-    "Initialize the scalar decoder output at zero, useful for residual prediction."
-    bundle_outputs_by_provenance: bool = False
-    "Process one context graph once and decode a metadata-defined field bundle."
-    stretched_grid: QueryStretchedGridConfig = Field(default_factory=QueryStretchedGridConfig)
 
 
 class TransportSourceConfig(BaseModel):
@@ -239,8 +200,6 @@ class BaseModelSchema(PydanticBaseModel):
     "Keep the input batch and the output of the model sharded"
     sparse_projector: SparseProjectorSchema = Field(default_factory=SparseProjectorSchema)
     "Sparse projection settings."
-    query: QueryModelConfig | None = None
-    "Query adapter and transferable geometry settings."
     model: Model = Field(default_factory=Model)
     "Model schema."
     node_trainable_parameters: dict[str, NonNegativeInt] = Field(examples=[{"data": 8, "hidden": 8}])

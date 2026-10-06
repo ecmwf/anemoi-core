@@ -9,7 +9,6 @@
 
 from .forecaster import Forecaster
 from .forecaster import OffsetForecaster
-from .query_forecasting import QueryForecasting
 from .temporal_downscaler import TemporalDownscaler
 from .timeless import Autoencoder
 
@@ -17,6 +16,5 @@ __all__ = [
     "Autoencoder",
     "Forecaster",
     "OffsetForecaster",
-    "QueryForecasting",
     "TemporalDownscaler",
 ]

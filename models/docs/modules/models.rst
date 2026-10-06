@@ -19,6 +19,46 @@ processor, and decoder components (`Lang et al. (2024a)
    :no-undoc-members:
    :show-inheritance:
 
+Paper-structured multidomain downscaling
+=======================================
+
+The dedicated transport branch also provides the checkpoint-compatible
+models used by the multidomain analog downscaling campaign:
+
+* ``anemoi.models.models.multidomain_transport.PaperStructuredMultidomainTransport``
+  is a velocity network on a shared 100,000-node residual-factor mesh. It
+  uses ``GraphTransformerProcessor``, domain graph providers, current-weather
+  context and conditional flow-time normalization. Atmospheric and transformed
+  precipitation models share this implementation with different factor counts.
+* ``anemoi.models.models.multidomain_decoder.PaperMultidomainDecoder`` lifts
+  factors through ``GraphTransformerBackwardMapper`` to a native regional grid.
+  It retains the PCA skip, high-resolution static context, native convolutional
+  refiners, isolated precipitation specialization and temperature-coupled
+  saturation-humidity coordinate.
+
+These are model components with explicit tensor/graph constructor contracts,
+not drop-in ``AnemoiModelEncProcDec`` replacements or registered training
+methods. Dataset/bank/PCA preparation, staged training orchestration and
+ensemble inference assembly remain in the campaign repository. Publishing
+these classes does not register the full campaign with the standard training
+CLI. They use a fixed semantic channel union, not the arbitrary-variable
+metadata query head. Flow time is integration time, not a forecast lead.
+
+State-dict keys and tensor shapes are retained for existing checkpoints;
+``load_state_dict(..., strict=True)`` does not require key remapping.
+Precipitation inputs use the campaign's continuous log coordinate; the
+decoder does not silently change its physical inverse. Humidity pairing and
+scales must be derived from training data only.
+
+.. autoclass:: anemoi.models.models.multidomain_transport.PaperStructuredMultidomainTransport
+   :members:
+
+.. autoclass:: anemoi.models.models.multidomain_decoder.PaperMultidomainDecoder
+   :members:
+
+.. autoclass:: anemoi.models.models.multidomain_decoder.SaturationHumidityCoordinate
+   :members:
+
 Residual connections (including graph-based truncation) are configured in
 the model config; see :ref:`residual-connections` for details.
 
