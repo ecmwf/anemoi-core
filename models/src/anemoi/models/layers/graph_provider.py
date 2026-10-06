@@ -58,24 +58,24 @@ def create_graph_provider(
     Parameters
     ----------
     graph : HeteroData, optional
-        Graph containing edges (for static mode)
+        Graph containing edges (for static mode).
     edge_builders : list[dict[str, dict]], optional
-        Edge builder configs (for dynamic mode)
+        Edge builder configs (for dynamic mode).
     attributes : dict[str, dict], optional
-        Edge attribute configs (for dynamic mode)
+        Edge attribute configs (for dynamic mode).
     edge_attribute_names : list[str], optional
-        Edge attributes to use (for static mode)
+        Edge attributes to use (for static mode).
     src_size : int, optional
-        Source grid size (for static mode)
+        Source grid size (for static mode).
     dst_size : int, optional
-        Destination grid size (for static mode)
+        Destination grid size (for static mode).
     trainable_size : int, optional
-        Trainable tensor size, by default 0
+        Trainable tensor size, by default 0.
 
     Returns
     -------
     BaseGraphProvider
-        Appropriate graph provider instance
+        Appropriate graph provider instance.
     """
     if (graph == {} or graph is None) and edge_builders is not None:
         if trainable_size > 0:
@@ -137,19 +137,19 @@ class BaseGraphProvider(nn.Module, ABC):
         Parameters
         ----------
         batch_size : int, optional
-            Number of times to expand the edge index (used by static mode)
+            Number of times to expand the edge index (used by static mode).
         src_coords : Tensor, optional
-            Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+            Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.).
         dst_coords : Tensor, optional
-            Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+            Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.).
         src_batch_sizes : tuple[int, ...], optional
             Number of source nodes in each variable-length batch sample.
         dst_batch_sizes : tuple[int, ...], optional
             Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
-            Whether to shard edges, by default True
+            Whether to shard edges, by default True.
         src_timedeltas : Tensor, optional
             Per-source-node signed time offsets in seconds.
         dst_timedeltas : Tensor, optional
@@ -159,7 +159,7 @@ class BaseGraphProvider(nn.Module, ABC):
         -------
         Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]
             For standard providers: (edge_attr, edge_index, edge_shard_sizes) tuple
-            For sparse providers: sparse projection matrix
+            For sparse providers: sparse projection matrix.
         """
         pass
 
@@ -246,16 +246,16 @@ class StaticGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         edge_index : Adj
-            Edge index to start
+            Edge index to start.
         edge_inc : Tensor
-            Edge increment to use
+            Edge increment to use.
         batch_size : int
-            Number of times to expand the edge index
+            Number of times to expand the edge index.
 
         Returns
         -------
         Adj
-            Expanded edge index
+            Expanded edge index.
         """
         edge_index = torch.cat(
             [edge_index + i * edge_inc for i in range(batch_size)],
@@ -310,17 +310,17 @@ class StaticGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         batch_size : int
-            Number of times to expand the edge index
+            Number of times to expand the edge index.
         src_coords : Tensor, optional
-            Source node coordinates (ignored for static graphs)
+            Source node coordinates (ignored for static graphs).
         dst_coords : Tensor, optional
-            Destination node coordinates (ignored for static graphs)
+            Destination node coordinates (ignored for static graphs).
         src_batch_sizes : tuple[int, ...], optional
             Variable-length source sample sizes (ignored for static graphs).
         dst_batch_sizes : tuple[int, ...], optional
             Variable-length destination sample sizes (ignored for static graphs).
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
             Whether to shard edges, by default True.
         act_checkpoint : bool, optional
@@ -345,7 +345,7 @@ class StaticGraphProvider(BaseGraphProvider):
 class NoOpGraphProvider(BaseGraphProvider):
     """Provider for edge-less architectures (e.g., Transformers).
 
-    Returns None for edges and has edge_dim=0. Used when the mapper/processor
+    Returns an empty edge set and has edge_dim=0. Used when the mapper/processor
     does not require graph structure (e.g., pure attention-based models).
     """
 
@@ -369,36 +369,42 @@ class NoOpGraphProvider(BaseGraphProvider):
         shard_edges: bool = True,
         src_timedeltas: Optional[Tensor] = None,
         dst_timedeltas: Optional[Tensor] = None,
-    ) -> tuple[None, None, None]:
-        """Return None for edge attributes, edge index, and edge_shard_sizes.
+    ) -> tuple[Tensor, Tensor, None]:
+        """Return an empty edge set.
+
+        The edge tensors have no edges, so callers can move and check them like real edges.
 
         Parameters
         ----------
         batch_size : int, optional
-            Unused
+            Unused.
         src_coords : Tensor, optional
-            Unused
+            Unused.
         dst_coords : Tensor, optional
-            Unused
+            Unused.
         src_batch_sizes : tuple[int, ...], optional
-            Unused
+            Unused.
         dst_batch_sizes : tuple[int, ...], optional
-            Unused
+            Unused.
         model_comm_group : ProcessGroup, optional
-            Unused
+            Unused.
         shard_edges : bool, optional
-            Unused
+            Unused.
         src_timedeltas : Tensor, optional
-            Unused
+            Unused.
         dst_timedeltas : Tensor, optional
-            Unused
+            Unused.
 
         Returns
         -------
-        tuple[None, None, None]
-            No edges
+        tuple[Tensor, Tensor, None]
+            ``(edge_attr, edge_index, edge_shard_sizes)``: a ``(0, 0)`` float tensor, a ``(2, 0)``
+            long tensor on the device of the coordinates (if given), and ``None`` (not sharded).
         """
-        return None, None, None
+        device = next((coords.device for coords in (src_coords, dst_coords) if coords is not None), None)
+        edge_attr = torch.empty((0, self.edge_dim), device=device)
+        edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
+        return edge_attr, edge_index, None
 
 
 class DynamicGraphProvider(BaseGraphProvider):
@@ -557,9 +563,9 @@ class DynamicGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         src_coords : Tensor
-            Source node features/positions
+            Source node features/positions.
         dst_coords : Tensor
-            Destination node features/positions
+            Destination node features/positions.
         src_batch_sizes : tuple[int, ...], optional
             Number of source nodes in each variable-length batch sample.
         dst_batch_sizes : tuple[int, ...], optional
@@ -569,12 +575,12 @@ class DynamicGraphProvider(BaseGraphProvider):
         dst_timedeltas : Tensor, optional
             Per-destination-node signed time offsets in seconds.
         **kwargs
-            Additional parameters for graph construction algorithm
+            Additional parameters for graph construction algorithm.
 
         Returns
         -------
         tuple[Tensor, Adj]
-            Edge attributes and edge index
+            Edge attributes and edge index.
         """
         if src_timedeltas is not None and src_timedeltas.shape[0] != src_coords.shape[0]:
             raise ValueError("src_timedeltas must contain one value per source coordinate.")
@@ -677,19 +683,19 @@ class DynamicGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         batch_size : int, optional
-            Batch size (currently unused, reserved for future implementation)
+            Batch size (currently unused, reserved for future implementation).
         src_coords : Tensor, optional
-            Source node coordinates
+            Source node coordinates.
         dst_coords : Tensor, optional
-            Destination node coordinates
+            Destination node coordinates.
         src_batch_sizes : tuple[int, ...], optional
             Number of source nodes in each variable-length batch sample.
         dst_batch_sizes : tuple[int, ...], optional
             Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
-            Whether to shard edges, by default True
+            Whether to shard edges, by default True.
         act_checkpoint : bool, optional
             Whether to use gradient checkpointing, by default True.
         src_timedeltas : Tensor, optional
@@ -705,9 +711,9 @@ class DynamicGraphProvider(BaseGraphProvider):
         Raises
         ------
         ValueError
-            If coordinates are not provided
+            If coordinates are not provided.
         NotImplementedError
-            If build_graph() is not yet implemented
+            If build_graph() is not yet implemented.
         """
         if src_coords is None or dst_coords is None:
             raise ValueError("DynamicGraphProvider requires (src_coords, dst_coords) to construct edges.")
@@ -927,28 +933,28 @@ class ProjectionGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         batch_size : int, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         src_coords : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         dst_coords : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         model_comm_group : ProcessGroup, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         shard_edges : bool, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         device : torch.device, optional
-            Target device for matrix
+            Target device for matrix.
         src_timedeltas : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         dst_timedeltas : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         dtype : torch.dtype, optional
-            Target dtype for matrix
+            Target dtype for matrix.
 
         Returns
         -------
         Tensor
-            Sparse projection matrix
+            Sparse projection matrix.
         """
         if device is not None or dtype is not None:
             # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand

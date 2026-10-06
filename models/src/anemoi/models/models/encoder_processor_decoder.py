@@ -18,6 +18,7 @@ import torch
 from hydra.utils import instantiate
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data.storage import EdgeStorage
 
 from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
@@ -142,6 +143,16 @@ class EncoderSource:
     shard_info: BipartiteGraphShardInfo
 
 
+def _edges_or_none(graph: HeteroData, edge_type: tuple[str, str, str]) -> EdgeStorage | None:
+    """Return the edges of ``edge_type``, or ``None`` if the graph has none.
+
+    A missing edge set means an edge-less layer (``create_graph_provider`` then returns a
+    ``NoOpGraphProvider``). Indexing a ``HeteroData`` with a missing edge type would add an
+    empty one to the graph, so the type is checked first.
+    """
+    return graph[edge_type] if edge_type in graph.edge_types else None
+
+
 class AnemoiModelEncProcDec(BaseGraphModel):
     """Message passing graph neural network."""
 
@@ -257,9 +268,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             # Create graph providers
             self.encoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=static_graph[(dataset_name, "to", self._graph_name_hidden)],
+                graph=_edges_or_none(static_graph, (dataset_name, "to", self._graph_name_hidden)),
                 edge_attribute_names=encoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config[(dataset_name, "to", self._graph_name_hidden)],
+                **dynamic_graph_config.get((dataset_name, "to", self._graph_name_hidden), {}),
                 src_size=static_graph[dataset_name].num_nodes,
                 dst_size=static_graph[self._graph_name_hidden].num_nodes,
                 trainable_size=encoder_config.mapper.get("trainable_size", 0),
@@ -271,9 +282,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         """Builds the graph providers for the processor network."""
 
         self.processor_graph_provider = create_graph_provider(
-            graph=static_graph[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            graph=_edges_or_none(static_graph, (self._graph_name_hidden, "to", self._graph_name_hidden)),
             edge_attribute_names=processor_config.get("sub_graph_edge_attributes"),
-            **dynamic_graph_config[(self._graph_name_hidden, "to", self._graph_name_hidden)],
+            **dynamic_graph_config.get((self._graph_name_hidden, "to", self._graph_name_hidden), {}),
             src_size=static_graph[self._graph_name_hidden].num_nodes,
             dst_size=static_graph[self._graph_name_hidden].num_nodes,
             trainable_size=processor_config.get("trainable_size", 0),
@@ -305,9 +316,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             decoder_config = decoders_config[self.dataset2decoder[dataset_name]]
             self.decoder_graph_provider[dataset_name] = create_graph_provider(
-                graph=static_graph[(self._graph_name_hidden, "to", dataset_name)],
+                graph=_edges_or_none(static_graph, (self._graph_name_hidden, "to", dataset_name)),
                 edge_attribute_names=decoder_config.mapper.get("sub_graph_edge_attributes"),
-                **dynamic_graph_config[(self._graph_name_hidden, "to", dataset_name)],
+                **dynamic_graph_config.get((self._graph_name_hidden, "to", dataset_name), {}),
                 src_size=static_graph[self._graph_name_hidden].num_nodes,
                 dst_size=static_graph[dataset_name].num_nodes,
                 trainable_size=decoder_config.mapper.get("trainable_size", 0),
@@ -761,6 +772,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             views (``view.flatten().shard_sizes``).
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
+        target_template : dict[str, Template]
+            What to predict per decoded dataset: the output variables and target nodes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.
         **kwargs

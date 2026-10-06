@@ -17,6 +17,7 @@ import torch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.layers.activations import CustomRelu
 from anemoi.models.preprocessing import BasePreprocessor
+from anemoi.models.preprocessing import resolve_variable_indices
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,10 +67,11 @@ class Postprocessor(BasePreprocessor):
         self.num_inference_output_vars = len(self.data_indices.model.output.name_to_index)
 
         (
+            self.postprocessed_names,
             self.index_training_output,
             self.index_inference_output,
             self.postprocessorfunctions,
-        ) = ([], [], [])
+        ) = ([], [], [], [])
 
     def _create_postprocessing_indices(self):
         """Create the indices for postprocessing."""
@@ -86,6 +88,7 @@ class Postprocessor(BasePreprocessor):
                 f"Postprocessors cannot be applied to forcing variables."
             )
 
+            self.postprocessed_names.append(name)
             self.index_training_output.append(self._get_index(self.data_indices.data.output.name_to_index, name))
             self.index_inference_output.append(self._get_index(self.data_indices.model.output.name_to_index, name))
             self.postprocessorfunctions.append(self._get_postprocessor_function(method, name))
@@ -110,20 +113,44 @@ class Postprocessor(BasePreprocessor):
         LOGGER.info(f"Postprocessor: applying {method} to {name}")
         return postprocessor_function
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
+    def _output_indices(
+        self,
+        names: list[str],
+        x: torch.Tensor,
+        name_to_index: Optional[dict[str, int]],
+        training_indices: list[int | None],
+        inference_indices: list[int | None],
+    ) -> list[int | None]:
+        """Locate ``names`` in the model output ``x``: by name if ``name_to_index`` is given, else by width."""
+        return resolve_variable_indices(
+            self.__class__.__name__,
+            names,
+            x.shape[-1],
+            name_to_index,
+            {
+                "training output": (self.num_training_output_vars, training_indices),
+                "inference output": (self.num_inference_output_vars, inference_indices),
+            },
+        )
+
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Postprocess model output tensor."""
         if not in_place:
             x = x.clone()
 
-        if x.shape[-1] == self.num_training_output_vars:
-            index = self.index_training_output
-        elif x.shape[-1] == self.num_inference_output_vars:
-            index = self.index_inference_output
-        else:
-            raise ValueError(
-                f"Input tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        index = self._output_indices(
+            self.postprocessed_names,
+            x,
+            name_to_index,
+            self.index_training_output,
+            self.index_inference_output,
+        )
 
         # Replace values
         for postprocessor, idx_dst in zip(self.postprocessorfunctions, index):
@@ -255,24 +282,36 @@ class ConditionalPostprocessor(Postprocessor):
         """
         pass
 
-    def inverse_transform(self, x: torch.Tensor, in_place: bool = True, **_kwargs) -> torch.Tensor:
+    def inverse_transform(
+        self,
+        x: torch.Tensor,
+        in_place: bool = True,
+        name_to_index: Optional[dict[str, int]] = None,
+        **_kwargs,
+    ) -> torch.Tensor:
         """Set values in the output tensor."""
         if not in_place:
             x = x.clone()
 
-        # Replace with value if masking variable is zero
-        if x.shape[-1] == self.num_training_output_vars:
-            index = self.index_training_output
-            masking_variable = self.masking_variable_training_output
-        elif x.shape[-1] == self.num_inference_output_vars:
-            index = self.index_inference_output
-            masking_variable = self.masking_variable_inference_output
-        else:
-            raise ValueError(
-                f"Output tensor ({x.shape[-1]}) does not match the training "
-                f"({self.num_training_output_vars}) or inference shape ({self.num_inference_output_vars})",
-            )
+        index = self._output_indices(
+            self.postprocessed_names,
+            x,
+            name_to_index,
+            self.index_training_output,
+            self.index_inference_output,
+        )
+        (masking_variable,) = self._output_indices(
+            [self.masking_variable],
+            x,
+            name_to_index,
+            [self.masking_variable_training_output],
+            [self.masking_variable_inference_output],
+        )
+        if masking_variable is None:
+            msg = f"{self.__class__.__name__}: the masking variable {self.masking_variable!r} is not in the output."
+            raise ValueError(msg)
 
+        # Replace with value if masking variable is zero
         postprocessor_mask = self.get_locations(x[..., masking_variable])
 
         # Replace values

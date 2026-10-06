@@ -83,20 +83,6 @@ class MultiDataset(IterableDataset):
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if False:  # single_seq and multi_seq: # TODO(Mario): Fix temporal downscaler with forecast data
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
         self._lazy_init_model_and_reader_group_info()
 
     def set_epoch(
@@ -212,17 +198,17 @@ class MultiDataset(IterableDataset):
         Parameters
         ----------
         global_rank : int
-            Global rank
+            Global rank.
         model_comm_group_id : int
-            Model communication group ID
+            Model communication group ID.
         model_comm_group_rank : int
-            Model communication group rank
+            Model communication group rank.
         model_comm_num_groups : int
-            Number of model communication groups
+            Number of model communication groups.
         reader_group_rank : int
-            Reader group rank
+            Reader group rank.
         reader_group_size : int
-            Reader group size
+            Reader group size.
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -262,11 +248,11 @@ class MultiDataset(IterableDataset):
         Parameters
         ----------
         ens_comm_group_id : int
-            Ensemble communication group ID
+            Ensemble communication group ID.
         ens_comm_group_rank : int
-            Ensemble communication group rank
+            Ensemble communication group rank.
         ens_comm_num_groups : int
-            Number of ensemble communication groups
+            Number of ensemble communication groups.
         """
         self.ens_comm_group_id = ens_comm_group_id
         self.ens_comm_group_rank = ens_comm_group_rank

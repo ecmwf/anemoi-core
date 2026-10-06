@@ -10,6 +10,8 @@
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
+from collections.abc import Sequence
 from typing import Optional
 
 import torch
@@ -19,6 +21,61 @@ from anemoi.models.data.sources.base import Source
 from anemoi.models.data_indices.collection import IndexCollection
 
 LOGGER = logging.getLogger(__name__)
+
+
+def resolve_variable_indices(
+    processor: str,
+    names: Sequence[str],
+    width: int,
+    name_to_index: Mapping[str, int] | None,
+    layouts: Mapping[str, tuple[int, Sequence[int | None]]],
+) -> list[int | None]:
+    """Return where each of ``names`` sits along the variable axis of a tensor with ``width`` variables.
+
+    With ``name_to_index``, positions come from the variable names;
+    a name the tensor does not carry gets ``None``. Without it, the layout is
+    inferred from the width among ``layouts``. 
+    
+    A width that matches no layout will raise a ValueError.
+
+    Parameters
+    ----------
+    processor : str
+        Processor name, for error messages.
+    names : Sequence[str]
+        Variables to locate.
+    width : int
+        Size of the tensor's variable axis.
+    name_to_index : Mapping[str, int] | None
+        The tensor's variable positions, if known.
+    layouts : Mapping[str, tuple[int, Sequence[int | None]]]
+        Width-inference fallback: ``{label: (number_of_variables, positions_of_names)}``.
+
+    Returns
+    -------
+    list[int | None]
+        One position (or ``None``) per name.
+    """
+    if name_to_index is not None:
+        if len(name_to_index) != width:
+            msg = f"{processor}: the tensor has {width} variables, but name_to_index lists {len(name_to_index)}."
+            raise ValueError(msg)
+        return [name_to_index.get(name) for name in names]
+
+    matches = {label: list(indices) for label, (n_variables, indices) in layouts.items() if n_variables == width}
+    if not matches:
+        expected = {label: n_variables for label, (n_variables, _) in layouts.items()}
+        msg = f"{processor}: a tensor with {width} variables matches none of the known layouts {expected}."
+        raise ValueError(msg)
+
+    if len({tuple(indices) for indices in matches.values()}) > 1:
+        msg = (
+            f"{processor}: a tensor with {width} variables matches the layouts {sorted(matches)}, which place "
+            "the variables differently. Pass name_to_index to select the variables by name."
+        )
+        raise ValueError(msg)
+
+    return next(iter(matches.values()))
 
 
 class BasePreprocessor(nn.Module, ABC):
@@ -97,12 +154,12 @@ class BasePreprocessor(nn.Module, ABC):
         Parameters
         ----------
         method_config : dict[str, list[str]]
-            dictionary of the methods with lists of variables
+            dictionary of the methods with lists of variables.
 
         Returns
         -------
         dict[str, str]
-            dictionary of the variables with methods
+            dictionary of the variables with methods.
         """
         return {
             variable: method
@@ -133,18 +190,18 @@ class BasePreprocessor(nn.Module, ABC):
         Parameters
         ----------
         x : Source
-            Input tensor
+            Input tensor.
         in_place : bool
-            Whether to process the tensor in place
+            Whether to process the tensor in place.
         inverse : bool
-            Whether to inverse transform the input
+            Whether to inverse transform the input.
         **kwargs
-            Additional keyword arguments to pass to transform/inverse_transform
+            Additional keyword arguments to pass to transform/inverse_transform.
 
         Returns
         -------
         Source
-            Processed tensor
+            Processed tensor.
         """
         if "skip_imputation" in kwargs and not getattr(self, "supports_skip_imputation", False):
             kwargs = {key: value for key, value in kwargs.items() if key != "skip_imputation"}
@@ -187,16 +244,16 @@ class Processors(nn.Module):
         Parameters
         ----------
         x : Source
-            Input tensor
+            Input tensor.
         in_place : bool
-            Whether to process the tensor in place
+            Whether to process the tensor in place.
         **kwargs
-            Additional keyword arguments to pass to processors
+            Additional keyword arguments to pass to processors.
 
         Returns
         -------
         Source
-            Processed tensor
+            Processed tensor.
         """
         for processor in self.processors.values():
             if self.inverse and getattr(processor, "supports_skip_imputation", False):

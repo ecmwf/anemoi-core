@@ -11,6 +11,7 @@ import datetime
 import logging
 from abc import ABC
 from abc import abstractmethod
+from collections.abc import Mapping
 from functools import cached_property
 
 import numpy as np
@@ -117,7 +118,7 @@ def _to_local_window_shard_data(
     *,
     reader_group_rank: int,
     reader_group_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes] | None]:
     """Project sparse windowed tensors to the local reader-rank shard.
 
     Parameters
@@ -139,19 +140,17 @@ def _to_local_window_shard_data(
     -------
     tuple
         ``(data_local, coordinates_local, timedeltas_local, boundaries_local, window_shard_sizes)``
-        where ``window_shard_sizes`` stores the per-window balanced partition sizes.
+        where ``window_shard_sizes`` stores the per-window balanced partition sizes, or is ``None``
+        when a single reader reads everything (the payload is then not sharded).
     """
     if reader_group_size <= 1:
-        window_shard_sizes_all = [
-            get_balanced_partition_sizes(boundary.stop - boundary.start, 1) for boundary in boundaries
-        ]
-        return data, coordinates, timedeltas, boundaries, window_shard_sizes_all
+        return data, coordinates, timedeltas, boundaries, None
 
     data_parts: list[torch.Tensor] = []
     coord_parts: list[torch.Tensor] = []
     td_parts: list[torch.Tensor] = []
     boundaries_local: list[slice] = []
-    window_shard_sizes_all: list[ShardSizes] = [] if reader_group_size > 1 else None
+    window_shard_sizes_all: list[ShardSizes] = []
 
     offset = 0
     for boundary in boundaries:
@@ -165,8 +164,7 @@ def _to_local_window_shard_data(
         coord_parts.append(coordinates[local_slice])
         td_parts.append(timedeltas[local_slice])
         boundaries_local.append(slice(offset, offset + local_size))
-        if window_shard_sizes_all is not None:
-            window_shard_sizes_all.append(window_shard_sizes)
+        window_shard_sizes_all.append(window_shard_sizes)
         offset += local_size
 
     if data_parts:
@@ -310,9 +308,9 @@ class BaseAnemoiReader(ABC):
         Arguments
         ---------
         reader_group_rank : int
-             Reader group rank
+             Reader group rank.
         reader_group_size : int
-             Reader group size
+             Reader group size.
         """
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
@@ -651,8 +649,14 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     """Factory function to create dataset based on dataset configuration."""
     dataset_config = _normalize_reader_config(dataset_config)
 
-    trajectory_config = dataset_config.pop("trajectory", {})
-    if trajectory_config is not None and hasattr(trajectory_config, "start") and hasattr(trajectory_config, "length"):
+    trajectory_config = dataset_config.pop("trajectory", None)
+    if trajectory_config:  # None or empty: not a trajectory dataset
+        if not isinstance(trajectory_config, Mapping) or not {"start", "length"} <= set(trajectory_config):
+            msg = (
+                f"Unsupported trajectory configuration {trajectory_config!r}: the TrajectoryDataset reader "
+                "needs `trajectory: {start: <first forecast start date>, length: <steps per forecast>}`. "
+            )
+            raise ValueError(msg)
         LOGGER.info("Creating a TrajectoryDataset...")
         return TrajectoryDataset(
             **dataset_config,

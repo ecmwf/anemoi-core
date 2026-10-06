@@ -31,6 +31,18 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+
+def time_steps_per_node(model: "BaseGraphModel", dataset_name: str, n_steps: dict[str, int]) -> int:
+    """Number of time steps carried in each node's features for ``dataset_name``.
+
+    Gridded datasets fold their time steps into the feature axis. Tabular datasets, which are
+    the datasets without a static grid (gridded grids are always static), stack their time
+    windows on the node axis instead, so each node carries a single step.
+    """
+    is_static = getattr(model, "is_dataset_static", {}).get(dataset_name, True)
+    return n_steps[dataset_name] if is_static else 1
+
+
 TARGET_FEATURE_REGISTRY: dict[str, type[DecodingTargetFeature]] = {}
 
 
@@ -162,7 +174,8 @@ class InputForcingsFeature(DecodingTargetFeature):
     @cached_property
     def dim(self) -> int:
         dataset_name = self.datasets_names[0]
-        return self.model.n_step_input[dataset_name] * self.model.num_input_channels_forcings[dataset_name]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -199,7 +212,8 @@ class TargetForcingsFeature(DecodingTargetFeature):
     @cached_property
     def dim(self) -> int:
         dataset_name = self.datasets_names[0]
-        return self.model.n_step_output[dataset_name] * self.model.num_input_channels_forcings[dataset_name]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_output)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
         self,
@@ -236,7 +250,8 @@ class PrognosticsFeature(DecodingTargetFeature):
     @cached_property
     def dim(self) -> int:
         dataset_name = self.datasets_names[0]
-        return self.model.n_step_input[dataset_name] * self.model.num_input_channels_prognostic[dataset_name]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_prognostic[dataset_name]
 
     def _compute(
         self,

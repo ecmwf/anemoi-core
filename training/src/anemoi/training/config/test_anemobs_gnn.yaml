@@ -711,7 +711,7 @@ diagnostics:
     mlflow:
       enabled: true
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-      offline: false
+      offline: true
       authentication: true
       tracking_uri: https://mlflow.ecmwf.int
       experiment_name: anemobs

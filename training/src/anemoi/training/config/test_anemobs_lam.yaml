@@ -328,7 +328,7 @@ diagnostics:
     mlflow:
       enabled: true
       _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
-      offline: false
+      offline: true
       authentication: true
       tracking_uri: https://mlflow.ecmwf.int
       experiment_name: anemobs
@@ -598,7 +598,7 @@ model:
     hidden: 8
 task:
   _target_: anemoi.training.tasks.Forecaster
-  # Observation datasets deliver one input window; multistep_input > 1 is not supported with them yet.
+  # With multistep_input > 1, observation windows are stacked on the node axis
   multistep_input: 1
   multistep_output: 1
   timestep: 6H

@@ -154,9 +154,9 @@ def test_get_sample_returns_unified_contract() -> None:
     assert sample.timedeltas.shape == (n,)
     torch.testing.assert_close(sample.timedeltas, torch.tensor(payload.timedeltas, dtype=torch.float32))
 
-    # The reader retains both time windows and reports their shard sizes.
+    # The reader retains both time windows; a single reader reads everything, so nothing is sharded.
     assert list(sample.boundaries) == list(payload.boundaries)
-    assert sample.shard_sizes == [[3], [3]]
+    assert sample.shard_sizes is None
     assert all(isinstance(s, slice) for s in sample.boundaries)
 
 

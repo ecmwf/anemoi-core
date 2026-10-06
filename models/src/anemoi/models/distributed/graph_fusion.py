@@ -295,7 +295,11 @@ def fuse_encoder_edges(
     assert sources, "fuse_encoder_edges needs at least one dataset."
 
     for source in sources:
-        if source.edge_index is None or source.edge_attr is None:
+        # Edge-less mappers (NoOpGraphProvider) supply an empty edge set without edge attributes.
+        edgeless = source.edge_index is None or source.edge_attr is None
+        if not edgeless and source.edge_index.shape[-1] == 0 and source.edge_attr.shape[-1] == 0:
+            edgeless = True
+        if edgeless:
             msg = (
                 f"Joint fusion requires edge-based encoder graphs, but dataset '{source.name}' "
                 "supplied no edges. Use dataset_fusing_strategy: 'sequential' for edge-less mappers."

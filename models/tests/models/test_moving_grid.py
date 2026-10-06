@@ -119,14 +119,17 @@ def _model(model_type):
     return model
 
 
-def test_moving_grid_feature_width_uses_n_step_input():
+@pytest.mark.parametrize(("is_static", "expected"), [(True, 10), (False, 6)])
+def test_feature_width_counts_time_steps_per_node(is_static: bool, expected: int):
+    """Gridded datasets fold their steps into the features; tabular (non-static) ones carry one step per node."""
     model = _model(AnemoiModelEncProcDec)
-    model.is_dataset_static = {"grid": False}
+    model.is_dataset_static = {"grid": is_static}
     model.n_step_input = {"grid": 3}
     model.num_input_channels = {"grid": 2}
     model.dynamic_node_attribute_dims = {}
-    # Three timesteps of two variables plus four coordinate features.
-    assert model._calculate_input_dim("grid") == 10
+    # Gridded: three timesteps of two variables plus four coordinate features.
+    # Tabular: the three windows are stacked on the node axis, so one step of two variables plus four.
+    assert model._calculate_input_dim("grid") == expected
 
 
 @pytest.mark.parametrize(
