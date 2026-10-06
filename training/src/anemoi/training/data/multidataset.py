@@ -80,7 +80,7 @@ class MultiDataset(IterableDataset):
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
+        # Guard against mixing single-sequence (gridded/tabular, global time axis)
         # with multi-sequence (TrajectoryDataReader, init x step axes).  The anchor
         # intersection would silently keep only sequence-0 samples and produce
         # semantically meaningless alignment between the two encoders.
@@ -356,15 +356,8 @@ class MultiDataset(IterableDataset):
 
         return x
 
-    def __iter__(self) -> Iterator[dict[str, dict]]:
-        """Return an iterator that yields per-dataset coordinate-rich payloads.
-
-        Yields
-        ------
-        dict[str, dict]
-            Mapping ``{name: {"data": tensor, "coordinates": tensor, ...}}``
-            for each synchronized sample.
-        """
+    def __iter__(self) -> Iterator[dict[str, SourceSample]]:
+        """Yield ``{dataset_name: SourceSample}`` for each synchronized sample."""
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
         if self.shuffle:

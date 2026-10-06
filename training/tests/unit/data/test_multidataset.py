@@ -16,6 +16,7 @@ import torch
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
@@ -25,13 +26,19 @@ class TestMultiDataset:
 
     @staticmethod
     def _mock_reader(mocker: MockFixture, num_dates: int, missing: set[int]) -> MockFixture:
-        """Mock a single-sequence gridded reader exposing what ``compute_valid_data_indices`` reads."""
+        """Mock a single-sequence gridded reader whose anchors follow its current ``missing`` dates."""
         reader = mocker.MagicMock()
         reader.missing = missing
         reader.dates = list(range(num_dates))
         reader.frequency = "3h"
         reader.num_sequences = 1
         reader.has_trajectories = False
+
+        def compute_anchors(relative_indices: list[int]) -> np.ndarray:
+            positions = get_usable_indices(reader.missing, len(reader.dates), relative_indices)
+            return np.stack([np.zeros_like(positions), positions], axis=1)
+
+        reader.compute_anchors.side_effect = compute_anchors
         return reader
 
     @pytest.fixture
@@ -45,22 +52,24 @@ class TestMultiDataset:
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
-    def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
-        """valid_date_indices holds the date indices every reader can sample."""
+    def test_valid_anchors(self, multi_dataset: MultiDataset) -> None:
+        """Anchors hold the positions every reader can sample; valid_date_indices index into them."""
         # relative_date_indices are: [0, 2, 6]
         # dataset_a has no missing dates → valid indices [0..23]
         # dataset_b has missing {7, 8, 9, 10} → indices 1..10 read a missing date → valid [0, 11..23]
         # intersection: [0, 11..23]
         expected = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
-        np.testing.assert_array_equal(multi_dataset.valid_date_indices, expected)
+        np.testing.assert_array_equal(multi_dataset.anchors[:, 1], expected)
+        assert np.all(multi_dataset.anchors[:, 0] == 0)
+        np.testing.assert_array_equal(multi_dataset.valid_date_indices, np.arange(len(expected)))
 
     def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:
-        """get_sample(t) asks every reader for the dates t + its relative date indices."""
+        """get_sample(i) asks every reader for anchor i's position + its relative date indices."""
         multi_dataset.worker_id = 0
-        sample = multi_dataset.get_sample(11)
+        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 11)
 
         for name, reader in multi_dataset.data_readers.items():
-            reader.get_sample.assert_called_once_with([11, 13, 17])
+            reader.get_sample.assert_called_once_with(0, [11, 13, 17])
             assert sample[name] is reader.get_sample.return_value
 
     def test_set_epoch_updates_contiguous_relative_date_indices(self, multi_dataset: MultiDataset) -> None:
@@ -134,7 +143,7 @@ class TestMultiDataset:
         assert all(torch.equal(batch["dataset_a"], batches[0]["dataset_a"]) for batch in batches)
 
     def test_valid_date_indices_empty_dataset(self, multi_dataset: MultiDataset) -> None:
-        """Test that MultiDataset raises ValueError when a dataset has no valid date index."""
+        """Test that MultiDataset raises ValueError when a dataset has no valid anchor."""
         data_readers = multi_dataset.data_readers
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}
 
@@ -142,12 +151,12 @@ class TestMultiDataset:
         empty_dataset = data_readers["dataset_b"]
         empty_dataset.missing = set(range(30))
 
-        err_msg = f"No valid date indices found for data reader 'dataset_b': {empty_dataset}"
+        err_msg = f"No valid anchors found for data reader 'dataset_b': {empty_dataset}"
         with pytest.raises(ValueError, match=re.escape(err_msg)):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset) -> None:
-        """Test that MultiDataset raises ValueError when the readers' valid date indices do not overlap."""
+        """Test that MultiDataset raises ValueError when the readers' valid anchors do not overlap."""
         data_readers = multi_dataset.data_readers
         relative_date_indices = {"dataset_a": [0], "dataset_b": [0]}
 
@@ -155,5 +164,5 @@ class TestMultiDataset:
         data_readers["dataset_a"].missing = set(range(10, 30))
         data_readers["dataset_b"].missing = set(range(10))
 
-        with pytest.raises(ValueError, match="No valid date indices found after intersection across all datasets"):
+        with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)

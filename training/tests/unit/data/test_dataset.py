@@ -128,7 +128,7 @@ class TestGriddedDataReader:
         """Test get_sample with a time slice on the full grid."""
         dataset = GriddedDataReader(dataset=dataset_path)
 
-        sample = dataset.get_sample(slice(0, 3))
+        sample = dataset.get_sample(0, slice(0, 3))
 
         assert isinstance(sample, GriddedSourceSample)
         assert isinstance(sample.data, torch.Tensor)
@@ -144,21 +144,21 @@ class TestGriddedDataReader:
         """Test get_sample with irregular time indices (e.g. offset-forecaster inputs)."""
         dataset = GriddedDataReader(dataset=dataset_path)
 
-        sample = dataset.get_sample([0, 2, 5])
+        sample = dataset.get_sample(0, [0, 2, 5])
 
         assert sample.data.ndim == 4
         assert sample.data.shape[0] == 3  # 3 time steps
-        expected = dataset.get_sample(slice(0, 6)).data[[0, 2, 5]]
+        expected = dataset.get_sample(0, slice(0, 6)).data[[0, 2, 5]]
         torch.testing.assert_close(sample.data, expected)
 
     @skip_if_offline
     def test_get_sample_with_grid_shard(self, dataset_path: str) -> None:
         """Test get_sample returns this reader's grid shard once reader-group info is set."""
         dataset = GriddedDataReader(dataset=dataset_path)
-        full = dataset.get_sample(slice(0, 3))
+        full = dataset.get_sample(0, slice(0, 3))
 
         dataset.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
-        sample = dataset.get_sample(slice(0, 3))
+        sample = dataset.get_sample(0, slice(0, 3))
 
         assert sample.shard_sizes == dataset.grid_shard_sizes
         assert sum(dataset.grid_shard_sizes) == dataset.grid_size

@@ -21,6 +21,8 @@ def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFix
     reader.dates = list(range(20))
     reader.has_trajectories = False
     reader.num_sequences = 1
+    positions = np.arange(17, dtype=np.int64)
+    reader.compute_anchors.return_value = np.stack([np.zeros_like(positions), positions], axis=1)
 
     ds = MultiDataset(
         data_readers={"a": reader, "b": reader},
@@ -32,7 +34,7 @@ def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFix
 
 
 def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
-    """GriddedDataReader.get_data forwards time indices to the dataset unchanged."""
+    """GriddedDataReader.get_data forwards time indices to the dataset's time axis unchanged."""
 
     class FakeDataset:
         def __init__(self) -> None:
@@ -46,14 +48,16 @@ def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
     reader.data = FakeDataset()
     reader.grid_shard_slice = None
 
-    reader.get_data([4, 5, 7])
-    assert reader.data.last_index == [4, 5, 7]
+    full = (slice(None), slice(None), slice(None))
 
-    reader.get_data(slice(4, 7, 1))
-    assert reader.data.last_index == slice(4, 7, 1)
+    reader.get_data(0, [4, 5, 7])
+    assert reader.data.last_index == ([4, 5, 7], *full)
+
+    reader.get_data(0, slice(4, 7, 1))
+    assert reader.data.last_index == (slice(4, 7, 1), *full)
 
     reader.grid_shard_slice = slice(0, 2)
-    x = reader.get_data(slice(4, 7, 1))
+    x = reader.get_data(0, slice(4, 7, 1))
     assert reader.data.last_index == (slice(4, 7, 1), slice(None), slice(None), slice(0, 2))
     # (dates, variables, ensemble, grid) -> (dates, ensemble, grid, variables)
     assert tuple(x.shape) == (3, 4, 5, 2)

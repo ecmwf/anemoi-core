@@ -85,9 +85,8 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
             },
             "start": datetime | int | None,  # optional
             "end": datetime | int | None,  # optional
-            "trajectory": {  # optional, for trajectory datasets
-                "start": datetime,
-                "length": int,
+            "trajectory": {  # optional, for 5-D trajectory datasets
+                "sampling": {"stride": int | None},  # optional
             }
         }
     """
@@ -210,7 +209,7 @@ class BaseAnemoiReader(ABC):
         #: Sampling config used by :meth:`compute_anchors`.
         #: ``{"stride": 1}`` keeps every valid position;
         #: ``{"stride": None}`` uses stride = window size (non-overlapping).
-        self.default_sampling = dict(stride=1)
+        self.default_sampling = {"stride": 1}
 
     @property
     def num_sequences(self) -> int:
@@ -510,14 +509,10 @@ class GriddedDataReader(BaseAnemoiReader):
         )
         return torch.from_numpy(coords)
 
-    def get_sample(
-        self,
-        sequence: int,
-        positions: TimeIndices,
-    ) -> GriddedSourceSample:
-        """Return the per-sample payload in the unified contract."""
+    def _build_sample(self, data: torch.Tensor) -> GriddedSourceSample:
+        """Wrap a ``(T, E, N, V)`` local-shard tensor with this reader's metadata."""
         return GriddedSourceSample(
-            data=self.get_data(sequence, positions),
+            data=data,
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
@@ -525,6 +520,14 @@ class GriddedDataReader(BaseAnemoiReader):
             coordinates=self.get_coordinates(),
             shard_sizes=self.grid_shard_sizes,
         )
+
+    def get_sample(
+        self,
+        sequence: int,
+        positions: TimeIndices,
+    ) -> GriddedSourceSample:
+        """Return the per-sample payload in the unified contract."""
+        return self._build_sample(self.get_data(sequence, positions))
 
 
 class TabularDataReader(BaseAnemoiReader):

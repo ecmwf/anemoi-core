@@ -41,7 +41,7 @@ def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
     reader = TabularDataReader(dataset_config={"dataset": "test-observations"})
 
-    sample = reader.get_sample(slice(0, 2))
+    sample = reader.get_sample(0, slice(0, 2))
 
     dataset.__getitem__.assert_called_once_with(slice(0, 2))
     assert sample.data.shape == (1, 5, 5)
@@ -55,8 +55,8 @@ def test_batch_collate_and_to() -> None:
 
     # ``Batch`` is a per-dataset envelope, so each sample must be wrapped
     # under its dataset name (here "npp_atms") before collation.
-    sample1 = {_DATASET_NAME: reader.get_sample(slice(20, 24))}
-    sample2 = {_DATASET_NAME: reader.get_sample(slice(40, 44))}
+    sample1 = {_DATASET_NAME: reader.get_sample(0, slice(20, 24))}
+    sample2 = {_DATASET_NAME: reader.get_sample(0, slice(40, 44))}
 
     # Collate the samples into a batch.
     batch = Batch.collate([sample1, sample2])
@@ -103,7 +103,7 @@ def _make_obs_reader(payload: SimpleNamespace) -> TabularDataReader:
 
 def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> TabularSourceSample:
     """Build a sparse sample matching the TabularDataReader contract."""
-    return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(slice(0, n_times))
+    return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(0, slice(0, n_times))
 
 
 def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> GriddedSourceSample:
@@ -127,7 +127,7 @@ def test_get_sample_returns_unified_contract() -> None:
     payload = _make_obs_payload(n=n, v=v, n_times=2)
 
     reader = _make_obs_reader(payload)
-    sample = reader.get_sample(slice(0, 2))
+    sample = reader.get_sample(0, slice(0, 2))
     reader.data.__getitem__.assert_called_once_with(slice(0, 2))
 
     assert isinstance(sample, TabularSourceSample)

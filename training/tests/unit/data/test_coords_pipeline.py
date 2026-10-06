@@ -83,6 +83,8 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader.has_trajectories = False
     reader.num_sequences = 1
     reader.frequency = "3h"
+    positions = np.arange(19, dtype=np.int64)  # 20 dates, window of 2
+    reader.compute_anchors.return_value = np.stack([np.zeros_like(positions), positions], axis=1)
     reader.get_sample.return_value = GriddedSourceSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],
@@ -111,8 +113,8 @@ def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> 
     assert set(sample) == {"a", "b"}
     assert isinstance(sample["a"], GriddedSourceSample)
     assert sample["a"].coordinates.shape == (6, 2)
-    # Relative indices [0, 1] are normalized to a slice and offset by the reference index.
-    ds.data_readers["a"].get_sample.assert_called_with(slice(0, 2, 1))
+    # Relative indices [0, 1] are normalized to a slice and offset by the anchor position.
+    ds.data_readers["a"].get_sample.assert_called_with(0, slice(0, 2, 1))
 
 
 def test_multidataset_collates_to_batch(mocker: MockFixture) -> None:
