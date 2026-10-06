@@ -313,9 +313,12 @@ for further speedups.
 
 Flash attention is not the default as it must be compiled from source.
 
-The Transformer processor also supports a Triton backend. This is as fast
-as flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
-enabled by default. It can be selected in the config like so:
+The Transformer processor also supports a Triton backend. Its speed is
+close to flash-attention 2. It is supported on Nvidia and AMD GPUs. It is
+enabled by default for the processor. The Triton backend does not support
+cross attention, so the encoder and decoder of the transformer mappers
+use PyTorch's scaled dot product attention by default. It can be selected
+in the config like so:
 
 .. code::
 

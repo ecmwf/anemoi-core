@@ -648,7 +648,7 @@ def _attn_bwd_dkdv_inner(
 
         # Apply exponent after masking, then multiply by inv_l to get the
         # normalised softmax probability.  Keeping m_max and inv_l separate
-        # (rather than the combined M = m + log2(l) used on the main branch)
+        # (rather than a combined M = m + log2(l))
         # avoids fp precision loss when m and log2(l) differ greatly.
         pT = tl.math.exp2((qkT - m[None, :]) * qk_scale) * inv_l[None, :]
 
@@ -1492,14 +1492,14 @@ class TritonAttention(torch.autograd.Function):
         # Pad M tensor to avoid out-of-bounds reads when N_CTX is not a multiple of BLOCK_FIXED.
         uneven_ctx = n_ctx_rounded != n_ctx
         M = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
-        # Allocate separate inv_l tensor (1/l_i per token) instead of the combined
-        # M = m + log2(l) used on the main branch.  See _attn_fwd epilogue for rationale.
+        # inv_l (1/l_i per token) is kept apart from M rather than folded into
+        # M = m + log2(l).  See _attn_fwd epilogue for rationale.
         inv_l = torch.empty((q.shape[0], q.shape[1], n_ctx_rounded), device=q.device, dtype=torch.float32)
 
         # Convert tensors from raw pointers to (host) tensor descriptors if the system supports it,
         # Tensor descriptors encode the shape, stride and block shape and pass this information to the compiler, allowing further optimisations and use of hardware features like TMA.
         # and get any additional system-specific kernel arguments
-        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, True)
+        desc_q, desc_k, desc_v, desc_o, extra_kern_args = _system_specific_settings(q, k, v, o, False)
         input_precision = _dot_input_precision()
 
         # defines how blocks in the q,k and v input matrices are distributed across SMs on a GPU

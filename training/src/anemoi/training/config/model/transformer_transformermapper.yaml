@@ -54,9 +54,9 @@ encoders:
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
       num_heads: 16 # GraphTransformer or Transformer only
-      window_size: -1
+      window_size: null
       dropout_p: 0.0
-      attention_implementation: triton_attention  # Possible values: scaled_dot_product_attention, flash_attention, triton_attention
+      attention_implementation: scaled_dot_product_attention  # Possible values: scaled_dot_product_attention, flash_attention
       softcap: 0.0 # Transformer only
       use_alibi_slopes: False # Transformer only
       qk_norm: False
@@ -81,9 +81,9 @@ decoders:
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)
       mlp_implementation: mlp
       num_heads: 16 # GraphTransformer or Transformer only
-      window_size: -1
+      window_size: null
       dropout_p: 0.0
-      attention_implementation: triton_attention  # Possible values: scaled_dot_product_attention, flash_attention, triton_attention
+      attention_implementation: scaled_dot_product_attention  # Possible values: scaled_dot_product_attention, flash_attention
       softcap: 0.0 # Transformer only
       use_alibi_slopes: False # Transformer only
       qk_norm: False

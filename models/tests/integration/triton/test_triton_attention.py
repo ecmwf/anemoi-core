@@ -23,6 +23,10 @@ from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
     from anemoi.models.triton.attention import TritonAttention
+    from anemoi.models.triton.attention import _attn_bwd_dkdv
+    from anemoi.models.triton.attention import _attn_bwd_dq
+    from anemoi.models.triton.attention import _attn_fwd
+    from anemoi.models.triton.attention import _host_descriptor_pre_hook
     from anemoi.models.triton.attention import is_hip
 
 try:
@@ -197,6 +201,65 @@ def test_triton_attention_dk_with_nearly_one_hot_attention(dtype, causal, window
     dk = _triton_grads(q, k, v, grad_out, sm_scale, causal, window)[1]
     reference = _attention_fp64_grads(q, k, v, grad_out, sm_scale, causal, window)[1]
     torch.testing.assert_close(dk.double(), reference, rtol=1e-2, atol=1e-7)
+
+
+# (BLOCK_FIXED, BLOCK_ITER) pairs the autotuner can choose in training. Under pytest the kernels
+# otherwise only ever run with a single pair, (32, 16).
+BLOCK_SIZES = [(16, 16), (16, 128), (128, 16), (64, 32), (128, 128)]
+
+
+@pytest.fixture
+def block_sizes(request):
+    """Runs the forward and both backward kernels with the given (BLOCK_FIXED, BLOCK_ITER) pair."""
+    block_fixed, block_iter = request.param
+    config = triton.Config(
+        dict(BLOCK_FIXED=block_fixed, BLOCK_ITER=block_iter, WARP_SPECIALIZE=False),
+        num_stages=1,
+        num_warps=8 if max(block_fixed, block_iter) == 128 else 4,
+        pre_hook=_host_descriptor_pre_hook,
+    )
+    kernels = (_attn_fwd, _attn_bwd_dq, _attn_bwd_dkdv)
+    saved_configs = [kernel.configs for kernel in kernels]
+    for kernel in kernels:
+        kernel.configs = [config]
+    yield
+    for kernel, configs in zip(kernels, saved_configs):
+        kernel.configs = configs
+
+
+@pytest.mark.gpu
+@pytest.mark.parametrize("block_sizes", BLOCK_SIZES, indirect=True, ids=[f"{f}x{i}" for f, i in BLOCK_SIZES])
+@pytest.mark.parametrize("n_ctx", [97, 256, 1025])
+@pytest.mark.parametrize("window", [-1, 1, 37, 300])
+def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
+    """Output and gradients match float64 attention for each block size pair.
+
+    The lengths include ones that are not a multiple of any block size, and the windows include
+    ones that end inside a block, so the partly filled last block and the window edges are
+    exercised for every pair.
+    """
+    if not is_triton_available() or not torch.cuda.is_available():
+        pytest.skip("Triton and CUDA required")
+
+    generator = torch.Generator(device="cuda").manual_seed(0)
+    shape = (2, 3, n_ctx, 64)
+    q, k, v, grad_out = (torch.randn(shape, device="cuda", generator=generator).to(torch.bfloat16) for _ in range(4))
+    sm_scale = shape[-1] ** -0.5
+
+    q_run, k_run, v_run = (t.detach().clone().requires_grad_() for t in (q, k, v))
+    out = TritonAttention.apply(q_run, k_run, v_run, False, window, sm_scale)
+    results = (out, *torch.autograd.grad(out, (q_run, k_run, v_run), grad_out))
+
+    positions = torch.arange(n_ctx, device="cuda")
+    visible = (positions[:, None] - positions[None, :]).abs() <= window if window >= 0 else None
+    reference_out = torch.nn.functional.scaled_dot_product_attention(
+        q.double(), k.double(), v.double(), attn_mask=visible, scale=sm_scale
+    )
+    references = (reference_out, *_attention_fp64_grads(q, k, v, grad_out, sm_scale, False, window))
+
+    for name, result, reference in zip(("out", "dq", "dk", "dv"), results, references):
+        error = ((result.double() - reference).norm() / reference.norm()).item()
+        assert error < 1e-2, f"{name}: relative error {error:.3g}"
 
 
 @pytest.mark.gpu

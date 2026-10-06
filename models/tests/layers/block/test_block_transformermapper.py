@@ -40,7 +40,7 @@ def init():
     hidden_dim: int = 256
     num_heads: int = 4
     window_size: int = None
-    dropout_p: float = (0.0,)
+    dropout_p: float = 0.0
     qk_norm: bool = (False,)
     attention_implementation: str = "scaled_dot_product_attention"
     layer_kernels = load_layer_kernels()

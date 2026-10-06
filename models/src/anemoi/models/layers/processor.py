@@ -260,7 +260,7 @@ class TransformerProcessor(BaseProcessor):
         mlp_implementation: MLPImplementation
             Implementation of feed-forward blocks in processor layers.
         softcap : float, optional
-            Anything > 0 activates softcapping attention, by default 0
+            Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool
             Use aLiBI option, only used for flash attention, by default False
         window_size: int, optional
