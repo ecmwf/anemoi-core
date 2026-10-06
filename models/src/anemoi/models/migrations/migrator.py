@@ -13,6 +13,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import importlib
+import importlib.util
 import logging
 import sys
 from collections.abc import Callable
@@ -24,6 +25,7 @@ from inspect import getsource
 from os import PathLike
 from pathlib import Path
 from pickle import Unpickler
+from types import ModuleType
 from typing import Any
 from typing import TypedDict
 
@@ -149,6 +151,34 @@ def _get_code_digest(content: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
 
 
+def _import_file(location: Path, package: str | None = None) -> ModuleType:
+    """Import a module from a file path.
+
+    Parameters
+    ----------
+    location : Path
+        Path to the Python file
+    package : str | None
+        Optional package context for namespacing in sys.modules
+
+    Returns
+    -------
+    ModuleType
+        The imported module
+    """
+    module_name = f"{package}.{location.stem}" if package else location.stem
+    spec = importlib.util.spec_from_file_location(module_name, location)
+    if spec is None or spec.loader is None:
+        raise ValueError(f"{location} does not point to a valid Python file.")
+
+    module = importlib.util.module_from_spec(spec)
+
+    sys.modules[module_name] = module
+
+    spec.loader.exec_module(module)
+    return module
+
+
 def _migrations_from_path(location: str | PathLike, package: str) -> list[Migration]:
     """Returns the migrations from a given folder
 
@@ -170,12 +200,14 @@ def _migrations_from_path(location: str | PathLike, package: str) -> list[Migrat
         if not file.is_file() and file.suffix != ".py" or file.name == "__init__.py":
             continue
         LOGGER.debug("Loading migration .%s from %s", file.stem, package)
-        migration = importlib.import_module(f".{file.stem}", package)
+        migration = _import_file(file, package)
         if not hasattr(migration, "metadata"):
             raise IncompleteMigrationScript("Migration script is missing metadata.")
 
         args: dict[str, Any] = dict(
-            name=file.stem, metadata=migration.metadata, signature=_get_code_digest(getsource(migration))
+            name=file.stem,
+            metadata=migration.metadata,
+            signature=_get_code_digest(getsource(migration)),
         )
         if not isinstance(args["metadata"], MigrationMetadata):
             raise IncompleteMigrationScript("Migration script is missing metadata.")
@@ -247,7 +279,11 @@ def _get_unpickler(replace_attrs: dict[str, list[str]] | bool = False):
                     or module_name in deleted_modules
                     or wild_name in replace_attrs
                 ):
-                    LOGGER.debug("Missing attribute %s.%s is checkpoint. Ignoring.", module_name, global_name)
+                    LOGGER.debug(
+                        "Missing attribute %s.%s is checkpoint. Ignoring.",
+                        module_name,
+                        global_name,
+                    )
                     return MissingAttribute
                 raise e
 

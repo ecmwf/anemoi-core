@@ -70,16 +70,16 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self._graph_name_hidden = model_config.model.model.hidden_nodes_name
+        self._graph_name_hidden = model_config.model.hidden_nodes_name
 
-        self.latent_skip = model_config.model.model.latent_skip
+        self.latent_skip = model_config.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.model.node_trainable_parameters, self._build_named_node_attributes_graph()
+            model_config.node_trainable_parameters, self._build_named_node_attributes_graph()
         )
 
-        self._build_encoder_routing(model_config.model.encoders)
-        self._build_decoder_routing(model_config.model.decoders)
+        self._build_encoder_routing(model_config.encoders)
+        self._build_decoder_routing(model_config.decoders)
 
         self._calculate_shapes_and_indices(data_indices)
 
@@ -88,19 +88,19 @@ class BaseGraphModel(nn.Module):
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
         # build networks
-        self._build_networks(model_config.model)
+        self._build_networks(model_config)
 
         # build residual connection
         self._build_residual(
-            get_multiple_datasets_config(model_config.model.residual),
-            sparse_projector_config=model_config.model.get("sparse_projector", {}),
+            get_multiple_datasets_config(model_config.residual),
+            sparse_projector_config=model_config.get("sparse_projector", {}),
         )
 
         # build boundings
         # Instantiation of model output bounding functions (e.g., to ensure outputs like TP are positive definite)
         # Multi-dataset: create ModuleDict with ModuleList per dataset
         self.boundings = build_boundings(
-            get_multiple_datasets_config(model_config.model.get("bounding", [])),
+            get_multiple_datasets_config(model_config.get("bounding", [])),
             data_indices=self.data_indices,
             statistics=self.statistics,
         )

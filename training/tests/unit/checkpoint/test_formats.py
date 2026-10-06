@@ -30,7 +30,7 @@ from anemoi.training.checkpoint.formats import load_checkpoint
 from anemoi.training.checkpoint.formats import save_checkpoint
 
 if TYPE_CHECKING:
-    from conftest import SimpleModel
+    from tests.unit.checkpoint.conftest import SimpleModel
 
 
 class TestFormatDetection:

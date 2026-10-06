@@ -1117,10 +1117,12 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
         pytest.param("reduced_sht", {"grid": "n320", "truncation": 3}, id="reduced"),
     ],
 )
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
 def test_spectral_crps_sht_transforms(
     transform: str,
     transform_kwargs: dict[str, object],
     mocker: MockerFixture,
+    dtype: torch.dtype,
 ) -> None:
     ring_sizes = [20, 24, 28, 32, 32, 28, 24, 20]
     if transform == "reduced_sht":
@@ -1129,8 +1131,8 @@ def test_spectral_crps_sht_transforms(
         mocker.patch("anemoi.transform.grids.named.lookup", return_value={"latitudes": latitudes})
 
     nvars = 2
-    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, requires_grad=True)
-    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars)
+    pred = torch.randn(2, 1, 4, sum(ring_sizes), nvars, dtype=dtype, requires_grad=True)
+    target = torch.randn(2, 1, 1, sum(ring_sizes), nvars, dtype=dtype)
     loss = _make_loss(
         "anemoi.training.losses.spectral.SpectralCRPSLoss",
         transform=transform,

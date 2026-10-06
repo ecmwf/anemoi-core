@@ -11,6 +11,7 @@ import logging
 import os
 from copy import deepcopy
 from pathlib import Path
+from typing import Any
 
 import pytest
 import pytorch_lightning as pl
@@ -18,7 +19,6 @@ import torch
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 from omegaconf import open_dict
-from schemas.partial_metadata_schema import PARTIAL_METADATA_SCHEMA
 
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.schemas.base_schema import UnvalidatedBaseSchema
@@ -87,12 +87,13 @@ def get_single_checkpoint_dir(cfg: DictConfig) -> Path:
 def test_training_cycle_global(
     global_config: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url, _ = global_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_global_config(global_config: tuple[DictConfig, str, str]) -> None:
@@ -174,13 +175,14 @@ def test_training_cycle_without_config_validation(
 def test_training_cycle_stretched(
     stretched_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = stretched_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[str]]) -> None:
@@ -193,13 +195,14 @@ def test_config_validation_stretched(stretched_config: tuple[DictConfig, list[st
 def test_training_cycle_multidatasets(
     multidatasets_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = multidatasets_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig, list[str]]) -> None:
@@ -209,13 +212,17 @@ def test_config_validation_multidatasets(multidatasets_config: tuple[DictConfig,
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_lam(lam_config: tuple[DictConfig, list[str]], get_test_archive: GetTestArchive) -> None:
+def test_training_cycle_lam(
+    lam_config: tuple[DictConfig, list[str]],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
     cfg, urls = lam_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -237,12 +244,16 @@ def test_config_validation_lam(lam_config: DictConfig) -> None:
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_ensemble(ensemble_config: tuple[DictConfig, str], get_test_archive: GetTestArchive) -> None:
+def test_training_cycle_ensemble(
+    ensemble_config: tuple[DictConfig, str],
+    get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
     cfg, url = ensemble_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -285,13 +296,14 @@ def test_config_validation_hierarchical(hierarchical_config: tuple[DictConfig, l
 def test_training_cycle_autoencoder(
     autoencoder_config: tuple[DictConfig, list[str]],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = autoencoder_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_autoencoder(autoencoder_config: tuple[DictConfig, list[str]]) -> None:
@@ -474,6 +486,7 @@ def test_restart_training_architectures(
 def test_inference_checkpoint_round_trips(
     gnn_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """A training run's inference checkpoint loads back and carries the inference contract.
 
@@ -503,7 +516,7 @@ def test_inference_checkpoint_round_trips(
 
     # Carries the metadata anemoi-inference consumes (the consumption contract).
     metadata = load_metadata(inference_ckpt)
-    assert_keys_exist(metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -633,13 +646,14 @@ def test_transfer_learning_into_fewer_variables_cycle(
 def test_training_cycle_temporal_downscaler(
     temporal_downscaler_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """Full training-cycle smoke-test for the temporal downscaler task."""
     cfg, url = temporal_downscaler_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple[DictConfig, str]) -> None:
@@ -650,12 +664,16 @@ def test_config_validation_temporal_downscaler(temporal_downscaler_config: tuple
 
 @skip_if_offline
 @pytest.mark.slow
-def test_training_cycle_edm_transport(edm_transport_config: tuple[DictConfig, str], get_test_archive: callable) -> None:
+def test_training_cycle_edm_transport(
+    edm_transport_config: tuple[DictConfig, str],
+    get_test_archive: callable,
+    partial_metadata_schema: dict[str, Any],
+) -> None:
     cfg, url = edm_transport_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_edm_transport(edm_transport_config: tuple[DictConfig, str]) -> None:
@@ -718,13 +736,14 @@ def test_training_cycle_imerg_target(
 def test_training_cycle_multidatasets_edm_transport(
     multidatasets_edm_transport_config: tuple[DictConfig, list[str]],
     get_test_archive: callable,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, urls = multidatasets_edm_transport_config
     for url in urls:
         get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 @skip_if_offline
@@ -732,12 +751,13 @@ def test_training_cycle_multidatasets_edm_transport(
 def test_training_cycle_temporal_downscaler_ensemble(
     temporal_downscaler_ensemble_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = temporal_downscaler_ensemble_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_temporal_downscaler_ensemble(
@@ -752,12 +772,13 @@ def test_config_validation_temporal_downscaler_ensemble(
 def test_training_cycle_offset_forecaster(
     offset_forecaster_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = offset_forecaster_config
     get_test_archive(url)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_offset_forecaster_config(offset_forecaster_config: tuple[DictConfig, str]) -> None:
@@ -770,6 +791,7 @@ def test_config_validation_offset_forecaster_config(offset_forecaster_config: tu
 def test_training_cycle_offset_forecaster_tendency_transport(
     offset_forecaster_tendency_transport_config: tuple[DictConfig, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     """Train the tendency transport path with irregular inputs and two forecast lead times."""
     cfg, url = offset_forecaster_tendency_transport_config
@@ -783,7 +805,7 @@ def test_training_cycle_offset_forecaster_tendency_transport(
     assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
 
 
 def test_config_validation_offset_forecaster_tendency_transport(
@@ -827,13 +849,14 @@ def test_evaluator(
 def test_restart_training_with_rollout(
     gnn_config_with_rollout: tuple[DictConfig, str, str],
     get_test_archive: GetTestArchive,
+    partial_metadata_schema: dict[str, Any],
 ) -> None:
     cfg, url = gnn_config_with_rollout
     get_test_archive(url)
     weights_only_cfg = deepcopy(cfg)
     trainer = AnemoiTrainer(cfg)
     trainer.train()
-    assert_keys_exist(trainer.metadata, PARTIAL_METADATA_SCHEMA)
+    assert_keys_exist(trainer.metadata, partial_metadata_schema)
     # The rollout step should be incremented after each epoch, so after 2 epochs it should be 3
     assert (
         trainer.task.rollout.step == 3
