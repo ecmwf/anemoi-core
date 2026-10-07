@@ -89,6 +89,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
             dataset_name=dataset_name,
+            compute_residual=True,
         )
 
         # add data positional info (lat/lon)

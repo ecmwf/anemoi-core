@@ -205,6 +205,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         grid_shard_sizes: DatasetShardSizes | None,
         model_comm_group: ProcessGroup | None = None,
         dataset_name: str | None = None,
+        compute_residual: bool = True,
     ) -> tuple[torch.Tensor, ShardSizes]:
         """Prepare the encoder source features for a single dataset.
 
@@ -225,12 +226,15 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
         )
 
-        x_skip = self.residual[dataset_name](
-            x,
-            grid_shard_sizes=grid_shard_sizes,
-            model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
-        )
+        if compute_residual:
+            x_skip = self.residual[dataset_name](
+                x,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                n_step_output=self.n_step_output,
+            )
+        else:
+            x_skip = None
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(
