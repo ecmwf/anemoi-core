@@ -609,7 +609,7 @@ class ObservationDataReader(BaseAnemoiReader):
         return tree
 
 
-class TrajectoryDataset(GriddedDataReader):
+class TrajectoryDataReader(GriddedDataReader):
     """Trajectory dataset."""
 
     def __init__(
@@ -653,12 +653,12 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
     if trajectory_config:  # None or empty: not a trajectory dataset
         if not isinstance(trajectory_config, Mapping) or not {"start", "length"} <= set(trajectory_config):
             msg = (
-                f"Unsupported trajectory configuration {trajectory_config!r}: the TrajectoryDataset reader "
+                f"Unsupported trajectory configuration {trajectory_config!r}: the TrajectoryDataReader reader "
                 "needs `trajectory: {start: <first forecast start date>, length: <steps per forecast>}`. "
             )
             raise ValueError(msg)
-        LOGGER.info("Creating a TrajectoryDataset...")
-        return TrajectoryDataset(
+        LOGGER.info("Creating a TrajectoryDataReader...")
+        return TrajectoryDataReader(
             **dataset_config,
             trajectory_start=trajectory_config["start"],
             trajectory_length=trajectory_config["length"],

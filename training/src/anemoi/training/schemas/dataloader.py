@@ -106,7 +106,7 @@ class TrajectorySchema(PydanticBaseModel):
     "Anchor sampling config. stride=None → non-overlapping; stride=1 → all; stride=N → step N."
 
 
-class TrajectoryDatasetSchema(NativeDatasetSchema):
+class TrajectoryDataReaderSchema(NativeDatasetSchema):
     """Dataset configuration schema."""
 
     trajectory: TrajectorySchema | None = Field(default=None)
@@ -140,11 +140,11 @@ class DataLoaderSchema(PydanticBaseModel):
     "Per-GPU batch size."
     limit_batches: LoaderSet = Field(example=None)
     "Limit number of batches to run. Default value null, will run on all the batches."
-    training: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    training: DatasetDict[NativeDatasetSchema | TrajectoryDataReaderSchema]
     "Training DatasetSchema."
-    validation: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    validation: DatasetDict[NativeDatasetSchema | TrajectoryDataReaderSchema]
     "Validation DatasetSchema."
-    test: DatasetDict[NativeDatasetSchema | TrajectoryDatasetSchema]
+    test: DatasetDict[NativeDatasetSchema | TrajectoryDataReaderSchema]
     "Test DatasetSchema."
     read_group_size: PositiveInt = Field(example=None)
     "Number of GPUs per reader group. Defaults to number of GPUs (see BaseSchema validators)."

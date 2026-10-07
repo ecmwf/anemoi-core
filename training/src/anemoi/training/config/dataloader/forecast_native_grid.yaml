@@ -11,7 +11,7 @@ defaults:
 # forecast step is the within-sequence position, so a sample never crosses an
 # initialisation boundary.
 #
-# - The ``trajectory`` block selects the TrajectoryDataset reader. ``sampling``
+# - The ``trajectory`` block selects the TrajectoryDataReader reader. ``sampling``
 #   controls how anchor positions are drawn within each forecast via ``stride``:
 #     * stride: null  : stride = window size (samples never share a step)
 #     * stride: 1     : every valid step position

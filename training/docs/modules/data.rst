@@ -15,20 +15,28 @@ the model (``__iter__``).
 Dataset Architecture
 ====================
 
-The data module provides two types of dataset readers that wrap
+The data module provides three types of dataset readers that wrap
 anemoi-datasets data:
 
-Native Grid Dataset
+Gridded Data Reader
 -------------------
 
-The ``NativeGridDataset`` class is used for standard atmospheric data
+The ``GriddedDataReader`` class is used for standard atmospheric data
 on a native grid. It provides a simple interface for reading data samples
 at specified time indices.
 
-Trajectory Dataset
-------------------
+Observation Data Reader
+-----------------------
 
-The ``TrajectoryDataset`` class extends ``NativeGridDataset`` to support
+The ``ObservationDataReader`` class reads tabular (observation) datasets,
+selected when the dataset configuration has a ``window`` and a
+``frequency``. Each sample holds the observations of its time windows,
+with per-observation coordinates and timedeltas.
+
+Trajectory Data Reader
+----------------------
+
+The ``TrajectoryDataReader`` class extends ``GriddedDataReader`` to support
 trajectory-based sampling, where data is organized into temporal
 trajectories. This is useful for tracking atmospheric features over time
 or for specialized training strategies that require trajectory awareness.
@@ -46,8 +54,8 @@ Multi-Dataset
 -------------
 
 The ``MultiDataset`` class provides a higher-level wrapper that can
-synchronize and combine multiple datasets (either ``NativeGridDataset``
-or ``TrajectoryDataset`` instances). This is the primary interface used
+synchronize and combine multiple datasets (``GriddedDataReader``,
+``ObservationDataReader`` or ``TrajectoryDataReader`` instances). This is the primary interface used
 for training and supports:
 
 * Synchronizing samples across multiple datasets with different grids
