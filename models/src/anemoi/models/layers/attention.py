@@ -38,6 +38,26 @@ LOGGER = logging.getLogger(__name__)
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND", "")
 
 
+class AttentionWrapper(nn.Module):
+    """Base class of the attention backends.
+
+    Each backend lists in ``unsupported`` the options of MultiHeadSelfAttention it cannot honour,
+    named as in the model config. MultiHeadSelfAttention checks them once, when it sets up the
+    backend, so a config asking for one fails when the model is built rather than at the first step.
+    """
+
+    unsupported: frozenset[str] = frozenset()
+
+    def check_supported(self, **options: bool) -> None:
+        """Raises if any of the options that are switched on is one this backend cannot honour."""
+        requested = sorted(name for name, used in options.items() if used and name in self.unsupported)
+        if requested:
+            raise NotImplementedError(
+                f"{type(self).__name__} does not support: {', '.join(requested)}. "
+                "Please switch to a different attention_implementation, or disable these options."
+            )
+
+
 class MultiHeadSelfAttention(nn.Module):
     """Multi Head Self Attention Pytorch Layer
 
@@ -71,7 +91,7 @@ class MultiHeadSelfAttention(nn.Module):
         is_causal: bool = False,
         window_size: Optional[int] = None,
         dropout_p: float = 0.0,
-        attention_implementation: str = "flash_attention",
+        attention_implementation: str = "scaled_dot_product_attention",
         softcap: Optional[float] = None,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
@@ -106,7 +126,7 @@ class MultiHeadSelfAttention(nn.Module):
             dropout probability, by default 0.0
         attention_implementation: str
             A predefined string which selects which underlying attention
-            implementation, by default "flash_attention"
+            implementation, by default "scaled_dot_product_attention"
         softcap : float, optional
             Anything > 0 activates softcapping attention, by default None
         use_alibi_slopes : bool, optional
@@ -156,6 +176,7 @@ class MultiHeadSelfAttention(nn.Module):
         attn_funcs = {
             "flash_attention": FlashAttentionWrapper,
             "scaled_dot_product_attention": SDPAAttentionWrapper,
+            "triton_attention": TritonAttentionWrapper,
         }
 
         # Check if 'ANEMOI_INFERENCE_TRANSFORMER_ATTENTION_BACKEND' env var has been set
@@ -180,6 +201,13 @@ class MultiHeadSelfAttention(nn.Module):
             )
         else:
             self.attention = attn_funcs[self.attention_implementation]()
+
+        self.attention.check_supported(
+            dropout_p=self.dropout_p > 0,
+            softcap=bool(self.softcap),
+            use_alibi_slopes=self.use_alibi_slopes,
+            use_rotary_embeddings=self.use_rotary_embeddings,
+        )
 
     def attention_computation(
         self,
@@ -262,10 +290,12 @@ class MultiHeadSelfAttention(nn.Module):
         return self.attention_computation(query, key, value, grid_shard_sizes.nodes, batch_size, model_comm_group)
 
 
-class SDPAAttentionWrapper(nn.Module):
+class SDPAAttentionWrapper(AttentionWrapper):
     """Wrapper for Pytorch scaled dot product attention
     To use this attention implementation: model.processor.attention_implementation='scaled_dot_product_attention'
     """
+
+    unsupported = frozenset({"softcap", "use_alibi_slopes", "use_rotary_embeddings"})
 
     def __init__(self):
         super().__init__()
@@ -328,14 +358,6 @@ class SDPAAttentionWrapper(nn.Module):
         softcap=None,
         alibi_slopes=None,
     ):
-        if softcap is not None and softcap > 0:
-            raise NotImplementedError(
-                "Softcap not supported by Pytorchs SDPA. please switch to flash attention or disable softcap."
-            )
-        if alibi_slopes is not None:
-            raise NotImplementedError(
-                "Alibi slopes not supported by Pytorchs SDPA. please switch to flash attention v2 or disable alibi slopes."
-            )
         if window_size is not None and self.attn_mask is None:
             # build the attention mask for sliding window attention. We build the mask once and reuse it,
             # since it is the same for every forward pass (assuming the sequence length does not change).
@@ -359,13 +381,13 @@ class SDPAAttentionWrapper(nn.Module):
         return out
 
 
-class FlashAttentionWrapper(nn.Module):
+class FlashAttentionWrapper(AttentionWrapper):
     """Wrapper for Flash attention.
 
-    Either flash attn v2 or flash attn v3 (optimised for hoppers and newer), based on
-    what is installed.
-    flash attention v3 does not support rotary embeddings or alibi slopes. To use these
-    features, you should downgrade to flash attention v2.
+    Either flash attn v2, v3 (optimised for hoppers and newer) or v4, based on what is installed.
+    Only flash attention v2 supports every option: v3 has no dropout, alibi slopes or rotary
+    embeddings, and v4 additionally has no softcap. To use these features, you should downgrade
+    to flash attention v2.
 
     """
 
@@ -374,23 +396,25 @@ class FlashAttentionWrapper(nn.Module):
 
         flash_attn_func = self._import_flash_attn()
 
-        self._init_rotary_embeddings(use_rotary_embeddings, head_dim)
+        if self.use_flash_attn_v4:
+            self.unsupported = frozenset({"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"})
+        elif self.use_flash_attn_v3:
+            self.unsupported = frozenset({"dropout_p", "use_alibi_slopes", "use_rotary_embeddings"})
+
+        self._init_rotary_embeddings(
+            use_rotary_embeddings and "use_rotary_embeddings" not in self.unsupported, head_dim
+        )
 
         self.attention = flash_attn_func
 
     def _init_rotary_embeddings(self, use_rotary_embeddings: bool, head_dim: int) -> None:
-        """Enables rotary embeddings if flash attention version is between 2.6.0 and 3."""
+        """Enables rotary embeddings, which need flash attention v2.6.0 or newer."""
         self.use_rotary_embeddings = False
         if use_rotary_embeddings:
-            if self.use_flash_attn_v4 or self.use_flash_attn_v3:
-                raise RuntimeError(
-                    "Rotary Embeddings not supported with flash attention v3 and v4. Please switch to flash attention v2 to use rotary embeddings."
-                )
-
             # import flash attn v2 to check the version
             import flash_attn
 
-            if flash_attn.__version__ <= version.parse("2.6"):
+            if version.parse(flash_attn.__version__) < version.parse("2.6"):
                 raise RuntimeError("Rotary Embeddings not supported with flash attention v2 < v2.6.0")
 
             from flash_attn.layers.rotary import RotaryEmbedding
@@ -466,11 +490,6 @@ class FlashAttentionWrapper(nn.Module):
             einops.rearrange(t, "batch heads grid vars -> batch grid heads vars") for t in (query, key, value)
         )
 
-        if alibi_slopes is not None and self.use_flash_attn_v3:
-            raise NotImplementedError(
-                "Alibi slopes is currently not supported by flash attention v3. please switch to flash attention v2 or disable alibi slopes."
-            )
-
         alibi_slopes = alibi_slopes.repeat(batch_size, 1).to(query.device) if alibi_slopes is not None else None
 
         if self.use_rotary_embeddings:
@@ -517,6 +536,55 @@ class FlashAttentionWrapper(nn.Module):
                 alibi_slopes=alibi_slopes,
             )
         out = einops.rearrange(out, "batch grid heads vars -> batch heads grid vars")
+        return out
+
+
+class TritonAttentionWrapper(AttentionWrapper):
+    """Wrapper for Anemoi Triton attention. An implementation of the flash attention algorithm, intended to be a portable alternative when flash attention is not available"""
+
+    unsupported = frozenset({"dropout_p", "softcap", "use_alibi_slopes", "use_rotary_embeddings"})
+
+    def __init__(self):
+        super().__init__()
+
+        # Helper function to check if triton is available
+        # Prevents strange errors from importing triton functions on unsupported systems
+        from anemoi.models.triton.utils import is_triton_available
+
+        if not is_triton_available():
+            raise ImportError(
+                "Triton is not supported on your system. Either it is not installed or no GPUs are available"
+            )
+
+        from anemoi.models.triton.attention import TritonAttention
+
+        self.attention = TritonAttention
+
+    def forward(
+        self,
+        query,
+        key,
+        value,
+        batch_size: int,
+        causal: bool = False,
+        window_size: int = None,
+        dropout_p: float = 0.0,
+        softcap=None,
+        alibi_slopes: torch.Tensor = None,
+    ):
+
+        if query.shape[-2] != key.shape[-2]:
+            # Cross attention between grids of different sizes (e.g. transformer mappers)
+            raise NotImplementedError(
+                "Cross attention between sequences of different lengths is not yet implemented in the Triton-Attention "
+                f"backend (query length {query.shape[-2]}, key/value length {key.shape[-2]}).\n"
+                "Please use a different attention backend, or create a ticket on the anemoi-core repository"
+            )
+
+        softmax_scale = 1 / math.sqrt(query.size(-1))
+
+        out = self.attention.apply(query, key, value, causal, window_size, softmax_scale).to(query.dtype)
+
         return out
 
 

@@ -24,6 +24,7 @@ from anemoi.models.layers.attention import MultiHeadCrossAttention
 from anemoi.models.layers.attention import MultiHeadSelfAttention
 from anemoi.models.layers.attention import PointwiseMultiHeadCrossAttention
 from anemoi.models.layers.utils import load_layer_kernels
+from anemoi.models.triton.utils import is_triton_available
 
 
 @pytest.fixture(scope="session")
@@ -52,12 +53,11 @@ def test_pointwise_cross_attention_weights_sources_and_disables_dropout_in_eval(
     num_heads=st.sampled_from([1, 2, 4, 8, 16]),
     embed_dim_multiplier=st.sampled_from([16, 32, 64]),
     dropout_p=st.floats(min_value=0.0, max_value=1.0),
-    softcap=st.floats(min_value=0.0, max_value=1.0),
     attention_module=st.sampled_from([MultiHeadSelfAttention, MultiHeadCrossAttention]),
     attention_implementation=st.sampled_from(["scaled_dot_product_attention"]),
 )
 def test_multi_head_self_attention_init(
-    num_heads, embed_dim_multiplier, dropout_p, softcap, attention_module, attention_implementation, layer_kernels
+    num_heads, embed_dim_multiplier, dropout_p, attention_module, attention_implementation, layer_kernels
 ):
     embed_dim = num_heads * embed_dim_multiplier
 
@@ -68,7 +68,6 @@ def test_multi_head_self_attention_init(
         qk_norm=True,
         dropout_p=dropout_p,
         attention_implementation=attention_implementation,
-        softcap=softcap,
     )
 
     assert isinstance(mhsa, nn.Module)
@@ -89,6 +88,36 @@ def test_attention_raises_when_embed_dim_not_divisible_by_num_heads(attention_mo
             embed_dim=10,
             layer_kernels=layer_kernels,
             attention_implementation="scaled_dot_product_attention",
+        )
+
+
+requires_triton = pytest.mark.skipif(not is_triton_available(), reason="Triton and a GPU are needed")
+
+
+@pytest.mark.parametrize(
+    "attention_implementation,option",
+    [
+        ("scaled_dot_product_attention", {"softcap": 0.5}),
+        ("scaled_dot_product_attention", {"use_alibi_slopes": True}),
+        ("scaled_dot_product_attention", {"use_rotary_embeddings": True}),
+        pytest.param("triton_attention", {"dropout_p": 0.1}, marks=requires_triton),
+        pytest.param("triton_attention", {"softcap": 0.5}, marks=requires_triton),
+        pytest.param("triton_attention", {"use_alibi_slopes": True}, marks=requires_triton),
+        pytest.param("triton_attention", {"use_rotary_embeddings": True}, marks=requires_triton),
+    ],
+)
+@pytest.mark.parametrize("attention_module", [MultiHeadSelfAttention, MultiHeadCrossAttention])
+def test_attention_rejects_unsupported_options_when_built(
+    attention_module, attention_implementation, option, layer_kernels
+):
+    (name,) = option
+    with pytest.raises(NotImplementedError, match=f"does not support: {name}"):
+        attention_module(
+            num_heads=4,
+            embed_dim=64,
+            layer_kernels=layer_kernels,
+            attention_implementation=attention_implementation,
+            **option,
         )
 
 
@@ -268,21 +297,3 @@ def test_multi_head_self_attention_forward_sdpa_sliding_window(layer_kernels):
     assert (
         peak_alloc_memory_after_sliding_window_mb <= peak_alloc_memory_after_global_mb
     ), "Sliding window attention should not use more memory than global attention"
-
-
-def test_multi_head_self_attention_forward_sdpa_rejects_softcap(layer_kernels):
-    num_heads = 4
-    embed_dim = 32
-    batch_size = 2
-    mhsa = MultiHeadSelfAttention(
-        num_heads,
-        embed_dim,
-        layer_kernels,
-        attention_implementation="scaled_dot_product_attention",
-        softcap=0.5,
-    )
-
-    x = torch.randn(batch_size * 2, embed_dim)
-    shard_info = GraphShardInfo(nodes=[2])
-    with pytest.raises(NotImplementedError, match="Softcap not supported"):
-        mhsa.forward(x, shard_info, batch_size)
