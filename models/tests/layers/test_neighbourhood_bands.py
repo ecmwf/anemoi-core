@@ -109,6 +109,21 @@ def test_bands_hold_about_the_same_number_of_points() -> None:
     assert max(sizes) - min(sizes) <= 2 * max(nb.query_grid.row_lengths)
 
 
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs a GPU as the default device")
+@pytest.mark.parametrize("case", ["octahedral self", "octahedral coarse to fine"])
+def test_bands_are_planned_with_the_gpu_as_default_device(case: str) -> None:
+    # anemoi-inference runs the model with the GPU as the default device, while the grids the
+    # bands are cut from stay on the CPU.
+    family, query_grid, key_grid, kernel_size = CASES[case]
+    nb = replace(neighbourhood(family, query_grid, key_grid, kernel_size), num_bands=3)
+    sizes = [7, nb.query_grid.num_points - 7]
+    expected = [(plan.query_points, plan.key_points) for plan in NeighbourhoodBands(nb).plans(sizes)]
+    with torch.device("cuda"):
+        plans = NeighbourhoodBands(nb).plans(sizes)
+    assert [(plan.query_points, plan.key_points) for plan in plans] == expected
+    assert all(len(plan.bands) > 1 for plan in plans[1:])
+
+
 def test_bands_need_nodes_in_grid_order() -> None:
     grid = ReducedGrid.octahedral(8)
     coords = grid_coords(grid)[torch.randperm(grid.num_points, generator=torch.Generator().manual_seed(0))]
