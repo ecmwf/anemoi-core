@@ -51,7 +51,7 @@ class BaseGraphModel(nn.Module):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        metadata: Optional[dict],
+        variable_metadata: Optional[dict],
     ) -> None:
         """Initializes the graph neural network.
 
@@ -69,8 +69,8 @@ class BaseGraphModel(nn.Module):
             Number of input timesteps
         n_step_output : int
             Number of output timesteps
-        metadata : Optional[dict]
-            Metadata dictionary
+        variable_metadata : Optional[dict]
+            Variable metadata dictionary
         """
         super().__init__()
         self._graph_data = graph_data
@@ -78,7 +78,7 @@ class BaseGraphModel(nn.Module):
         self.statistics = statistics
         self.n_step_input = n_step_input
         self.n_step_output = n_step_output
-        self.metadata = metadata
+        self.variable_metadata = variable_metadata
         self.dataset_names = list(data_indices.keys())
         self._graph_name_hidden = model_config.model.hidden_nodes_name
 

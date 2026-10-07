@@ -56,7 +56,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
             self.variable_vocabulary = VariableVocabulary.from_foundation(
                 data_indices=self.data_indices,
-                metadata=self.metadata,
+                metadata=self.variable_metadata,
             )
 
         if tokenizer_config:
