@@ -79,10 +79,8 @@ def test_gridded_reader_is_not_tabular(mocker: MockFixture) -> None:
 
 def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader = mocker.MagicMock()
-    reader.missing = set()
-    reader.dates = list(range(20))
-    reader.has_trajectories = False
-    reader.frequency = "3h"
+    # (sequence, position) anchors of a 20-date series sampled with relative indices [0, 1]
+    reader.compute_anchors.return_value = np.column_stack([np.zeros(19, dtype=np.int64), np.arange(19)])
     positions = np.arange(19, dtype=np.int64)  # 20 dates, window of 2
     reader.valid_anchors.return_value = ReaderAnchors(
         positions.astype("datetime64[s]"),
@@ -118,7 +116,7 @@ def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> 
     assert set(sample) == {"a", "b"}
     assert isinstance(sample["a"], GriddedSourceSample)
     assert sample["a"].coordinates.shape == (6, 2)
-    # Relative indices [0, 1] are normalized to a slice and offset by the anchor position.
+    # Relative indices [0, 1] are normalized to a slice and offset by the anchor's position.
     ds.data_readers["a"].get_sample.assert_called_with(0, slice(0, 2, 1))
 
 

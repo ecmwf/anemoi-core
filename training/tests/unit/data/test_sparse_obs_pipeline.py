@@ -66,8 +66,8 @@ def test_batch_collate_and_to() -> None:
     moved_batch = batch.to(device)
 
     # Assert that the data is on the correct device.
-    assert moved_batch.data[_DATASET_NAME][0].device.type == device.type
-    assert moved_batch.data[_DATASET_NAME][1].device.type == device.type
+    assert moved_batch[_DATASET_NAME].data[0].device.type == device.type
+    assert moved_batch[_DATASET_NAME].data[1].device.type == device.type
 
 
 # ----------------------------------------------------------------- helpers
@@ -154,9 +154,9 @@ def test_get_sample_returns_unified_contract() -> None:
     assert sample.timedeltas.shape == (n,)
     torch.testing.assert_close(sample.timedeltas, torch.tensor(payload.timedeltas, dtype=torch.float32))
 
-    # The reader retains both time windows and reports their shard sizes.
+    # The reader retains both time windows; a single reader reads everything, so nothing is sharded.
     assert list(sample.boundaries) == list(payload.boundaries)
-    assert sample.shard_sizes == [[3], [3]]
+    assert sample.shard_sizes is None
     assert all(isinstance(s, slice) for s in sample.boundaries)
 
 
@@ -203,10 +203,10 @@ def test_collate_mixed_gridded_and_sparse_batch() -> None:
 
     # Sparse timedeltas are list[(N_i,)] tensors per sample, stored separately
     # from coordinates.
-    assert isinstance(batch.timedeltas["obs"], list)
-    assert len(batch.timedeltas["obs"]) == 2
-    assert batch.timedeltas["obs"][0].shape == (5,)
-    assert batch.timedeltas["obs"][1].shape == (7,)
+    assert isinstance(batch["obs"].timedeltas, list)
+    assert len(batch["obs"].timedeltas) == 2
+    assert batch["obs"].timedeltas[0].shape == (5,)
+    assert batch["obs"].timedeltas[1].shape == (7,)
 
     # Static-grid coordinates reused by reference (single tensor, no batch dim).
     assert batch["grid"].coordinates.shape == (grid, 2)
@@ -255,8 +255,8 @@ def test_to_mixed_batch_moves_tensors_and_preserves_boundaries() -> None:
     # Sparse coordinates and timedeltas moved per-list-entry.
     assert isinstance(moved["obs"].coordinates, list)
     assert all(t.device.type == "cpu" for t in moved["obs"].coordinates)
-    assert isinstance(moved.timedeltas["obs"], list)
-    assert all(t.device.type == "cpu" for t in moved.timedeltas["obs"])
+    assert isinstance(moved["obs"].timedeltas, list)
+    assert all(t.device.type == "cpu" for t in moved["obs"].timedeltas)
 
     # Boundaries are passed through unchanged (identity-preserved).
     assert moved["obs"].boundaries is batch["obs"].boundaries

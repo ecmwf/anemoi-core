@@ -544,6 +544,66 @@ class TabularSource(Source):
             shard_sizes=new_shard_sizes,
         )
 
+    def concat_time(self, *others: "TabularSource") -> "TabularSource":
+        """Return a new view with the time windows of ``others`` appended after this source's.
+
+        Sample by sample, data, coordinates and timedeltas are concatenated along the node axis,
+        and the window boundaries and shard sizes are extended accordingly.
+
+        Parameters
+        ----------
+        *others : TabularSource
+            Sources with the same samples, variables, layout and ensemble size.
+
+        Returns
+        -------
+        TabularSource
+            A new view with ``self.time_size + sum(other.time_size)`` windows.
+        """
+        sources = (self, *others)
+        for other in others:
+            if not isinstance(other, TabularSource):
+                msg = f"Cannot append {type(other).__name__} windows to TabularSource {self.name!r}."
+                raise TypeError(msg)
+            mismatch = {
+                "batch size": (self.batch_size, other.batch_size),
+                "variables": (tuple(self.variables), tuple(other.variables)),
+                "layout": (self.layout, other.layout),
+                "ensemble size": (self.ensemble_size, other.ensemble_size),
+                "sharding": (self.shard_sizes is None, other.shard_sizes is None),
+            }
+            mismatch = {key: values for key, values in mismatch.items() if values[0] != values[1]}
+            if mismatch:
+                msg = f"Cannot append the windows of source {other.name!r} to {self.name!r}: mismatched {mismatch}."
+                raise ValueError(msg)
+
+        grid_axis = self.layout.grid
+        new_data, new_coords, new_timedeltas, new_boundaries = [], [], [], []
+        new_shard_sizes = None if self.shard_sizes is None else []
+        for sample_idx in range(self.batch_size):
+            new_data.append(torch.cat([source.data[sample_idx] for source in sources], dim=grid_axis))
+            new_coords.append(torch.cat([source.coordinates[sample_idx] for source in sources], dim=0))
+            new_timedeltas.append(torch.cat([source.timedeltas[sample_idx] for source in sources], dim=0))
+
+            offset = 0
+            boundaries = []
+            for source in sources:
+                for window in source.boundaries[sample_idx]:
+                    boundaries.append(slice(window.start + offset, window.stop + offset))
+                offset += len(source.coordinates[sample_idx])
+            new_boundaries.append(tuple(boundaries))
+
+            if new_shard_sizes is not None:
+                new_shard_sizes.append([sizes for source in sources for sizes in source.shard_sizes[sample_idx]])
+
+        return self.clone(
+            data=new_data,
+            coordinates=new_coords,
+            timedeltas=new_timedeltas,
+            boundaries=new_boundaries,
+            shard_sizes=new_shard_sizes,
+        )
+
     def tree(self, prefix: str = "") -> Tree:
         """Return a tree representation of the tabular source.
 

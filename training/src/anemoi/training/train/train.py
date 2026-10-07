@@ -491,8 +491,6 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "base_seed": self.base_seed,
             "run_id": self.run_id,
-            "dataset_names": None,  # will be populated in DataModule
-            "task": None,  # will be populated in BaseTrainingModule
         }
         # Store metadata needed in inference in a separate dict "metadata_inference"
         # For each group, we add a dictionary with:
@@ -507,13 +505,9 @@ class AnemoiTrainer(ABC):
             "seed": self.initial_seed,
             "base_seed": self.base_seed,
             "run_id": self.run_id,
-            "task": None,  # will be populated in Task
-            "dataset": None,  # will be populated in DataModule
-            "data_indices": None,  # will be populated in DataModule
             "provenance_training": gather_provenance_info(),
             "timestamp": datetime.datetime.now(tz=datetime.UTC),
             "metadata_inference": metadata_inference,
-            "uuid": None,  # will be populated in checkpoint callback
         }
         self.datamodule.fill_metadata(md_dict)
         self.task.fill_metadata(md_dict)

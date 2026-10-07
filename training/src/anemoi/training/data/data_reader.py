@@ -118,7 +118,7 @@ def _to_local_window_shard_data(
     *,
     reader_group_rank: int,
     reader_group_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes] | None]:
     """Project sparse windowed tensors to the local reader-rank shard.
 
     Parameters
@@ -142,13 +142,11 @@ def _to_local_window_shard_data(
     -------
     tuple
         ``(data_local, latitudes_local, longitudes_local, timedeltas_local, boundaries_local, window_shard_sizes)``
-        where ``window_shard_sizes`` stores the per-window balanced partition sizes.
+        where ``window_shard_sizes`` stores the per-window balanced partition sizes, or is ``None``
+        when a single reader reads everything (the payload is then not sharded).
     """
     if reader_group_size <= 1:
-        window_shard_sizes_all = [
-            get_balanced_partition_sizes(boundary.stop - boundary.start, 1) for boundary in boundaries
-        ]
-        return data, latitudes, longitudes, timedeltas, boundaries, window_shard_sizes_all
+        return data, latitudes, longitudes, timedeltas, boundaries, None
 
     data_parts: list[torch.Tensor] = []
     lat_parts: list[torch.Tensor] = []
@@ -307,9 +305,9 @@ class BaseAnemoiReader(ABC):
         Arguments
         ---------
         reader_group_rank : int
-             Reader group rank
+             Reader group rank.
         reader_group_size : int
-             Reader group size
+             Reader group size.
         """
         self.reader_group_rank = reader_group_rank
         self.reader_group_size = reader_group_size
@@ -523,6 +521,8 @@ class TabularDataReader(BaseAnemoiReader):
 
         Parameters
         ----------
+        sequence : int
+            Sequence index; ignored, as tabular datasets have a single sequence.
         positions : TimeIndices
             Time windows and shard selection for the observation sample.
 
@@ -682,10 +682,6 @@ class TrajectoryDataReader(GriddedDataReader):
         x = rearrange(x, "variables ensemble steps gridpoints -> steps ensemble gridpoints variables")
         return torch.from_numpy(x)
 
-    def get_sample(self, sequence: int, positions: TimeIndices) -> GriddedSourceSample:
-        """Return forecast steps ``positions`` of initialisation ``sequence``."""
-        return self._build_sample(self.get_data(sequence, positions))
-
     def tree(self, prefix: str = "") -> Tree:
         tree = super().tree(prefix)
         tree.add(f"Num initialisations: {self.num_sequences}")
@@ -708,5 +704,5 @@ def create_dataset(dataset_config: dict, **_kwargs) -> BaseAnemoiReader:
         LOGGER.info("Creating TabularDataReader...")
         return TabularDataReader(**dataset_config)
 
-    LOGGER.info("Creating GriddedDataReader...")
+    LOGGER.info("Creating a GriddedDataReader...")
     return GriddedDataReader(**dataset_config)

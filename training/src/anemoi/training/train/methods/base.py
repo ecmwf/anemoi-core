@@ -656,18 +656,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred : Source
-            Predicted values
+            Predicted values.
         y : Source
-            Target values
+            Target values.
         dataset_name : str
             Dataset being processed.
         validation_mode : bool
-            Whether in validation mode
+            Whether in validation mode.
 
         Returns
         -------
         tuple[Source, Source, slice | None]
-            Prepared y_pred, y, and grid_shard_slice
+            Prepared y_pred, y, and grid_shard_slice.
         """
         # Sharding metadata now lives on the source views (None when replicated).
         # A single gather decision is applied to both views, so they must agree.
@@ -728,6 +728,53 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         with torch.autocast(device_type=pred.device.type, enabled=False):
             return loss(pred, target, **kwargs)
 
+    def _check_nan_targets(self, y: Source, dataset_name: str, losses: dict[str, torch.nn.Module]) -> None:
+        """Fail loudly when targets contain NaNs that a loss or metric cannot handle.
+
+        Targets are not imputed, so missing values reach the losses as NaNs. A loss or metric
+        with ``ignore_nans=False`` would then return NaN. The check only runs when such a loss is
+        configured for ``dataset_name``, and only looks at the model's output variables.
+
+        Parameters
+        ----------
+        y : Source
+            Target values.
+        dataset_name : str
+            Dataset name.
+        losses : dict[str, torch.nn.Module]
+            Losses or metrics to check, keyed by the name used in the error message.
+        """
+        intolerant = [
+            name
+            for name, loss in losses.items()
+            if any(getattr(module, "ignore_nans", True) is False for module in loss.modules())
+        ]
+        if not intolerant:
+            return
+
+        output_variables = self.data_indices[dataset_name].model.output.name_to_index
+        indices = [i for i, name in enumerate(y.variables) if name in output_variables]
+        if not indices:
+            return
+        samples = y.data if y.is_tabular else [y.data]
+        nan_per_variable = torch.zeros(len(indices), dtype=torch.bool, device=samples[0].device)
+        for sample in samples:
+            variables_axis = y.layout.axis("variables", ndim=sample.ndim)
+            values = sample.index_select(variables_axis, torch.as_tensor(indices, device=sample.device))
+            nan_per_variable |= torch.isnan(values.movedim(variables_axis, -1)).reshape(-1, len(indices)).any(dim=0)
+        if not bool(nan_per_variable.any()):
+            return
+
+        nan_variables = [
+            y.variables[i] for i, has_nan in zip(indices, nan_per_variable.tolist(), strict=True) if has_nan
+        ]
+        msg = (
+            f"Dataset '{dataset_name}': the targets of {nan_variables} contain NaNs, but {intolerant} "
+            "use ignore_nans=False, so they would be NaN. Targets are not imputed; set ignore_nans: True "
+            "for these losses and metrics."
+        )
+        raise ValueError(msg)
+
     def _compute_loss(
         self,
         y_pred: Source,
@@ -743,26 +790,27 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred : Source
-            Predicted values
+            Predicted values.
         y : Source
-            Target values
+            Target values.
         grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Grid shard slice for distributed training.
         dataset_name : str
-            Dataset name for multi-dataset scenarios
+            Dataset name for multi-dataset scenarios.
         pred_layout : IndexSpace | str | None
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None
             Variable layout of the targets.
         **_kwargs
-            Additional arguments
+            Additional arguments.
 
         Returns
         -------
         torch.Tensor
-            Computed loss
+            Computed loss.
         """
         loss = self.loss[dataset_name]
+        self._check_nan_targets(y, dataset_name, {"training_loss": loss})
         loss_kwargs = {
             "grid_shard_slice": grid_shard_slice,
             "group": self.model_comm_group,
@@ -799,11 +847,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred : Source
-            Predicted values
+            Predicted values.
         y : Source
-            Target values
+            Target values.
         grid_shard_slice : slice | None
-            Grid shard slice for distributed training
+            Grid shard slice for distributed training.
         dataset_name : str | None
             Dataset name for multi-dataset scenarios.
         pred_layout : IndexSpace | str | None
@@ -818,7 +866,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Returns
         -------
         dict[str, torch.Tensor]
-            Computed metrics
+            Computed metrics.
         """
         return self.calculate_val_metrics(
             y_pred,
@@ -843,20 +891,20 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred : Source
-            Predicted values
+            Predicted values.
         y : Source
-            Target values
+            Target values.
         validation_mode : bool, optional
-            Whether to compute validation metrics
+            Whether to compute validation metrics.
         dataset_name : str | None, optional
             Dataset being processed.
         **kwargs
-            Additional arguments to pass to loss computation
+            Additional arguments to pass to loss computation.
 
         Returns
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor], Source]
-            Loss, metrics dictionary (if validation_mode), and full predictions
+            Loss, metrics dictionary (if validation_mode), and full predictions.
         """
         # Prepare tensors for loss/metrics computation
         y_pred_full, y_full, grid_shard_slice = self._prepare_tensors_for_loss(
@@ -899,18 +947,18 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred : Batch
-            Predicted values
+            Predicted values.
         y : Batch
-            Target values
+            Target values.
         validation_mode : bool, optional
-            Whether to compute validation metrics
+            Whether to compute validation metrics.
         **kwargs
-            Additional arguments to pass to loss computation
+            Additional arguments to pass to loss computation.
 
         Returns
         -------
         tuple[torch.Tensor | None, dict[str, torch.Tensor], Batch]
-            Loss, metrics dictionary (if validation_mode), and full predictions
+            Loss, metrics dictionary (if validation_mode), and full predictions.
         """
         assert isinstance(y_pred, Batch), "y_pred must be a dict keyed by dataset name"
         assert isinstance(y, Batch), "y must be a dict keyed by dataset name"
@@ -1004,12 +1052,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         batch : Batch
-            Batch to transfer
+            Batch to transfer.
 
         Returns
         -------
         Batch
-            Batch after transfer
+            Batch after transfer.
         """
         assert isinstance(batch, Batch), "batch must be a Batch instance"
         # Gathering/sharding of batch
@@ -1088,7 +1136,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         torch.Tensor
             Allgathered (full) tensor.
         """
-        return batch.allgather(self.reader_groups[self.reader_group_id])
+        # Without reader groups (single-device training) there is a single reader, so nothing is
+        # sharded; Source.allgather treats a None group as single-rank and validates any shard sizes.
+        group = None if self.reader_groups is None else self.reader_groups[self.reader_group_id]
+        return batch.allgather(group)
 
     def _align_view_to_layout(
         self,
@@ -1133,7 +1184,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Parameters
         ----------
         y_pred: Source
-            Predicted ensemble
+            Predicted ensemble.
         y: Source
             Ground truth (target).
         grid_shard_slice : slice | None, optional
@@ -1141,7 +1192,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         dataset_name : str | None, optional
             Dataset being processed.
         step : int | None, optional
-            Step number
+            Step number.
         pred_layout : IndexSpace | str | None, optional
             Variable layout of the predictions.
         target_layout : IndexSpace | str | None, optional
@@ -1154,12 +1205,17 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Returns
         -------
         val_metrics : dict[str, torch.Tensor]
-            validation metrics and predictions
+            validation metrics and predictions.
         """
         metrics = {}
 
         # Handle multi-dataset case for post-processors
         metrics_dict = self.metrics[dataset_name]
+        self._check_nan_targets(
+            y,
+            dataset_name,
+            {f"validation_metrics.{name}": metric for name, metric in metrics_dict.items()},
+        )
         val_metric_ranges = self.val_metric_ranges[dataset_name]
 
         # y (target) and y_pred (model output) can live in different index

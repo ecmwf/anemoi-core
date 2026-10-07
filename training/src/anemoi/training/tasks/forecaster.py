@@ -24,6 +24,8 @@ LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from anemoi.models.data.batch import Batch
+    from anemoi.models.data.sources import Source
+    from anemoi.models.data.sources import TabularSource
 
 
 class RolloutConfig:
@@ -97,6 +99,7 @@ class BaseForecaster(BaseTask):
         self._rollout_shift = rollout_shift
         self.rollout = RolloutConfig(**(rollout or {}))
         self.validation_rollout = validation_rollout
+        self._advance_map = self._compute_advance_map()
         self._plot_adapter = ForecasterPlotAdapter(self)
 
     def steps(self, mode: str = "training") -> tuple[dict[str, int], ...]:
@@ -141,7 +144,7 @@ class BaseForecaster(BaseTask):
         shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
-    def _advance_dataset_input(
+    def _advance_gridded_input(
         self,
         x: torch.Tensor,
         y_pred: torch.Tensor | None,
@@ -150,12 +153,81 @@ class BaseForecaster(BaseTask):
         output_mask: object | None = None,
         grid_shard_slice: slice | None = None,
     ) -> torch.Tensor:
-        """Advance a single dataset's input state for the next rollout step.
+        """Advance a gridded dataset's input state for the next rollout step.
 
+        Input windows that remain inputs move to their new position (see ``_compute_advance_map``).
+        Each new input window is the output window at the same time: the predicted prognostics,
+        the true state outside the output mask, and the output-time forcings. A dataset without
+        a prediction (it has no decoder) takes its true state there, forcings included.
         Supports model outputs shaped like ``(B, T, E, G, V)``.
         """
-        msg = "Subclasses must implement _advance_dataset_input."
-        raise NotImplementedError(msg)
+        # Return a fresh tensor: gradient computations need the version of x at each rollout step
+        previous = x
+        x = x.clone()
+
+        # Shift part of input to be reused.
+        for old_idx, new_idx in self._advance_map["inin"]:
+            x[:, new_idx] = previous[:, old_idx]
+
+        for out_idx, new_idx in self._advance_map["outin"]:
+            if y_pred is None:
+                # No prediction (the dataset has no decoder): its next input is its true state,
+                # forcings included.
+                x[:, new_idx] = output_values[:, out_idx, ..., data_indices.data.input.full]
+                continue
+
+            # Get prognostic variables
+            x[:, new_idx, ..., data_indices.model.input.prognostic] = y_pred[
+                :,
+                out_idx,
+                ...,
+                data_indices.model.output.prognostic,
+            ]
+
+            true_state = output_values[:, out_idx]
+
+            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
+                true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
+
+            x[:, new_idx] = output_mask.rollout_boundary(
+                x[:, new_idx],
+                true_state,
+                data_indices,
+                grid_shard_slice=grid_shard_slice,
+            )
+
+            # get new "constants" needed for time-varying fields
+            x[:, new_idx, ..., data_indices.model.input.forcing] = output_values[
+                :,
+                out_idx,
+                ...,
+                data_indices.data.input.forcing,
+            ]
+        return x
+
+    def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
+        """Map each input window of the next rollout step to where it comes from.
+
+        Returns ``{"inin": [(old_input_index, new_input_index), ...], "outin": [(output_index,
+        new_input_index), ...]}``: after a step the input window at ``input_offsets[new]`` is
+        either a current input window (shifted by ``rollout_shift``) or an output window.
+        """
+        out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
+        in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
+        advance_map = {"inin": [], "outin": []}
+        for new_idx, in_offset in enumerate(self._input_offsets):
+            shifted_in = in_offset + self._rollout_shift
+            if shifted_in in out_to_idx:
+                advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
+            elif shifted_in in in_to_idx:
+                advance_map["inin"].append((in_to_idx[shifted_in], new_idx))
+            else:
+                msg = (
+                    f"Cannot advance the input window at offset {in_offset} by the rollout shift "
+                    f"{self._rollout_shift}: {shifted_in} is neither an input nor an output offset."
+                )
+                raise ValueError(msg)
+        return advance_map
 
     def advance_input(
         self,
@@ -169,28 +241,120 @@ class BaseForecaster(BaseTask):
     ) -> "Batch":
         """Advance the input state for the next rollout step, preserving coords and metadata.
 
-        Missing predictions are passed as None to the forecasting task. The
-        regular Forecaster rotates these input windows without updating them.
-        Tabular (observation) datasets pass through unchanged.
+        A dataset without a prediction (``None``: it has no decoder) takes its true state at the
+        next input times. Tabular (observation) datasets advance their time windows the same way
+        (see ``_advance_tabular_input``).
         """
         del rollout_step
-        new_data = {}
-        for dataset_name, view in x.items():
-            if view.is_tabular:
-                # Sparse observations have no explicit time axis to roll.
-                new_data[dataset_name] = view.data
-                continue
+        return x.with_sources(
+            {
+                dataset_name: self._advance_source(
+                    view,
+                    y_pred.get(dataset_name),
+                    output_values[dataset_name],
+                    data_indices=data_indices[dataset_name],
+                    output_mask=None if output_mask is None else output_mask[dataset_name],
+                    grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice.get(dataset_name),
+                )
+                for dataset_name, view in x.items()
+            },
+        )
 
-            prediction = y_pred[dataset_name].data.to(view.dtype) if dataset_name in y_pred else None
-            new_data[dataset_name] = self._advance_dataset_input(
-                view.data,
-                prediction,
-                output_values[dataset_name].data,
-                data_indices=data_indices[dataset_name],
-                output_mask=None if output_mask is None else output_mask[dataset_name],
-                grid_shard_slice=None if grid_shard_slice is None else grid_shard_slice.get(dataset_name),
+    def _advance_source(
+        self,
+        x: "Source",
+        prediction: "Source | None",
+        truth: "Source",
+        data_indices: IndexCollection,
+        output_mask: object | None = None,
+        grid_shard_slice: slice | None = None,
+    ) -> "Source":
+        """Advance one dataset's input for the next rollout step.
+
+        Parameters
+        ----------
+        x : Source
+            Current input, in the model input variables.
+        prediction : Source | None
+            Predicted output, in the model output variables, or ``None`` if the dataset is not decoded.
+        truth : Source
+            True output, in the full data variables.
+        data_indices : IndexCollection
+            Data indices of the dataset.
+        output_mask : object | None
+            Output mask of a gridded dataset, which refills the true state outside it.
+        grid_shard_slice : slice | None
+            Local grid shard of a gridded dataset, which the output mask indexes.
+
+        Returns
+        -------
+        Source
+            The input for the next rollout step.
+        """
+        if x.is_tabular:
+            return self._advance_tabular_input(x, prediction, truth, data_indices)
+
+        new_data = self._advance_gridded_input(
+            x.data,
+            None if prediction is None else prediction.data.to(x.dtype),
+            truth.data,
+            data_indices=data_indices,
+            output_mask=output_mask,
+            grid_shard_slice=grid_shard_slice,
+        )
+        return x.clone(data=new_data)
+
+    def _advance_tabular_input(
+        self,
+        x: "TabularSource",
+        prediction: "TabularSource | None",
+        truth: "TabularSource",
+        data_indices: IndexCollection,
+    ) -> "TabularSource":
+        """Advance an observation dataset's input windows for the next rollout step.
+
+        Input windows that remain inputs move to their new position. Each new input window is
+        the output window at the same time: a dataset the model decodes takes its predicted
+        values there for its prognostic variables, with the observed forcings; a dataset it does
+        not decode takes the observations. Timedeltas are relative to each window's own date,
+        so windows keep theirs when they move.
+
+        Parameters
+        ----------
+        x : TabularSource
+            Current input windows, in the model input variables.
+        prediction : TabularSource | None
+            Predicted output windows, in the model output variables, or ``None`` if the dataset
+            is not decoded.
+        truth : TabularSource
+            Observed output windows, in the full data variables.
+        data_indices : IndexCollection
+            Data indices of the dataset.
+
+        Returns
+        -------
+        TabularSource
+            The input windows for the next rollout step.
+        """
+        windows: dict[int, TabularSource] = {}
+        advance_map = self._advance_map
+        for old_idx, new_idx in advance_map["inin"]:
+            windows[new_idx] = x.select_time([old_idx])
+        for out_idx, new_idx in advance_map["outin"]:
+            window = truth.select_time([out_idx]).select_variables(data_indices.data.input.full)
+            window = _match_ensemble_size(window, x.ensemble_size)
+            if prediction is not None:
+                window = _with_predicted_prognostics(window, prediction.select_time([out_idx]), data_indices)
+            windows[new_idx] = window.map_data(lambda t: t.to(x.dtype))
+
+        if sorted(windows) != list(range(x.time_size)):
+            msg = (
+                f"Source {x.name!r} has {x.time_size} input windows, but the rollout advance map "
+                f"{advance_map} fills {sorted(windows)}."
             )
-        return x.with_data(new_data)
+            raise ValueError(msg)
+        ordered = [windows[i] for i in range(x.time_size)]
+        return ordered[0].concat_time(*ordered[1:])
 
     def log_extra(self, logger: Callable, logger_enabled: bool, batch_size: int | None = None) -> None:
         """Log any task-specific information."""
@@ -278,57 +442,6 @@ class Forecaster(BaseForecaster):
             **kwargs,
         )
 
-    def _advance_dataset_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor | None,
-        output_values: torch.Tensor,
-        data_indices: IndexCollection | None = None,
-        output_mask: object | None = None,
-        grid_shard_slice: slice | None = None,
-    ) -> torch.Tensor:
-        """Advance a single dataset's input state for the next rollout step.
-
-        Supports model outputs shaped like ``(B, T, E, G, V)``.
-        """
-        keep_steps = min(self.num_input_steps, self.num_output_steps)
-
-        x = x.roll(-keep_steps, dims=1)
-
-        # Match upstream: missing predictions leave the rotated window unmodified.
-        for i in range(keep_steps):
-            if y_pred is None:
-                continue
-
-            # Get prognostic variables
-            x[:, -(i + 1), ..., data_indices.model.input.prognostic] = y_pred[
-                :,
-                -(i + 1),
-                ...,
-                data_indices.model.output.prognostic,
-            ]
-
-            true_state = output_values[:, -(i + 1)]
-
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, -(i + 1)].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, -(i + 1)].shape[1], -1, -1)
-
-            x[:, -(i + 1)] = output_mask.rollout_boundary(
-                x[:, -(i + 1)],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, -(i + 1), ..., data_indices.model.input.forcing] = output_values[
-                :,
-                -(i + 1),
-                ...,
-                data_indices.data.input.forcing,
-            ]
-        return x
-
 
 class OffsetForecaster(BaseForecaster):
     """Alternative Forecasting task implementation.
@@ -365,21 +478,6 @@ class OffsetForecaster(BaseForecaster):
             **kwargs,
         )
 
-        self._advance_map = self._compute_advance_map()
-
-    def _compute_advance_map(self) -> dict[str, list[tuple[int, int]]]:
-        """Pre-compute index mappings for input advancement during a rollout step."""
-        out_to_idx = {o: j for j, o in enumerate(self._output_offsets)}
-        in_to_idx = {i: j for j, i in enumerate(self._input_offsets)}
-        advance_map = {"inin": [], "outin": []}
-        for new_idx, in_offset in enumerate(self._input_offsets):
-            shifted_in = in_offset + self._rollout_shift
-            if shifted_in in out_to_idx:
-                advance_map["outin"].append((out_to_idx[shifted_in], new_idx))
-            else:
-                advance_map["inin"].append((in_to_idx[shifted_in], new_idx))
-        return advance_map
-
     def fill_metadata(self, md_dict: dict) -> None:
         """Fill the metadata dictionary with task-specific information."""
         super().fill_metadata(md_dict)
@@ -392,58 +490,6 @@ class OffsetForecaster(BaseForecaster):
         dataset_names = md_dict["metadata_inference"]["dataset_names"]
         for dataset_name in dataset_names:
             md_dict["metadata_inference"][dataset_name]["timesteps"].update(fc_timesteps)
-
-    def _advance_dataset_input(
-        self,
-        x: torch.Tensor,
-        y_pred: torch.Tensor,
-        output_values: torch.Tensor,
-        data_indices: IndexCollection | None = None,
-        output_mask: object | None = None,
-        grid_shard_slice: slice | None = None,
-    ) -> torch.Tensor:
-        """Advance a single dataset's input state for the next rollout step.
-
-        Based on advance_map, mapping indices from input and output to new input.
-        Supports model outputs shaped like ``(B, T, E, G, V)``.
-        """
-        # Return a fresh tensor: gradient computations need the version of x at each rollout step
-        previous = x
-        x = x.clone()
-
-        # Shift part of input to be reused.
-        for old_idx, new_idx in self._advance_map["inin"]:
-            x[:, new_idx] = previous[:, old_idx]
-
-        for out_idx, new_idx in self._advance_map["outin"]:
-            # Get prognostic variables
-            x[:, new_idx, ..., data_indices.model.input.prognostic] = y_pred[
-                :,
-                out_idx,
-                ...,
-                data_indices.model.output.prognostic,
-            ]
-
-            true_state = output_values[:, out_idx]
-
-            if output_mask is not None and true_state.shape[1] == 1 and x[:, new_idx].shape[1] != 1:
-                true_state = true_state.expand(-1, x[:, new_idx].shape[1], -1, -1)
-
-            x[:, new_idx] = output_mask.rollout_boundary(
-                x[:, new_idx],
-                true_state,
-                data_indices,
-                grid_shard_slice=grid_shard_slice,
-            )
-
-            # get new "constants" needed for time-varying fields
-            x[:, new_idx, ..., data_indices.model.input.forcing] = output_values[
-                :,
-                out_idx,
-                ...,
-                data_indices.data.input.forcing,
-            ]
-        return x
 
     @staticmethod
     def _convert_and_validate(
@@ -514,3 +560,48 @@ class OffsetForecaster(BaseForecaster):
                 )
                 raise ValueError(msg)
         return input_offsets, output_offsets, rollout_shift
+
+
+def _match_ensemble_size(source: "TabularSource", ensemble_size: int) -> "TabularSource":
+    """Broadcast a single-member tabular source to ``ensemble_size`` members."""
+    if source.ensemble_size == ensemble_size:
+        return source
+    if source.ensemble_size != 1:
+        msg = (
+            f"Cannot use the {source.ensemble_size} members of source {source.name!r} as input for "
+            f"{ensemble_size} ensemble members."
+        )
+        raise ValueError(msg)
+
+    def expand(t: torch.Tensor) -> torch.Tensor:
+        axis = source.layout.axis("ensemble", ndim=t.ndim)
+        return t.expand(*[ensemble_size if i == axis else -1 for i in range(t.ndim)])
+
+    return source.map_data(expand)
+
+
+def _with_predicted_prognostics(
+    window: "TabularSource",
+    prediction: "TabularSource",
+    data_indices: IndexCollection,
+) -> "TabularSource":
+    """Return ``window`` (model input variables) with its prognostic values taken from ``prediction``."""
+    if window.layout.axis("variables", ndim=window.layout.ndim) != window.layout.ndim - 1:
+        msg = f"Source {window.name!r} must have its variables last to take predicted values, got {window.layout!r}."
+        raise ValueError(msg)
+
+    input_prognostic = data_indices.model.input.prognostic
+    output_prognostic = data_indices.model.output.prognostic
+    new_data = []
+    for sample_idx, (observed, predicted) in enumerate(zip(window.data, prediction.data, strict=True)):
+        if observed.shape[:-1] != predicted.shape[:-1]:
+            msg = (
+                f"Source {window.name!r}, sample {sample_idx}: the prediction has shape {tuple(predicted.shape)} "
+                f"but the observed window has {tuple(observed.shape)}; the predicted nodes (and ensemble members) "
+                "must match the observations of the window they replace."
+            )
+            raise ValueError(msg)
+        sample = observed.clone()
+        sample[..., input_prognostic] = predicted[..., output_prognostic].to(sample.dtype)
+        new_data.append(sample)
+    return window.clone(data=new_data)

@@ -15,6 +15,7 @@ import pytest
 import torch
 from pytest_mock import MockFixture
 
+from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.data.usable_indices import get_usable_indices
@@ -26,10 +27,24 @@ class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
 
     @staticmethod
-    def _mock_reader(mocker: MockFixture, num_dates: int, missing: set[int]) -> MockFixture:
-        """Mock a single-sequence gridded reader whose anchors follow its current ``missing`` dates."""
+    def _mock_reader(mocker: MockFixture, num_dates: int, missing: set[int], num_sequences: int = 1) -> MockFixture:
+        """Mock a reader whose ``compute_anchors`` runs the real anchor logic over ``reader.missing``.
+
+        Each sequence has ``num_dates`` positions, and ``reader.missing`` is read at call time,
+        so tests can change it after the mock is built.
+        """
         reader = mocker.MagicMock()
         reader.missing = missing
+        reader.num_sequences = num_sequences
+        reader.missing_sequences = set()
+        reader.default_sampling = {"stride": 1}
+        reader.sequence_length.return_value = num_dates
+        reader.missing_positions.side_effect = lambda sequence=0: set(reader.missing)  # noqa: ARG005
+        reader.compute_anchors.side_effect = lambda relative_indices, sampling=None: BaseAnemoiReader.compute_anchors(
+            reader,
+            relative_indices,
+            sampling,
+        )
         reader.dates = list(range(num_dates))
         reader.frequency = "3h"
         reader.has_trajectories = False
@@ -53,25 +68,24 @@ class TestMultiDataset:
 
         return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
 
-    def test_valid_anchors(self, multi_dataset: MultiDataset) -> None:
-        """Anchors hold the positions every reader can sample; valid_date_indices index into them."""
+    def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
+        """valid_date_indices is a flat range over the (sequence, position) anchors every reader can sample."""
         # relative_date_indices are: [0, 2, 6]
-        # dataset_a has no missing dates → valid indices [0..23]
-        # dataset_b has missing {7, 8, 9, 10} → indices 1..10 read a missing date → valid [0, 11..23]
-        # intersection: [0, 11..23]
-        expected = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
-        for rows in multi_dataset.anchors.rows.values():
-            np.testing.assert_array_equal(rows[:, 1], expected)
-            assert np.all(rows[:, 0] == 0)
-        np.testing.assert_array_equal(multi_dataset.valid_date_indices, np.arange(len(expected)))
+        # dataset_a has no missing dates → valid positions [0..23]
+        # dataset_b has missing {7, 8, 9, 10} → positions 1..10 read a missing date → valid [0, 11..23]
+        # intersection: [0, 11..23], all in sequence 0
+        expected_positions = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
+        np.testing.assert_array_equal(multi_dataset.valid_date_indices, np.arange(len(expected_positions)))
+        np.testing.assert_array_equal(multi_dataset.anchors[:, 0], 0)
+        np.testing.assert_array_equal(multi_dataset.anchors[:, 1], expected_positions)
 
     def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:
-        """get_sample(i) asks every reader for anchor i's position + its relative date indices."""
+        """get_sample(i) asks every reader for anchor i's sequence and position + its relative date indices."""
         multi_dataset.worker_id = 0
-        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 11)
+        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 1)  # anchor 1 is (sequence 0, position 11)
 
         for name, reader in multi_dataset.data_readers.items():
-            reader.get_sample.assert_called_once_with(0, [11, 13, 17])
+            reader.get_sample.assert_called_once_with(0, 0, [11, 13, 17])
             assert sample[name] is reader.get_sample.return_value
 
     def test_set_epoch_updates_contiguous_relative_date_indices(self, multi_dataset: MultiDataset) -> None:
@@ -167,4 +181,15 @@ class TestMultiDataset:
         data_readers["dataset_b"].missing = set(range(10))
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
+            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+
+    def test_mixing_single_and_multi_sequence_readers_raises(self, mocker: MockFixture) -> None:
+        """A global-time-axis reader cannot be aligned with a trajectory reader's (sequence, position) anchors."""
+        data_readers = {
+            "analysis": self._mock_reader(mocker, num_dates=30, missing=set()),
+            "forecast": self._mock_reader(mocker, num_dates=10, missing=set(), num_sequences=3),
+        }
+        relative_date_indices = {"analysis": [0, 1], "forecast": [0, 1]}
+
+        with pytest.raises(ValueError, match=r"Single-sequence: \['analysis'\]. Trajectory: \['forecast'\]"):
             MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)

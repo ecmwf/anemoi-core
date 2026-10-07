@@ -34,6 +34,7 @@ from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
 from anemoi.models.models.target_features import DecodingTargetFeature
 from anemoi.models.models.target_features import create_decoding_target_features
+from anemoi.models.models.target_features import time_steps_per_node
 from anemoi.models.utils.config import COORDS_DIM
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.utils.config import DotDict
@@ -177,11 +178,12 @@ class BaseGraphModel(nn.Module):
         model_graph_config : DotDict
             Graph configuration
         n_step_input : dict[str, int]
-            Number of input time steps to embed per node for each dataset. For tabular datasets, this will be 1 as
-            nodes are not colocated at both time steps.
+            Number of input time steps (windows, for tabular datasets) for each dataset. Gridded datasets embed
+            all of them per node; tabular datasets stack their windows on the node axis, so each node carries one
+            (see ``target_features.time_steps_per_node``).
         n_step_output : dict[str, int]
-            Number of output time steps to predict per node for each dataset. For tabular datasets, this will be 1
-            as nodes are not colocated at both time steps.
+            Number of output time steps (windows, for tabular datasets) for each dataset, with the same per-node
+            convention as ``n_step_input``.
         """
         super().__init__()
 
@@ -195,9 +197,10 @@ class BaseGraphModel(nn.Module):
             )
             self._graph_data = GraphCreator(static_graph_config).create()
         else:
-            # Existing-graph mode: no nodes in the graph config, load the graph from file.
+            # Existing-graph mode: no nodes in the graph config, load the graph from file. The model
+            # interface passes ``system.input.graph`` as the graph config's ``path``.
             self._graph_data, dynamic_graph_config = load_existing_graph(
-                model_config.get("system", {}).get("input", {}).get("graph"),
+                model_graph_config.get("path"),
                 is_dataset_static,
                 self._graph_name_hidden,
             )
@@ -392,7 +395,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
         return (
-            self.n_step_input[dataset_name] * self.num_input_channels[dataset_name]
+            time_steps_per_node(self, dataset_name, self.n_step_input) * self.num_input_channels[dataset_name]
             + COORDS_DIM
             + self.node_attributes.num_trainable_parameters.get(dataset_name, 0)
             + self.dynamic_node_attribute_dims.get(dataset_name, 0)
@@ -421,7 +424,7 @@ class BaseGraphModel(nn.Module):
 
     def _calculate_output_dim(self, dataset_name: str) -> int:
         """Calculate the decoder output dimension for a given dataset."""
-        return self.n_step_output[dataset_name] * self.num_output_channels[dataset_name]
+        return time_steps_per_node(self, dataset_name, self.n_step_output) * self.num_output_channels[dataset_name]
 
     @staticmethod
     def _as_hidden_node_names(

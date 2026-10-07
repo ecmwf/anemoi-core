@@ -139,10 +139,15 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
+        graph_config = self.config.graph
+        if not graph_config.get("nodes"):
+            # Existing-graph mode: the model loads the pre-built graph from system.input.graph.
+            system_input = (self.config.get("system") or {}).get("input") or {}
+            graph_config = {**graph_config, "path": system_input.get("graph")}
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
-            model_graph_config=self.config.graph,
+            model_graph_config=graph_config,
             data_indices=self.data_indices,
             statistics=self.statistics,
             is_dataset_static=self.is_dataset_static,
@@ -328,6 +333,8 @@ class AnemoiModelInterface(torch.nn.Module):
         target_forcing : dict[str, dict]
             Decoder conditioning, one payload per decoded dataset, holding the forcing
             variables at the output valid times.
+        target_template : dict[str, dict]
+            Output geometry, one payload per decoded dataset; required.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
