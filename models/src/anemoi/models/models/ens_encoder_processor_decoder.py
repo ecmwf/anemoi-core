@@ -61,9 +61,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_config.noise_injector,
             _recursive_=False,
             graph_data=self._graph_data,
-            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get(
-                "num_chunks", 1
-            ),
+            sparse_projector_num_chunks=model_config.get("sparse_projector", {}).get("num_chunks", 1),
         )
 
     def _calculate_input_dim(self, dataset_name: str) -> int:
@@ -100,8 +98,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                     "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
                 ),
                 node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1)
-                * fcstep,
+                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
             ),
             dim=-1,  # feature dimension
         )
@@ -174,9 +171,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         batch_size = self._get_consistent_dim(x, 0)
         ensemble_size = self._get_consistent_dim(x, 2)
 
-        batch_ens_size = (
-            batch_size * ensemble_size
-        )  # batch and ensemble dimensions are merged
+        batch_ens_size = batch_size * ensemble_size  # batch and ensemble dimensions are merged
         in_out_sharded = self._resolve_in_out_sharded(
             dataset_names=dataset_names,
             grid_shard_sizes=grid_shard_sizes,
@@ -196,13 +191,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_data_latent_dict = {}
         shard_sizes_data_dict = {}
 
-        x_hidden_latent = self.node_attributes(
-            self._graph_name_hidden, batch_size=batch_ens_size
-        )
+        x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
-        x_hidden_latent = shard_tensor(
-            x_hidden_latent, 0, shard_sizes_hidden, model_comm_group
-        )
+        x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
         for dataset_name in x.keys():
             if dataset_name not in self.input_datasets:
                 continue
@@ -273,9 +264,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_latent_proc = self.processor(
             x=x_latent_proc,
             batch_size=batch_ens_size,
-            shard_info=GraphShardInfo(
-                nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes
-            ),
+            shard_info=GraphShardInfo(nodes=shard_sizes_hidden, edges=proc_edge_shard_sizes),
             edge_attr=processor_edge_attr,
             edge_index=processor_edge_index,
             model_comm_group=model_comm_group,
@@ -320,9 +309,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 edge_attr=decoder_edge_attr,
                 edge_index=decoder_edge_index,
                 model_comm_group=model_comm_group,
-                keep_x_dst_sharded=in_out_sharded[
-                    dataset_name
-                ],  # keep x_out sharded iff in_out_sharded
+                keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
             )
 
             x_out_dict[dataset_name] = self._assemble_output(
