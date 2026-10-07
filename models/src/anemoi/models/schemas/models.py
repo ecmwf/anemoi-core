@@ -319,10 +319,75 @@ class SphericalInputNoiseSchema(BaseModel):
     "Default temporal decorrelation rate, dt / 6h in FourCastNet 3."
 
 
+class BandFilterSchema(BaseModel):
+    """Per-channel low-pass applied to each modulated noise channel."""
+
+    quantile: float = Field(default=0.99, gt=0.0, le=1.0)
+    "Share of the channel's own variance below its band edge."
+    taper: NonNegativeFloat = Field(default=0.25)
+    "Raised-cosine roll-off beyond the band edge, as a fraction of the edge degree. 0 gives a hard cut."
+
+
+class StdModulationSchema(BaseModel):
+    """Spatial amplitude modulation of the input noise by ensemble spread fields."""
+
+    enabled: bool = Field(default=True)
+    "Modulate the noise. When False the spread inputs are still dropped from the encoder, giving a matched baseline."
+    groups: dict[str, list[str]] = Field(..., example={"A": ["t", "skt", "2t"], "C": ["q", "2d"]})
+    "Group name to spread variables, by base name (t), exact name (t_850) or full name (std_t_850)."
+    channel_group: list[str] = Field(..., example=["A", "A", "C", "C"])
+    "Group modulating each noise channel, one entry per channel."
+    variable_prefix: str = Field(default="std_")
+    "Prefix of the spread variables in the input dataset."
+    source: Literal["eda_stdev"] = Field(default="eda_stdev")
+    "Kind of spread field the variables hold."
+    area_weight: bool = Field(default=True)
+    "Weight spatial means by grid-cell area (Gauss-Legendre quadrature) rather than per point."
+    smooth_to_channel: bool = Field(default=True)
+    "Smooth each amplitude map with the heat kernel of its channel's kT before clipping."
+    clip: Optional[tuple[NonNegativeFloat, PositiveFloat]] = Field(default=(0.25, 4.0))
+    "Bounds on the amplitude, in multiples of its global mean. None disables clipping."
+    preserve_total_variance: bool = Field(default=True)
+    "Keep the injected area-weighted variance equal to the unmodulated noise."
+    band_filter: BandFilterSchema = Field(default_factory=BandFilterSchema)
+    "Low-pass returning each modulated channel to its own scale band."
+
+    @model_validator(mode="after")
+    def check_channel_groups_exist(self) -> StdModulationSchema:
+        unknown = sorted(set(self.channel_group) - set(self.groups))
+        if unknown:
+            raise ValueError(f"channel_group refers to undefined groups {unknown}.")
+        return self
+
+
+class SphericalInputConditionedNoiseSchema(SphericalInputNoiseSchema):
+    """Schema for SphericalInputConditionedNoise - FourCastNet 3 noise modulated by analysis spread."""
+
+    target_: Literal["anemoi.models.layers.ensemble.SphericalInputConditionedNoise"] = Field(..., alias="_target_")
+    "Spread-conditioned spherical input noise class"
+    modulation: StdModulationSchema = Field(...)
+    "Spread modulation configuration."
+
+    @model_validator(mode="after")
+    def check_one_group_per_channel(self) -> SphericalInputConditionedNoiseSchema:
+        if self.modulation.enabled and len(self.modulation.channel_group) != self.n_channels:
+            raise ValueError(
+                f"modulation.channel_group has {len(self.modulation.channel_group)} entries, "
+                f"expected n_channels={self.n_channels}."
+            )
+        return self
+
+
+SphericalInputNoiseUnion = Annotated[
+    Union[SphericalInputNoiseSchema, SphericalInputConditionedNoiseSchema],
+    Field(discriminator="target_"),
+]
+
+
 class EnsModelSchema(BaseModelSchema):
     noise_injector: NoiseInjectorUnion = Field(...)
     "Noise injection configuration. Use NoOpNoiseInjector to disable, NoiseConditioning for conditioning, or NoiseInjector for direct injection."
-    input_noise: Optional[SphericalInputNoiseSchema] = Field(default=None)
+    input_noise: Optional[SphericalInputNoiseUnion] = Field(default=None)
     "FourCastNet 3 style spherical input perturbation, concatenated to the encoder input. None disables it."
     condition_on_residual: bool = Field(default=False)
     "Whether to condition the noise injection on the residual connection."

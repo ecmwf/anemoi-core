@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import math
 from abc import ABC
 from abc import abstractmethod
 from typing import Optional
@@ -28,11 +29,22 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.layers.graph_provider import ProjectionGraphProvider
 from anemoi.models.layers.mlp import MLP
+from anemoi.models.layers.noise_modulation import GroupedStdModulation
+from anemoi.models.layers.noise_modulation import resolve_prefixed_variables
 from anemoi.models.layers.sparse_projector import SparseProjector
+from anemoi.models.layers.spectral_helpers import quadrature_weights
+from anemoi.models.layers.spectral_transforms import SphericalSpectralFilter
+from anemoi.models.layers.spherical_noise import DEFAULT_DIFFUSION_KT
+from anemoi.models.layers.spherical_noise import EARTH_RADIUS_KM
 from anemoi.models.layers.spherical_noise import BaseSphericalNoise
 from anemoi.models.layers.spherical_noise import build_inverse_sht
 from anemoi.models.layers.spherical_noise import build_noise
+from anemoi.models.layers.spherical_noise import diffusion_band_limit
+from anemoi.models.layers.spherical_noise import diffusion_lowpass_response
+from anemoi.models.layers.spherical_noise import filter_truncation
+from anemoi.models.layers.spherical_noise import heat_kernel_response
 from anemoi.models.layers.spherical_noise import noise_seeds_reflects
+from anemoi.models.layers.spherical_noise import per_channel_values
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
 
@@ -137,6 +149,20 @@ class SphericalInputNoise(nn.Module):
             self.centered,
         )
 
+    @property
+    def consumed_input_idx(self) -> list[int]:
+        """Positions in the dataset's model input that this module reads in place of the encoder.
+
+        The model drops these channels from the encoder input. The homogeneous
+        perturbation reads nothing.
+        """
+        return []
+
+    @property
+    def conditioned(self) -> bool:
+        """Whether :meth:`advance` needs the consumed input channels at ``fcstep == 0``."""
+        return False
+
     def advance(
         self,
         *,
@@ -147,6 +173,7 @@ class SphericalInputNoise(nn.Module):
         num_members_total: Optional[int] = None,
         group_id: int = 0,
         device: Optional[torch.device] = None,
+        inputs: Optional[Tensor] = None,
     ) -> None:
         r"""Step the noise process forward, ready for the next :meth:`sample`.
 
@@ -159,6 +186,9 @@ class SphericalInputNoise(nn.Module):
         ``member_offset``, ``num_members_total`` and ``group_id`` describe where
         this rank's members sit in the *global* ensemble, so the realisation does
         not depend on how members happen to be distributed over devices.
+
+        ``inputs`` carries the :attr:`consumed_input_idx` channels for subclasses
+        that condition on them; the homogeneous perturbation ignores it.
         """
         layout = (ensemble_size, member_offset, num_members_total, group_id)
         if self.noise is None or layout != self._layout:
@@ -199,6 +229,240 @@ class SphericalInputNoise(nn.Module):
         if self.noise is None:
             raise RuntimeError("SphericalInputNoise.sample() called before advance().")
         return self.noise()
+
+
+class SphericalInputConditionedNoise(SphericalInputNoise):
+    r"""FourCastNet 3 input perturbation whose amplitude follows the analysis spread.
+
+    :class:`SphericalInputNoise` injects noise of the same amplitude everywhere.
+    This variant keeps its channels -- the same ``kT`` scale ladder, the same
+    Ornstein-Uhlenbeck process in time -- but redistributes each channel in space
+    so it is strong where the initial conditions are uncertain and weak where
+    they are not, using ensemble spread fields (e.g. the ERA5 EDA standard
+    deviation) read from the model input.
+
+    At the start of every rollout (``fcstep == 0``):
+
+    1. :class:`~anemoi.models.layers.noise_modulation.GroupedStdModulation` turns
+       the spread fields of each history step into one amplitude map
+       :math:`M_c` per channel, from the variable group assigned to it,
+       smoothed to the channel's own correlation scale.
+    2. The freshly drawn stationary noise :math:`\eta_c` is multiplied by
+       :math:`M_c`.
+    3. Multiplying in grid space convolves the two spectra, which leaks energy
+       out of the channel's scale band -- mostly to smaller scales, increasingly
+       so for the large-scale channels. Each product is therefore low-pass
+       filtered back to its own band (:func:`diffusion_lowpass_response`), so a
+       channel keeps representing the scale it was designed for.
+    4. With ``preserve_total_variance`` the filtered field is rescaled to the
+       area-weighted variance it had before filtering: the filter moves energy
+       back into the band rather than discarding it.
+    5. The result is written back into the spectral state of the noise process.
+
+    Later rollout steps need no spread fields: the unchanged FourCastNet 3 update
+    :math:`\eta \leftarrow \phi\,\eta + \sqrt{1-\phi^2}\,\sigma_l\,\xi` carries the
+    modulated field forward, so the initial-condition structure decays by
+    :math:`\phi` per step while fresh homogeneous noise takes over.
+
+    The consumed spread channels are dropped from the encoder input by the model,
+    so they shape the noise without becoming input features. With
+    ``modulation.enabled: False`` they are still dropped and the noise is exactly
+    that of :class:`SphericalInputNoise` -- a matched baseline from the same data.
+
+    Parameters
+    ----------
+    modulation : dict
+        ``enabled``; ``groups`` (group name to variables); ``channel_group`` (group
+        of each channel); ``variable_prefix`` (``"std_"``); ``source``
+        (``"eda_stdev"``); ``area_weight``; ``smooth_to_channel``; ``clip``;
+        ``preserve_total_variance``; ``band_filter`` (``quantile``, ``taper``).
+    name_to_index : dict
+        Supplied by the model: the dataset's model-input name to position map.
+    **kwargs
+        Passed to :class:`SphericalInputNoise`.
+    """
+
+    def __init__(self, *, modulation: dict, name_to_index: Optional[dict[str, int]] = None, **kwargs) -> None:
+        super().__init__(**kwargs)
+
+        if name_to_index is None:
+            raise ValueError("SphericalInputConditionedNoise needs name_to_index, which the model supplies.")
+        if OmegaConf.is_config(modulation):
+            modulation = OmegaConf.to_container(modulation, resolve=True)
+        modulation = dict(modulation)
+
+        self.enabled = bool(modulation.get("enabled", True))
+        self.variable_prefix = modulation.get("variable_prefix", "std_")
+        self.preserve_total_variance = bool(modulation.get("preserve_total_variance", True))
+        source = modulation.get("source", "eda_stdev")
+        if source != "eda_stdev":
+            raise ValueError(f"modulation.source '{source}' is not supported; expected 'eda_stdev'.")
+
+        self._consumed_input_idx = [
+            index for index, _ in resolve_prefixed_variables(name_to_index, self.variable_prefix)
+        ]
+        self.std_modulation: Optional[GroupedStdModulation] = None
+        self.spectral_filter: Optional[SphericalSpectralFilter] = None
+        self._modulation_seen = False
+
+        if not self.enabled:
+            LOGGER.info(
+                "SphericalInputConditionedNoise: modulation disabled; %d '%s' inputs are dropped from the "
+                "encoder input and the noise is plain FourCastNet 3.",
+                len(self._consumed_input_idx),
+                self.variable_prefix,
+            )
+            return
+
+        if self.noise_params.get("type") != "diffusion":
+            raise ValueError(
+                "SphericalInputConditionedNoise modulates the spectral state of a 'diffusion' noise field, got "
+                f"type '{self.noise_params.get('type')}'."
+            )
+        channel_group = list(modulation.get("channel_group", []))
+        if len(channel_group) != self.n_channels:
+            raise ValueError(
+                f"modulation.channel_group has {len(channel_group)} entries but there are {self.n_channels} channels."
+            )
+
+        band = dict(modulation.get("band_filter") or {})
+        kT = per_channel_values(self.noise_params.get("kT", DEFAULT_DIFFUSION_KT), self.n_channels, "kT")
+        band_response = diffusion_lowpass_response(
+            kT, self.lmax, quantile=float(band.get("quantile", 0.99)), taper=float(band.get("taper", 0.25))
+        )
+        smooth = bool(modulation.get("smooth_to_channel", True))
+        smooth_response = heat_kernel_response(kT, self.lmax) if smooth else None
+
+        # The filter only needs the degrees its responses reach, far fewer than lmax.
+        truncation = filter_truncation([r for r in (band_response, smooth_response) if r is not None], self.lmax)
+        lons_per_lat = self._transform[0].lons_per_lat
+        self.spectral_filter = SphericalSpectralFilter(lons_per_lat, truncation)
+        self.register_buffer("band_response", band_response[:, : truncation + 1].to(torch.float32), persistent=False)
+
+        if modulation.get("area_weight", True):
+            area_weights = torch.as_tensor(quadrature_weights(lons_per_lat))
+        else:
+            area_weights = torch.full((self.num_grid_points,), 1.0 / self.num_grid_points)
+
+        self.std_modulation = GroupedStdModulation(
+            groups=modulation.get("groups", {}),
+            channel_group=channel_group,
+            name_to_index=name_to_index,
+            area_weights=area_weights,
+            variable_prefix=self.variable_prefix,
+            clip=modulation.get("clip", (0.25, 4.0)),
+            preserve_total_variance=self.preserve_total_variance,
+            spectral_filter=self.spectral_filter if smooth else None,
+            smooth_response=smooth_response[:, : truncation + 1] if smooth else None,
+        )
+
+        band_limit = diffusion_band_limit(kT, self.lmax, float(band.get("quantile", 0.99)))
+        LOGGER.info(
+            "SphericalInputConditionedNoise: %d '%s' inputs, group sizes %s, filter truncation %d, "
+            "smooth_to_channel=%s, area_weight=%s, clip=%s, preserve_total_variance=%s",
+            len(self._consumed_input_idx),
+            self.variable_prefix,
+            self.std_modulation.group_sizes(),
+            truncation,
+            smooth,
+            modulation.get("area_weight", True),
+            self.std_modulation.clip,
+            self.preserve_total_variance,
+        )
+        for channel, (group, kT_c, limit) in enumerate(zip(channel_group, kT.tolist(), band_limit.tolist())):
+            LOGGER.info(
+                "  channel %d: group %s, kT=%.4e (L=%.0f km), band up to degree %d",
+                channel,
+                group,
+                kT_c,
+                EARTH_RADIUS_KM * math.sqrt(2 * kT_c),
+                limit,
+            )
+
+    @property
+    def consumed_input_idx(self) -> list[int]:
+        return list(self._consumed_input_idx)
+
+    @property
+    def conditioned(self) -> bool:
+        return self.enabled
+
+    def advance(
+        self,
+        *,
+        fcstep: int,
+        batch_size: int,
+        ensemble_size: int,
+        member_offset: int = 0,
+        num_members_total: Optional[int] = None,
+        group_id: int = 0,
+        device: Optional[torch.device] = None,
+        inputs: Optional[Tensor] = None,
+    ) -> None:
+        r"""Step the noise process and, at ``fcstep == 0``, modulate it by ``inputs``.
+
+        ``inputs`` holds the :attr:`consumed_input_idx` channels on the full grid,
+        shape ``(batch, time, points, variables)``. It is required at
+        ``fcstep == 0`` and ignored afterwards, when the modulated field decays
+        through the noise process on its own.
+        """
+        super().advance(
+            fcstep=fcstep,
+            batch_size=batch_size,
+            ensemble_size=ensemble_size,
+            member_offset=member_offset,
+            num_members_total=num_members_total,
+            group_id=group_id,
+            device=device,
+        )
+        if not self.enabled or fcstep > 0:
+            return
+        if inputs is None:
+            raise ValueError(
+                f"SphericalInputConditionedNoise needs the '{self.variable_prefix}' inputs at the first rollout step."
+            )
+        self._modulate(inputs)
+
+    @torch.no_grad()
+    def _modulate(self, inputs: Tensor) -> None:
+        """Replace the freshly drawn noise state by its filtered, modulated version."""
+        expected = (self.noise.state.shape[0], self.num_time_steps, self.num_grid_points, len(self._consumed_input_idx))
+        if tuple(inputs.shape) != expected:
+            raise ValueError(
+                f"SphericalInputConditionedNoise: inputs have shape {tuple(inputs.shape)}, expected {expected} "
+                "(batch, time, points, variables)."
+            )
+
+        with torch.amp.autocast(device_type=inputs.device.type, enabled=False):
+            amplitude = self.std_modulation(inputs)  # (batch, time, channels, points)
+            product = self.noise() * amplitude.unsqueeze(1)  # (batch, ensemble, time, channels, points)
+
+            coeffs = self.spectral_filter.analyse(product) * self.band_response.unsqueeze(-1)
+            filtered = self.spectral_filter.synthesise(coeffs)
+            before = self.std_modulation.area_mean(product**2)
+            after = self.std_modulation.area_mean(filtered**2)
+            if self.preserve_total_variance:
+                coeffs = coeffs * torch.sqrt(before / after.clamp(min=torch.finfo(after.dtype).tiny))[..., None, None]
+
+        # Coefficients below the filter truncation carry over unchanged at the full lmax.
+        state = torch.zeros_like(self.noise.state)
+        degrees = coeffs.shape[-1]
+        state[..., :degrees, :degrees, 0] = coeffs.real
+        state[..., :degrees, :degrees, 1] = coeffs.imag
+        self.noise.set_tensor_state(state)
+
+        # .item() synchronises with the device, so only pay for it when the line is emitted.
+        first_use = not self._modulation_seen
+        if first_use or LOGGER.isEnabledFor(logging.DEBUG):
+            self._modulation_seen = True
+            LOGGER.log(
+                logging.INFO if first_use else logging.DEBUG,
+                "SphericalInputConditionedNoise: modulated draw; amplitude in [%.3f, %.3f], "
+                "%.2f%% of the modulated variance lay outside the channel bands",
+                amplitude.min().item(),
+                amplitude.max().item(),
+                100.0 * (1.0 - after.sum() / before.sum()).item(),
+            )
 
 
 class BaseNoiseInjector(nn.Module, ABC):

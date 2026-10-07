@@ -86,6 +86,36 @@ def legendre_gauss_weights(n: int, a: float = -1.0, b: float = 1.0) -> np.ndarra
     return xlg, wlg
 
 
+def quadrature_weights(lons_per_lat: list[int]) -> np.ndarray:
+    r"""Per-point area weights of a Gaussian grid, normalised to sum to one.
+
+    Each point receives its ring's Gauss-Legendre weight shared equally between
+    the ring's longitudes. This is the quadrature :class:`SphericalHarmonicTransform`
+    integrates with, so an area mean taken with these weights is consistent with
+    the spectral power of the field (Parseval). It holds for regular, reduced and
+    octahedral Gaussian grids alike.
+
+    A plain mean over grid points is not an area mean: on a reduced Gaussian grid
+    the polar points cover roughly a quarter of the area of an equatorial point,
+    so an unweighted mean over-represents the poles.
+
+    Parameters
+    ----------
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+
+    Returns
+    -------
+    np.ndarray
+        Weights of shape ``(sum(lons_per_lat),)``, in the transform's point order.
+    """
+    lons_per_lat = np.asarray(lons_per_lat)
+    # Gauss weights are symmetric about the equator, so ring order is irrelevant.
+    _, ring_weights = legendre_gauss_weights(len(lons_per_lat))
+    weights = np.repeat(ring_weights / lons_per_lat, lons_per_lat)
+    return weights / weights.sum()
+
+
 def legpoly(
     mmax: int,
     lmax: int,

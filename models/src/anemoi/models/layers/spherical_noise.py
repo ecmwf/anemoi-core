@@ -44,6 +44,158 @@ from anemoi.models.layers.spectral_transforms import InverseSpectralTransform
 
 LOGGER = logging.getLogger(__name__)
 
+EARTH_RADIUS_KM = 6370.0
+
+# Spatial correlation default for a diffusion field built through :func:`build_noise`:
+# kT = (L / a)^2 / 2 with a length scale L = 100 km.
+DEFAULT_DIFFUSION_KT = 0.5 * (100.0 / EARTH_RADIUS_KM) ** 2
+
+
+def per_channel_values(value: Union[float, list], num_channels: int, name: str) -> torch.Tensor:
+    """Resolve a scalar-or-list parameter to one float32 value per channel.
+
+    Anything that is not a plain scalar is treated as one entry per channel, so
+    OmegaConf ListConfig and numpy arrays work as well as a Python list.
+    """
+    if isinstance(value, (int, float)):
+        return torch.as_tensor([float(value)]).repeat(num_channels)
+    tensor = torch.as_tensor([float(entry) for entry in value], dtype=torch.float32)
+    if tensor.shape[0] != num_channels:
+        raise ValueError(f"expected {name} to have {num_channels} entries (one per channel), got {tensor.shape[0]}")
+    return tensor
+
+
+def diffusion_degree_variance(kT: torch.Tensor, lmax: int) -> torch.Tensor:
+    r"""Variance per spherical-harmonic degree of a :class:`DiffusionNoiseS2` channel.
+
+    A channel draws :math:`2l+1` coefficients per degree, each with standard
+    deviation proportional to :math:`e^{-kT\,l(l+1)/2}`, so its variance per degree
+    is proportional to :math:`(2l+1)\,e^{-kT\,l(l+1)}`. Unnormalised: only its shape
+    matters to the responses built from it.
+
+    Parameters
+    ----------
+    kT : torch.Tensor
+        One spatial correlation parameter per channel, shape ``(channels,)``.
+    lmax : int
+        Number of degrees, ``l = 0 .. lmax-1``.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of shape ``(channels, lmax)``.
+    """
+    ls = torch.arange(lmax, dtype=torch.float64)
+    kT = torch.as_tensor(kT, dtype=torch.float64).reshape(-1, 1)
+    return (2 * ls + 1) * torch.exp(-kT * ls * (ls + 1))
+
+
+def diffusion_band_limit(kT: torch.Tensor, lmax: int, quantile: float = 0.99) -> torch.Tensor:
+    r"""Lowest degree below which a channel holds ``quantile`` of its variance.
+
+    This is the upper edge of the scale band a channel represents: about 193, 96,
+    48 and 24 at N320 for the 100, 200, 400 and 800 km FourCastNet 3 rungs.
+
+    Parameters
+    ----------
+    kT : torch.Tensor
+        One spatial correlation parameter per channel, shape ``(channels,)``.
+    lmax : int
+        Number of degrees, ``l = 0 .. lmax-1``.
+    quantile : float, optional
+        Share of the channel's variance below the returned degree.
+
+    Returns
+    -------
+    torch.Tensor
+        Integer degrees of shape ``(channels,)``, at most ``lmax - 1``.
+    """
+    variance = diffusion_degree_variance(kT, lmax)
+    cumulative = variance.cumsum(dim=-1) / variance.sum(dim=-1, keepdim=True)
+    # first degree whose cumulative share reaches the quantile
+    return (cumulative < quantile).sum(dim=-1).clamp(max=lmax - 1)
+
+
+def heat_kernel_response(kT: torch.Tensor, lmax: int) -> torch.Tensor:
+    r"""Diffusion (heat-kernel) smoothing at each channel's own correlation scale.
+
+    :math:`r_l = e^{-kT\,l(l+1)}` is the response of diffusing a field for a time
+    :math:`kT` on the unit sphere -- the same kernel that gives a
+    :class:`DiffusionNoiseS2` channel its correlation length. It is positive in
+    grid space, so it smooths without ringing and keeps a positive field positive,
+    and :math:`r_0 = 1` leaves the global mean untouched.
+
+    Parameters
+    ----------
+    kT : torch.Tensor
+        One spatial correlation parameter per channel, shape ``(channels,)``.
+    lmax : int
+        Number of degrees, ``l = 0 .. lmax-1``.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of shape ``(channels, lmax)``.
+    """
+    ls = torch.arange(lmax, dtype=torch.float64)
+    kT = torch.as_tensor(kT, dtype=torch.float64).reshape(-1, 1)
+    return torch.exp(-kT * ls * (ls + 1))
+
+
+def diffusion_lowpass_response(
+    kT: torch.Tensor,
+    lmax: int,
+    quantile: float = 0.99,
+    taper: float = 0.25,
+) -> torch.Tensor:
+    r"""Low-pass response confining each channel to its own scale band.
+
+    Unity up to the channel's band limit :math:`l_c` (see
+    :func:`diffusion_band_limit`), then a raised-cosine roll-off reaching zero at
+    :math:`\lceil l_c (1 + \mathrm{taper}) \rceil`. Inside the band the channel's own
+    spectrum passes untouched; the taper avoids the ringing of a hard truncation.
+
+    Parameters
+    ----------
+    kT : torch.Tensor
+        One spatial correlation parameter per channel, shape ``(channels,)``.
+    lmax : int
+        Number of degrees, ``l = 0 .. lmax-1``.
+    quantile : float, optional
+        Share of the channel's own variance below its band edge, in ``(0, 1]``.
+    taper : float, optional
+        Length of the roll-off as a fraction of the band edge. ``0`` gives a hard cut.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of shape ``(channels, lmax)``.
+    """
+    if not 0.0 < quantile <= 1.0:
+        raise ValueError(f"quantile must lie in (0, 1], got {quantile}")
+    if taper < 0.0:
+        raise ValueError(f"taper must be non-negative, got {taper}")
+
+    ls = torch.arange(lmax, dtype=torch.float64)
+    cutoff = diffusion_band_limit(kT, lmax, quantile).to(torch.float64).reshape(-1, 1)
+    end = torch.ceil(cutoff * (1.0 + taper))
+    width = (end - cutoff).clamp(min=1.0)
+    roll_off = 0.5 * (1.0 + torch.cos(math.pi * (ls - cutoff) / width))
+    response = torch.where(ls <= cutoff, 1.0, torch.where(ls < end, roll_off, 0.0))
+    return response
+
+
+def filter_truncation(responses: list[torch.Tensor], lmax: int, tolerance: float = 1e-3) -> int:
+    """Smallest truncation that keeps every degree where any response exceeds ``tolerance``.
+
+    Lets a spectral filter be built at the resolution its responses actually use
+    rather than at the full ``lmax``. Clamped to ``[1, lmax - 1]``.
+    """
+    significant = torch.stack([(response > tolerance).any(dim=0) for response in responses]).any(dim=0)
+    degrees = torch.nonzero(significant).flatten()
+    highest = int(degrees.max()) if degrees.numel() else 1
+    return max(1, min(highest, lmax - 1))
+
 
 def build_inverse_sht(
     grid: Union[str, int],
@@ -287,9 +439,7 @@ class BaseSphericalNoise(nn.Module):
     def _member_generators(self, device: torch.device) -> list[torch.Generator]:
         """Fetch (creating on first use) the per-member generators for ``device``."""
         if device not in self._generators:
-            self._generators[device] = [
-                torch.Generator(device=device).manual_seed(int(seed)) for seed in self.seeds
-            ]
+            self._generators[device] = [torch.Generator(device=device).manual_seed(int(seed)) for seed in self.seeds]
         return self._generators[device]
 
     def _draw_normal(self, out: torch.Tensor) -> torch.Tensor:
@@ -567,17 +717,7 @@ class DiffusionNoiseS2(BaseSphericalNoise):
             self.register_buffer("discount", torch.stack(discount, dim=0), persistent=False)
 
     def _as_per_channel_tensor(self, value: Union[float, list], name: str) -> torch.Tensor:
-        # Anything that is not a plain scalar is treated as one entry per channel, so
-        # OmegaConf ListConfig and numpy arrays work as well as a Python list.
-        if isinstance(value, (int, float)):
-            tensor = torch.as_tensor([float(value)]).repeat(self.num_channels)
-        else:
-            tensor = torch.as_tensor([float(entry) for entry in value], dtype=torch.float32)
-            if tensor.shape[0] != self.num_channels:
-                raise ValueError(
-                    f"expected {name} to have {self.num_channels} entries (one per channel), got {tensor.shape[0]}"
-                )
-        return tensor.reshape(self.num_channels, 1)
+        return per_channel_values(value, self.num_channels, name).reshape(self.num_channels, 1)
 
     def is_stateful(self) -> bool:
         return True
@@ -828,7 +968,7 @@ def build_noise(
     if noise_type == "diffusion":
         return DiffusionNoiseS2(
             sigma=noise_params.get("sigma", 1.0),
-            kT=noise_params.get("kT", 0.5 * (100 / 6370) ** 2),
+            kT=noise_params.get("kT", DEFAULT_DIFFUSION_KT),
             lambd=noise_params.get("lambd", default_lambd),
             **common,
         )

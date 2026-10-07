@@ -16,8 +16,14 @@ from anemoi.models.layers.spectral_transforms import RegularSHT
 from anemoi.models.layers.spherical_noise import DummyNoiseS2
 from anemoi.models.layers.spherical_noise import build_inverse_sht
 from anemoi.models.layers.spherical_noise import build_noise
+from anemoi.models.layers.spherical_noise import diffusion_band_limit
+from anemoi.models.layers.spherical_noise import diffusion_degree_variance
+from anemoi.models.layers.spherical_noise import diffusion_lowpass_response
+from anemoi.models.layers.spherical_noise import filter_truncation
+from anemoi.models.layers.spherical_noise import heat_kernel_response
 from anemoi.models.layers.spherical_noise import noise_seeds_reflects
 from anemoi.models.layers.spherical_noise import orthonormal_basis_scale
+from anemoi.models.layers.spherical_noise import per_channel_values
 
 NLAT = 32
 ENSEMBLE = 4
@@ -103,7 +109,10 @@ def test_lag1_autocorrelation_matches_phi(transform, lambd) -> None:
 
 
 def test_power_spectrum_follows_the_configured_kt() -> None:
-    """Measured angular power must follow the analytic (2l+1) * sigma_l^2."""
+    """Measured angular power must follow the analytic (2l+1) * sigma_l^2.
+
+    That analytic shape is also what the band filter of the conditioned noise is built from.
+    """
     kT = 0.01
     # A Gaussian grid of nlat rings only integrates exactly up to l = nlat/2 - 1, so
     # generate and measure inside that band or quadrature error masks the comparison.
@@ -116,8 +125,7 @@ def test_power_spectrum_follows_the_configured_kt() -> None:
     coeffs = sht(fields.reshape(-1, 1, 1, fields.shape[-1], 1))
     measured = sht.power_spectral_density(coeffs).mean(dim=(0, 1, 2, -1))
 
-    ls = torch.arange(band, dtype=torch.float64)
-    analytic = (2 * ls + 1) * torch.exp(-kT * ls * (ls + 1))
+    analytic = diffusion_degree_variance(torch.tensor([kT]), band)[0]
     # l=0 holds a single m, so it is not comparable with the rest of the spectrum.
     ratio = measured[1:].double() / analytic[1:]
 
@@ -263,3 +271,67 @@ def test_state_is_not_checkpointed(transform) -> None:
     noise = make_noise(transform, {"type": "diffusion"})
     assert "state" not in noise.state_dict()
     assert "sigma_l" not in noise.state_dict()
+
+
+# The 100/200/400/800 km FourCastNet 3 rungs.
+FCN3_KT = torch.tensor([1.2322e-4, 4.9289e-4, 1.9716e-3, 7.8862e-3])
+
+
+def test_band_limits_of_the_fcn3_ladder_at_n320() -> None:
+    """Each rung holds 99% of its variance below roughly 6370 km / L * 3, halving per rung."""
+    assert diffusion_band_limit(FCN3_KT, 640).tolist() == [193, 96, 48, 24]
+
+
+def test_heat_kernel_keeps_the_mean_and_smooths_more_for_larger_scales() -> None:
+    response = heat_kernel_response(FCN3_KT, 64)
+
+    assert torch.all(response[:, 0] == 1.0)
+    assert torch.all(response.diff(dim=-1) <= 0)
+    assert torch.all(response[1:, 1:] < response[:-1, 1:])
+
+
+def test_lowpass_passes_the_band_and_rolls_off_beyond_it() -> None:
+    lmax = 640
+    response = diffusion_lowpass_response(FCN3_KT, lmax, quantile=0.99, taper=0.25)
+    limits = diffusion_band_limit(FCN3_KT, lmax, 0.99)
+
+    for channel, limit in enumerate(limits.tolist()):
+        end = math.ceil(limit * 1.25)
+        assert torch.all(response[channel, : limit + 1] == 1.0)
+        assert torch.all(response[channel, end:] == 0.0)
+        roll_off = response[channel, limit : end + 1]
+        assert torch.all(roll_off.diff() < 0)
+
+
+def test_lowpass_without_taper_is_a_hard_cut() -> None:
+    response = diffusion_lowpass_response(FCN3_KT[:1], 640, quantile=0.99, taper=0.0)
+    assert response[0].sum().item() == 194
+    assert set(response.unique().tolist()) == {0.0, 1.0}
+
+
+def test_full_quantile_passes_every_degree() -> None:
+    assert torch.all(diffusion_lowpass_response(torch.tensor([1e-6]), 16, quantile=1.0, taper=0.0) == 1.0)
+
+
+@pytest.mark.parametrize("quantile, taper", [(0.0, 0.25), (1.5, 0.25), (0.99, -0.1)])
+def test_lowpass_rejects_invalid_parameters(quantile, taper) -> None:
+    with pytest.raises(ValueError):
+        diffusion_lowpass_response(FCN3_KT, 64, quantile=quantile, taper=taper)
+
+
+def test_filter_truncation_covers_every_significant_degree() -> None:
+    lmax = 640
+    responses = [diffusion_lowpass_response(FCN3_KT, lmax), heat_kernel_response(FCN3_KT, lmax)]
+    truncation = filter_truncation(responses, lmax)
+
+    # the 100 km rung's roll-off ends at ceil(193 * 1.25) = 242, well inside the 319 degrees
+    # an N320 grid analyses exactly
+    assert truncation == 241
+    assert filter_truncation([torch.ones(2, 16)], 16) == 15
+
+
+def test_per_channel_values() -> None:
+    torch.testing.assert_close(per_channel_values(0.5, 3, "kT"), torch.full((3,), 0.5))
+    torch.testing.assert_close(per_channel_values([1, 2], 2, "kT"), torch.tensor([1.0, 2.0]))
+    with pytest.raises(ValueError, match="entries"):
+        per_channel_values([1, 2], 3, "kT")

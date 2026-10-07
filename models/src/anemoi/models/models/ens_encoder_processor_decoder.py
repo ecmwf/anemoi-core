@@ -19,6 +19,7 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
+from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
@@ -33,6 +34,10 @@ LOGGER = logging.getLogger(__name__)
 
 class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
     """Message passing graph neural network with ensemble functionality."""
+
+    # Model-input positions passed on to the encoder when the input noise consumes some
+    # channels. A class-level default keeps models pickled before it existed loadable.
+    _encoder_input_keep_idx: Optional[torch.Tensor] = None
 
     def __init__(
         self,
@@ -64,6 +69,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         """Instantiate the FourCastNet 3 style input perturbation, if configured."""
         self.input_noise = None
         self.input_noise_dataset = None
+        self._encoder_input_keep_idx = None
         if self._input_noise_config is None:
             return
 
@@ -80,6 +86,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 f"model.input_noise.dataset '{dataset_name}' is not an input dataset {self.input_datasets}."
             )
 
+        name_to_index = self.data_indices[dataset_name].model.input.name_to_index
         self.input_noise_dataset = dataset_name
         self.input_noise = instantiate(
             self._input_noise_config,
@@ -87,7 +94,22 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             dataset=dataset_name,
             num_time_steps=self.n_step_input,
             num_grid_points=self.node_attributes.num_nodes[dataset_name],
+            name_to_index=name_to_index,
         )
+
+        # Channels the noise reads (e.g. spread fields) shape the perturbation only; they
+        # are not encoder features. The data indices keep the full layout, since rollout,
+        # normalisation and inference all address the model input by those positions.
+        consumed = set(self.input_noise.consumed_input_idx)
+        if consumed:
+            self._encoder_input_keep_idx = torch.as_tensor(
+                [index for index in range(len(name_to_index)) if index not in consumed], dtype=torch.long
+            )
+            LOGGER.info(
+                "Input noise reads %d '%s' input channels, which are dropped from the encoder input.",
+                len(consumed),
+                dataset_name,
+            )
 
     def _build_networks(self, model_config: DotDict) -> None:
         super()._build_networks(model_config)
@@ -106,7 +128,26 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             base_input_dim += self.num_input_channels_prognostic[dataset_name]
         if self.input_noise is not None and dataset_name == self.input_noise_dataset:
             base_input_dim += self.n_step_input * self.input_noise.n_channels
+            base_input_dim -= self.n_step_input * len(self.input_noise.consumed_input_idx)
         return base_input_dim
+
+    def _input_noise_inputs(
+        self,
+        x: torch.Tensor,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: ProcessGroup | None,
+    ) -> torch.Tensor:
+        """The channels the input noise reads, on the full grid, shape ``(batch, time, grid, vars)``.
+
+        Taken from the first ensemble member: these are forcings, identical across members.
+        """
+        with torch.no_grad():
+            inputs = x[:, :, 0, :, self.input_noise.consumed_input_idx]
+            shard_sizes = grid_shard_sizes.get(self.input_noise_dataset) if grid_shard_sizes is not None else None
+            if shard_sizes is not None:
+                # spectral operations need the whole sphere
+                inputs = gather_tensor(inputs, -2, shard_sizes, model_comm_group)
+        return inputs
 
     def _assemble_input(
         self,
@@ -132,10 +173,16 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
+        if dataset_name == self.input_noise_dataset and self._encoder_input_keep_idx is not None:
+            # after the residual, which addresses x by its full model-input positions
+            x = x[..., self._encoder_input_keep_idx]
+
         if input_noise is not None:
             # Appended per time step, so the "(time vars)" flattening below interleaves
             # noise with data exactly as makani's flatten_history does.
-            input_noise = einops.rearrange(input_noise, "batch ensemble time vars grid -> batch time ensemble grid vars")
+            input_noise = einops.rearrange(
+                input_noise, "batch ensemble time vars grid -> batch time ensemble grid vars"
+            )
             if grid_shard_sizes is not None:
                 input_noise = shard_tensor(input_noise, 3, grid_shard_sizes, model_comm_group)
             x = torch.cat((x, input_noise.to(dtype=x.dtype)), dim=-1)
@@ -257,6 +304,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         # noise history, later steps advance the existing trajectory.
         input_noise = None
         if self.input_noise is not None:
+            noise_inputs = None
+            if fcstep == 0 and self.input_noise.conditioned:
+                noise_inputs = self._input_noise_inputs(x[self.input_noise_dataset], grid_shard_sizes, model_comm_group)
             self.input_noise.advance(
                 fcstep=fcstep,
                 batch_size=batch_size,
@@ -265,6 +315,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 num_members_total=ensemble_members_total,
                 group_id=ensemble_group_id,
                 device=x[self.input_noise_dataset].device,
+                inputs=noise_inputs,
             )
             input_noise = self.input_noise.sample()
 

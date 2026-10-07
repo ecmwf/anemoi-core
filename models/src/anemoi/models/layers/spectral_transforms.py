@@ -501,3 +501,83 @@ class InverseOctahedralSHT(InverseSpectralTransform):
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
         return self._isht(data)
+
+
+class SphericalSpectralFilter(torch.nn.Module):
+    r"""Isotropic spectral filter on a Gaussian grid.
+
+    Analyses a field into spherical harmonics, scales every coefficient of degree
+    :math:`l` by a response :math:`r_l`, and synthesises it back. Because the
+    response depends on :math:`l` only, the filter is isotropic: it treats every
+    location and direction on the sphere alike, which a filter applied on the grid
+    itself would not.
+
+    Its main use is restoring the spectral content of a product of fields.
+    Multiplying two fields in grid space convolves their spectra, so the product
+    carries energy at degrees neither factor had, and only a filter in spectral
+    space can put it back in a prescribed band.
+
+    The filter is built at its own ``truncation`` rather than the full resolution
+    of the grid: the Legendre tables scale as ``truncation**2 * nlat``, so a filter
+    that only needs low degrees should not pay for the high ones. Coefficients it
+    produces are directly usable at any larger truncation by zero padding, since
+    the basis does not depend on the truncation.
+
+    Parameters
+    ----------
+    lons_per_lat : list[int]
+        Number of longitudinal points on each latitude ring, from pole to pole.
+    truncation : int
+        Highest degree retained, so coefficients have ``truncation + 1`` degrees.
+    """
+
+    def __init__(self, lons_per_lat: list[int], truncation: int) -> None:
+        super().__init__()
+
+        lons_per_lat = [int(n) for n in lons_per_lat]
+        nlat = len(lons_per_lat)
+        self.truncation = truncation
+        self.n_grid_points = sum(lons_per_lat)
+
+        self._sht = SphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation)
+        self._isht = InverseSphericalHarmonicTransform(lons_per_lat=lons_per_lat, truncation=truncation)
+        # legpoly builds these in float64; the per-call `.to(x.dtype)` in the transforms
+        # would otherwise copy them on every call.
+        self._sht.weight = self._sht.weight.to(torch.float32)
+        self._isht.pct = self._isht.pct.to(torch.float32)
+
+        # Gauss-Legendre quadrature on nlat rings is exact in latitude for any degree
+        # the grid carries, but a reduced grid's short polar rings cannot resolve high
+        # zonal wavenumbers, which limits exact analysis to roughly nlat/2 degrees.
+        exact_truncation = nlat - 1 if len(set(lons_per_lat)) == 1 else nlat // 2 - 1
+        if truncation > exact_truncation:
+            LOGGER.warning(
+                "SphericalSpectralFilter: truncation %d exceeds %d, the highest degree this grid analyses "
+                "exactly; the filtered field will carry aliasing error.",
+                truncation,
+                exact_truncation,
+            )
+
+    @property
+    def lmax(self) -> int:
+        """Number of degrees retained, ``l = 0 .. lmax-1``."""
+        return self.truncation + 1
+
+    def analyse(self, field: torch.Tensor) -> torch.Tensor:
+        """Real field ``[..., points]`` to complex coefficients ``[..., lmax, lmax]``."""
+        with torch.amp.autocast(device_type=field.device.type, enabled=False):
+            return self._sht(field)
+
+    def synthesise(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """Complex coefficients ``[..., lmax, lmax]`` to a real field ``[..., points]``."""
+        with torch.amp.autocast(device_type=coeffs.device.type, enabled=False):
+            return self._isht(coeffs)
+
+    def forward(self, field: torch.Tensor, response: torch.Tensor) -> torch.Tensor:
+        """Filter ``field`` of shape ``[..., points]`` with a per-degree ``response``.
+
+        ``response`` has shape ``[..., lmax]`` and broadcasts against the leading
+        dimensions of ``field``, so ``[channels, lmax]`` filters each channel of a
+        ``[..., channels, points]`` field with its own response.
+        """
+        return self.synthesise(self.analyse(field) * response.unsqueeze(-1))
