@@ -140,7 +140,7 @@ def grid_from_coords(family: str, coords: Tensor) -> tuple[ReducedGrid, Optional
             f"The {coords.shape[0]} nodes, in {grid.num_rows} latitude rows, do not form one of the "
             f"{GRID_KERNELS[family].description}."
         )
-    if torch.equal(order, torch.arange(order.numel())):
+    if torch.equal(order, torch.arange(order.numel(), device=order.device)):
         return grid, None
     return grid, order
 
@@ -472,7 +472,7 @@ def window_start_rows(neighbourhood: GridNeighbourhood) -> Tensor:
     query_grid, key_grid = neighbourhood.query_grid, neighbourhood.key_grid
     kernel_h = neighbourhood.kernel_size[0]
     if neighbourhood.is_self_attention:
-        row_map = torch.arange(query_grid.num_rows)
+        row_map = torch.arange(query_grid.num_rows, device=query_grid.row_starts.device)
     else:
         row_map = query_grid.nearest_rows(key_grid)
     return (row_map - kernel_h // 2).clamp(0, key_grid.num_rows - kernel_h)
@@ -528,9 +528,11 @@ def split_into_bands(
 
     # Cut the rows where the running number of points passes each equal share.
     row_starts = query_grid.row_starts.to(torch.float64)
-    shares = torch.linspace(float(row_starts[first]), float(row_starts[end]), num_bands + 1, dtype=torch.float64)
+    shares = torch.linspace(
+        float(row_starts[first]), float(row_starts[end]), num_bands + 1, dtype=torch.float64, device=row_starts.device
+    )
     cuts = torch.searchsorted(row_starts, shares).clamp(first, end)
-    cuts = torch.unique(torch.cat([torch.tensor([first, end]), cuts])).tolist()
+    cuts = torch.unique(torch.cat([torch.tensor([first, end], device=cuts.device), cuts])).tolist()
 
     bands = []
     for first_row, end_row in zip(cuts[:-1], cuts[1:]):
