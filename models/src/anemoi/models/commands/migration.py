@@ -9,30 +9,27 @@
 
 
 import logging
-import subprocess
 from argparse import ArgumentParser
 from argparse import Namespace
-from datetime import datetime
 from pathlib import Path
 from shutil import copy2
+from textwrap import dedent
 
 from jinja2 import Environment
 from rich.console import Console
 
+from anemoi.utils.migrations import added_migrations_compared_to_main_branch
+from anemoi.utils.migrations import get_migration_name
+from anemoi.utils.migrations import migrations_in_incorrect_order
+
 from ..migrations import MIGRATION_PATH
-from ..migrations import IncompatibleCheckpointException
-from ..migrations import Migrator
+from ..migrations import CkptMigrator
+from ..migrations import IncompatibleCheckpointError
 from ..migrations.migrator import LOGGER as migrator_logger
 from . import Command
 
 here = Path(__file__).parent
 root_folder = here.parent.parent.parent.parent.parent
-
-
-def _get_migration_name(name: str) -> str:
-    name = name.lower().replace("-", "_").replace(" ", "_")
-    now = int(datetime.now().timestamp())
-    return f"{now}_{name}.py"
 
 
 def maybe_plural(count: int, text: str) -> str:
@@ -41,109 +38,55 @@ def maybe_plural(count: int, text: str) -> str:
     return text
 
 
-def new_migrations_from_main_branch():
-    """Finds the all now migration scripts that were added compared to origin/main"""
-    run_new_migrations = subprocess.run(
-        [
-            "git diff --name-only --diff-filter=A "
-            '$(git log -n 1 origin/main --pretty=format:"%H") '
-            f"HEAD {MIGRATION_PATH.resolve()}"
-        ],
-        capture_output=True,
-        shell=True,
-    )
-    new_migrations = [root_folder / file for file in run_new_migrations.stdout.decode("utf-8").split("\n")]
-    new_migrations = [file.name for file in new_migrations if file.is_file() and file.name != "__init__.py"]
-    return sorted(new_migrations)
+def get_migration_template() -> str:
+    return dedent("""\
+        {% for import in imports %}
+        {{import}}
+        {% endfor %}
+
+        # DO NOT CHANGE -->
+        metadata = MigrationMetadata(
+            versions={
+                "migration": "{{migration_version}}",
+                "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
+            },
+            {% if final %}
+            final=True,
+            {% endif %}
+        )
+        # <-- END DO NOT CHANGE
+        {% if not final %}
 
 
-def in_incorrect_order(all_migrations: list[str], new_migrations: list[str]) -> tuple[list[str], str | None]:
-    """Tests whether the order of the new migrations is correct.
-    All new migrations should be at the end of all_migrations.
+        {% if with_setup %}
+        def migrate_setup(context: MigrationContext) -> None:
+            \"""Migrate setup callback to be run before loading the checkpoint.
 
-    Parameters
-    ----------
-    all_migrations : list[str]
-        All migrations currently in anemoi-models
-    new_migrations : list[str]
-        New migrations from this PR.
-
-    Returns
-    -------
-    tuple[list[str], str | None]
-        * the list of name in incorrect order
-        * the name of the last migration in main
-    """
-    stop_new = False
-    incorrect_order: list[str] = []
-    last_name: str | None = None
-
-    for name in reversed(all_migrations):
-        if name not in new_migrations and not stop_new:
-            stop_new = True
-            last_name = name
-        elif stop_new and name in new_migrations:
-            incorrect_order.append(name)
-    return list(reversed(incorrect_order)), last_name
+            Parameters
+            ----------
+            context : MigrationContext
+               A MigrationContext instance
+            \"""
 
 
-migration_template_str = """\
-# (C) Copyright 2025 Anemoi contributors.
-#
-# This software is licensed under the terms of the Apache Licence Version 2.0
-# which can be obtained at http://www.apache.org/licenses/LICENSE-2.0.
-#
-# In applying this licence, ECMWF does not waive the privileges and immunities
-# granted to it by virtue of its status as an intergovernmental organisation
-# nor does it submit to any jurisdiction.
-
-{% for import in imports %}
-{{import}}
-{% endfor %}
-
-# DO NOT CHANGE -->
-metadata = MigrationMetadata(
-    versions={
-        "migration": "{{migration_version}}",
-        "anemoi-models": "%NEXT_ANEMOI_MODELS_VERSION%",
-    },
-    {% if final %}
-    final=True,
-    {% endif %}
-)
-# <-- END DO NOT CHANGE
-{% if not final %}
+        {% endif %}
+        def migrate(ckpt: CkptType) -> CkptType:
+            \"""Migrate the checkpoint.
 
 
-{% if with_setup %}
-def migrate_setup(context: MigrationContext) -> None:
-    \"""Migrate setup callback to be run before loading the checkpoint.
+            Parameters
+            ----------
+            ckpt : CkptType
+                The checkpoint dict.
 
-    Parameters
-    ----------
-    context : MigrationContext
-       A MigrationContext instance
-    \"""
-
-
-{% endif %}
-def migrate(ckpt: CkptType) -> CkptType:
-    \"""Migrate the checkpoint.
-
-
-    Parameters
-    ----------
-    ckpt : CkptType
-        The checkpoint dict.
-
-    Returns
-    -------
-    CkptType
-        The migrated checkpoint dict.
-    \"""
-    return ckpt
-{% endif %}
-"""
+            Returns
+            -------
+            CkptType
+                The migrated checkpoint dict.
+            \"""
+            return ckpt
+        {% endif %}
+        """)
 
 
 class Migration(Command):
@@ -217,7 +160,7 @@ class Migration(Command):
         raise ValueError(f"{args.subcommand} does not exist.")
 
     def run_create(self, args: Namespace) -> None:
-        """Create a new migration
+        """Create a new migration.
 
         Parameters
         ----------
@@ -228,7 +171,7 @@ class Migration(Command):
         if args.final and args.with_setup:
             raise ValueError("Final migration cannot have setup callbacks.")
 
-        name = _get_migration_name(args.name)
+        name = get_migration_name(args.name)
 
         imports: list[str] = []
         if not args.final:
@@ -236,7 +179,7 @@ class Migration(Command):
         if args.with_setup:
             imports.append("from anemoi.models.migrations import MigrationContext")
         imports.append("from anemoi.models.migrations import MigrationMetadata")
-        template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(migration_template_str)
+        template = Environment(trim_blocks=True, lstrip_blocks=True).from_string(get_migration_template())
 
         with open(MIGRATION_PATH / name, "w") as f:
             f.write(
@@ -265,11 +208,11 @@ class Migration(Command):
         migrator_logger.setLevel(args.log_level)
 
         console = Console(force_terminal=not args.no_color, highlight=False)
-        migrator = Migrator()
+        migrator = CkptMigrator()
         ckpt_path = Path(args.ckpt)
         try:
-            old_ckpt, new_ckpt, done_ops = migrator.sync(ckpt_path)
-            if len(done_ops) and not args.dry_run:
+            old_ckpt, new_ckpt, executed_migrations = migrator.sync(ckpt_path)
+            if len(executed_migrations) and not args.dry_run:
                 registered_migrations = migrator.registered_migrations(old_ckpt)
                 version = ""
                 if len(registered_migrations):
@@ -280,31 +223,45 @@ class Migration(Command):
                 copy2(ckpt_path, new_path)
                 print("Saved backed-up checkpoint here:", str(new_path.resolve()))
                 torch.save(new_ckpt, ckpt_path)
-                print("Executed ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
-            if len(done_ops) and args.dry_run:
-                print("Would execute ", len(done_ops), " ", maybe_plural(len(done_ops), "operation"), ":", sep="")
-            if not len(done_ops):
-                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
-            for op in done_ops:
-                console.print(
-                    f"  [green]+ MIGRATE [bold]{op.migration.name}[/bold] \\[v{op.migration.metadata.versions['anemoi-models']}][/green]"
+                print(
+                    "Executed ",
+                    len(executed_migrations),
+                    " ",
+                    maybe_plural(len(executed_migrations), "operation"),
+                    ":",
+                    sep="",
                 )
-        except IncompatibleCheckpointException as e:
+            if len(executed_migrations) and args.dry_run:
+                print(
+                    "Would execute ",
+                    len(executed_migrations),
+                    " ",
+                    maybe_plural(len(executed_migrations), "operation"),
+                    ":",
+                    sep="",
+                )
+            if not len(executed_migrations):
+                console.print("Your checkpoint is already compatible :party_popper:! No missing migration to execute.")
+            for migration in executed_migrations:
+                console.print(
+                    f"  [green]+ MIGRATE [bold]{migration.name}[/bold] \\[v{migration.metadata.versions['anemoi-models']}][/green]"
+                )
+        except IncompatibleCheckpointError as e:
             print(str(e))
 
     def run_inspect(self, args: Namespace) -> None:
         """Inspects the checkpoint.
+
         It will show:
         * the migrations already registered in the checkpoint
         * the missing migrations to execute
-        * the extra migrations to rollback
 
         Parameters
         ----------
         args : Namespace
             The arguments passed to the command.
         """
-        migrator = Migrator()
+        migrator = CkptMigrator()
         console = Console(force_terminal=not args.no_color, highlight=False)
         try:
             executed_migrations, missing_migrations, extra_migrations = migrator.inspect(args.ckpt)
@@ -350,18 +307,19 @@ class Migration(Command):
             if len(missing_migrations) and not len(extra_migrations):
                 console.print("\n[italic]To update your checkpoint, run:[/italic]")
                 console.print(f"  [italic]anemoi-models migration sync {args.ckpt}[/italic]")
-        except IncompatibleCheckpointException as e:
+        except IncompatibleCheckpointError as e:
             print(str(e))
 
     def run_fix_order(self) -> None:
         """Fixes the order of the new migration scripts.
+
         It uses the earliest possible time with the last migration name in origin/main.
         """
-        new_migrations = new_migrations_from_main_branch()
+        new_migrations = added_migrations_compared_to_main_branch(root_folder, MIGRATION_PATH)
         all_migrations = sorted(
             [file.name for file in MIGRATION_PATH.iterdir() if file.is_file() and file.name != "__init__.py"]
         )
-        incorrect_order, last_upstream_name = in_incorrect_order(all_migrations, new_migrations)
+        incorrect_order, last_upstream_name = migrations_in_incorrect_order(all_migrations, new_migrations)
 
         if last_upstream_name is None or not len(incorrect_order):
             print("No migration to rename.")

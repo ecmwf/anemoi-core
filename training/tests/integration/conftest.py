@@ -21,7 +21,7 @@ from hydra import initialize
 from omegaconf import DictConfig
 from omegaconf import OmegaConf
 
-from anemoi.models.migrations import Migrator
+from anemoi.models.migrations import CkptMigrator
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.testing import GetTmpPath
 from anemoi.utils.testing import GetTestData
@@ -564,13 +564,13 @@ def benchmark_config(
 
 
 @pytest.fixture(scope="session")
-def migrator() -> Migrator:
-    return Migrator()
+def migrator() -> CkptMigrator:
+    return CkptMigrator()
 
 
 @pytest.fixture
 def global_config_with_checkpoint(
-    migrator: Migrator,
+    migrator: CkptMigrator,
     global_config: tuple[DictConfig, str, str],
     get_test_data: GetTestData,
 ) -> tuple[OmegaConf, str]:
