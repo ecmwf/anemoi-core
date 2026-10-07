@@ -59,12 +59,13 @@ class VariableDropout(nn.Module):
         drop_indices : torch.Tensor
             Indices of dropped variables in the original input channel layout.
         """
+        empty_indices = torch.empty(0, dtype=torch.long, device=x.device)
         if not self.training or self.dropout_rate == 0.0:
-            return x, names
+            return x, names, empty_indices
 
         if torch.rand((), device=x.device) >= self.dropout_rate:
             # no dropout applied, return original tensor and names
-            return x, names
+            return x, names, empty_indices
 
         # keep = torch.ones(len(names), dtype=torch.bool, device=x.device)
         prognostic_indices = torch.as_tensor(prognostic_indices, dtype=torch.long, device=x.device)
@@ -72,7 +73,7 @@ class VariableDropout(nn.Module):
         num_prognostic = len(prognostic_indices)
 
         if num_prognostic <= 1:
-            return x, names, torch.empty(0, dtype=torch.long, device=x.device)
+            return x, names, empty_indices
 
         if not self.multi_variable_dropout:
             num_drop = 1
