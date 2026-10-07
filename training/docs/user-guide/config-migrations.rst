@@ -21,7 +21,7 @@ To update your config dump:
 
 .. code:: bash
 
-    anemoi-training config migration sync PATH [--output OUTPUT] [--no-color]
+    anemoi-training config migration sync PATH [--output OUTPUT] [--no-summary] [--no-color]
 
 where ``PATH`` is the path to your config file. You can define where the migrated config
 will be written to with ``--output path/to/migrated-config.yaml``. Defaults to printing
@@ -29,3 +29,6 @@ in stdout.
 
 This command will also write a diff of the old versus new config to help you quickly see
 what has been changed by the migrations.
+
+The ``--no-summary`` option will skip the comments at the top of the migrated configuration dump
+with a summaries provided by the different migration scripts.
