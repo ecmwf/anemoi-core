@@ -26,6 +26,8 @@ from anemoi.training.tasks.base import BaseTask
 class TinyIterableDataset(IterableDataset):
     """Minimal iterable dataset for DataLoader construction tests."""
 
+    valid_date_indices = (0,)  # read by AnemoiDatasetsDataModule._get_dataloader for logging
+
     def __iter__(self) -> Iterator[int]:
         yield 0
 
@@ -151,7 +153,8 @@ def test_persistent_workers_are_disabled_for_rollout_schedule(
 
     assert [loader.persistent_workers for loader in loaders] == [False] * len(loaders)
     assert datamodule.config.dataloader.persistent_workers is True
-    assert caplog.messages == [
+    # Logged once, although three dataloaders are built.
+    assert [message for message in caplog.messages if "persistent_workers" in message] == [
         "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
     ]
 

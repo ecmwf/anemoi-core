@@ -17,10 +17,8 @@ from anemoi.training.data.multidataset import MultiDataset
 def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFixture) -> None:
     """Contiguous relative time indices are collapsed to slices; sparse ones are kept as lists."""
     reader = mocker.MagicMock()
-    reader.missing = set()
-    reader.dates = list(range(20))
-    reader.has_trajectories = False
     reader.num_sequences = 1
+    reader.compute_anchors.return_value = np.column_stack([np.zeros(17, dtype=np.int64), np.arange(17)])
 
     ds = MultiDataset(
         data_readers={"a": reader, "b": reader},
@@ -32,7 +30,7 @@ def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFix
 
 
 def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
-    """GriddedDataReader.get_data forwards time indices to the dataset unchanged."""
+    """GriddedDataReader.get_data forwards time positions to the dataset unchanged."""
 
     class FakeDataset:
         def __init__(self) -> None:
@@ -46,14 +44,14 @@ def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
     reader.data = FakeDataset()
     reader.grid_shard_slice = None
 
-    reader.get_data([4, 5, 7])
-    assert reader.data.last_index == [4, 5, 7]
+    reader.get_data(0, [4, 5, 7])
+    assert reader.data.last_index == ([4, 5, 7], slice(None), slice(None), slice(None))
 
-    reader.get_data(slice(4, 7, 1))
-    assert reader.data.last_index == slice(4, 7, 1)
+    reader.get_data(0, slice(4, 7, 1))
+    assert reader.data.last_index == (slice(4, 7, 1), slice(None), slice(None), slice(None))
 
     reader.grid_shard_slice = slice(0, 2)
-    x = reader.get_data(slice(4, 7, 1))
+    x = reader.get_data(0, slice(4, 7, 1))
     assert reader.data.last_index == (slice(4, 7, 1), slice(None), slice(None), slice(0, 2))
     # (dates, variables, ensemble, grid) -> (dates, ensemble, grid, variables)
     assert tuple(x.shape) == (3, 4, 5, 2)

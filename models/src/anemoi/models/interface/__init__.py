@@ -83,8 +83,10 @@ class AnemoiModelInterface(torch.nn.Module):
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
 
-        self.is_dataset_static = {key: val.is_static_grid for key, val in data_readers.items()}
         self.sample_types = {name: reader.sample_type for name, reader in data_readers.items()}
+        self.is_dataset_static = {
+            name: not issubclass(sample_type, TabularSourceSample) for name, sample_type in self.sample_types.items()
+        }
 
         self._build_model()
         self._update_metadata()

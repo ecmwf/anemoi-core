@@ -7,11 +7,9 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-import datashader as dsh
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from datashader.mpl_ext import dsshow
 from matplotlib import colormaps as mpl_colormaps
 from matplotlib.collections import PathCollection
 from matplotlib.colors import BoundaryNorm
@@ -299,6 +297,10 @@ def single_plot(
             scatter_kwargs["transform"] = data_crs
         psc = ax.scatter(lon, lat, **scatter_kwargs)
     else:
+        # Imported lazily: datashader is an optional dependency (anemoi-training[plotting])
+        import datashader as dsh
+        from datashader.mpl_ext import dsshow
+
         df = pd.DataFrame({"val": data, "x": lon, "y": lat})
         # Pin the mapped extent to the source coordinates as well as the cell count: dsshow would
         # otherwise infer the range from the surviving points, so panels could share a canvas size

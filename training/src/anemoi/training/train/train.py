@@ -685,7 +685,7 @@ class AnemoiTrainer(ABC):
     @cached_property
     def has_tabular_datasets(self) -> bool:
         """Returns True iff the run includes at least one tabular observation dataset."""
-        return not all(self.datamodule.ds_train.is_static_dataset.values())
+        return any(reader.is_tabular for reader in self.datamodule.ds_train.data_readers.values())
 
     @cached_property
     def strategy(self) -> Any:

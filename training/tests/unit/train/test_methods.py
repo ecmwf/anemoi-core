@@ -2046,7 +2046,7 @@ def test_ensemble_expand_ens_dim_tiles_tabular_members() -> None:
     pl.LightningModule.__init__(forecaster)
     forecaster.nens_per_device = 3
 
-    # the layout and per-sample shape ObservationDataReader emits
+    # the layout and per-sample shape TabularDataReader emits
     batch = build_batch(
         data={"obs": [torch.randn(1, 5, 2), torch.randn(1, 4, 2)]},
         coordinates={"obs": [torch.zeros(5, 2), torch.zeros(4, 2)]},

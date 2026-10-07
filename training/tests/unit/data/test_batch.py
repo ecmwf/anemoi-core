@@ -49,20 +49,30 @@ def _gridded_payload(
     )
 
 
-def _simple_batch(**kwargs) -> Batch:
-    """A minimal single-dataset gridded batch."""
-    kwargs.setdefault("data", {"a": torch.zeros(2, 1, 1, 4, 2)})
-    kwargs.setdefault("layouts", {"a": _gridded_layout()})
-    kwargs.setdefault("variables", {"a": ["x", "y"]})
-    return build_batch(**kwargs)
-
-
 def _make_coordinates(grid: int = 4) -> torch.Tensor:
     """Return a stacked ``(N, 2)`` tensor of (latitudes, longitudes)."""
     return torch.stack(
         [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],
         dim=-1,
     )
+
+
+def _simple_batch(**kwargs) -> Batch:
+    """A minimal single-dataset gridded batch."""
+    kwargs.setdefault("data", {"a": torch.zeros(2, 1, 1, 4, 2)})
+    kwargs.setdefault("coordinates", {"a": _make_coordinates()})
+    kwargs.setdefault("layouts", {"a": _gridded_layout()})
+    kwargs.setdefault("variables", {"a": ["x", "y"]})
+    return build_batch(**kwargs)
+
+
+def _tabular_envelope(sizes: list[int]) -> dict[str, list]:
+    """Per-sample coordinates, timedeltas and single-window boundaries for tabular payloads of ``sizes`` points."""
+    return {
+        "coordinates": [torch.zeros(n, 2) for n in sizes],
+        "timedeltas": [torch.zeros(n) for n in sizes],
+        "boundaries": [(slice(0, n),) for n in sizes],
+    }
 
 
 # ---------------------------------------------------------------- construction
@@ -178,10 +188,10 @@ def test_collate_supports_multiple_datasets() -> None:
     ]
     batch = Batch.collate(samples)
     assert batch.dataset_names == ("a", "b")
-    # "a" is static -> shared reference
+    # Gridded coordinates are always static -> each dataset shares the first sample's tensor
     assert batch["a"].coordinates is samples[0]["a"].coordinates
-    # "b" is dynamic -> stacked
-    assert batch["b"].coordinates.shape == (2, 2, 2)
+    assert batch["b"].coordinates is samples[0]["b"].coordinates
+    assert batch.static_coord_datasets == frozenset({"a", "b"})
 
 
 # --------------------------------------------------------------- device / pin
@@ -258,7 +268,7 @@ def test_with_data_can_subset_datasets_and_envelope() -> None:
     coords_a = _make_coordinates()
     batch = build_batch(
         data={"a": torch.zeros(2, 1, 1, 4, 2), "b": torch.zeros(2, 1, 1, 4, 2)},
-        coordinates={"a": coords_a},
+        coordinates={"a": coords_a, "b": _make_coordinates()},
         layouts={"a": _gridded_layout(), "b": _gridded_layout()},
         variables={"a": ["x", "y"], "b": ["x", "y"]},
         statistics={"a": {}},
@@ -322,8 +332,12 @@ def test_source_view_apply_func_uses_processor_and_preserves_envelope() -> None:
 
 def test_source_view_apply_func_handles_sparse_list_payloads() -> None:
     layout = TensorLayout(grid=0, variables=1)
+    envelope = _tabular_envelope([5, 7])
     batch = build_batch(
         data={"obs": [torch.zeros(5, 3), torch.ones(7, 3)]},
+        coordinates={"obs": envelope["coordinates"]},
+        timedeltas={"obs": envelope["timedeltas"]},
+        boundaries={"obs": envelope["boundaries"]},
         layouts={"obs": layout},
         variables={"obs": ["a", "b", "c"]},
         statistics={"obs": {}},
@@ -363,21 +377,24 @@ def test_source_view_returns_stacked_latlon_coordinates() -> None:
     assert out is coords
 
 
-def test_source_view_coordinates_none_when_missing() -> None:
-    batch = build_batch(
-        data={"a": torch.zeros(2, 1, 1, 4, 2)},
-        layouts={"a": _gridded_layout()},
-        variables={"a": ["a", "b"]},
-    )
-
-    assert batch["a"].coordinates is None
+def test_source_without_coordinates_is_rejected() -> None:
+    """Every source must carry coordinates; a missing one fails at construction, naming the dataset."""
+    with pytest.raises(ValueError, match="GriddedSource 'a' requires coordinates"):
+        build_batch(
+            data={"a": torch.zeros(2, 1, 1, 4, 2)},
+            layouts={"a": _gridded_layout()},
+            variables={"a": ["a", "b"]},
+        )
 
 
 def test_source_view_returns_sparse_coordinate_lists() -> None:
     """Sparse datasets store ``coordinates`` as ``list[Tensor]``."""
+    envelope = _tabular_envelope([4, 6])
     batch = build_batch(
         data={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
-        coordinates={"a": [torch.zeros(4, 2), torch.zeros(6, 2)]},
+        coordinates={"a": envelope["coordinates"]},
+        timedeltas={"a": envelope["timedeltas"]},
+        boundaries={"a": envelope["boundaries"]},
         layouts={"a": TensorLayout(grid=0, variables=1)},
         variables={"a": ["a", "b"]},
     )
@@ -437,8 +454,12 @@ def test_tensor_layout_repr_elides_none_fields() -> None:
 def test_batch_repr_summarises_per_dataset() -> None:
     from anemoi.models.data import TensorLayout
 
+    envelope = _tabular_envelope([5, 7])
     batch = build_batch(
         data={"grid": torch.zeros(2, 1, 1, 4, 3), "obs": [torch.zeros(5, 3), torch.zeros(7, 3)]},
+        coordinates={"grid": _make_coordinates(), "obs": envelope["coordinates"]},
+        timedeltas={"obs": envelope["timedeltas"]},
+        boundaries={"obs": envelope["boundaries"]},
         layouts={
             "grid": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
             "obs": TensorLayout(grid=0, variables=1),
@@ -446,12 +467,13 @@ def test_batch_repr_summarises_per_dataset() -> None:
         variables={"grid": ["x", "y", "z"], "obs": ["x", "y", "z"]},
     )
     out = repr(batch)
-    assert "grid:" in out
-    assert "(2, 1, 1, 4, 3)" in out
-    assert "obs:" in out
-    assert "list[2]" in out
-    assert "TensorLayout" in out
-    assert "batch=0" in out
+    assert "grid | GriddedSource" in out
+    assert "Dim 0 (batch): 2" in out
+    assert "Dim 3 (grid): 4" in out
+    assert "obs | TabularSource" in out
+    # Tabular sources list their per-sample point counts.
+    assert "Sample 1: 5" in out
+    assert "Sample 2: 7" in out
 
 
 def test_batch_collate_rejects_invalid_layout_position() -> None:

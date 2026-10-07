@@ -12,12 +12,10 @@ import datetime
 import numpy as np
 import pytest
 import torch
-from omegaconf import OmegaConf
 from pydantic import ValidationError
 
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import TrajectoryDataReader
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
@@ -130,7 +128,7 @@ class TestGriddedDataReader:
         """Test get_sample with a time slice on the full grid."""
         dataset = GriddedDataReader(dataset=dataset_path)
 
-        sample = dataset.get_sample(slice(0, 3))
+        sample = dataset.get_sample(0, slice(0, 3))
 
         assert isinstance(sample, GriddedSourceSample)
         assert isinstance(sample.data, torch.Tensor)
@@ -146,21 +144,21 @@ class TestGriddedDataReader:
         """Test get_sample with irregular time indices (e.g. offset-forecaster inputs)."""
         dataset = GriddedDataReader(dataset=dataset_path)
 
-        sample = dataset.get_sample([0, 2, 5])
+        sample = dataset.get_sample(0, [0, 2, 5])
 
         assert sample.data.ndim == 4
         assert sample.data.shape[0] == 3  # 3 time steps
-        expected = dataset.get_sample(slice(0, 6)).data[[0, 2, 5]]
+        expected = dataset.get_sample(0, slice(0, 6)).data[[0, 2, 5]]
         torch.testing.assert_close(sample.data, expected)
 
     @skip_if_offline
     def test_get_sample_with_grid_shard(self, dataset_path: str) -> None:
         """Test get_sample returns this reader's grid shard once reader-group info is set."""
         dataset = GriddedDataReader(dataset=dataset_path)
-        full = dataset.get_sample(slice(0, 3))
+        full = dataset.get_sample(0, slice(0, 3))
 
         dataset.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
-        sample = dataset.get_sample(slice(0, 3))
+        sample = dataset.get_sample(0, slice(0, 3))
 
         assert sample.shard_sizes == dataset.grid_shard_sizes
         assert sum(dataset.grid_shard_sizes) == dataset.grid_size
@@ -447,26 +445,6 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
     )
 
     assert cfg.dataset_config == {"invalid_key": "not_supported"}
-
-
-@skip_if_offline
-def test_create_dataset_selects_trajectory_reader(dataset_path: str) -> None:
-    """A ``trajectory`` section with ``start`` and ``length`` creates a TrajectoryDataReader."""
-    dataset_reader_cfg = OmegaConf.create(
-        {
-            "dataset_config": {"dataset": dataset_path, "frequency": "6h"},
-            "start": None,
-            "end": None,
-            "trajectory": {"start": "2017-01-01T00:00:00", "length": 4},
-        },
-    )
-
-    dataset = create_dataset(dataset_reader_cfg)
-
-    assert isinstance(dataset, TrajectoryDataReader)
-    assert dataset.has_trajectories
-    assert dataset.trajectory_length == 4
-    assert len(dataset.trajectory_ids) == len(dataset.dates)
 
 
 @skip_if_offline
