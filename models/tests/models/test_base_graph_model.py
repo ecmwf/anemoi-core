@@ -164,3 +164,29 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
     assert model.node_attributes.num_nodes["hidden_3"] == 1
+
+
+class InputOnlyDatasetModel(DummyGraphModel):
+    """Decodes only `target`: `forcing` feeds an encoder but has no decoder, so it has no output."""
+
+    def forward(self, x, *, model_comm_group=None, grid_shard_sizes=None, **kwargs):
+        return {"target": x["target"][:, -1:] + 1.0}
+
+
+def test_predict_step_skips_input_only_datasets() -> None:
+    model = InputOnlyDatasetModel.__new__(InputOnlyDatasetModel)
+    torch.nn.Module.__init__(model)
+
+    def identity(x, in_place=False):
+        return x
+
+    processors = {"target": identity, "forcing": identity}
+    batch = {
+        "target": torch.zeros(1, 2, 3, 2),  # (batch, time, grid, variables)
+        "forcing": torch.zeros(1, 2, 3, 1),
+    }
+
+    y_hat = model.predict_step(batch, pre_processors=processors, post_processors=processors, n_step_input=2)
+
+    assert set(y_hat) == {"target"}
+    assert torch.equal(y_hat["target"], torch.ones(1, 1, 1, 3, 2))
