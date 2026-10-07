@@ -29,6 +29,7 @@ from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
+from anemoi.models.models.base import NO_ENCODER_FUSION
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
@@ -59,10 +60,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
+        target_anchors: dict[str, str] | None = None,
     ) -> None:
 
         model_config = DotDict(model_config)
 
+        self.target_anchors: dict[str, str] = dict(target_anchors or {})
         transport_params = model_config.model.model.transport
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
@@ -86,11 +89,65 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_embedder = instantiate(transport_params.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
+    def _build_target_routing(self) -> None:
+        """Resolve ``target_anchors`` to the anchor node set each target is encoded and decoded on."""
+        undecoded = sorted(set(self.target_anchors) - set(self.target_datasets))
+        if undecoded:
+            raise ValueError(
+                f"target_anchors attaches {undecoded}, but no decoder produces them "
+                f"(decoded targets: {self.target_datasets})."
+            )
+
+        self.target2anchor = {}
+        for target_name in self.target_datasets:
+            attached_to = self.target_anchors.get(target_name, target_name)
+            if attached_to not in self.dataset2encoder:
+                raise ValueError(
+                    f"Target '{target_name}' is attached to '{attached_to}', which is not a source dataset of any "
+                    f"encoder. Add it to the source_datasets of an encoder."
+                )
+            if attached_to != target_name and target_name in self.dataset2encoder:
+                raise ValueError(
+                    f"Target '{target_name}' is attached to '{attached_to}' and must not also be a source dataset "
+                    f"of encoder '{self.dataset2encoder[target_name]}'."
+                )
+
+            anchor = self.dataset2anchor[attached_to]
+            anchor_nodes = self.node_attributes.num_nodes[anchor]
+            target_nodes = self.node_attributes.num_nodes[target_name]
+            if anchor_nodes != target_nodes:
+                raise ValueError(
+                    f"Target '{target_name}' is decoded from anchor '{anchor}', whose graph node set has "
+                    f"{anchor_nodes} nodes, but the target's node set has {target_nodes}. They must describe "
+                    f"the same grid."
+                )
+            self.target2anchor[target_name] = anchor
+
+    def _anchor_of_target(self, target_name: str) -> str:
+        # Checkpoints pickled before target2anchor existed decode every target from itself.
+        return getattr(self, "target2anchor", {}).get(target_name, target_name)
+
+    def _targets_on_anchor(self, anchor: str) -> list[str]:
+        """Targets whose noised state is encoded on ``anchor``'s node set."""
+        return [name for name in self.target_datasets if self._anchor_of_target(name) == anchor]
+
+    def _encoder_input_datasets(self, anchor: str) -> list[str]:
+        """Datasets whose input history is encoded on ``anchor``'s node set, in ``source_datasets`` order."""
+        encoder_name = self.dataset2encoder[anchor]
+        if self.encoder_fusing_strategy[encoder_name] == NO_ENCODER_FUSION:
+            return [anchor]
+        return list(self.encoder2datasets[encoder_name])
+
     def _calculate_input_dim(self, dataset_name: str) -> int:
-        base_input_dim = super()._calculate_input_dim(dataset_name)
-        output_dim = super()._calculate_output_dim(dataset_name)
-        input_dim = base_input_dim + output_dim  # input history plus corrupted target
-        return input_dim
+        if dataset_name not in self.input_datasets:
+            # Fused sources and decoder-only targets own no encoder, so this width is unused.
+            return super()._calculate_input_dim(dataset_name)
+
+        history_dim = self.n_step_input * sum(
+            self.num_input_channels[name] for name in self._encoder_input_datasets(dataset_name)
+        )
+        noised_target_dim = sum(self._calculate_output_dim(name) for name in self._targets_on_anchor(dataset_name))
+        return history_dim + noised_target_dim + self.node_attributes.attr_ndims[dataset_name]
 
     def _create_noise_conditioning_mlp(self) -> nn.Sequential:
         mlp = nn.Sequential()
@@ -115,15 +172,17 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
-        # Combine input history, corrupted target, and node position features
+        # Input history of every fused source, then the corrupted targets, then node position features
+        features = [x[name] for name in self._encoder_input_datasets(dataset_name)]
+        features += [y_noised[name] for name in self._targets_on_anchor(dataset_name)]
         x_data_latent = torch.cat(
-            (
-                einops.rearrange(x[dataset_name], "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
-                einops.rearrange(
-                    y_noised[dataset_name], "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"
+            [
+                *(
+                    einops.rearrange(feature, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+                    for feature in features
                 ),
                 node_attributes_data,
-            ),
+            ],
             dim=-1,  # feature dimension
         )
 
@@ -369,6 +428,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Decoder
         x_out_dict = {}
         for dataset_name in self.target_datasets:
+            anchor = self._anchor_of_target(dataset_name)
             # Compute decoder edges using updated latent representation
             (
                 decoder_edge_attr,
@@ -381,13 +441,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             dec_shard_info = BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data_dict[dataset_name],  # None if not sharded
+                dst_nodes=shard_sizes_data_dict[anchor],  # None if not sharded
                 edges=dec_edge_shard_sizes,
             )
 
             decoder_name = self.dataset2decoder[dataset_name]
             x_out = self.decoder[decoder_name](
-                (x_latent_proc, x_data_latent_dict[dataset_name]),
+                (x_latent_proc, x_data_latent_dict[anchor]),
                 batch_size=bse,
                 shard_info=dec_shard_info,
                 edge_attr=decoder_edge_attr,
@@ -399,7 +459,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             x_out_dict[dataset_name] = self._assemble_output(
                 x_out,
-                x_skip_dict[dataset_name],
+                x_skip_dict[anchor],
                 batch_size,
                 ensemble_size,
                 conditioned_target[dataset_name].dtype,
@@ -1086,7 +1146,11 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 
 
 class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncProcDec):
-    """Transport model for spatial downscaling that predicts residuals relative to a low res dataset."""
+    """Transport model for spatial downscaling that predicts residuals relative to a low res dataset.
+
+    ``target_anchors`` pairs each target with its residual reference. The target is
+    not an encoder source: its noised state is encoded on the reference's anchor.
+    """
 
     #: Inputs are concatenated onto the target grid and encoded together, so one
     #: encoder owns several source datasets.
@@ -1101,6 +1165,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
+        target_anchors: dict[str, str] | None = None,
     ) -> None:
         super().__init__(
             model_config=model_config,
@@ -1109,50 +1174,33 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             n_step_input=n_step_input,
             n_step_output=n_step_output,
             graph_data=graph_data,
+            target_anchors=target_anchors,
         )
 
-        self._resolve_roles(model_config=DotDict(model_config))
-        self._validate_roles_match_encoder_routing()
+    def _build_target_routing(self) -> None:
+        self._resolve_residual_references()
+        super()._build_target_routing()
 
-    def _resolve_roles(self, model_config: DotDict) -> None:
-        """Build the ``{target: reference}`` index from ``training.transport.residual_reference``."""
-
-        residual_reference = model_config.get("training", {}).get("transport", {}).get("residual_reference", None) or {}
-        if not residual_reference:
+    def _resolve_residual_references(self) -> None:
+        """Take each target's residual reference from ``target_anchors``."""
+        if not self.target_anchors:
             msg = (
-                "AnemoiTransportSpatialDownscalerModelEncProcDec requires "
-                "training.transport.residual_reference to pair each target dataset with its "
-                "residual baseline, e.g. {out_hres: in_lres}."
+                "AnemoiTransportSpatialDownscalerModelEncProcDec requires target_anchors to pair each "
+                "target dataset with its residual reference, e.g. {out_hres: in_lres}. In training it "
+                "is set from training.transport.residual_reference."
             )
             raise ValueError(msg)
 
-        self._reference_by_target: dict[str, str] = dict(residual_reference)
-        self.target_dataset_names: list[str] = list(self._reference_by_target.keys())
+        missing = [name for name in self.target_datasets if name not in self.target_anchors]
+        if missing:
+            msg = f"Targets {missing} have no residual reference in target_anchors {self.target_anchors}."
+            raise ValueError(msg)
+
+        self._reference_by_target: dict[str, str] = {name: self.target_anchors[name] for name in self.target_datasets}
 
         # Fail fast on residual-baseline misconfiguration: every target prognostic
         # variable must also be prognostic in its reference dataset.
         self._validate_prognostics_match()
-
-    def _validate_roles_match_encoder_routing(self) -> None:
-        """Require the residual pairing and the encoder/decoder routing to describe the same model."""
-        role_targets = set(self.target_dataset_names)
-        routed_targets = set(self.target_datasets)
-        if role_targets != routed_targets:
-            msg = (
-                f"residual_reference declares targets {sorted(role_targets)} but the decoders "
-                f"declare {sorted(routed_targets)}. Every target must appear in both."
-            )
-            raise ValueError(msg)
-
-        for target_name, reference_name in self._reference_by_target.items():
-            fused_inputs = self._fused_input_dataset_names(target_name)
-            if reference_name not in fused_inputs:
-                msg = (
-                    f"residual_reference: reference dataset '{reference_name}' of target "
-                    f"'{target_name}' is not encoded with it. Add it to the source_datasets of "
-                    f"encoder '{self.dataset2encoder[target_name]}' (currently fusing {fused_inputs})."
-                )
-                raise ValueError(msg)
 
     def _validate_prognostics_match(self) -> None:
         """Require the set of prognostic variables in the target and its reference to match exactly."""
@@ -1177,40 +1225,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 "variables in each target dataset to match its reference dataset exactly:\n  - " + bullets
             )
             raise ValueError(msg)
-
-    # ── dimension arithmetic ─────────────────────────────────────────────────
-
-    def _fused_input_dataset_names(self, dataset_name: str) -> list[str]:
-        """Datasets concatenated onto ``dataset_name``'s grid, in encoder source order.
-
-        The anchor itself is excluded: it contributes the noised target rather
-        than an input history.
-        """
-        encoder_name = self.dataset2encoder[dataset_name]
-        return [name for name in self.encoder2datasets[encoder_name] if name != dataset_name]
-
-    @property
-    def inference_input_datasets(self) -> list[str]:
-        """The fused inputs only.
-
-        The encoder anchors are the targets, and a target is sampled rather
-        than read, so inference never needs data for it.
-        """
-        targets = set(self.target_datasets)
-        return [name for name in super().inference_input_datasets if name not in targets]
-
-    def _calculate_input_dim(self, dataset_name: str) -> int:
-        """Return the encoder input dimension on the target grid for ``dataset_name``."""
-        if dataset_name not in self.input_datasets:
-            # Fused inputs have no encoder of their own, so this width is unused.
-            return super()._calculate_input_dim(dataset_name)
-
-        history_dim = self.n_step_input * sum(
-            self.num_input_channels[input_name] for input_name in self._fused_input_dataset_names(dataset_name)
-        )
-        noised_dim = self.n_step_output * self.num_output_channels[dataset_name]
-        node_attr_dim = self.node_attributes.attr_ndims[dataset_name]
-        return history_dim + noised_dim + node_attr_dim
 
     # ── residual math (mirror of tendency model's compute_tendency pair) ─────
 
@@ -1361,59 +1375,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         return state_outp
 
-    # ── encoder input assembly ───────────────────────────────────────────────
-
-    def _assemble_input(
-        self,
-        x: dict[str, torch.Tensor],
-        y_noised: dict[str, torch.Tensor],
-        bse: int,
-        grid_shard_sizes: DatasetShardSizes | None = None,
-        model_comm_group: ProcessGroup | None = None,
-        dataset_name: str | None = None,
-    ) -> tuple[torch.Tensor, None, ShardSizes]:
-        """Concatenate all fused input features, the noised target, and node attrs."""
-        assert dataset_name in self.input_datasets, (
-            "AnemoiTransportSpatialDownscalerModelEncProcDec._assemble_input only supports "
-            f"encoder anchors {self.input_datasets}; got '{dataset_name}'."
-        )
-
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=bse)
-        target_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-        if target_grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(
-                node_attributes_data,
-                0,
-                target_grid_shard_sizes,
-                model_comm_group,
-            )
-
-        # Concatenate each input dataset's history into a single per-node feature
-        # vector on the target grid.  All inputs must already share the target
-        # grid dimension (reference is projected upstream).
-        feature_chunks: list[torch.Tensor] = []
-        for input_name in self._fused_input_dataset_names(dataset_name):
-            input_tensor = x[input_name]
-            feature_chunks.append(
-                einops.rearrange(
-                    input_tensor,
-                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-                ),
-            )
-
-        # Append the noised target for the target dataset.
-        feature_chunks.append(
-            einops.rearrange(
-                y_noised[dataset_name],
-                "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-            ),
-        )
-        # Append the target-grid node attributes.
-        feature_chunks.append(node_attributes_data)
-
-        x_data_latent = torch.cat(feature_chunks, dim=-1)
-        return x_data_latent, None, target_grid_shard_sizes
-
     # ── sampling hooks ────────────────────────────────────────────────────────
 
     def _before_sampling(
@@ -1458,7 +1419,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         if missing:
             msg = (
                 f"Missing input dataset(s) {missing} in the batch. The downscaler reads "
-                f"{input_dataset_names} and samples {self.target_dataset_names}."
+                f"{input_dataset_names} and samples {self.target_datasets}."
             )
             raise ValueError(msg)
 
@@ -1500,7 +1461,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         ), "Downscaler _before_sampling needs post_processors to denormalize the projected reference."
         x_ref_on_target_grid_by_target: dict[str, torch.Tensor] = {}
         reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]] = {}
-        for target_name in self.target_dataset_names:
+        for target_name in self.target_datasets:
             reference_name = self._reference_by_target[target_name]
             x_ref_on_target_grid_by_target[target_name] = post_processors[reference_name](
                 xs[reference_name],
@@ -1515,7 +1476,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         #    way, which is what keeps the fused inputs and the noised target on
         #    matching shards.
         if grid_shard_sizes is not None:
-            for target_name in self.target_dataset_names:
+            for target_name in self.target_datasets:
                 grid_shard_sizes[target_name] = self._target_grid_shard_sizes(target_name, model_comm_group)
 
         return (
@@ -1604,7 +1565,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         placed on the target grid.
         """
         specs: dict[str, TransportSourceSpec] = {}
-        for target_name in self.target_dataset_names:
+        for target_name in self.target_datasets:
             reference = x[self._reference_by_target[target_name]]
             num_nodes = self.node_attributes.num_nodes[target_name]
             target_shard_sizes = grid_shard_sizes.get(target_name) if grid_shard_sizes is not None else None
@@ -1701,7 +1662,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 sampler_params=sampler_params,
                 **kwargs,
             )
-            for target_name in self.target_dataset_names:
+            for target_name in self.target_datasets:
                 # The target is not in the batch; its reference input carries the input dtype.
                 out[target_name] = out[target_name].to(batch[self._reference_by_target[target_name]].dtype)
 

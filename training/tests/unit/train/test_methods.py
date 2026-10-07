@@ -2782,18 +2782,53 @@ def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> 
 
 
 def test_residual_prediction_mode_reference_dataset_raises_when_roles_absent() -> None:
-    """_build_reference_by_target raises ValueError when transport.residual_reference is not set."""
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
-    module.config.training.transport = {"objective": "edm_diffusion"}  # no residual_reference
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
+    """target_anchors raises ValueError when transport.residual_reference is not set."""
+    config = SimpleNamespace(training=SimpleNamespace(transport={"objective": "edm_diffusion"}))
+
     with pytest.raises(ValueError, match="is not configured"):
-        mode._build_reference_by_target()
+        ResidualPredictionMode.target_anchors(config)
+
+
+def test_only_residual_prediction_attaches_targets_to_another_encoder_input() -> None:
+    """State and tendency targets are encoded on their own node set, so the model gets no anchors."""
+    config = SimpleNamespace(
+        training=SimpleNamespace(transport={"objective": "edm_diffusion", "residual_reference": {"out": "in_lres"}}),
+    )
+
+    assert StatePredictionMode.target_anchors(config) is None
+    assert TendencyPredictionMode.target_anchors(config) is None
+    assert ResidualPredictionMode.target_anchors(config) == {"out": "in_lres"}
+
+
+@pytest.mark.parametrize(
+    ("prediction_mode", "expected"),
+    [("state", None), ("tendency", None), ("residual", {"out": "in_lres"})],
+)
+def test_transport_training_takes_target_anchors_from_its_prediction_mode(
+    prediction_mode: str,
+    expected: dict[str, str] | None,
+) -> None:
+    """The anchors must be known before the model is built, i.e. before the prediction mode exists."""
+    config = DictConfig(
+        {
+            "training": {
+                "transport": {
+                    "objective": "edm_diffusion",
+                    "prediction_mode": prediction_mode,
+                    "residual_reference": {"out": "in_lres"},
+                },
+            },
+        },
+    )
+    module = TransportTraining.__new__(TransportTraining)
+
+    assert module._model_target_anchors(config) == expected
+
+
+def test_non_transport_training_passes_no_target_anchors() -> None:
+    module = SingleTraining.__new__(SingleTraining)
+
+    assert module._model_target_anchors(DictConfig({})) is None
 
 
 def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:

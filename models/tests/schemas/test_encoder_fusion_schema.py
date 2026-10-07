@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Validation of ``encoders.*.dataset_fusing_strategy`` / ``fusion_anchor``."""
+"""Validation of ``encoders.*.dataset_fusing_strategy``."""
 
 import pytest
 from pydantic import ValidationError
@@ -28,37 +28,27 @@ def _encoder(**overrides: object) -> EncodersSchema:
     return EncodersSchema(source_datasets=["hres", "lres"], mapper=_MAPPER, **overrides)
 
 
-def test_defaults_to_no_fusing_and_no_anchor() -> None:
+def test_defaults_to_no_fusing() -> None:
     encoder = _encoder()
 
     assert encoder.dataset_fusing_strategy == "not_supported"
-    assert encoder.fusion_anchor is None
 
 
-def test_accepts_fusing_with_an_anchor_from_the_source_datasets() -> None:
-    encoder = _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim", fusion_anchor="hres")
+def test_accepts_fusing_without_naming_an_anchor() -> None:
+    """The anchor is the first source dataset, so there is nothing to configure."""
+    encoder = _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim")
 
-    assert encoder.fusion_anchor == "hres"
-
-
-def test_rejects_anchor_without_a_fusing_strategy() -> None:
-    with pytest.raises(ValidationError, match="would be ignored"):
-        _encoder(fusion_anchor="hres")
+    assert encoder.dataset_fusing_strategy == "concatenate_inputs_along_variable_dim"
 
 
-def test_rejects_fusing_without_an_anchor() -> None:
-    with pytest.raises(ValidationError, match="requires fusion_anchor"):
-        _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim")
-
-
-def test_rejects_anchor_that_is_not_a_source_dataset() -> None:
-    with pytest.raises(ValidationError, match="not in source_datasets"):
-        _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim", fusion_anchor="hidden")
+def test_rejects_the_removed_fusion_anchor_field() -> None:
+    with pytest.raises(ValidationError, match="fusion_anchor"):
+        _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim", fusion_anchor="hres")
 
 
 def test_rejects_unknown_fusing_strategy() -> None:
     with pytest.raises(ValidationError):
-        _encoder(dataset_fusing_strategy="concatenate", fusion_anchor="hres")
+        _encoder(dataset_fusing_strategy="concatenate")
 
 
 @pytest.mark.parametrize(

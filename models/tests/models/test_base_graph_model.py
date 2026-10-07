@@ -192,7 +192,6 @@ def _build_dummy_model(
     *,
     source_datasets: tuple[str, ...] = ("data",),
     fusing_strategy: str = "not_supported",
-    fusion_anchor: str | None = None,
     model_cls: type[BaseGraphModel] = DummyGraphModel,
 ) -> BaseGraphModel:
     encoder_config: dict = {
@@ -200,8 +199,6 @@ def _build_dummy_model(
         "dataset_fusing_strategy": fusing_strategy,
         "mapper": {},
     }
-    if fusion_anchor is not None:
-        encoder_config["fusion_anchor"] = fusion_anchor
 
     model_config = OmegaConf.create(
         {
@@ -243,18 +240,11 @@ def test_rejects_fusing_strategy_that_is_a_substring_of_a_supported_one(fusing_s
         _build_dummy_model(fusing_strategy=fusing_strategy)
 
 
-def test_fusion_anchor_without_a_fusion_strategy_is_rejected() -> None:
-    """Silently ignoring the anchor would hide a real misconfiguration."""
-    with pytest.raises(ValueError, match="fusion_anchor"):
-        _build_dummy_model(source_datasets=("data", "extra"), fusion_anchor="data")
-
-
 def test_fusion_is_rejected_by_model_classes_that_do_not_implement_it() -> None:
     with pytest.raises(ValueError, match="does not support"):
         _build_dummy_model(
             source_datasets=("data", "extra"),
             fusing_strategy="concatenate_inputs_along_variable_dim",
-            fusion_anchor="data",
         )
 
 
@@ -262,7 +252,6 @@ def test_fusion_routes_every_source_dataset_through_the_anchor_node_set() -> Non
     model = _build_dummy_model(
         source_datasets=("data", "extra"),
         fusing_strategy="concatenate_inputs_along_variable_dim",
-        fusion_anchor="data",
         model_cls=FusingGraphModel,
     )
 
@@ -272,25 +261,35 @@ def test_fusion_routes_every_source_dataset_through_the_anchor_node_set() -> Non
     # Every fused dataset still resolves to the encoder, on the anchor's node set.
     assert model.encoder2datasets == {0: ["data", "extra"]}
     assert model.dataset2encoder == {"data": 0, "extra": 0}
+    assert model.dataset2anchor == {"data": "data", "extra": "data"}
 
 
-def test_fusion_requires_an_anchor() -> None:
-    with pytest.raises(ValueError, match="must set fusion_anchor"):
-        _build_dummy_model(
-            source_datasets=("data", "extra"),
-            fusing_strategy="concatenate_inputs_along_variable_dim",
-            model_cls=FusingGraphModel,
-        )
+def test_fusion_anchors_the_encoder_at_its_first_source_dataset() -> None:
+    model = _build_dummy_model(
+        source_datasets=("extra", "data"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.encoder2anchors == {0: ["extra"]}
+    assert model.dataset2anchor == {"extra": "extra", "data": "extra"}
 
 
-def test_fusion_anchor_must_be_one_of_the_source_datasets() -> None:
-    with pytest.raises(ValueError, match="not in source_datasets"):
-        _build_dummy_model(
-            source_datasets=("data", "extra"),
-            fusing_strategy="concatenate_inputs_along_variable_dim",
-            fusion_anchor="hidden",
-            model_cls=FusingGraphModel,
-        )
+def test_without_fusion_every_source_dataset_is_its_own_anchor() -> None:
+    model = _build_dummy_model(source_datasets=("data", "extra"), model_cls=FusingGraphModel)
+
+    assert model.encoder2anchors == {0: ["data", "extra"]}
+    assert model.dataset2anchor == {"data": "data", "extra": "extra"}
+
+
+def test_each_target_is_decoded_from_its_own_anchor_by_default() -> None:
+    model = _build_dummy_model(
+        source_datasets=("data", "extra"),
+        fusing_strategy="concatenate_inputs_along_variable_dim",
+        model_cls=FusingGraphModel,
+    )
+
+    assert model.target2anchor == {"data": "data"}
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +302,6 @@ def test_inference_input_datasets_covers_every_encoder_source() -> None:
     model = _build_dummy_model(
         source_datasets=("data", "extra"),
         fusing_strategy="concatenate_inputs_along_variable_dim",
-        fusion_anchor="data",
         model_cls=FusingGraphModel,
     )
 
@@ -316,7 +314,6 @@ def test_fill_metadata_records_the_role_of_each_dataset() -> None:
     model = _build_dummy_model(
         source_datasets=("data", "extra"),
         fusing_strategy="concatenate_inputs_along_variable_dim",
-        fusion_anchor="data",
         model_cls=FusingGraphModel,
     )
     md_dict = {"metadata_inference": {"data": {}, "extra": {}}}

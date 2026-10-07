@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING
 
 import torch
 from torch.utils.checkpoint import checkpoint
@@ -25,6 +26,9 @@ from anemoi.training.train.methods.transport_base import TransportObjective
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.index_space import IndexSpace
 
+if TYPE_CHECKING:
+    from anemoi.training.schemas.base_schema import BaseSchema
+
 LOGGER = logging.getLogger(__name__)
 
 
@@ -33,6 +37,16 @@ class PredictionMode:
 
     def __init__(self, module: BaseTransportTraining) -> None:
         self.module = module
+
+    @classmethod
+    def target_anchors(cls, config: BaseSchema) -> dict[str, str] | None:
+        """Return the ``{target: dataset}`` pairs the model must attach targets by, or ``None``.
+
+        Called before the model exists, so it may only read ``config``. ``None``
+        encodes every target on its own node set.
+        """
+        del config
+        return None
 
     def prepare_target(
         self,
@@ -303,7 +317,8 @@ class ResidualPredictionMode(PredictionMode):
     (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
     The reference dataset for each target is read from ``transport.residual_reference`` in
     the training config, a ``{target: reference}`` mapping, so that ``prepare_target`` can
-    look up the correct baseline for each target independently.
+    look up the correct baseline for each target independently. The same mapping is handed
+    to the model as its ``target_anchors``.
     Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
     normalization.
     Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
@@ -313,12 +328,13 @@ class ResidualPredictionMode(PredictionMode):
         super().__init__(module)
         self._validate_objective()
         self._validate_source_kind()
-        self._reference_by_target = self._build_reference_by_target()
+        self._reference_by_target = self.target_anchors(self.module.config)
         self._validate_residual_processors()
 
-    def _build_reference_by_target(self) -> dict[str, str]:
-        """Read the ``{target: reference}`` mapping from ``transport.residual_reference``."""
-        transport = getattr(self.module.config.training, "transport", {}) or {}
+    @classmethod
+    def target_anchors(cls, config: BaseSchema) -> dict[str, str]:
+        """Attach each target to its residual reference, read from ``transport.residual_reference``."""
+        transport = getattr(config.training, "transport", {}) or {}
         residual_reference = transport.get("residual_reference", None)
         if not residual_reference:
             msg = (
@@ -498,15 +514,19 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
-        self._prediction_mode = self._get_prediction_mode_cls()(self)
+        self._prediction_mode = self._get_prediction_mode_cls(self.config)(self)
 
-    def _get_prediction_mode_cls(self) -> type[PredictionMode]:
-        prediction_mode = self.config.training.transport.prediction_mode
+    @staticmethod
+    def _get_prediction_mode_cls(config: BaseSchema) -> type[PredictionMode]:
+        prediction_mode = config.training.transport.prediction_mode
         try:
             return PREDICTION_MODE_CLASSES[prediction_mode]
         except KeyError as exc:
             msg = f"Unknown training.transport.prediction_mode '{prediction_mode}'."
             raise ValueError(msg) from exc
+
+    def _model_target_anchors(self, config: BaseSchema) -> dict[str, str] | None:
+        return self._get_prediction_mode_cls(config).target_anchors(config)
 
     @property
     def prediction_mode(self) -> PredictionMode:

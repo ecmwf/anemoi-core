@@ -23,10 +23,10 @@ from typing import Any
 import pytest
 import torch
 from omegaconf import DictConfig
-from omegaconf import OmegaConf
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 from anemoi.models.transport import TransportSourceBuilder
@@ -54,7 +54,7 @@ def _make_index_collection(
 def _make_downscaler_indices() -> dict[str, IndexCollection]:
     """Three datasets: in_lres (reference), in_hres (conditioning), out_hres (target).
     The target's prognostic variables (``t2m``, ``u10``) must also be
-    prognostic in the reference dataset for ``_resolve_roles`` to accept the
+    prognostic in the reference dataset for ``_resolve_residual_references`` to accept the
     configuration (see ``_validate_prognostics_match``).
     """
     # in_lres: reference dataset — must expose the same variables as prognostic.
@@ -128,25 +128,32 @@ class _IdentitySpatialProjector:
 
 
 def _wire_fused_encoder_routing(
-    model: AnemoiTransportSpatialDownscalerModelEncProcDec,
+    model: AnemoiTransportModelEncProcDec,
     *,
-    anchor: str,
-    fused: list[str],
+    sources: list[str],
+    target: str = "out_hres",
+    reference: str = "in_lres",
+    fusing_strategy: str = "concatenate_inputs_along_variable_dim",
 ) -> None:
-    """Attach the routing state ``BaseGraphModel._build_encoder_routing`` would produce.
+    """Attach the routing state ``BaseGraphModel`` and the transport base would produce.
 
-    Config keys (``enc0``/``dec0``) deliberately differ from the dataset names,
-    as in the graphtransformer_multi_* configs.
+    One encoder fuses ``sources`` on the first of them (the anchor), and ``target``
+    is decoded from the anchor of its ``reference``. Config keys (``enc0``/``dec0``)
+    deliberately differ from the dataset names, as in the graphtransformer_multi_* configs.
     """
-    model.encoder2datasets = {"enc0": [anchor, *fused]}
+    anchor = sources[0]
+    model.encoder2datasets = {"enc0": list(sources)}
     model.encoder2anchors = {"enc0": [anchor]}
-    model.dataset2anchor = {name: anchor for name in (anchor, *fused)}
-    model.dataset2encoder = {name: "enc0" for name in (anchor, *fused)}
+    model.encoder_fusing_strategy = {"enc0": fusing_strategy}
+    model.dataset2anchor = {name: anchor for name in sources}
+    model.dataset2encoder = {name: "enc0" for name in sources}
     model.input_datasets = [anchor]
-    model.dataset2decoder = {anchor: "dec0"}
-    model.decoder2datasets = {"dec0": [anchor]}
+    model.dataset2decoder = {target: "dec0"}
+    model.decoder2datasets = {"dec0": [target]}
     model.decoders_target_input = {"dec0": SimpleNamespace(dim=0)}
-    model.target_datasets = [anchor]
+    model.target_datasets = [target]
+    model.target_anchors = {target: reference}
+    model.target2anchor = {target: anchor}
 
 
 def _make_bare_model(
@@ -171,19 +178,40 @@ def _make_bare_model(
         attr_ndims or {"in_lres": 2, "in_hres": 2, "out_hres": 3},
         grid=grid,
     )
-    model.target_dataset_names = ["out_hres"]
-    # Encoder/decoder config names deliberately differ from the dataset name,
-    # as in the graphtransformer_multi_* configs.
-    _wire_fused_encoder_routing(model, anchor="out_hres", fused=["in_lres", "in_hres"])
+    _wire_fused_encoder_routing(model, sources=["in_lres", "in_hres"])
     model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
 
-def test_fused_input_dataset_names_excludes_the_anchor() -> None:
-    """The anchor contributes the noised target, not an input history."""
+def test_encoder_input_datasets_are_every_fused_source_in_order() -> None:
+    """The anchor contributes its own history too, ahead of the other sources."""
     model = _make_bare_model()
 
-    assert model._fused_input_dataset_names("out_hres") == ["in_lres", "in_hres"]
+    assert model._encoder_input_datasets("in_lres") == ["in_lres", "in_hres"]
+
+
+def test_encoder_input_datasets_without_fusion_is_the_anchor_alone() -> None:
+    model = _make_bare_model()
+    model.encoder_fusing_strategy = {"enc0": "not_supported"}
+
+    assert model._encoder_input_datasets("in_lres") == ["in_lres"]
+
+
+def test_targets_on_anchor_lists_the_targets_decoded_from_it() -> None:
+    model = _make_bare_model()
+
+    assert model._targets_on_anchor("in_lres") == ["out_hres"]
+    assert model._targets_on_anchor("in_hres") == []
+
+
+def test_targets_on_anchor_falls_back_to_identity_for_models_pickled_without_target2anchor() -> None:
+    """Checkpoints of transport models trained before ``target2anchor`` existed must still run."""
+    model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
+    torch.nn.Module.__init__(model)
+    model.target_datasets = ["data"]
+
+    assert model._targets_on_anchor("data") == ["data"]
+    assert model._anchor_of_target("data") == "data"
 
 
 def test_forward_transport_network_resolves_encoder_and_decoder_by_routing_name() -> None:
@@ -208,25 +236,25 @@ def test_forward_transport_network_resolves_encoder_and_decoder_by_routing_name(
 
     edges = (None, None, None)
     provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
-    model.encoder_graph_provider = {"out_hres": provider}
+    model.encoder_graph_provider = {"in_lres": provider}
     model.decoder_graph_provider = {"out_hres": provider}
     model.processor_graph_provider = provider
     model.processor = lambda x, **_kwargs: x
     model.latent_aggregator = lambda *_args, **_kwargs: torch.zeros(4, 1)
 
-    model._resolve_in_out_sharded = lambda **_kwargs: {"out_hres": False}
+    model._resolve_in_out_sharded = lambda **_kwargs: {"in_lres": False, "out_hres": False}
     model._assert_valid_sharding = lambda *_args, **_kwargs: None
     model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
-        {"out_hres": {}},
+        {"in_lres": {}, "out_hres": {}},
         {},
-        {"out_hres": {}},
+        {"in_lres": {}, "out_hres": {}},
     )
     model._assemble_input = lambda *_args, **_kwargs: (torch.zeros(4, 1), None, None)
     model._assemble_output = lambda x, *_args, **_kwargs: x
 
     target = torch.zeros(1, 1, 1, 4, 1)
     out = model._forward_transport_network(
-        x={"out_hres": target},
+        x={"in_lres": target},
         conditioned_target={"out_hres": target},
         condition={"out_hres": torch.zeros(1)},
     )
@@ -269,7 +297,7 @@ def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the
 
     edges = (None, None, None)
     provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
-    model.encoder_graph_provider = {"out_hres": provider}
+    model.encoder_graph_provider = {"in_lres": provider}
     model.decoder_graph_provider = {"out_hres": provider}
     model.processor_graph_provider = provider
     model.processor = lambda x, **_kwargs: x
@@ -277,9 +305,9 @@ def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the
     # cannot be attached to a model built via __new__.
     model.latent_aggregator = lambda _hidden, latents: next(iter(latents.values()))
     model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
-        {"out_hres": {}},
+        {"in_lres": {}, "out_hres": {}},
         {},
-        {"out_hres": {}},
+        {"in_lres": {}, "out_hres": {}},
     )
 
     x = {
@@ -295,76 +323,79 @@ def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the
     )
 
     # The encoder must receive exactly the width the model was sized for.
-    assert seen["encoder_src"] == (batch * ensemble * grid, model.input_dim["out_hres"])
-    # The decoder's destination features are the encoder-updated data tensor.
-    assert seen["decoder_dst"] == (batch * ensemble * grid, model.input_dim["out_hres"])
+    assert seen["encoder_src"] == (batch * ensemble * grid, model.input_dim["in_lres"])
+    # The decoder's destination features are the anchor's encoder-updated data tensor.
+    assert seen["decoder_dst"] == (batch * ensemble * grid, model.input_dim["in_lres"])
     assert seen["decoder_src"] == (batch * ensemble * grid, num_channels)
     # Output is reassembled back into (batch, time, ensemble, grid, vars).
     assert out["out_hres"].shape == (batch, 1, ensemble, grid, model.num_output_channels["out_hres"])
 
 
-# ── role inference ────────────────────────────────────────────────────────────
+# ── residual references ─────────────────────────────────────────────────────
 
 
-def test_resolve_roles_reads_the_residual_reference_mapping() -> None:
-    """``residual_reference`` is a ``{target: reference}`` map; its keys are the targets."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
-    )
-    model.data_indices = _make_downscaler_indices()
-    model.dataset_names = list(model.data_indices.keys())
+def test_resolve_residual_references_uses_the_target_anchors() -> None:
+    """Each target's residual baseline is the dataset it is attached to."""
+    model = _make_bare_model()
+    model._reference_by_target = {}
 
-    model._resolve_roles({"training": {"transport": {"residual_reference": {"out_hres": "in_lres"}}}})
+    model._resolve_residual_references()
 
-    assert model.target_dataset_names == ["out_hres"]
     assert model._reference_by_target == {"out_hres": "in_lres"}
 
 
-def test_resolve_roles_allows_multiple_targets() -> None:
+def test_resolve_residual_references_allows_multiple_targets() -> None:
     """Several targets may share one reference; each gets its own decoder."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
-    )
+    model = _make_bare_model()
     # Both target datasets must have prognostic variable sets matching the reference.
     model.data_indices = {
         **_make_downscaler_indices(),
         "out_hres_2": _make_index_collection({"t2m": 0, "u10": 1}),
     }
-    model.dataset_names = list(model.data_indices.keys())
-    config = {
-        "training": {
-            "transport": {
-                "residual_reference": {"out_hres": "in_lres", "out_hres_2": "in_lres"},
-            },
-        },
-    }
+    model.target_datasets = ["out_hres", "out_hres_2"]
+    model.target_anchors = {"out_hres": "in_lres", "out_hres_2": "in_lres"}
 
-    model._resolve_roles(config)
+    model._resolve_residual_references()
 
-    assert model.target_dataset_names == ["out_hres", "out_hres_2"]
+    assert model._reference_by_target == {"out_hres": "in_lres", "out_hres_2": "in_lres"}
+
+
+def test_resolve_residual_references_requires_target_anchors() -> None:
+    model = _make_bare_model()
+    model.target_anchors = {}
+
+    with pytest.raises(ValueError, match="target_anchors"):
+        model._resolve_residual_references()
+
+
+def test_resolve_residual_references_requires_a_reference_for_every_target() -> None:
+    model = _make_bare_model()
+    model.target_datasets = ["out_hres", "other"]
+
+    with pytest.raises(ValueError, match=r"\['other'\] have no residual reference"):
+        model._resolve_residual_references()
 
 
 # ── dimension arithmetic ─────────────────────────────────────────────────────
 
 
-def test_calculate_input_dim_sums_all_input_datasets_plus_noised_target_and_node_attrs() -> None:
-    """input_dim = sum(fused input vars over history) + noised_target + anchor node attrs."""
+def test_calculate_input_dim_sums_all_fused_inputs_plus_attached_target_and_node_attrs() -> None:
+    """input_dim = fused input vars over history + noised attached target + anchor node attrs."""
     # in_lres has 2 input vars, in_hres has 1, out_hres has 2 output vars.
-    # attr_ndims for out_hres is 3.
+    # attr_ndims for the anchor in_lres is 2.
     model = _make_bare_model(n_step_input=2, n_step_output=1)
-    # sum of input vars across input datasets (over history): 2*(2+1) = 6
+    # sum of input vars across fused inputs (over history): 2*(2+1) = 6
     # noised target: 1 * 2 = 2
-    # target node attrs: 3
-    assert model._calculate_input_dim("out_hres") == 6 + 2 + 3
+    # anchor node attrs: 2
+    assert model._calculate_input_dim("in_lres") == 6 + 2 + 2
 
 
-def test_calculate_input_dim_falls_back_to_the_base_width_for_fused_inputs() -> None:
-    """Fused inputs have no encoder of their own, so their width is never used."""
+def test_calculate_input_dim_falls_back_to_the_base_width_for_datasets_without_an_encoder() -> None:
+    """Fused sources and decoder-only targets own no encoder, so their width is never used."""
     model = _make_bare_model()
 
-    assert model._calculate_input_dim("in_lres") == AnemoiTransportModelEncProcDec._calculate_input_dim(
-        model, "in_lres"
-    )
+    for dataset_name in ("in_hres", "out_hres"):
+        assert model._calculate_input_dim(dataset_name) == BaseGraphModel._calculate_input_dim(model, dataset_name)
 
 
 def test_calculate_shapes_and_indices_sizes_the_anchor_from_all_fused_inputs() -> None:
@@ -378,9 +409,9 @@ def test_calculate_shapes_and_indices_sizes_the_anchor_from_all_fused_inputs() -
 
     assert set(model.num_input_channels) == set(model.data_indices)
     assert set(model.num_output_channels) == set(model.data_indices)
-    # 2*(2 in_lres + 1 in_hres) + 1*2 noised target + 3 node attrs
-    assert model.input_dim["out_hres"] == 6 + 2 + 3
-    # Only the anchor has a decoder, so only it has a non-zero target dim.
+    # 2*(2 in_lres + 1 in_hres) + 1*2 noised target + 2 node attrs
+    assert model.input_dim["in_lres"] == 6 + 2 + 2
+    # Only the target has a decoder, so only it has a non-zero target dim.
     assert model.target_dim["out_hres"] == 0
 
 
@@ -409,8 +440,8 @@ def test_calculate_shapes_and_indices_populates_base_forcing_attributes() -> Non
 # ── input assembly ────────────────────────────────────────────────────────────
 
 
-def test_assemble_input_concatenates_input_datasets_y_noised_and_node_attrs() -> None:
-    """Encoder input tensor is [in_lres_vars | in_hres_vars | y_noised_vars | node_attrs]."""
+def test_assemble_input_concatenates_fused_inputs_attached_target_and_node_attrs() -> None:
+    """Encoder input tensor is [in_lres_vars | in_hres_vars | y_noised_vars | anchor node_attrs]."""
     model = _make_bare_model(n_step_input=1, n_step_output=1)
     batch = 2
     ensemble = 1
@@ -418,8 +449,7 @@ def test_assemble_input_concatenates_input_datasets_y_noised_and_node_attrs() ->
     # per-dataset tensors: shape (batch, time, ensemble, grid, vars)
     x_in_lres = torch.full((batch, 1, ensemble, grid, 2), 1.0)
     x_in_hres = torch.full((batch, 1, ensemble, grid, 1), 2.0)
-    # target-only inputs would go here — out_hres has no input variables in our fixture,
-    # but the y_noised input still enters via conditioned_target.
+    # The noised target is not an encoder source: it rides along on its reference's anchor.
     y_noised = torch.full((batch, 1, ensemble, grid, 2), 7.0)
 
     x_dict = {"in_lres": x_in_lres, "in_hres": x_in_hres}
@@ -431,23 +461,24 @@ def test_assemble_input_concatenates_input_datasets_y_noised_and_node_attrs() ->
         bse=batch * ensemble,
         grid_shard_sizes=None,
         model_comm_group=None,
-        dataset_name="out_hres",
+        dataset_name="in_lres",
     )
 
-    # Expected feature dim = 2 (in_lres) + 1 (in_hres) + 2 (y_noised) + 3 (attrs) = 8
-    assert latent.shape == (batch * ensemble * grid, 8)
+    # Expected feature dim = 2 (in_lres) + 1 (in_hres) + 2 (y_noised) + 2 (attrs) = 7
+    assert latent.shape == (batch * ensemble * grid, 7)
+    assert latent.shape[-1] == model._calculate_input_dim("in_lres")
     # Feature slices should match the sources.
     torch.testing.assert_close(latent[:, 0:2], torch.full((batch * ensemble * grid, 2), 1.0))
     torch.testing.assert_close(latent[:, 2:3], torch.full((batch * ensemble * grid, 1), 2.0))
     torch.testing.assert_close(latent[:, 3:5], torch.full((batch * ensemble * grid, 2), 7.0))
-    torch.testing.assert_close(latent[:, 5:8], torch.zeros(batch * ensemble * grid, 3))
+    torch.testing.assert_close(latent[:, 5:7], torch.zeros(batch * ensemble * grid, 2))
 
 
 def test_assemble_input_uses_input_dataset_order_from_encoder_routing() -> None:
     """Assembly must follow the encoder's ``source_datasets`` order so the layout is stable."""
     model = _make_bare_model()
-    # Reverse the fused order; ``_assemble_input`` must respect it.
-    model.encoder2datasets["enc0"] = ["out_hres", "in_hres", "in_lres"]
+    # in_hres first makes it the anchor; the target follows its reference onto it.
+    _wire_fused_encoder_routing(model, sources=["in_hres", "in_lres"])
 
     batch = 1
     ensemble = 1
@@ -462,11 +493,29 @@ def test_assemble_input_uses_input_dataset_order_from_encoder_routing() -> None:
         bse=batch * ensemble,
         grid_shard_sizes=None,
         model_comm_group=None,
-        dataset_name="out_hres",
+        dataset_name="in_hres",
     )
     # in_hres comes first now (1 var of value 2.0), then in_lres (2 vars of value 1.0).
     torch.testing.assert_close(latent[:, 0:1], torch.full((batch * ensemble * grid, 1), 2.0))
     torch.testing.assert_close(latent[:, 1:3], torch.full((batch * ensemble * grid, 2), 1.0))
+
+
+def test_assemble_input_without_fusion_encodes_the_anchor_and_its_attached_target_only() -> None:
+    model = _make_bare_model()
+    model.encoder_fusing_strategy = {"enc0": "not_supported"}
+
+    batch, grid = 1, 4
+    latent, _skip, _sharding = model._assemble_input(
+        x={"in_lres": torch.full((batch, 1, 1, grid, 2), 1.0), "in_hres": torch.full((batch, 1, 1, grid, 1), 2.0)},
+        y_noised={"out_hres": torch.full((batch, 1, 1, grid, 2), 7.0)},
+        bse=batch,
+        dataset_name="in_lres",
+    )
+
+    # 2 (in_lres) + 2 (y_noised) + 2 (attrs); in_hres is encoded elsewhere.
+    assert latent.shape == (batch * grid, 6)
+    assert latent.shape[-1] == model._calculate_input_dim("in_lres")
+    torch.testing.assert_close(latent[:, 2:4], torch.full((batch * grid, 2), 7.0))
 
 
 # ── sampling hooks ────────────────────────────────────────────────────────────
@@ -685,8 +734,7 @@ def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
         {"in_lres": 2, "in_hres": 2, "out_hres": 3},
         grid=4,
     )
-    model.target_dataset_names = ["out_hres"]
-    _wire_fused_encoder_routing(model, anchor="out_hres", fused=["in_lres", "in_hres"])
+    _wire_fused_encoder_routing(model, sources=["in_lres", "in_hres"])
     model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
@@ -959,107 +1007,147 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
     torch.testing.assert_close(result["out_hres"], expected)
 
 
-# ── _resolve_roles: explicit config-based role resolution ───────────────────
+# ── target routing (transport base) ───────────────────────────────────────────
 
 
-def test_resolve_roles_records_the_reference_for_each_target() -> None:
-    """``_reference_by_target`` is authoritative for the residual baseline.
+def _make_target_routing_model(
+    *,
+    target_anchors: dict[str, str],
+    sources: tuple[str, ...] = ("in_lres", "in_hres"),
+    target_datasets: tuple[str, ...] = ("out_hres",),
+    num_nodes: dict[str, int] | None = None,
+) -> AnemoiTransportModelEncProcDec:
+    """Routing state after ``_build_encoder_routing`` / ``_build_decoder_routing`` for one fused encoder."""
+    model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
+    model.target_anchors = target_anchors
+    model.dataset2encoder = {name: "enc0" for name in sources}
+    model.dataset2anchor = {name: sources[0] for name in sources}
+    model.target_datasets = list(target_datasets)
+    model.node_attributes = SimpleNamespace(
+        num_nodes=num_nodes or {name: 4 for name in (*sources, *target_datasets)},
+    )
+    return model
 
-    Which datasets are *encoded* with the target is decided by the encoder
-    routing, not here.
-    """
+
+def test_target_routing_decodes_an_attached_target_from_its_reference_anchor() -> None:
+    model = _make_target_routing_model(target_anchors={"out_hres": "in_lres"})
+
+    model._build_target_routing()
+
+    assert model.target2anchor == {"out_hres": "in_lres"}
+
+
+def test_target_routing_follows_the_reference_onto_whichever_source_anchors_the_encoder() -> None:
+    """The reference need not be the anchor itself, only fused into its encoder."""
+    model = _make_target_routing_model(target_anchors={"out_hres": "in_lres"}, sources=("in_hres", "in_lres"))
+
+    model._build_target_routing()
+
+    assert model.target2anchor == {"out_hres": "in_hres"}
+
+
+def test_target_routing_defaults_to_decoding_each_target_from_its_own_anchor() -> None:
+    """State and tendency models pass no target anchors; nothing may change for them."""
+    model = _make_target_routing_model(target_anchors={}, sources=("data",), target_datasets=("data",))
+
+    model._build_target_routing()
+
+    assert model.target2anchor == {"data": "data"}
+
+
+def test_target_routing_rejects_a_reference_that_is_not_encoded() -> None:
+    """A reference the encoder never sees would leave the noised target without a node set."""
+    model = _make_target_routing_model(target_anchors={"out_hres": "in_lres"}, sources=("in_hres",))
+
+    with pytest.raises(ValueError, match="not a source dataset of any encoder"):
+        model._build_target_routing()
+
+
+def test_target_routing_rejects_targets_the_decoders_do_not_declare() -> None:
+    model = _make_target_routing_model(target_anchors={"out_hres": "in_lres", "other": "in_lres"})
+
+    with pytest.raises(ValueError, match=r"\['other'\].*no decoder"):
+        model._build_target_routing()
+
+
+def test_target_routing_rejects_an_attached_target_that_is_also_an_encoder_source() -> None:
+    """The target must not be listed in ``source_datasets`` once it is attached to its reference."""
+    model = _make_target_routing_model(
+        target_anchors={"out_hres": "in_lres"},
+        sources=("in_lres", "in_hres", "out_hres"),
+    )
+
+    with pytest.raises(ValueError, match="must not also be a source dataset"):
+        model._build_target_routing()
+
+
+def test_target_routing_rejects_an_anchor_on_a_different_grid_than_its_target() -> None:
+    model = _make_target_routing_model(
+        target_anchors={"out_hres": "in_lres"},
+        num_nodes={"in_lres": 4, "in_hres": 4, "out_hres": 5},
+    )
+
+    with pytest.raises(ValueError, match="4 nodes.*5"):
+        model._build_target_routing()
+
+
+# ── residual references: reference/target prognostic consistency ───────────
+
+
+def _make_reference_model(data_indices: dict[str, IndexCollection]) -> AnemoiTransportSpatialDownscalerModelEncProcDec:
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    model.data_indices = {
-        "in_lres": _make_index_collection({"t2m": 0}),
-        "out_hres": _make_index_collection({"t2m": 0, "precip": 1}, diagnostic=["precip"]),
-    }
-    model.dataset_names = list(model.data_indices.keys())
+    model.data_indices = data_indices
+    model.target_datasets = ["out_hres"]
+    model.target_anchors = {"out_hres": "in_lres"}
+    return model
 
-    model._resolve_roles({"training": {"transport": {"residual_reference": {"out_hres": "in_lres"}}}})
 
-    assert model.target_dataset_names == ["out_hres"]
+def test_resolve_residual_references_accepts_a_diagnostic_without_a_reference_counterpart() -> None:
+    model = _make_reference_model(
+        {
+            "in_lres": _make_index_collection({"t2m": 0}),
+            "out_hres": _make_index_collection({"t2m": 0, "precip": 1}, diagnostic=["precip"]),
+        },
+    )
+
+    model._resolve_residual_references()
+
     assert model._reference_by_target == {"out_hres": "in_lres"}
 
 
-def test_validate_roles_match_encoder_routing_accepts_a_consistent_setup() -> None:
-    model = _make_bare_model()
-
-    model._validate_roles_match_encoder_routing()
-
-
-def test_validate_roles_match_encoder_routing_rejects_a_reference_that_is_not_encoded() -> None:
-    """A reference the encoder never sees would silently train on the wrong baseline."""
-    model = _make_bare_model()
-    model.encoder2datasets["enc0"] = ["out_hres", "in_hres"]
-
-    with pytest.raises(ValueError, match="is not encoded with it"):
-        model._validate_roles_match_encoder_routing()
-
-
-def test_validate_roles_match_encoder_routing_rejects_targets_the_decoders_do_not_declare() -> None:
-    model = _make_bare_model()
-    model.target_dataset_names = ["out_hres", "other"]
-
-    with pytest.raises(ValueError, match="but the decoders declare"):
-        model._validate_roles_match_encoder_routing()
-
-
-def test_resolve_roles_raises_without_residual_reference() -> None:
-    """Raises ``ValueError`` when called with a config that has no ``residual_reference``."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
-    )
-    model.data_indices = _make_downscaler_indices()
-    model.dataset_names = list(model.data_indices.keys())
-    with pytest.raises(ValueError, match="residual_reference"):
-        model._resolve_roles({"training": {"transport": {}}})
-
-
-# ── _resolve_roles: reference/target prognostic role consistency ───────────
-
-
-def _resolve_roles_config(target: str = "out_hres", reference: str = "in_lres") -> dict:
-    return {"training": {"transport": {"residual_reference": {target: reference}}}}
-
-
-def test_resolve_roles_rejects_target_prognostic_absent_from_reference() -> None:
+def test_resolve_residual_references_rejects_target_prognostic_absent_from_reference() -> None:
     """A target prognostic that does not exist at all in the reference is a config error."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    model = _make_reference_model(
+        {
+            "in_lres": _make_index_collection({"u10": 0}),
+            "out_hres": _make_index_collection({"t2m": 0}),
+        },
     )
-    model.data_indices = {
-        "in_lres": _make_index_collection({"u10": 0}),
-        "out_hres": _make_index_collection({"t2m": 0}),
-    }
-    model.dataset_names = list(model.data_indices.keys())
     with pytest.raises(ValueError, match=r"only in target: \['t2m'\]"):
-        model._resolve_roles(_resolve_roles_config())
+        model._resolve_residual_references()
 
 
-def test_resolve_roles_rejects_reference_prognostic_absent_from_target() -> None:
+def test_resolve_residual_references_rejects_reference_prognostic_absent_from_target() -> None:
     """A prognostic in the reference that the target does not predict prognostically is also a config error."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
+    model = _make_reference_model(
+        {
+            "in_lres": _make_index_collection({"t2m": 0, "u10": 1}),  # both prognostic
+            "out_hres": _make_index_collection({"t2m": 0}),  # only t2m
+        },
     )
-    model.data_indices = {
-        "in_lres": _make_index_collection({"t2m": 0, "u10": 1}),  # both prognostic
-        "out_hres": _make_index_collection({"t2m": 0}),  # only t2m
-    }
-    model.dataset_names = list(model.data_indices.keys())
     with pytest.raises(ValueError, match=r"only in reference: \['u10'\]"):
-        model._resolve_roles(_resolve_roles_config())
+        model._resolve_residual_references()
 
 
 # ── end-to-end construction ─────────────────────────────────────────────────
 
 
-def _make_downscaler_graph(grid: int = 4, hidden: int = 3) -> HeteroData:
-    """Graph with encoder/decoder edges anchored at ``out_hres`` only.
+def _make_downscaler_graph(grid: int = 4, hidden: int = 3, encoded: tuple[str, ...] = ("in_lres",)) -> HeteroData:
+    """Graph with encoder edges from each ``encoded`` anchor and decoder edges to ``out_hres``.
 
-    ``in_lres`` and ``in_hres`` are node sets without encoder edges: they are
-    fused onto the anchor's grid, so they never anchor a mapper.
+    ``in_lres`` lives on the target grid because the projector puts it there.
     """
     graph = HeteroData()
     for name in ("out_hres", "in_lres", "in_hres"):
@@ -1073,31 +1161,33 @@ def _make_downscaler_graph(grid: int = 4, hidden: int = 3) -> HeteroData:
         dst = torch.arange(num_dst).repeat(num_src)
         return torch.stack([src, dst])
 
-    for relation, (num_src, num_dst) in {
-        ("out_hres", "to", "hidden"): (grid, hidden),
-        ("hidden", "to", "out_hres"): (hidden, grid),
-        ("hidden", "to", "hidden"): (hidden, hidden),
-    }.items():
+    relations = {(name, "to", "hidden"): (grid, hidden) for name in encoded}
+    relations[("hidden", "to", "out_hres")] = (hidden, grid)
+    relations[("hidden", "to", "hidden")] = (hidden, hidden)
+    for relation, (num_src, num_dst) in relations.items():
         edge_index = _dense_edges(num_src, num_dst)
         graph[relation].edge_index = edge_index
         graph[relation].edge_length = torch.zeros(edge_index.shape[1], 1)
     return graph
 
 
-def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
-    def _gnn(target: str, **extra: Any) -> dict[str, Any]:
-        return {
-            "_target_": target,
-            "num_channels": num_channels,
-            "num_chunks": 1,
-            "mlp_extra_layers": 0,
-            "mlp_hidden_ratio": 1,
-            "cpu_offload": False,
-            "layer_kernels": {},
-            "sub_graph_edge_attributes": ["edge_length"],
-            **extra,
-        }
+def _gnn_mapper(target: str, num_channels: int = 8) -> dict[str, Any]:
+    return {
+        "_target_": target,
+        "num_channels": num_channels,
+        "num_chunks": 1,
+        "mlp_extra_layers": 0,
+        "mlp_hidden_ratio": 1,
+        "cpu_offload": False,
+        "layer_kernels": {},
+        "sub_graph_edge_attributes": ["edge_length"],
+    }
 
+
+_FORWARD_MAPPER = "anemoi.models.layers.mapper.GNNForwardMapper"
+
+
+def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
     return DictConfig(
         {
             "model": {
@@ -1123,10 +1213,9 @@ def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
                 },
                 "encoders": {
                     "enc0": {
-                        "source_datasets": ["out_hres", "in_lres", "in_hres"],
+                        "source_datasets": ["in_lres", "in_hres"],
                         "dataset_fusing_strategy": "concatenate_inputs_along_variable_dim",
-                        "fusion_anchor": "out_hres",
-                        "mapper": _gnn("anemoi.models.layers.mapper.GNNForwardMapper"),
+                        "mapper": _gnn_mapper(_FORWARD_MAPPER, num_channels),
                     },
                 },
                 "latent_aggregator": {"_target_": "anemoi.models.layers.aggregator.SumAggregator"},
@@ -1145,7 +1234,7 @@ def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
                     "dec0": {
                         "target_datasets": ["out_hres"],
                         "target_node_features": ["encoded_data"],
-                        "mapper": _gnn("anemoi.models.layers.mapper.GNNBackwardMapper"),
+                        "mapper": _gnn_mapper("anemoi.models.layers.mapper.GNNBackwardMapper", num_channels),
                     },
                 },
                 "residual": {
@@ -1156,45 +1245,79 @@ def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
                 },
                 "bounding": {"datasets": {name: [] for name in ("out_hres", "in_lres", "in_hres")}},
             },
-            "training": {
-                "transport": {
-                    "residual_reference": {"out_hres": "in_lres"},
-                },
-            },
         },
     )
 
 
-def _build_real_downscaler(**config_overrides: Any) -> AnemoiTransportSpatialDownscalerModelEncProcDec:
-    config = _make_downscaler_config()
-    for path, value in config_overrides.items():
-        OmegaConf.update(config, path.replace("__", "."), value, force_add=True)
+def _build_real_downscaler(
+    *,
+    config: DictConfig | None = None,
+    graph: HeteroData | None = None,
+    target_anchors: dict[str, str] | None = None,
+) -> AnemoiTransportSpatialDownscalerModelEncProcDec:
     return AnemoiTransportSpatialDownscalerModelEncProcDec(
-        model_config=config,
+        model_config=config if config is not None else _make_downscaler_config(),
         data_indices=_make_downscaler_indices(),
         statistics={name: None for name in ("out_hres", "in_lres", "in_hres")},
         n_step_input=1,
         n_step_output=1,
-        graph_data=_make_downscaler_graph(),
+        graph_data=graph if graph is not None else _make_downscaler_graph(),
+        target_anchors=target_anchors if target_anchors is not None else {"out_hres": "in_lres"},
     )
 
 
-def test_real_construction_builds_one_encoder_decoder_pair_anchored_at_the_target() -> None:
+def test_real_construction_builds_one_encoder_decoder_pair_anchored_at_the_reference() -> None:
     """Every other test wires routing by hand, so this is the only check that
     ``__init__`` (routing, dimension arithmetic, network build) agrees with itself.
     """
     model = _build_real_downscaler()
 
-    # Fused inputs share the anchor's encoder and node set but own no mapper.
-    assert model.input_datasets == ["out_hres"]
+    # in_hres shares the anchor's encoder and node set but owns no mapper.
+    assert model.input_datasets == ["in_lres"]
     assert model.target_datasets == ["out_hres"]
+    assert model.target2anchor == {"out_hres": "in_lres"}
     assert set(model.encoder.keys()) == {"enc0"}
     assert set(model.decoder.keys()) == {"dec0"}
-    assert set(model.encoder_graph_provider.keys()) == {"out_hres"}
+    assert set(model.encoder_graph_provider.keys()) == {"in_lres"}
     assert set(model.decoder_graph_provider.keys()) == {"out_hres"}
 
     # in_lres (2 vars) + in_hres (1 var) history, noised target (2 vars), node attrs.
-    assert model.input_dim["out_hres"] == 3 + 2 + model.node_attributes.attr_ndims["out_hres"]
+    assert model.input_dim["in_lres"] == 3 + 2 + model.node_attributes.attr_ndims["in_lres"]
+    assert model.target_dim["out_hres"] == model.input_dim["in_lres"]
+
+
+def test_real_construction_requires_target_anchors() -> None:
+    with pytest.raises(ValueError, match="target_anchors"):
+        _build_real_downscaler(target_anchors={})
+
+
+def test_real_construction_without_fusion_encodes_each_input_on_its_own_node_set() -> None:
+    """``not_supported``: separate encoders, combined in latent space by the aggregator."""
+    config = _make_downscaler_config()
+    config.model.encoders = {
+        name: {
+            "source_datasets": [dataset_name],
+            "dataset_fusing_strategy": "not_supported",
+            "mapper": _gnn_mapper(_FORWARD_MAPPER),
+        }
+        for name, dataset_name in (("lres", "in_lres"), ("hres", "in_hres"))
+    }
+    model = _build_real_downscaler(config=config, graph=_make_downscaler_graph(encoded=("in_lres", "in_hres")))
+
+    assert model.input_datasets == ["in_lres", "in_hres"]
+    assert model.target2anchor == {"out_hres": "in_lres"}
+    # in_lres history (2) + noised target (2); in_hres history (1) only.
+    assert model.input_dim["in_lres"] == 2 + 2 + model.node_attributes.attr_ndims["in_lres"]
+    assert model.input_dim["in_hres"] == 1 + model.node_attributes.attr_ndims["in_hres"]
+
+    batch, grid = 1, 4
+    out = _run_real_predict_step(
+        model,
+        {"in_lres": torch.zeros(batch, 1, grid, 2), "in_hres": torch.zeros(batch, 1, grid, 1)},
+    )
+
+    assert set(out) == {"out_hres"}
+    assert out["out_hres"].shape == (batch, 1, 1, grid, 2)
 
 
 def test_real_construction_forward_returns_the_target_on_its_own_grid() -> None:
@@ -1214,12 +1337,22 @@ def test_real_construction_forward_returns_the_target_on_its_own_grid() -> None:
     assert out["out_hres"].shape == (batch, 1, ensemble, grid, 2)
 
 
-def test_real_construction_rejects_a_reference_that_is_not_fused_into_the_encoder() -> None:
-    """The residual baseline must be one of the encoder's source datasets."""
-    with pytest.raises(ValueError, match="is not encoded with it"):
-        _build_real_downscaler(
-            model__encoders__enc0__source_datasets=["out_hres", "in_hres"],
-        )
+def test_real_construction_rejects_a_reference_that_is_not_an_encoder_source() -> None:
+    """The residual baseline must be one of the encoders' source datasets."""
+    config = _make_downscaler_config()
+    config.model.encoders.enc0.source_datasets = ["in_hres"]
+
+    with pytest.raises(ValueError, match="not a source dataset of any encoder"):
+        _build_real_downscaler(config=config)
+
+
+def test_real_construction_rejects_the_target_as_an_encoder_source() -> None:
+    """The target rides along on its reference's anchor and must not be encoded in its own right."""
+    config = _make_downscaler_config()
+    config.model.encoders.enc0.source_datasets = ["in_lres", "in_hres", "out_hres"]
+
+    with pytest.raises(ValueError, match="must not also be a source dataset"):
+        _build_real_downscaler(config=config)
 
 
 def _run_real_predict_step(

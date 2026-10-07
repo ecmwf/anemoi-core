@@ -2,10 +2,11 @@
 # Graph — one fused graph with a single encoder/decoder pair on the target
 # (hres) grid.
 #
-# ``AnemoiTransportSpatialDownscalerModelEncProcDec`` builds encoder/processor/
-# decoder only for the target dataset (``out_hres``).  Input datasets are
-# projected onto the target grid by ``CrossGridProjector`` and concatenated as
-# extra per-node features, so no separate input->hidden encoder is built.
+# ``AnemoiTransportSpatialDownscalerModelEncProcDec`` encodes the inputs on the
+# ``in_lres`` node set (the encoder anchor) and decodes the target ``out_hres``.
+# ``in_lres`` is projected onto the target grid by ``CrossGridProjector``, and
+# ``in_hres`` is concatenated as extra per-node features, so both node sets are
+# built on the target grid and only ``in_lres`` needs encoder edges.
 #
 # We declare ``in_lres`` and ``in_hres`` node groups so
 # ``uses_fused_dataset_graph`` succeeds and node-attribute / residual
@@ -40,9 +41,9 @@ nodes:
       resolution: 5
     attributes: ${graph.attributes.nodes}
 edges:
-  # Encoder edges (data-on-target-grid -> hidden). Inputs live on the target
-  # grid after CrossGridProjector, so the encoder is anchored at out_hres.
-  - source_name: out_hres
+  # Encoder edges (data-on-target-grid -> hidden). in_lres lives on the target
+  # grid after CrossGridProjector and anchors the fused encoder.
+  - source_name: in_lres
     target_name: hidden
     edge_builders:
       - _target_: anemoi.graphs.edges.CutOffEdges

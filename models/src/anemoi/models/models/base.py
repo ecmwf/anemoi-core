@@ -90,6 +90,7 @@ class BaseGraphModel(nn.Module):
 
         self._build_encoder_routing(model_config.model.encoders)
         self._build_decoder_routing(model_config.model.decoders)
+        self._build_target_routing()
 
         self._calculate_shapes_and_indices(data_indices)
 
@@ -125,12 +126,7 @@ class BaseGraphModel(nn.Module):
         for encoder_name, encoder_config in encoders_config.items():
             datasets_to_encode = list(encoder_config["source_datasets"])
             fusing_strategy = encoder_config.dataset_fusing_strategy
-            anchors = self._resolve_encoder_anchors(
-                encoder_name,
-                datasets_to_encode,
-                fusing_strategy,
-                encoder_config.get("fusion_anchor"),
-            )
+            anchors = self._resolve_encoder_anchors(encoder_name, datasets_to_encode, fusing_strategy)
 
             self.encoder2datasets[encoder_name] = datasets_to_encode
             self.encoder2anchors[encoder_name] = anchors
@@ -150,9 +146,7 @@ class BaseGraphModel(nn.Module):
 
         Every dataset an encoder consumes, fused or not — which is more than
         ``input_datasets`` (the anchors) whenever an encoder fuses several
-        sources. Models that generate one of their encoder sources rather than
-        reading it, such as the residual downscaler whose anchor is its target,
-        override this.
+        sources.
         """
         return list(dict.fromkeys(d for sources in self.encoder2datasets.values() for d in sources))
 
@@ -161,9 +155,12 @@ class BaseGraphModel(nn.Module):
         encoder_name: str,
         source_datasets: list[str],
         fusing_strategy: str,
-        fusion_anchor: str | None,
     ) -> list[str]:
-        """Return the datasets of ``encoder_name`` that own a graph node set."""
+        """Return the datasets of ``encoder_name`` that own a graph node set.
+
+        Without fusion every source is its own anchor; with fusion the first
+        source is the anchor and the others ride along on its node set.
+        """
         if fusing_strategy not in SUPPORTED_ENCODER_FUSING_STRATEGIES:
             raise ValueError(
                 f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
@@ -171,11 +168,6 @@ class BaseGraphModel(nn.Module):
             )
 
         if fusing_strategy == NO_ENCODER_FUSION:
-            if fusion_anchor is not None:
-                raise ValueError(
-                    f"Encoder '{encoder_name}' sets fusion_anchor='{fusion_anchor}' but its "
-                    f"dataset_fusing_strategy is '{NO_ENCODER_FUSION}', so the anchor would be ignored."
-                )
             return list(source_datasets)
 
         if not self.supports_encoder_fusion:
@@ -183,18 +175,7 @@ class BaseGraphModel(nn.Module):
                 f"Encoder '{encoder_name}' requests dataset_fusing_strategy '{fusing_strategy}', "
                 f"which {type(self).__name__} does not support."
             )
-        if fusion_anchor is None:
-            raise ValueError(
-                f"Encoder '{encoder_name}' uses dataset_fusing_strategy '{fusing_strategy}' and "
-                f"must set fusion_anchor to the dataset whose graph node set the fused features "
-                f"live on (one of {source_datasets})."
-            )
-        if fusion_anchor not in source_datasets:
-            raise ValueError(
-                f"Encoder '{encoder_name}': fusion_anchor '{fusion_anchor}' is "
-                f"not in source_datasets {source_datasets}."
-            )
-        return [fusion_anchor]
+        return [source_datasets[0]]
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
@@ -213,6 +194,10 @@ class BaseGraphModel(nn.Module):
             )
 
         self.target_datasets = list(self.dataset2decoder.keys())
+
+    def _build_target_routing(self) -> None:
+        """Map each target to the anchor whose encoder-updated node features its decoder reads."""
+        self.target2anchor: dict[str, str] = {d: self.dataset2anchor.get(d, d) for d in self.target_datasets}
 
     def _assert_model_routing(self) -> None:
         """Asserts that the model routing is valid."""

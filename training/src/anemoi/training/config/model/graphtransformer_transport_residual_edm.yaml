@@ -1,14 +1,11 @@
 ---
 # Model config for spatial downscaling with AnemoiTransportSpatialDownscalerModelEncProcDec.
 #
-# The encoder below fuses all three datasets onto the out_hres node set: in_lres is
-# remapped onto it by data.datasets.in_lres.spatial_processor, in_hres is native, and
-# out_hres contributes the noised target. Only the fusion_anchor (out_hres) owns
-# encoder/decoder edges.
-#
-# training.transport.residual_reference only pairs the residual baseline with its
-# target ({out_hres: in_lres}); which datasets are encoded is decided by
-# encoders.*.source_datasets.
+# The encoder below fuses the inputs onto the in_lres node set (the first source dataset is
+# the anchor): in_lres is remapped onto the target grid by data.datasets.in_lres.spatial_processor
+# and in_hres is native. out_hres is not an encoder source: training.transport.residual_reference
+# attaches it to its reference in_lres, so the noised target is encoded on the in_lres node set
+# and decoded from there. Only the anchor (in_lres) owns encoder edges.
 
 num_channels: 1024
 cpu_offload: False
@@ -85,12 +82,10 @@ processor:
 
 encoders:
   "0":
-    # All three datasets are encoded together on the out_hres node set: in_lres is
-    # remapped onto it by data.datasets.in_lres.spatial_processor, in_hres is native,
-    # and out_hres contributes the noised target. Only the anchor owns encoder edges.
-    source_datasets: [ "out_hres", "in_lres", "in_hres" ]
+    # Both inputs are encoded together on the in_lres node set, which is built on the target grid.
+    # Use "not_supported" with one encoder per input to encode them separately instead.
+    source_datasets: [ "in_lres", "in_hres" ]
     dataset_fusing_strategy:  "concatenate_inputs_along_variable_dim" # Options: "not_supported", "concatenate_inputs_along_variable_dim" (model-class dependent)
-    fusion_anchor: "out_hres"
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
       num_channels: ${model.num_channels}

@@ -231,13 +231,14 @@ class EncodedDataFeature(DecodingTargetFeature):
     def validate(self) -> None:
         input_dims = {}
         for dataset_name in self.datasets_names:
-            if dataset_name not in self.model.input_datasets:
+            anchor = self.model.target2anchor[dataset_name]
+            if anchor not in self.model.input_datasets:
                 decoder_name = self.model.dataset2decoder[dataset_name]
                 raise ValueError(
                     f'"{self.name}" requires dataset "{dataset_name}" to have an encoder. '
                     f"Update decoder.{decoder_name}.target_node_features."
                 )
-            input_dims[dataset_name] = self.model.input_dim[dataset_name]
+            input_dims[dataset_name] = self.model.input_dim[anchor]
         assert len(set(input_dims.values())) == 1, (
             f"Encoded data feature must have the same dimension across all datasets encoded with the same encoder. "
             f"Found dimensions: {input_dims}"
@@ -245,7 +246,7 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.input_dim[self.datasets_names[0]]
+        return self.model.input_dim[self.model.target2anchor[self.datasets_names[0]]]
 
     def _compute(
         self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
