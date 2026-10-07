@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.distributed as dist
@@ -51,6 +52,9 @@ class HaloInfo:
         Edge index relabeled to local + halo node IDs.
         Shape ``(2, num_local_edges)``. Row 0 uses ``[0, total_src_nodes)``
         and row 1 uses ``[0, num_local_dst_nodes)``.
+    send_counts_matrix : tuple[tuple[int, ...], ...], optional
+        Send counts of all ranks, ``send_counts_matrix[src][dst]`` rows go from *src* to *dst*.
+        Needed by the peer-to-peer symmetric-memory halo exchange.
     """
 
     num_local_src_nodes: int
@@ -59,6 +63,7 @@ class HaloInfo:
     send_indices: tuple[Tensor, ...]
     recv_counts: tuple[int, ...]
     edge_index_local: Tensor
+    send_counts_matrix: Optional[tuple[tuple[int, ...], ...]] = None
 
     @property
     def total_src_nodes(self) -> int:
@@ -136,6 +141,17 @@ def _request_send_nodes(recv_nodes_by_rank: tuple[Tensor, ...], model_comm_group
         group=model_comm_group,
     )
     return send_nodes.split(send_counts)
+
+
+def _gather_send_counts(send_counts: list[int], device: torch.device, model_comm_group: ProcessGroup) -> tuple:
+    """Collect the send counts of every rank into a ``[src][dst]`` matrix.
+
+    This is a **collective** operation — all ranks in the group must call it.
+    """
+    local = torch.tensor(send_counts, dtype=torch.long, device=device)
+    gathered = [torch.empty_like(local) for _ in range(model_comm_group.size())]
+    dist.all_gather(gathered, local, group=model_comm_group)
+    return tuple(tuple(counts.tolist()) for counts in gathered)
 
 
 def build_halo_info(
@@ -230,6 +246,10 @@ def build_halo_info(
         halo_relabel[halo_nodes] = torch.arange(num_halo_nodes, device=edge_index.device) + num_local_src_nodes
         edge_index_local[0, is_remote_src] = halo_relabel[remote_src]
 
+    send_counts_matrix = _gather_send_counts(
+        [nodes.size(0) for nodes in send_nodes_by_rank], edge_index.device, model_comm_group
+    )
+
     return HaloInfo(
         num_local_src_nodes=num_local_src_nodes,
         num_local_dst_nodes=dst_stop - dst_start,
@@ -237,4 +257,5 @@ def build_halo_info(
         send_indices=tuple(nodes - src_start for nodes in send_nodes_by_rank),
         recv_counts=tuple(nodes.size(0) for nodes in recv_nodes_by_rank),
         edge_index_local=edge_index_local,
+        send_counts_matrix=send_counts_matrix,
     )

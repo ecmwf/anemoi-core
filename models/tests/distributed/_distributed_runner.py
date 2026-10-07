@@ -37,6 +37,7 @@ def _run_distributed_test(
     *,
     backend: str,
     world_size: int,
+    symmetric_memory: str | None = None,
     **rank_kwargs: Any,
 ) -> None:
     """Launch worker processes and run a distributed test function.
@@ -45,6 +46,10 @@ def _run_distributed_test(
     each, validates the backend/device context, and then calls ``rank_fn`` once
     per rank with ``rank``, ``world_size``, ``device``, ``group``, and any
     forwarded keyword arguments.
+
+    With ``symmetric_memory`` set to ``"NCCL"`` or ``"CUDA"`` that symmetric memory
+    backend is selected and the process group is eagerly initialised, as required by
+    ``anemoi.models.distributed.symmetric``.
     """
     if world_size < 2:
         msg = f"world_size must be >= 2, got {world_size}"
@@ -66,7 +71,7 @@ def _run_distributed_test(
     try:
         mp.spawn(
             _run_rank,
-            args=(world_size, backend, str(init_file), rank_fn, rank_kwargs),
+            args=(world_size, backend, str(init_file), rank_fn, rank_kwargs, symmetric_memory),
             nprocs=world_size,
             join=True,
         )
@@ -81,6 +86,7 @@ def _run_rank(
     init_file: str,
     rank_fn: Callable[..., None],
     rank_kwargs: dict[str, Any],
+    symmetric_memory: str | None = None,
 ) -> None:
     """Spawn entry point that initializes one distributed rank."""
     if backend == "nccl":
@@ -89,12 +95,20 @@ def _run_rank(
     else:
         device = torch.device("cpu")
 
+    init_kwargs: dict[str, Any] = {}
+    if symmetric_memory:
+        from anemoi.models.distributed.symmetric import init_symmetric_memory_backend
+
+        init_symmetric_memory_backend(symmetric_memory)
+        init_kwargs["device_id"] = device
+
     dist.init_process_group(
         backend=backend,
         init_method=f"file://{init_file}",
         rank=rank,
         world_size=world_size,
         timeout=timedelta(seconds=120),
+        **init_kwargs,
     )
 
     try:

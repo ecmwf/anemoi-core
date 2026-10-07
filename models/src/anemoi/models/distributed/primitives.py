@@ -19,6 +19,11 @@ from torch.distributed.distributed_c10d import _resolve_process_group
 
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import expand_shard_sizes_to_shapes
+from anemoi.models.distributed.symmetric import symmetric_all_reduce
+from anemoi.models.distributed.symmetric import symmetric_gather
+from anemoi.models.distributed.symmetric import symmetric_halo_exchange
+from anemoi.models.distributed.symmetric import symmetric_halo_exchange_bwd
+from anemoi.models.distributed.symmetric import symmetric_reduce_scatter
 from anemoi.models.distributed.utils import get_memory_format
 
 
@@ -165,6 +170,10 @@ def _gather(
     if dist.get_world_size(group=group) == 1:
         return input_
 
+    output = symmetric_gather(input_, dim_, sizes, group)
+    if output is not None:
+        return output
+
     all_shards_equal_shape = all(size == sizes[0] for size in sizes)
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
         return _gather_into_tensor(input_, dim_, sizes, group)
@@ -239,6 +248,10 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
     if comm_size == 1:
         return input_
 
+    output = symmetric_all_reduce(input_, use_fp32, group)
+    if output is not None:
+        return output
+
     # All-reduce.
     input_format = get_memory_format(input_)
     if use_fp32:
@@ -251,6 +264,27 @@ def _reduce(input_: Tensor, use_fp32: bool = True, group: Optional[ProcessGroup]
         dist.all_reduce(input_, group=group)
 
     return input_
+
+
+def _reduce_scatter(
+    input_: Tensor,
+    dim_: int,
+    sizes_: ShardSizes,
+    use_fp32: bool = True,
+    group: Optional[ProcessGroup] = None,
+) -> Tensor:
+    """Sum-reduce the input across the group and keep the local shard along dim_.
+
+    Uses a symmetric-memory reduce-scatter if enabled for the group, otherwise an all-reduce followed by a split.
+    """
+    if dist.get_world_size(group=group) == 1:
+        return input_
+
+    output = symmetric_reduce_scatter(input_, dim_, sizes_, use_fp32, group)
+    if output is not None:
+        return output
+
+    return _split(_reduce(input_, use_fp32=use_fp32, group=group), dim_, sizes_, group=group)
 
 
 def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
@@ -414,6 +448,7 @@ def _halo_exchange(
     send_indices: tuple[Tensor, ...],
     recv_counts: tuple[int, ...],
     group: ProcessGroup,
+    send_counts_matrix: Optional[tuple[tuple[int, ...], ...]] = None,
 ) -> Tensor:
     """Forward halo exchange: gather inner node features and send to peers.
 
@@ -432,6 +467,8 @@ def _halo_exchange(
         Per-rank number of halo rows to receive.  Length = world size.
     group : ProcessGroup
         Communication group.
+    send_counts_matrix : tuple[tuple[int, ...], ...], optional
+        Send counts of all ranks; enables the peer-to-peer symmetric-memory path.
 
     Returns
     -------
@@ -441,6 +478,10 @@ def _halo_exchange(
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return x
+
+    output = symmetric_halo_exchange(x, send_indices, recv_counts, send_counts_matrix, group)
+    if output is not None:
+        return output
 
     send_list = [x[idx].contiguous() for idx in send_indices]
     recv_list = [torch.empty((count, *x.shape[1:]), dtype=x.dtype, device=x.device) for count in recv_counts]
@@ -456,6 +497,7 @@ def _halo_exchange_bwd(
     recv_counts: tuple[int, ...],
     num_local_nodes: int,
     group: ProcessGroup,
+    send_counts_matrix: Optional[tuple[tuple[int, ...], ...]] = None,
 ) -> Tensor:
     """Backward of halo exchange.
 
@@ -476,6 +518,8 @@ def _halo_exchange_bwd(
         Number of local (inner) nodes.
     group : ProcessGroup
         Communication group.
+    send_counts_matrix : tuple[tuple[int, ...], ...], optional
+        Send counts of all ranks; enables the peer-to-peer symmetric-memory path.
 
     Returns
     -------
@@ -485,6 +529,12 @@ def _halo_exchange_bwd(
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return grad_output
+
+    output = symmetric_halo_exchange_bwd(
+        grad_output, send_indices, recv_counts, num_local_nodes, send_counts_matrix, group
+    )
+    if output is not None:
+        return output
 
     grad_local = grad_output[:num_local_nodes].clone()
 

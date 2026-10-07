@@ -17,6 +17,9 @@ import pytorch_lightning as pl
 import torch
 from pytorch_lightning.strategies.ddp import DDPStrategy
 
+from anemoi.models.distributed.symmetric import enable_symmetric_memory
+from anemoi.models.distributed.symmetric import init_symmetric_memory_backend
+from anemoi.models.distributed.symmetric import release_symmetric_memory
 from anemoi.training.distributed.groups import build_ensemble_layout
 from anemoi.training.distributed.groups import build_model_layout
 from anemoi.training.distributed.groups import build_reader_layout
@@ -93,6 +96,7 @@ class BaseDDPStrategy(DDPStrategy):
         read_group_size: int,
         use_local_synchronization: bool = True,
         broadcast_buffers: bool = False,
+        symmetric_memory: dict | None = None,
         **kwargs: dict,
     ) -> None:
         """Initialise the distributed strategy.
@@ -107,6 +111,11 @@ class BaseDDPStrategy(DDPStrategy):
             Use synchronization local to the group when creating process groups.
         broadcast_buffers : bool, optional
             Whether to broadcast module buffers at the start of each iteration. Defaults to False.
+        symmetric_memory : dict, optional
+            Symmetric-memory options for the model communication group: ``enabled``, ``backend``
+            (``"nccl"`` or ``"cuda"``) plus the keyword arguments of
+            :func:`anemoi.models.distributed.symmetric.enable_symmetric_memory`.
+            Only takes effect if the whole model communication group is within one NVLink domain.
         **kwargs : dict
             Additional keyword arguments.
         """
@@ -114,6 +123,9 @@ class BaseDDPStrategy(DDPStrategy):
         self.model_comm_group_size = num_gpus_per_model
         self.read_group_size = read_group_size
         self.use_local_synchronization = use_local_synchronization
+        self.symmetric_memory = dict(symmetric_memory or {})
+        self.use_symmetric_memory = bool(self.symmetric_memory.pop("enabled", False)) and num_gpus_per_model > 1
+        self.symmetric_memory_backend = str(self.symmetric_memory.pop("backend", "nccl"))
         self.shard_sizes: dict | None = None
 
     @abstractmethod
@@ -126,6 +138,20 @@ class BaseDDPStrategy(DDPStrategy):
             The model communication group ID for this rank.
         """
         raise NotImplementedError
+
+    def setup_distributed(self) -> None:
+        if self.use_symmetric_memory:
+            # must happen before the (eagerly initialised) process group is created
+            init_symmetric_memory_backend(self.symmetric_memory_backend)
+        super().setup_distributed()
+
+    def teardown(self) -> None:
+        release_symmetric_memory()
+        super().teardown()
+
+    def _enable_symmetric_memory(self, model_comm_group: torch.distributed.ProcessGroup) -> None:
+        if self.use_symmetric_memory:
+            enable_symmetric_memory(model_comm_group, **self.symmetric_memory)
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()
@@ -202,6 +228,7 @@ class DDPGroupStrategy(BaseDDPStrategy):
         )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
+        self._enable_symmetric_memory(model_comm_group)
 
         self.model.set_model_comm_group(
             model_comm_group,
@@ -342,6 +369,7 @@ class DDPEnsGroupStrategy(BaseDDPStrategy):
         )
         model_comm_group = model_comm_groups[model_layout.model_comm_group_id]
         model_reader_groups = reader_groups[model_layout.model_comm_group_id]
+        self._enable_symmetric_memory(model_comm_group)
 
         self.model.set_model_comm_group(
             model_comm_group,

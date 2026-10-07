@@ -18,6 +18,7 @@ from anemoi.models.distributed.primitives import _gather
 from anemoi.models.distributed.primitives import _halo_exchange
 from anemoi.models.distributed.primitives import _halo_exchange_bwd
 from anemoi.models.distributed.primitives import _reduce
+from anemoi.models.distributed.primitives import _reduce_scatter
 from anemoi.models.distributed.primitives import _split
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
@@ -321,15 +322,15 @@ class _SyncParallelSection(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         if ctx.comm_group:
-            grad_output = _reduce(grad_output, group=ctx.comm_group)
             if ctx.did_gather:  # only split if we gathered in forward
                 return (
-                    _split(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
+                    _reduce_scatter(grad_output, ctx.dim, ctx.sizes, group=ctx.comm_group),
                     None,
                     None,
                     None,
                     None,
                 )
+            grad_output = _reduce(grad_output, group=ctx.comm_group)
         return grad_output, None, None, None, None
 
 
@@ -357,8 +358,7 @@ class _ReduceShardParallelSection(torch.autograd.Function):
         ctx.comm_group = mgroup_
         ctx.sizes = sizes_
         if mgroup_:
-            input_ = _reduce(input_, group=mgroup_)
-            return _split(input_, dim_, sizes_, group=mgroup_)
+            return _reduce_scatter(input_, dim_, sizes_, group=mgroup_)
         return input_
 
     @staticmethod
@@ -558,9 +558,12 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
         ctx.send_indices = halo_info_.send_indices
         ctx.recv_counts = halo_info_.recv_counts
         ctx.num_local_src_nodes = halo_info_.num_local_src_nodes
+        ctx.send_counts_matrix = halo_info_.send_counts_matrix
         ctx.comm_group = mgroup_
         if mgroup_:
-            return _halo_exchange(input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_)
+            return _halo_exchange(
+                input_, halo_info_.send_indices, halo_info_.recv_counts, mgroup_, halo_info_.send_counts_matrix
+            )
         return input_
 
     @staticmethod
@@ -573,6 +576,7 @@ class _HaloExchangeParallelSection(torch.autograd.Function):
                     ctx.recv_counts,
                     ctx.num_local_src_nodes,
                     ctx.comm_group,
+                    ctx.send_counts_matrix,
                 ),
                 None,
                 None,

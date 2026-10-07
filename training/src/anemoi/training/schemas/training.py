@@ -733,6 +733,21 @@ class SingleDeviceStrategySchema(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class SymmetricMemorySchema(BaseModel):
+    """NCCL symmetric-memory (SymK) collectives for the model communication group."""
+
+    enabled: bool = Field(default=False, example=False)
+    "Use symmetric memory for model-parallel communication (single NVLink domain only)."
+    backend: Literal["nccl", "cuda"] = Field(default="nccl", example="nccl")
+    "nccl: NCCL symmetric kernels for all-gather/all-reduce/reduce-scatter. cuda: peer-to-peer halo exchange."
+    max_buffer_mb: NonNegativeFloat = Field(default=2048, example=2048)
+    "Maximum size of the symmetric workspace; larger collectives use regular NCCL."
+    all_reduce_max_mb: NonNegativeFloat = Field(default=16, example=16)
+    "nccl backend: only all-reduces up to this payload use symmetric kernels."
+    reduce_scatter: bool = Field(default=True, example=True)
+    "nccl backend: replace all-reduce followed by split with a symmetric reduce-scatter."
+
+
 class BaseDDPStrategySchema(BaseModel):
     """Strategy configuration."""
 
@@ -745,6 +760,8 @@ class BaseDDPStrategySchema(BaseModel):
     "Use synchronization local to the group when creating process groups."
     broadcast_buffers: bool = Field(default=False, example=False)
     "Broadcast model buffers at the start of each iteration. Defaults to False."
+    symmetric_memory: SymmetricMemorySchema | None = Field(default=None)
+    "NCCL symmetric-memory options for the model communication group."
 
 
 class DDPEnsGroupStrategyStrategySchema(BaseDDPStrategySchema):
