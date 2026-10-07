@@ -111,21 +111,24 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
 
 def _to_local_window_shard_data(
     data: torch.Tensor,
-    coordinates: torch.Tensor,
+    latitudes: torch.Tensor,
+    longitudes: torch.Tensor,
     timedeltas: torch.Tensor,
     boundaries: list[slice],
     *,
     reader_group_rank: int,
     reader_group_size: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, list[slice], list[ShardSizes]]:
     """Project sparse windowed tensors to the local reader-rank shard.
 
     Parameters
     ----------
     data : torch.Tensor
         Full sparse payload of shape ``(N, V)``.
-    coordinates : torch.Tensor
-        Full coordinates of shape ``(N, 2)``.
+    latitudes : torch.Tensor
+        Full latitudes of shape ``(N,)``.
+    longitudes : torch.Tensor
+        Full longitudes of shape ``(N,)``.
     timedeltas : torch.Tensor
         Full per-point timedeltas of shape ``(N,)``.
     boundaries : list[slice]
@@ -138,17 +141,18 @@ def _to_local_window_shard_data(
     Returns
     -------
     tuple
-        ``(data_local, coordinates_local, timedeltas_local, boundaries_local, window_shard_sizes)``
+        ``(data_local, latitudes_local, longitudes_local, timedeltas_local, boundaries_local, window_shard_sizes)``
         where ``window_shard_sizes`` stores the per-window balanced partition sizes.
     """
     if reader_group_size <= 1:
         window_shard_sizes_all = [
             get_balanced_partition_sizes(boundary.stop - boundary.start, 1) for boundary in boundaries
         ]
-        return data, coordinates, timedeltas, boundaries, window_shard_sizes_all
+        return data, latitudes, longitudes, timedeltas, boundaries, window_shard_sizes_all
 
     data_parts: list[torch.Tensor] = []
-    coord_parts: list[torch.Tensor] = []
+    lat_parts: list[torch.Tensor] = []
+    lon_parts: list[torch.Tensor] = []
     td_parts: list[torch.Tensor] = []
     boundaries_local: list[slice] = []
     window_shard_sizes_all: list[ShardSizes] = []
@@ -162,7 +166,8 @@ def _to_local_window_shard_data(
         local_size = end - start
 
         data_parts.append(data[local_slice])
-        coord_parts.append(coordinates[local_slice])
+        lat_parts.append(latitudes[local_slice])
+        lon_parts.append(longitudes[local_slice])
         td_parts.append(timedeltas[local_slice])
         boundaries_local.append(slice(offset, offset + local_size))
         window_shard_sizes_all.append(window_shard_sizes)
@@ -170,14 +175,16 @@ def _to_local_window_shard_data(
 
     if data_parts:
         data_local = torch.cat(data_parts, dim=0)
-        coordinates_local = torch.cat(coord_parts, dim=0)
+        latitudes_local = torch.cat(lat_parts, dim=0)
+        longitudes_local = torch.cat(lon_parts, dim=0)
         timedeltas_local = torch.cat(td_parts, dim=0)
     else:
         data_local = data[:0]
-        coordinates_local = coordinates[:0]
+        latitudes_local = latitudes[:0]
+        longitudes_local = longitudes[:0]
         timedeltas_local = timedeltas[:0]
 
-    return data_local, coordinates_local, timedeltas_local, boundaries_local, window_shard_sizes_all
+    return data_local, latitudes_local, longitudes_local, timedeltas_local, boundaries_local, window_shard_sizes_all
 
 
 class BaseAnemoiReader(ABC):
@@ -432,7 +439,7 @@ class GriddedDataReader(BaseAnemoiReader):
         x = rearrange(x, "dates variables ensemble gridpoints -> dates ensemble gridpoints variables")
         return torch.from_numpy(x)
 
-    def get_coordinates(self) -> torch.Tensor:
+    def get_latlons(self) -> tuple[torch.Tensor, torch.Tensor]:
         """Return the local shard's ``(N, 2)`` ``(latitude, longitude)`` coordinates in **radians**."""
         lats = self.latitudes
         lons = self.longitudes
@@ -441,21 +448,19 @@ class GriddedDataReader(BaseAnemoiReader):
             lats = lats[self.grid_shard_slice]
             lons = lons[self.grid_shard_slice]
 
-        coords = np.stack(
-            [np.ascontiguousarray(lats), np.ascontiguousarray(lons)],
-            axis=-1,
-        )
-        return torch.from_numpy(coords)
+        return torch.from_numpy(np.ascontiguousarray(lats)), torch.from_numpy(np.ascontiguousarray(lons))
 
     def _build_sample(self, data: torch.Tensor) -> GriddedSourceSample:
         """Wrap a ``(T, E, N, V)`` local-shard tensor with this reader's metadata."""
+        latitudes, longitudes = self.get_latlons()
         return GriddedSourceSample(
             data=data,
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
             grid_size=self.grid_size,
-            coordinates=self.get_coordinates(),
+            latitudes=latitudes,
+            longitudes=longitudes,
             shard_sizes=self.grid_shard_sizes,
         )
 
@@ -537,12 +542,13 @@ class TabularDataReader(BaseAnemoiReader):
         data = torch.from_numpy(np.asarray(x.data, dtype=np.float32))
         latitudes = np.deg2rad(np.asarray(x.latitudes, dtype=np.float32))
         longitudes = np.deg2rad(np.asarray(x.longitudes, dtype=np.float32))
-        coordinates = torch.from_numpy(np.stack([latitudes, longitudes], axis=-1))
+
         timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
         boundaries = list(x.boundaries)
-        data, coordinates, timedeltas, boundaries, shard_sizes = _to_local_window_shard_data(
+        data, latitudes, longitudes, timedeltas, boundaries, shard_sizes = _to_local_window_shard_data(
             data,
-            coordinates,
+            latitudes,
+            longitudes,
             timedeltas,
             boundaries,
             reader_group_rank=self.reader_group_rank,
@@ -554,7 +560,8 @@ class TabularDataReader(BaseAnemoiReader):
             variables=self.variables,
             layout=self.layout,
             statistics=self.statistics,
-            coordinates=coordinates,
+            latitudes=latitudes,
+            longitudes=longitudes,
             timedeltas=timedeltas,
             boundaries=boundaries,
             shard_sizes=shard_sizes,
