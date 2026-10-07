@@ -16,6 +16,7 @@ import torch
 from pytest_mock import MockFixture
 
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -31,14 +32,14 @@ class TestMultiDataset:
         reader.missing = missing
         reader.dates = list(range(num_dates))
         reader.frequency = "3h"
-        reader.num_sequences = 1
         reader.has_trajectories = False
+        reader.sampling = None
 
-        def compute_anchors(relative_indices: list[int]) -> np.ndarray:
+        def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
             positions = get_usable_indices(reader.missing, len(reader.dates), relative_indices)
-            return np.stack([np.zeros_like(positions), positions], axis=1)
+            return ReaderAnchors(positions.astype("datetime64[s]"), np.zeros_like(positions), positions)
 
-        reader.compute_anchors.side_effect = compute_anchors
+        reader.valid_anchors.side_effect = valid_anchors
         return reader
 
     @pytest.fixture
@@ -59,8 +60,9 @@ class TestMultiDataset:
         # dataset_b has missing {7, 8, 9, 10} → indices 1..10 read a missing date → valid [0, 11..23]
         # intersection: [0, 11..23]
         expected = np.array([0, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23])
-        np.testing.assert_array_equal(multi_dataset.anchors[:, 1], expected)
-        assert np.all(multi_dataset.anchors[:, 0] == 0)
+        for rows in multi_dataset.anchors.rows.values():
+            np.testing.assert_array_equal(rows[:, 1], expected)
+            assert np.all(rows[:, 0] == 0)
         np.testing.assert_array_equal(multi_dataset.valid_date_indices, np.arange(len(expected)))
 
     def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:

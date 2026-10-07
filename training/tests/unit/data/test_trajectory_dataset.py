@@ -44,6 +44,8 @@ class FakeTrajectoryDataset:
         self.shape = (num_base_dates, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self.shape).astype(np.float32)
         self.step_frequency = step_frequency
+        self.base_dates = np.datetime64("2020-01-01T00", "s") + np.arange(num_base_dates) * np.timedelta64(1, "D")
+        self.steps = np.arange(steps) * np.timedelta64(step_frequency or datetime.timedelta(hours=6))
         self.missing = missing or set()
         self.variables = [f"var_{i}" for i in range(variables)]
         self.name_to_index = {name: i for i, name in enumerate(self.variables)}
@@ -95,14 +97,13 @@ class TestTrajectoryDataReaderProperties:
         with pytest.raises(ValueError, match="step frequency"):
             _ = reader.frequency
 
-    def test_missing_base_dates_are_missing_sequences(self) -> None:
+    def test_missing_base_dates_have_no_anchors(self) -> None:
         reader = _make_reader(missing={1, 3})
-        assert reader.missing_sequences == {1, 3}
-        assert reader.missing_positions(0) == set()
+        assert set(reader.valid_anchors([0]).sequences.tolist()) == {0, 2}
 
     def test_default_sampling(self) -> None:
-        assert _make_reader().default_sampling == {"stride": None}
-        assert _make_reader(sampling={"stride": 2}).default_sampling == {"stride": 2}
+        assert _make_reader().sampling == {"stride": None}
+        assert _make_reader(sampling={"stride": 2}).sampling == {"stride": 2}
 
     def test_tree_reports_trajectory_settings(self) -> None:
         text = repr(_make_reader(num_base_dates=4, steps=6))
@@ -190,7 +191,7 @@ class TestCreateDatasetWithTrajectory:
             reader = create_dataset(config)
 
         assert isinstance(reader, TrajectoryDataReader)
-        assert reader.default_sampling == trajectory.get("sampling", {"stride": None})
+        assert reader.sampling == trajectory.get("sampling", {"stride": None})
 
     @pytest.mark.parametrize("trajectory", [None, "absent"])
     def test_create_dataset_without_trajectory_gives_gridded_reader(self, trajectory: str | None) -> None:

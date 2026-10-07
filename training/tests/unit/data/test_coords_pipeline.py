@@ -22,6 +22,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
 
 if TYPE_CHECKING:
     from pytest_mock import MockFixture
@@ -81,10 +82,14 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader.missing = set()
     reader.dates = list(range(20))
     reader.has_trajectories = False
-    reader.num_sequences = 1
     reader.frequency = "3h"
     positions = np.arange(19, dtype=np.int64)  # 20 dates, window of 2
-    reader.compute_anchors.return_value = np.stack([np.zeros_like(positions), positions], axis=1)
+    reader.valid_anchors.return_value = ReaderAnchors(
+        positions.astype("datetime64[s]"),
+        np.zeros_like(positions),
+        positions,
+    )
+    reader.sampling = None
     reader.get_sample.return_value = GriddedSourceSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],

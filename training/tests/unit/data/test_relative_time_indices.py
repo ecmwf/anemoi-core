@@ -12,6 +12,7 @@ from pytest_mock import MockFixture
 
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
 
 
 def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFixture) -> None:
@@ -20,9 +21,13 @@ def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFix
     reader.missing = set()
     reader.dates = list(range(20))
     reader.has_trajectories = False
-    reader.num_sequences = 1
     positions = np.arange(17, dtype=np.int64)
-    reader.compute_anchors.return_value = np.stack([np.zeros_like(positions), positions], axis=1)
+    reader.valid_anchors.return_value = ReaderAnchors(
+        positions.astype("datetime64[s]"),
+        np.zeros_like(positions),
+        positions,
+    )
+    reader.sampling = None
 
     ds = MultiDataset(
         data_readers={"a": reader, "b": reader},

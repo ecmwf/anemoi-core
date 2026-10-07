@@ -28,6 +28,7 @@ from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
+from anemoi.training.data.usable_indices import ReaderAnchors
 from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.time_indices import TimeIndices
 
@@ -206,85 +207,22 @@ class BaseAnemoiReader(ABC):
         self.grid_shard_sizes = None
         self.grid_shard_slice = None
 
-        #: Sampling config used by :meth:`compute_anchors`.
-        #: ``{"stride": 1}`` keeps every valid position;
-        #: ``{"stride": None}`` uses stride = window size (non-overlapping).
-        self.default_sampling = {"stride": 1}
+        #: Configured anchor sampling (``{"stride": int | None}``), or ``None`` if not configured.
+        #: The readers of a MultiDataset must agree on it.
+        self.sampling: dict | None = None
 
-    @property
-    def num_sequences(self) -> int:
-        """Number of independent sequences in the dataset."""
-        return 1
+    def valid_anchors(self, relative_indices: list[int] | np.ndarray) -> ReaderAnchors:
+        """Return the anchors at which every ``position + relative_index`` can be read.
 
-    def sequence_length(self, sequence: int = 0) -> int:  # noqa: ARG002
-        """Return the number of positions in ``sequence``."""
-        return len(self.dates)
-
-    @property
-    def missing_sequences(self) -> set[int]:
-        """Return sequences that are entirely missing and must not be sampled."""
-        return set()
-
-    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
-        """Return positions within ``sequence`` that are missing."""
-        return set(self.missing)
-
-    def compute_anchors(
-        self,
-        relative_indices: list[int] | np.ndarray,
-        sampling: dict | None = None,
-    ) -> np.ndarray:
-        """Return the valid ``(sequence, position)`` anchors for a relative window.
-
-        Parameters
-        ----------
-        relative_indices : list[int] | np.ndarray
-            Relative offsets (in positions) requested around each anchor.
-        sampling : dict | None
-            Sampling configuration with key ``"stride"``.
-            ``{"stride": None}`` uses stride = window size (non-overlapping);
-            ``{"stride": 1}`` keeps every valid position;
-            ``{"stride": 6}`` steps anchors by 6.
-            Defaults to :attr:`default_sampling`.
-
-        Returns
-        -------
-        np.ndarray
-            Array of shape ``(n_anchors, 2)`` with ``(sequence, position)`` rows.
+        Single-sequence readers anchor on their own ``dates``: the anchor time is the
+        date at relative offset 0.
         """
-        sampling = sampling or self.default_sampling
-
-        rel = np.asarray(list(relative_indices), dtype=np.int64)
-        window = int(rel.max()) - int(rel.min()) + 1
-
-        # Resolve stride from sampling dict; None → window size (non-overlapping)
-        raw_stride = sampling.get("stride") if isinstance(sampling, dict) else None
-        stride = window if raw_stride is None else int(raw_stride)
-        if stride < 1:
-            msg = f"trajectory_sampling.stride must be >= 1, got {stride}."
-            raise ValueError(msg)
-
-        anchors: list[np.ndarray] = []
-        for sequence in range(self.num_sequences):
-            if sequence in self.missing_sequences:
-                continue
-
-            positions = get_usable_indices(
-                self.missing_positions(sequence),
-                self.sequence_length(sequence),
-                rel,
-            )
-
-            if stride > 1 and positions.size:
-                positions = positions[(positions - positions[0]) % stride == 0]
-
-            if positions.size:
-                seq_col = np.full(positions.size, sequence, dtype=np.int64)
-                anchors.append(np.stack([seq_col, positions], axis=1))
-
-        if not anchors:
-            return np.empty((0, 2), dtype=np.int64)
-        return np.concatenate(anchors, axis=0)
+        positions = get_usable_indices(self.missing, len(self.dates), relative_indices)
+        return ReaderAnchors(
+            times=np.asarray(self.dates)[positions],
+            sequences=np.zeros_like(positions),
+            positions=positions,
+        )
 
     @property
     def dates(self) -> np.ndarray:
@@ -672,7 +610,7 @@ class TrajectoryDataReader(GriddedDataReader):
         # would trigger access to .dates, which they do not have.
         open_kwargs = {key: value for key, value in (("base_start", start), ("base_end", end)) if value is not None}
         self.data = open_dataset(source, **open_kwargs)
-        self.default_sampling = sampling if sampling is not None else {"stride": None}
+        self.sampling = sampling if sampling is not None else {"stride": None}
 
         # lazy init reader group info (will be set by DDPGroupStrategy)
         self.reader_group_rank = 0
@@ -689,14 +627,26 @@ class TrajectoryDataReader(GriddedDataReader):
         """Return the number of forecast steps per initialisation."""
         return self.data.shape[-2]
 
-    @property
-    def missing_sequences(self) -> set[int]:
-        """Return the base-date indices that are missing."""
-        return set(self.data.missing)
+    def valid_anchors(self, relative_indices: list[int] | np.ndarray) -> ReaderAnchors:
+        """Return the ``(base date, step)`` anchors whose window fits inside one forecast.
 
-    def missing_positions(self, sequence: int = 0) -> set[int]:  # noqa: ARG002
-        """Forecast datasets do not track per-step missing values."""
-        return set()
+        Missing base dates are skipped; steps are never missing. The anchor time is
+        the valid time ``base_date + step`` at relative offset 0.
+        """
+        steps = get_usable_indices(set(), self.sequence_length(), relative_indices)
+        missing = np.array(sorted(self.data.missing), dtype=np.int64)
+        sequences = np.setdiff1d(np.arange(self.num_sequences, dtype=np.int64), missing)
+
+        sequence_rows = np.repeat(sequences, len(steps))
+        position_rows = np.tile(steps, len(sequences))
+        base_dates = np.asarray(self.data.base_dates).astype("datetime64[s]")[sequence_rows]
+        lead_times = np.asarray(self.data.steps).astype("timedelta64[s]")[position_rows]
+        return ReaderAnchors(
+            times=base_dates + lead_times,
+            sequences=sequence_rows,
+            positions=position_rows,
+            base_dates=base_dates,
+        )
 
     @property
     def frequency(self) -> datetime.timedelta:
@@ -733,7 +683,7 @@ class TrajectoryDataReader(GriddedDataReader):
         tree = super().tree(prefix)
         tree.add(f"Num initialisations: {self.num_sequences}")
         tree.add(f"Steps per initialisation: {self.sequence_length()}")
-        tree.add(f"Sampling: {self.default_sampling}")
+        tree.add(f"Sampling: {self.sampling}")
         return tree
 
 
