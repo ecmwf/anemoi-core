@@ -128,9 +128,9 @@ bounding: #These are applied in order
   #   min_val: [-2]
   #   normalizer: ['mean-std']
 
-# [Optional] variable agnostic tokenizer and detokenizer
-# The variable agnostic tokenizer and detokenizer are used to transform the input variables into a common representation and back.
-#This is useful when dealing with transfer learning, and multi-domain training when different domains has
+# [Optional] variable agnostic tokenizer and detokenizer 
+# The variable agnostic tokenizer and detokenizer are used to transform the input variables into a common representation and back. 
+#This is useful when dealing with transfer learning, and multi-domain training when different domains has 
 # missing variables. Improve this text to explain the purpose of the variable agnostic tokenizer and detokenizer.
 variable_tokenizer: null
     # _target_: anemoi.models.variable.variabletokenizer.MultiHeadAttentionTransform
