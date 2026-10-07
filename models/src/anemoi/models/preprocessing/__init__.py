@@ -34,8 +34,8 @@ def resolve_variable_indices(
 
     With ``name_to_index``, positions come from the variable names;
     a name the tensor does not carry gets ``None``. Without it, the layout is
-    inferred from the width among ``layouts``. 
-    
+    inferred from the width among ``layouts``.
+
     A width that matches no layout will raise a ValueError.
 
     Parameters
