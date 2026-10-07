@@ -683,20 +683,14 @@ class AnemoiTrainer(ABC):
             LOGGER.info("Dry run: %s", self.dry_run)
 
     @cached_property
-    def has_tabular_datasets(self) -> bool:
-        """Returns True iff the run includes at least one tabular observation dataset."""
-        return not all(self.datamodule.ds_train.is_static_dataset.values())
-
-    @cached_property
     def strategy(self) -> Any:
         """Returns the distributed training strategy.
 
-        Runs with at least one tabular observation dataset build a dynamic graph per batch
-        and route each sample through per-dataset encoders/decoders that may be unused when a
-        dataset has no observations in a batch. In this case, we set
-        find_unused_parameters=True and static_graph=False.
+        Runs with at least one tabular observation dataset build a dynamic graph per batch  and route each sample
+        through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
         """
-        if self.has_tabular_datasets:
+        if any(dr.is_tabular for dr in self.datamodule.ds_train.data_readers.values()):
+            # If not all datasets are static, we set find_unused_parameters=True and static_graph=False.
             return instantiate(
                 self.config.training.strategy,
                 find_unused_parameters=True,
