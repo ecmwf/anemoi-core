@@ -540,8 +540,8 @@ class TabularDataReader(BaseAnemoiReader):
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
         data = torch.from_numpy(np.asarray(x.data, dtype=np.float32))
-        latitudes = np.deg2rad(np.asarray(x.latitudes, dtype=np.float32))
-        longitudes = np.deg2rad(np.asarray(x.longitudes, dtype=np.float32))
+        latitudes = torch.from_numpy(np.deg2rad(np.asarray(x.latitudes, dtype=np.float32)))
+        longitudes = torch.from_numpy(np.deg2rad(np.asarray(x.longitudes, dtype=np.float32)))
 
         timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
         boundaries = list(x.boundaries)
