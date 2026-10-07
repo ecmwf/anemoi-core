@@ -211,7 +211,7 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
-        #print(self.metadata["dataset"]["data"].keys())
+        # print(self.metadata["dataset"]["data"].keys())
         variable_metadata = self.metadata["dataset"]["data"]["variables_metadata"]
         self.model = instantiate(
             model_instantiate_config,

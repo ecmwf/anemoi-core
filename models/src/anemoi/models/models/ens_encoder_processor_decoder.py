@@ -57,7 +57,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             graph_data=graph_data,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
-            variable_metadata=variable_metadata
+            variable_metadata=variable_metadata,
         )
 
     def _build_networks(self, model_config: DotDict) -> None:
