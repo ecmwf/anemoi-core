@@ -16,10 +16,8 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sample import TabularSourceSample
+from anemoi.models.data.sample import create_source_sample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -27,14 +25,24 @@ from anemoi.models.utils.config import get_multiple_datasets_config
 
 
 def _create_source(dataset_name: str, payload: dict) -> SourceSample:
-    if payload["type"] == "tabular":
-        source_class = TabularSourceSample
-    elif payload["type"] == "gridded":
-        source_class = GriddedSourceSample
-    else:
-        raise ValueError(f"Unsupported source type: {payload['type']}")
+    """Build one dataset's SourceSample from a plain inference payload.
 
-    return source_class(**payload)
+    The payload carries ``latitudes`` / ``longitudes`` (degrees), ``layout`` (per-sample
+    axis names, no batch axis), ``variables`` and, optionally, ``data``; tabular datasets
+    also carry ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time
+    window). The dataset kind and the statistics come from the checkpoint; an optional
+    ``type`` key must agree with the checkpoint. The payload is not modified.
+    """
+    payload = dict(payload)
+
+    try:
+        return create_source_sample(
+            data_type=payload.pop("type"),
+            statistics=self._statistics_for(dataset_name, payload["variables"]),
+            **payload,
+        )
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Dataset {dataset_name!r}: {e}") from e
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -194,13 +202,6 @@ class AnemoiModelInterface(torch.nn.Module):
                 batch = batch.replace(dataset_name, projected)
         return batch
 
-    @staticmethod
-    def _as_payload(ds_data: torch.Tensor | dict) -> dict:
-        """Normalise one dataset entry to the payload dict of the inference boundary.
-        A bare tensor is accepted as a data-only payload.
-        """
-        return ds_data if isinstance(ds_data, dict) else {"data": ds_data}
-
     def _statistics_for(self, dataset_name: str, variables: list[str]) -> dict:
         """Slice the checkpoint's data-space statistics down to the variables.
         Same alignment that is done for the model outputs in AnemoiModelEncProcDec._assemble_output.
@@ -208,70 +209,6 @@ class AnemoiModelInterface(torch.nn.Module):
         name_to_index = self.data_indices[dataset_name].name_to_index
         positions = [name_to_index[name] for name in variables]
         return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
-
-    def _target_forcing_names(self, dataset_name: str) -> list[str]:
-        """Returns the names of the output-time forcing variables that condition this dataset's decoder.
-        Mirrors the BaseTask.get_forcings method.
-        """
-        data_input = self.data_indices[dataset_name].data.input
-        return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
-
-    def _source_sample(self, dataset_name: str, payload: dict) -> SourceSample:
-        """Build one dataset's SourceSample from a plain inference payload.
-
-        The payload carries ``data``, ``latitudes`` / ``longitudes`` (degrees), ``layout``
-        (per-sample axis names, no batch axis) and ``variables``; tabular datasets also carry
-        ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time window).
-        Statistics and the dataset kind (the reader's ``sample_type``) come from the checkpoint.
-        The payload is not modified.
-        """
-        for key in ("data", "latitudes", "longitudes", "layout", "variables"):
-            if payload.get(key) is None:
-                raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the sample.")
-
-        data = payload["data"]
-        latitudes = torch.as_tensor(payload["latitudes"], dtype=torch.float32).reshape(-1)
-        longitudes = torch.as_tensor(payload["longitudes"], dtype=torch.float32).reshape(-1)
-        if latitudes.shape != longitudes.shape:
-            raise ValueError(
-                f"Dataset {dataset_name!r}: latitudes {tuple(latitudes.shape)} and longitudes "
-                f"{tuple(longitudes.shape)} must describe the same nodes."
-            )
-        coordinates = torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1)).to(device=data.device)
-
-        layout_names = tuple(payload["layout"])
-        if data.ndim != len(layout_names):
-            raise ValueError(
-                f"Dataset {dataset_name!r}: data of shape {tuple(data.shape)} does not match the layout {layout_names}."
-            )
-        layout = TensorLayout.from_tuple(*layout_names)
-
-        variables = list(payload["variables"])
-        if data.shape[layout.axis("variables", ndim=data.ndim)] != len(variables):
-            raise ValueError(
-                f"Dataset {dataset_name!r}: data carries {data.shape[layout.axis('variables', ndim=data.ndim)]} "
-                f"variables but {len(variables)} names were given."
-            )
-
-        common = {
-            "variables": variables,
-            "layout": layout,
-            "statistics": self._statistics_for(dataset_name, variables),
-            "coordinates": coordinates,
-        }
-        sample_type = self.sample_types[dataset_name]
-        if not issubclass(sample_type, TabularSourceSample):
-            return sample_type(**common, grid_size=coordinates.shape[0])
-
-        for key in ("timedeltas", "boundaries"):
-            if payload.get(key) is None:
-                raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the tabular sample.")
-
-        return sample_type(
-            **common,
-            timedeltas=torch.as_tensor(payload["timedeltas"], dtype=torch.float32).reshape(-1).to(device=data.device),
-            boundaries=tuple(slice(int(start), int(stop)) for start, stop in payload["boundaries"]),
-        )
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
@@ -351,10 +288,8 @@ class AnemoiModelInterface(torch.nn.Module):
         assert target_template is not None, "target_template must be provided for prediction."
 
         # Convert to batch
-        x = Batch.collate({dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in x.items()})
-        target = Batch.collate(
-            {dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in target_template.items()}
-        )
+        x = Batch.collate({name: _create_source(name, payload) for name, payload in x.items()})
+        target = Batch.collate({name: _create_source(name, payload) for name, payload in target_template.items()})
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

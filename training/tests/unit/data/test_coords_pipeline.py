@@ -46,10 +46,34 @@ def _make_reader(grid: int = 5, mocker: MockFixture | None = None) -> GriddedDat
     return reader
 
 
-def test_reader_latitudes_longitudes_in_radians(mocker: MockFixture) -> None:
+def test_reader_latitudes_longitudes_in_degrees(mocker: MockFixture) -> None:
     reader = _make_reader(grid=4, mocker=mocker)
-    np.testing.assert_allclose(reader.latitudes, np.deg2rad([-90.0, -30.0, 30.0, 90.0]), rtol=1e-6)
-    np.testing.assert_allclose(reader.longitudes, np.deg2rad([0.0, 90.0, 180.0, 270.0]), rtol=1e-6)
+    np.testing.assert_allclose(reader.latitudes, [-90.0, -30.0, 30.0, 90.0], rtol=1e-6)
+    np.testing.assert_allclose(reader.longitudes, [0.0, 90.0, 180.0, 270.0], rtol=1e-6)
+
+
+def test_reader_sample_coordinates_in_radians(mocker: MockFixture) -> None:
+    reader = _make_reader(grid=4, mocker=mocker)
+    reader.data.variables = ["x"]
+    reader.data.statistics = {}
+    reader.get_data = lambda sequence, positions: torch.zeros(1, 1, 4, 1)
+    sample = reader.get_sample(0, slice(0, 1))
+    assert isinstance(sample, GriddedSourceSample)
+    assert sample.grid_size == 4
+    np.testing.assert_allclose(sample.latitudes.numpy(), np.deg2rad(reader.latitudes), rtol=1e-6)
+    np.testing.assert_allclose(sample.longitudes.numpy(), np.deg2rad(reader.longitudes), rtol=1e-6)
+
+
+def test_sharded_reader_sample_keeps_full_grid_size(mocker: MockFixture) -> None:
+    reader = _make_reader(grid=8, mocker=mocker)
+    reader.data.variables = ["x"]
+    reader.data.statistics = {}
+    reader.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
+    reader.get_data = lambda sequence, positions: torch.zeros(1, 1, 4, 1)
+    sample = reader.get_sample(0, slice(0, 1))
+    assert sample.grid_size == 8
+    assert list(sample.shard_sizes) == [4, 4]
+    np.testing.assert_allclose(sample.latitudes.numpy(), np.deg2rad(reader.latitudes[4:8]), rtol=1e-6)
 
 
 def test_reader_get_coordinates_full_grid(mocker: MockFixture) -> None:
