@@ -198,24 +198,22 @@ def _build_dummy_model(
 
     model_config = OmegaConf.create(
         {
-            "model": {
-                "node_trainable_parameters": {name: 0 for name in (*source_datasets, "hidden")},
-                "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
-                "encoders": {0: encoder_config},
-                "decoders": {
-                    0: {
-                        "target_datasets": [source_datasets[0]],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
+            "node_trainable_parameters": {name: 0 for name in (*source_datasets, "hidden")},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {0: encoder_config},
+            "decoders": {
+                0: {
+                    "target_datasets": [source_datasets[0]],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
                 },
-                "residual": {
-                    "datasets": {
-                        name: {"_target_": "anemoi.models.layers.residual.SkipConnection"} for name in source_datasets
-                    },
-                },
-                "bounding": {"datasets": {name: [] for name in source_datasets}},
             },
+            "residual": {
+                "datasets": {
+                    name: {"_target_": "anemoi.models.layers.residual.SkipConnection"} for name in source_datasets
+                },
+            },
+            "bounding": {"datasets": {name: [] for name in source_datasets}},
         },
     )
     return model_cls(

@@ -1190,61 +1190,59 @@ _FORWARD_MAPPER = "anemoi.models.layers.mapper.GNNForwardMapper"
 def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
     return DictConfig(
         {
+            "num_channels": num_channels,
+            "node_trainable_parameters": {name: 0 for name in ("out_hres", "in_lres", "in_hres", "hidden")},
             "model": {
-                "num_channels": num_channels,
-                "node_trainable_parameters": {name: 0 for name in ("out_hres", "in_lres", "in_hres", "hidden")},
-                "model": {
-                    "_target_": (
-                        "anemoi.models.models.transport_encoder_processor_decoder."
-                        "AnemoiTransportSpatialDownscalerModelEncProcDec"
-                    ),
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": True,
-                    "transport": {
-                        "objective": "edm_diffusion",
-                        "noise_channels": 4,
-                        "noise_cond_dim": 2,
-                        "noise_embedder": {
-                            "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
-                            "num_channels": 4,
-                            "max_period": 1000,
-                        },
+                "_target_": (
+                    "anemoi.models.models.transport_encoder_processor_decoder."
+                    "AnemoiTransportSpatialDownscalerModelEncProcDec"
+                ),
+                "hidden_nodes_name": "hidden",
+                "latent_skip": True,
+                "transport": {
+                    "objective": "edm_diffusion",
+                    "noise_channels": 4,
+                    "noise_cond_dim": 2,
+                    "noise_embedder": {
+                        "_target_": "anemoi.models.layers.diffusion.SinusoidalEmbeddings",
+                        "num_channels": 4,
+                        "max_period": 1000,
                     },
                 },
-                "encoders": {
-                    "enc0": {
-                        "source_datasets": ["in_lres", "in_hres"],
-                        "dataset_fusing_strategy": "concatenate_inputs_along_variable_dim",
-                        "mapper": _gnn_mapper(_FORWARD_MAPPER, num_channels),
-                    },
-                },
-                "latent_aggregator": {"_target_": "anemoi.models.layers.aggregator.SumAggregator"},
-                "processor": {
-                    "_target_": "anemoi.models.layers.processor.PointWiseMLPProcessor",
-                    "num_channels": num_channels,
-                    "num_layers": 1,
-                    "num_chunks": 1,
-                    "mlp_hidden_ratio": 1,
-                    "cpu_offload": False,
-                    "gradient_checkpointing": False,
-                    "layer_kernels": {},
-                    "sub_graph_edge_attributes": ["edge_length"],
-                },
-                "decoders": {
-                    "dec0": {
-                        "target_datasets": ["out_hres"],
-                        "target_node_features": ["encoded_data"],
-                        "mapper": _gnn_mapper("anemoi.models.layers.mapper.GNNBackwardMapper", num_channels),
-                    },
-                },
-                "residual": {
-                    "datasets": {
-                        name: {"_target_": "anemoi.models.layers.residual.SkipConnection"}
-                        for name in ("out_hres", "in_lres", "in_hres")
-                    },
-                },
-                "bounding": {"datasets": {name: [] for name in ("out_hres", "in_lres", "in_hres")}},
             },
+            "encoders": {
+                "enc0": {
+                    "source_datasets": ["in_lres", "in_hres"],
+                    "dataset_fusing_strategy": "concatenate_inputs_along_variable_dim",
+                    "mapper": _gnn_mapper(_FORWARD_MAPPER, num_channels),
+                },
+            },
+            "latent_aggregator": {"_target_": "anemoi.models.layers.aggregator.SumAggregator"},
+            "processor": {
+                "_target_": "anemoi.models.layers.processor.PointWiseMLPProcessor",
+                "num_channels": num_channels,
+                "num_layers": 1,
+                "num_chunks": 1,
+                "mlp_hidden_ratio": 1,
+                "cpu_offload": False,
+                "gradient_checkpointing": False,
+                "layer_kernels": {},
+                "sub_graph_edge_attributes": ["edge_length"],
+            },
+            "decoders": {
+                "dec0": {
+                    "target_datasets": ["out_hres"],
+                    "target_node_features": ["encoded_data"],
+                    "mapper": _gnn_mapper("anemoi.models.layers.mapper.GNNBackwardMapper", num_channels),
+                },
+            },
+            "residual": {
+                "datasets": {
+                    name: {"_target_": "anemoi.models.layers.residual.SkipConnection"}
+                    for name in ("out_hres", "in_lres", "in_hres")
+                },
+            },
+            "bounding": {"datasets": {name: [] for name in ("out_hres", "in_lres", "in_hres")}},
         },
     )
 
@@ -1294,7 +1292,7 @@ def test_real_construction_requires_target_anchors() -> None:
 def test_real_construction_without_fusion_encodes_each_input_on_its_own_node_set() -> None:
     """``not_supported``: separate encoders, combined in latent space by the aggregator."""
     config = _make_downscaler_config()
-    config.model.encoders = {
+    config.encoders = {
         name: {
             "source_datasets": [dataset_name],
             "dataset_fusing_strategy": "not_supported",
@@ -1340,7 +1338,7 @@ def test_real_construction_forward_returns_the_target_on_its_own_grid() -> None:
 def test_real_construction_rejects_a_reference_that_is_not_an_encoder_source() -> None:
     """The residual baseline must be one of the encoders' source datasets."""
     config = _make_downscaler_config()
-    config.model.encoders.enc0.source_datasets = ["in_hres"]
+    config.encoders.enc0.source_datasets = ["in_hres"]
 
     with pytest.raises(ValueError, match="not a source dataset of any encoder"):
         _build_real_downscaler(config=config)
@@ -1349,7 +1347,7 @@ def test_real_construction_rejects_a_reference_that_is_not_an_encoder_source() -
 def test_real_construction_rejects_the_target_as_an_encoder_source() -> None:
     """The target rides along on its reference's anchor and must not be encoded in its own right."""
     config = _make_downscaler_config()
-    config.model.encoders.enc0.source_datasets = ["in_lres", "in_hres", "out_hres"]
+    config.encoders.enc0.source_datasets = ["in_lres", "in_hres", "out_hres"]
 
     with pytest.raises(ValueError, match="must not also be a source dataset"):
         _build_real_downscaler(config=config)
