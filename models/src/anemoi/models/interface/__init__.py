@@ -9,7 +9,6 @@
 
 import uuid
 from typing import Optional
-from anemoi.models.data.sample import GriddedSourceSample, TabularSourceSample
 
 import torch
 from hydra.utils import instantiate
@@ -18,7 +17,9 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -215,7 +216,6 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
-
     def _source_sample(self, dataset_name: str, payload: dict) -> SourceSample:
         """Build one dataset's SourceSample from a plain inference payload.
 
@@ -352,7 +352,9 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Convert to batch
         x = Batch.collate({dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in x.items()})
-        target = Batch.collate({dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in target_template.items()})
+        target = Batch.collate(
+            {dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in target_template.items()}
+        )
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

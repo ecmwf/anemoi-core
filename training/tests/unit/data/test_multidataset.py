@@ -82,7 +82,9 @@ class TestMultiDataset:
     def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:
         """get_sample(i) asks every reader for anchor i's sequence and position + its relative date indices."""
         multi_dataset.worker_id = 0
-        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 1)  # anchor 1 is (sequence 0, position 11)
+        sample = multi_dataset.get_sample(
+            1,
+        )  # anchor 1 is (sequence 0, position 1)  # anchor 1 is (sequence 0, position 11)
 
         for name, reader in multi_dataset.data_readers.items():
             reader.get_sample.assert_called_once_with(0, 0, [11, 13, 17])

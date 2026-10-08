@@ -205,6 +205,8 @@ class TestMultiDatasetSamplingStride:
         readers = {"f1": _trajectory(2, 4, sampling={"stride": 1}), "f2": _trajectory(2, 4)}
         with pytest.raises(ValueError, match="disagree on the sampling stride"):
             MultiDataset._sampling_stride(readers)
+
+
 # (C) Copyright 2024- Anemoi contributors.
 #
 # This software is licensed under the terms of the Apache Licence Version 2.0
@@ -227,7 +229,6 @@ import pytest
 
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.data_reader import TrajectoryDataReader
-from anemoi.training.data.usable_indices import compute_valid_anchors
 
 # ---------------------------------------------------------------------------
 # Helpers: lightweight stubs that bypass open_dataset
