@@ -23,7 +23,7 @@ class EmbedMetadata(nn.Module):
 
     Parameters
     ----------
-    vocabular : VariableVocabulary
+    vocabulary : VariableVocabulary
         Foundation variable vocabulary containing the physical variable
         specifications and categorical index mappings.
 
@@ -31,16 +31,16 @@ class EmbedMetadata(nn.Module):
         Dimension of the resulting variable metadata embeddings.
     """
 
-    def __init__(self, vocabular: VariableVocabulary, emb_dim: int) -> None:
+    def __init__(self, vocabulary: VariableVocabulary, emb_dim: int) -> None:
         super().__init__()
 
-        assert isinstance(vocabular, VariableVocabulary), "expecting vocabular object of class VariableVocabulary"
+        assert isinstance(vocabulary, VariableVocabulary), "expecting vocabular object of class VariableVocabulary"
 
-        self.vocabular = vocabular
+        self.vocabulary = vocabulary
 
-        self.num_params = len(self.vocabular.param_to_id)
-        self.num_vertical_level_types = len(self.vocabular.vertical_type_to_id)
-        self.num_temporal_operators = len(self.vocabular.temporal_operator_to_id)
+        self.num_params = len(self.vocabulary.param_to_id)
+        self.num_vertical_level_types = len(self.vocabulary.vertical_type_to_id)
+        self.num_temporal_operators = len(self.vocabulary.temporal_operator_to_id)
 
         # categorical
         self.emb_param = nn.Embedding(self.num_params, emb_dim)
@@ -78,7 +78,7 @@ class EmbedMetadata(nn.Module):
         if isinstance(variables, str):
             variables = [variables]
 
-        current_vocabular = self.vocabular.get_variables(variables)
+        current_vocabulary = self.vocabulary.get_variables(variables)
 
         device = self.emb_param.weight.device
         # categorical

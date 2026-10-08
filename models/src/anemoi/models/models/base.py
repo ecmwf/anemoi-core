@@ -91,7 +91,7 @@ class BaseGraphModel(nn.Module):
         self._build_encoder_routing(model_config.encoders)
         self._build_decoder_routing(model_config.decoders)
 
-        self._build_variable_io(model_config=model_config.model)
+        self._build_variable_io(model_config=model_config)
 
         self._calculate_shapes_and_indices(data_indices)
 
