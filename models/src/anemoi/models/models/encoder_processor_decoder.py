@@ -52,6 +52,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         if tokenizer_config or detokenizer_config:
             from anemoi.models.variable.variablevocabular import VariableVocabulary
+
             self.variable_vocabulary = VariableVocabulary.from_foundation(
                 data_indices=self.data_indices[self.dataset_names[0]],
                 metadata=self.variable_metadata,
@@ -71,7 +72,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         if dropout_config:
             self.variable_dropout = instantiate(dropout_config)
-       
+
     def _build_networks(self, model_config: DotDict) -> None:
         """Builds the model components."""
 
