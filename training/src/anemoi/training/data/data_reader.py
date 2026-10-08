@@ -25,6 +25,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.sample import TabularSourceSample
+from anemoi.models.data.sample import create_source_sample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
@@ -375,17 +376,13 @@ class GriddedDataReader(BaseAnemoiReader):
 
     @cached_property
     def latitudes(self) -> np.ndarray:
-        """Return per-grid-point latitudes in **radians**.
-
-        Backed by ``self.data.latitudes`` (which is stored in degrees by
-        ``anemoi.datasets``); converted once and cached.
-        """
-        return np.deg2rad(np.asarray(self.data.latitudes, dtype=np.float32))
+        """Return per-grid-point latitudes in **degrees**, as stored by ``anemoi.datasets``."""
+        return np.asarray(self.data.latitudes, dtype=np.float32)
 
     @cached_property
     def longitudes(self) -> np.ndarray:
-        """Return per-grid-point longitudes in **radians**."""
-        return np.deg2rad(np.asarray(self.data.longitudes, dtype=np.float32))
+        """Return per-grid-point longitudes in **degrees**, as stored by ``anemoi.datasets``."""
+        return np.asarray(self.data.longitudes, dtype=np.float32)
 
     @cached_property
     def cutout_mask(self) -> np.ndarray:
@@ -438,9 +435,8 @@ class GriddedDataReader(BaseAnemoiReader):
         return torch.from_numpy(x)
 
     def get_latlons(self) -> tuple[torch.Tensor, torch.Tensor]:
-        """Return the local shard's ``(N, 2)`` ``(latitude, longitude)`` coordinates in **radians**."""
-        lats = self.latitudes
-        lons = self.longitudes
+        """Return the local shard's ``(N,)`` latitudes and longitudes in **degrees**."""
+        lats, lons = self.latitudes, self.longitudes
 
         if self.grid_shard_slice is not None:
             lats = lats[self.grid_shard_slice]
@@ -448,10 +444,16 @@ class GriddedDataReader(BaseAnemoiReader):
 
         return torch.from_numpy(np.ascontiguousarray(lats)), torch.from_numpy(np.ascontiguousarray(lons))
 
-    def _build_sample(self, data: torch.Tensor) -> GriddedSourceSample:
-        """Wrap a ``(T, E, N, V)`` local-shard tensor with this reader's metadata."""
+    def get_sample(
+        self,
+        sequence: int,
+        positions: TimeIndices,
+    ) -> GriddedSourceSample:
+        """Return the per-sample payload in the unified contract."""
         latitudes, longitudes = self.get_latlons()
-        return GriddedSourceSample(
+        data = self.get_data(sequence, positions)
+        return create_source_sample(
+            data_type="gridded",
             data=data,
             variables=self.variables,
             layout=self.layout,
@@ -462,13 +464,6 @@ class GriddedDataReader(BaseAnemoiReader):
             shard_sizes=self.grid_shard_sizes,
         )
 
-    def get_sample(
-        self,
-        sequence: int,
-        positions: TimeIndices,
-    ) -> GriddedSourceSample:
-        """Return the per-sample payload in the unified contract."""
-        return self._build_sample(self.get_data(sequence, positions))
 
 
 class TabularDataReader(BaseAnemoiReader):
@@ -529,8 +524,9 @@ class TabularDataReader(BaseAnemoiReader):
         Returns
         -------
         TabularSourceSample
-            Data of shape ``(1, N, V)`` (leading size-1 ensemble axis), ``(N, 2)``
-            coordinates in **radians** to match the gridded reader convention, ``(N,)``
+            Data of shape ``(1, N, V)`` (leading size-1 ensemble axis), ``(N,)``
+            latitudes and longitudes in **radians** (converted by
+            :func:`create_source_sample`), ``(N,)``
             timedeltas and the per-window ``boundaries``.
         """
         del sequence
@@ -540,8 +536,8 @@ class TabularDataReader(BaseAnemoiReader):
         # the leading time axis is intentionally absent — per-time
         # structure is recoverable through ``boundaries``.
         data = torch.from_numpy(np.asarray(x.data, dtype=np.float32))
-        latitudes = torch.from_numpy(np.deg2rad(np.asarray(x.latitudes, dtype=np.float32)))
-        longitudes = torch.from_numpy(np.deg2rad(np.asarray(x.longitudes, dtype=np.float32)))
+        latitudes = torch.from_numpy(np.asarray(x.latitudes, dtype=np.float32))
+        longitudes = torch.from_numpy(np.asarray(x.longitudes, dtype=np.float32))
 
         timedeltas = torch.from_numpy(np.asarray(x.timedeltas, dtype=np.float32))
         boundaries = list(x.boundaries)
@@ -555,7 +551,8 @@ class TabularDataReader(BaseAnemoiReader):
             reader_group_size=self.reader_group_size,
         )
 
-        return TabularSourceSample(
+        return create_source_sample(
+            data_type="tabular",
             data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             variables=self.variables,
             layout=self.layout,
@@ -607,7 +604,7 @@ class TrajectoryDataReader(GriddedDataReader):
         source: dict = _normalize_dataset_config(dataset_config or dataset)
         if source.get("frequency") is not None:
             msg = (
-                "TrajectoryDataReader does not accept a 'frequency' in dataset_config. "
+                f"{self.__class__.__name__} does not accept a 'frequency' in dataset_config. "
                 "The step frequency is read directly from the dataset. "
                 "Set data.frequency: null in your config."
             )

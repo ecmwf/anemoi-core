@@ -15,7 +15,6 @@ from omegaconf import DictConfig
 from torch import nn
 
 from anemoi.graphs.edges.attributes import EdgeLength
-from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.data_indices.collection import IndexCollection
@@ -177,7 +176,6 @@ def test_inference_forcing_only_target_preserves_output_metadata():
     interface.statistics = model.statistics
     interface.statistics_tendencies = None
     interface.is_dataset_static = {"grid": True}
-    interface.sample_types = {"grid": GriddedSourceSample}
     interface.n_step_input = {"grid": 2}
     interface.pre_processors = nn.ModuleDict(
         {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}

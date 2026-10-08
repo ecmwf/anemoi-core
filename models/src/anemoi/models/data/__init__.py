@@ -14,6 +14,7 @@ from .layout import TensorLayout
 from .sample import GriddedSourceSample
 from .sample import SourceSample
 from .sample import TabularSourceSample
+from .sample import create_source_sample
 from .sources import GriddedSource
 from .sources import GriddedTemplate
 from .sources import Source
@@ -26,6 +27,7 @@ __all__ = [
     "SourceSample",
     "GriddedSourceSample",
     "TabularSourceSample",
+    "create_source_sample",
     "TensorLayout",
     "GriddedSource",
     "TabularSource",
