@@ -25,7 +25,7 @@ from anemoi.models.data.sources import Source
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
-class SourceSample(ABC):
+class BaseSample(ABC):
     """One dataset's contribution to one sample, as produced by a data reader.
 
     Everything needed to build the collated :class:`~anemoi.models.data.sources.Source` travels with the sample, so

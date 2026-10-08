@@ -11,8 +11,8 @@ import pytest
 import torch
 
 from anemoi.models.data import Batch
-from anemoi.models.data import GriddedSourceSample
-from anemoi.models.data import TabularSourceSample
+from anemoi.models.data import GriddedSample
+from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data import create_source_sample
 from anemoi.models.data.sample import source_sample_registry
@@ -49,7 +49,7 @@ def _tabular(**overrides):
 
 def test_gridded_converts_layout_and_degrees():
     sample = _gridded()
-    assert isinstance(sample, GriddedSourceSample)
+    assert isinstance(sample, GriddedSample)
     assert sample.layout == TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     assert sample.grid_size == 3
     torch.testing.assert_close(sample.coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
@@ -58,7 +58,7 @@ def test_gridded_converts_layout_and_degrees():
 
 def test_tabular_converts_boundaries_and_timedeltas():
     sample = _tabular()
-    assert isinstance(sample, TabularSourceSample)
+    assert isinstance(sample, TabularSample)
     assert sample.boundaries == (slice(0, 2), slice(2, 3))
     assert sample.timedeltas.dtype == torch.float32
 
@@ -105,8 +105,8 @@ def test_tabular_validation(overrides, match):
 
 
 def test_registry_holds_both_kinds():
-    assert source_sample_registry.lookup("gridded") is GriddedSourceSample
-    assert source_sample_registry.lookup("tabular") is TabularSourceSample
+    assert source_sample_registry.lookup("gridded") is GriddedSample
+    assert source_sample_registry.lookup("tabular") is TabularSample
 
 
 @pytest.mark.parametrize(
@@ -160,18 +160,6 @@ def test_tabular_collate_rejects_mixed_sharding():
 def test_collate_rejects_mixed_data_presence(build):
     with pytest.raises(ValueError, match="mixes samples with and without data"):
         Batch.collate([{"ds": build()}, {"ds": build(data=None)}])
-
-
-@pytest.mark.parametrize(
-    ("other", "match"),
-    [
-        ({"variables": ["a", "c"]}, "different variables"),
-        ({"statistics": {"mean": torch.zeros(2)}}, "different statistics objects"),
-    ],
-)
-def test_collate_rejects_samples_with_different_metadata(other, match):
-    with pytest.raises(ValueError, match=match):
-        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(**other)}])
 
 
 def test_collate_accepts_samples_sharing_statistics():

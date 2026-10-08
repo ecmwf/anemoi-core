@@ -14,8 +14,8 @@ import pytest
 import torch
 
 from anemoi.models.data import Batch
-from anemoi.models.data import GriddedSourceSample
-from anemoi.models.data import TabularSourceSample
+from anemoi.models.data import GriddedSample
+from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources.gridded import GriddedSource
 from anemoi.models.data.sources.gridded import GriddedTemplate
@@ -27,7 +27,7 @@ GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 
 # One statistics object per dataset, shared by its samples as a reader does
-# (SourceSample.collate checks the statistics by identity).
+# (BaseSample.collate checks the statistics by identity).
 TABULAR_STATISTICS = {"mean": torch.tensor([1.0, 2.0])}
 
 
@@ -36,9 +36,9 @@ def gridded_statistics(n_vars: int) -> dict[str, torch.Tensor]:
     return {"mean": torch.arange(n_vars, dtype=torch.float32)}
 
 
-def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSample:
+def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSample:
     n_vars = len(variables)
-    return GriddedSourceSample(
+    return GriddedSample(
         data=torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
         variables=variables,
         statistics=gridded_statistics(n_vars),
@@ -48,8 +48,8 @@ def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSamp
     )
 
 
-def tabular_payload(n_points: int = 4) -> TabularSourceSample:
-    return TabularSourceSample(
+def tabular_payload(n_points: int = 4) -> TabularSample:
+    return TabularSample(
         data=torch.ones(1, n_points, 2),
         variables=["t2m", "sp"],
         statistics=TABULAR_STATISTICS,
@@ -270,18 +270,18 @@ class TestCollate:
         assert isinstance(Batch.collate([{"src": payload()}])["src"], expected_type)
 
     def test_mixed_sample_kinds_are_rejected(self) -> None:
-        with pytest.raises(TypeError, match="single SourceSample subclass"):
+        with pytest.raises(TypeError, match="single BaseSample subclass"):
             Batch.collate([{"src": gridded_payload()}, {"src": tabular_payload()}])
 
     def test_plain_dicts_are_rejected(self) -> None:
-        with pytest.raises(TypeError, match="single SourceSample subclass"):
+        with pytest.raises(TypeError, match="single BaseSample subclass"):
             Batch.collate([{"src": {"data": torch.zeros(1)}}])
 
     @pytest.mark.parametrize(
         ("sample_cls", "layout", "extra"),
         [
-            (GriddedSourceSample, TABULAR_LAYOUT, {}),
-            (TabularSourceSample, GRIDDED_LAYOUT, {"timedeltas": torch.zeros(4), "boundaries": (slice(0, 4),)}),
+            (GriddedSample, TABULAR_LAYOUT, {}),
+            (TabularSample, GRIDDED_LAYOUT, {"timedeltas": torch.zeros(4), "boundaries": (slice(0, 4),)}),
         ],
     )
     def test_sample_rejects_a_layout_of_the_other_kind(self, sample_cls, layout, extra) -> None:

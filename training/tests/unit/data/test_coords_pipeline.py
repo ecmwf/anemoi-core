@@ -19,7 +19,7 @@ import torch
 
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.models.data.sample import GriddedSample
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.usable_indices import ReaderAnchors
@@ -58,7 +58,7 @@ def test_reader_sample_coordinates_in_radians(mocker: MockFixture) -> None:
     reader.data.statistics = {}
     reader.get_data = lambda *_: torch.zeros(1, 1, 4, 1)
     sample = reader.get_sample(0, slice(0, 1))
-    assert isinstance(sample, GriddedSourceSample)
+    assert isinstance(sample, GriddedSample)
     assert sample.grid_size == 4
     np.testing.assert_allclose(sample.coordinates[:, 0].numpy(), np.deg2rad(reader.latitudes), rtol=1e-6)
     np.testing.assert_allclose(sample.coordinates[:, 1].numpy(), np.deg2rad(reader.longitudes), rtol=1e-6)
@@ -112,7 +112,7 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
         positions,
     )
     reader.sampling = None
-    reader.get_sample.return_value = GriddedSourceSample(
+    reader.get_sample.return_value = GriddedSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],
         layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
@@ -138,7 +138,7 @@ def test_multidataset_get_sample_returns_source_samples(mocker: MockFixture) -> 
     ds = _make_multidataset(mocker)
     sample = ds.get_sample(0)
     assert set(sample) == {"a", "b"}
-    assert isinstance(sample["a"], GriddedSourceSample)
+    assert isinstance(sample["a"], GriddedSample)
     assert sample["a"].coordinates.shape == (6, 2)
     # Relative indices [0, 1] are normalized to a slice and offset by the anchor's position.
     ds.data_readers["a"].get_sample.assert_called_with(0, slice(0, 2, 1))

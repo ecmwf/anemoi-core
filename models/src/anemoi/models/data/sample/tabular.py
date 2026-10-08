@@ -17,14 +17,14 @@ import torch
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import source_sample_registry
-from anemoi.models.data.sample.base import SourceSample
+from anemoi.models.data.sample.base import BaseSample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.shapes import ShardSizes
 
 
 @source_sample_registry.register("tabular")
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
-class TabularSourceSample(SourceSample):
+class TabularSample(BaseSample):
     """A sample of points that change from sample to sample (e.g. observations).
 
     ``data`` is ``(ensemble, grid, variables)``. The time windows are stacked along

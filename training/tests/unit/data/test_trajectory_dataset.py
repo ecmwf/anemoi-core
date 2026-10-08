@@ -22,7 +22,7 @@ import pytest
 import torch
 from omegaconf import OmegaConf
 
-from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.models.data.sample import GriddedSample
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.data_reader import TrajectoryDataReader
 from anemoi.training.data.data_reader import create_dataset
@@ -76,7 +76,7 @@ class TestTrajectoryDataReaderProperties:
     def test_is_a_gridded_reader_with_trajectories(self) -> None:
         reader = _make_reader()
         assert isinstance(reader, GriddedDataReader)
-        assert reader.sample_type is GriddedSourceSample
+        assert reader.sample_type is GriddedSample
         assert reader.has_trajectories
         assert not reader.is_tabular
 
@@ -146,7 +146,7 @@ class TestTrajectoryDataReaderGetSample:
     def test_get_sample_shape(self, positions: list[int] | slice, num_steps: int) -> None:
         reader = _make_reader(variables=3, ensemble=2, gridpoints=10)
         sample = reader.get_sample(1, positions)
-        assert isinstance(sample, GriddedSourceSample)
+        assert isinstance(sample, GriddedSample)
         assert sample.data.shape == (num_steps, 2, 10, 3)  # (steps, ensemble, gridpoints, variables)
         assert sample.variables == reader.variables
         assert sample.grid_size == 10

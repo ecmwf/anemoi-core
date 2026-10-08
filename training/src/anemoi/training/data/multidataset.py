@@ -20,7 +20,7 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
-from anemoi.models.data import SourceSample
+from anemoi.models.data import BaseSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
@@ -338,13 +338,13 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, SourceSample]:
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
         """Return per-dataset samples for ``index``.
 
-        Each value is the reader's :class:`~anemoi.models.data.SourceSample`, so that
+        Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
         the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
         """
-        x: dict[str, SourceSample] = {}
+        x: dict[str, BaseSample] = {}
         for name, data_reader in self.data_readers.items():
             sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
@@ -352,8 +352,8 @@ class MultiDataset(IterableDataset):
 
         return x
 
-    def __iter__(self) -> Iterator[dict[str, SourceSample]]:
-        """Yield ``{dataset_name: SourceSample}`` for each synchronized sample."""
+    def __iter__(self) -> Iterator[dict[str, BaseSample]]:
+        """Yield ``{dataset_name: BaseSample}`` for each synchronized sample."""
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
         if self.shuffle:

@@ -240,7 +240,7 @@ class TabularSource(Source):
     def grid_shard_sizes(self) -> ShardSizes:
         # Sharded per time window, not along a single grid axis.
         return None
-    
+
     @property
     def is_sharded(self) -> bool:
         """Return ``True`` if the source is sharded per time window."""

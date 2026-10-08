@@ -14,7 +14,7 @@ import pytest
 import torch
 from pydantic import ValidationError
 
-from anemoi.models.data.sample import GriddedSourceSample
+from anemoi.models.data.sample import GriddedSample
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
@@ -130,7 +130,7 @@ class TestGriddedDataReader:
 
         sample = dataset.get_sample(0, slice(0, 3))
 
-        assert isinstance(sample, GriddedSourceSample)
+        assert isinstance(sample, GriddedSample)
         assert isinstance(sample.data, torch.Tensor)
         assert sample.data.ndim == 4  # dates, ensemble, gridpoints, variables
         assert sample.data.shape[0] == 3  # 3 time steps

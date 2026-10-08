@@ -14,8 +14,8 @@ from dataclasses import FrozenInstanceError
 import pytest
 import torch
 
-from anemoi.models.data import GriddedSourceSample
-from anemoi.models.data import TabularSourceSample
+from anemoi.models.data import GriddedSample
+from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources.base import Source
@@ -39,9 +39,9 @@ def _sample_layout() -> TensorLayout:
 def _gridded_payload(
     data: torch.Tensor,
     coordinates: torch.Tensor,
-) -> GriddedSourceSample:
+) -> GriddedSample:
     """A gridded sample in the reader contract."""
-    return GriddedSourceSample(
+    return GriddedSample(
         data=data,
         layout=_sample_layout(),
         variables=[f"v{i}" for i in range(data.shape[_sample_layout().variables])],
@@ -482,7 +482,7 @@ def test_batch_collate_rejects_invalid_layout_position() -> None:
 
     samples = [
         {
-            "a": GriddedSourceSample(
+            "a": GriddedSample(
                 data=torch.zeros(1, 2, 3),
                 layout=TensorLayout(time=0, grid=1, variables=5),
                 variables=["x", "y", "z"],
@@ -506,7 +506,7 @@ def test_batch_collate_keeps_sparse_layout_unshifted() -> None:
     sample_layout = TensorLayout(grid=0, variables=1)
     samples = [
         {
-            "obs": TabularSourceSample(
+            "obs": TabularSample(
                 data=torch.zeros(n, 3),
                 layout=sample_layout,
                 variables=["x", "y", "z"],
@@ -528,7 +528,7 @@ def test_batch_collate_shifts_gridded_layout_with_batch_dim() -> None:
     from anemoi.models.data import TensorLayout
 
     sample_layout = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
-    sample = GriddedSourceSample(
+    sample = GriddedSample(
         data=torch.zeros(1, 1, 4, 3),
         layout=sample_layout,
         variables=["x", "y", "z"],

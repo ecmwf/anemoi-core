@@ -9,7 +9,7 @@
 
 """The contract between a data reader and :meth:`Batch.collate`.
 
-A reader returns one :class:`SourceSample` per dataset and sample. The concrete class
+A reader returns one :class:`BaseSample` per dataset and sample. The concrete class
 says what kind of data it is, and knows how to collate a list of its own kind into
 the matching :class:`~anemoi.models.data.sources.Source`.
 
@@ -32,14 +32,14 @@ from anemoi.utils.registry import Registry
 source_sample_registry = Registry(__name__)
 
 # Imported after the registry is defined: each kind registers itself on import.
-from anemoi.models.data.sample.base import SourceSample  # noqa: E402
-from anemoi.models.data.sample.gridded import GriddedSourceSample  # noqa: E402
-from anemoi.models.data.sample.tabular import TabularSourceSample  # noqa: E402
+from anemoi.models.data.sample.base import BaseSample  # noqa: E402
+from anemoi.models.data.sample.gridded import GriddedSample  # noqa: E402
+from anemoi.models.data.sample.tabular import TabularSample  # noqa: E402
 
 __all__ = [
-    "GriddedSourceSample",
-    "SourceSample",
-    "TabularSourceSample",
+    "GriddedSample",
+    "BaseSample",
+    "TabularSample",
     "create_source_sample",
     "source_sample_registry",
 ]
@@ -55,13 +55,13 @@ def create_source_sample(
     data: torch.Tensor | None = None,
     statistics: Mapping[str, Any] | None = None,
     **kwargs: Any,
-) -> SourceSample:
-    """Validate the inputs and build the :class:`SourceSample` registered as ``data_type``.
+) -> BaseSample:
+    """Validate the inputs and build the :class:`BaseSample` registered as ``data_type``.
 
     This is the single entry point used by the data readers and by
     :meth:`~anemoi.models.interface.AnemoiModelInterface.predict_step`. The fields
     common to every kind are checked and converted here; the rest is handed to the
-    kind's :meth:`SourceSample.from_validated`.
+    kind's :meth:`BaseSample.from_validated`.
 
     Parameters
     ----------

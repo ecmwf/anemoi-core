@@ -22,9 +22,9 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sample import GriddedSourceSample
-from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sample import TabularSourceSample
+from anemoi.models.data.sample import GriddedSample
+from anemoi.models.data.sample import BaseSample
+from anemoi.models.data.sample import TabularSample
 from anemoi.models.data.sample import create_source_sample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
@@ -189,7 +189,7 @@ def _to_local_window_shard_data(
 class BaseAnemoiReader(ABC):
     """Generic anemoi data reader."""
 
-    sample_type: type[SourceSample]
+    sample_type: type[BaseSample]
     has_trajectories: bool = False
 
     def __init__(
@@ -246,7 +246,7 @@ class BaseAnemoiReader(ABC):
 
         Cached: some ``anemoi.datasets`` stores rebuild the dict (and re-read the arrays)
         on every access, and every sample must carry the same statistics object for
-        :meth:`SourceSample.collate` to accept them together.
+        :meth:`BaseSample.collate` to accept them together.
         """
         return self.data.statistics
 
@@ -273,7 +273,7 @@ class BaseAnemoiReader(ABC):
     @property
     def is_tabular(self) -> bool:
         """Return whether the reader produces tabular (observation) samples."""
-        return issubclass(self.sample_type, TabularSourceSample)
+        return issubclass(self.sample_type, TabularSample)
 
     @property
     def variables(self) -> list[str]:
@@ -332,11 +332,11 @@ class BaseAnemoiReader(ABC):
         self,
         sequence: int,
         positions: TimeIndices,
-    ) -> SourceSample:
+    ) -> BaseSample:
         """Return a single per-sample payload.
 
-        Gridded readers return a :class:`GriddedSourceSample` with data of shape
-        ``(T, E, N, V)``. Observation readers return a :class:`TabularSourceSample`
+        Gridded readers return a :class:`GriddedSample` with data of shape
+        ``(T, E, N, V)``. Observation readers return a :class:`TabularSample`
         with data of shape ``(E=1, N, V)``, per-point ``timedeltas`` and the time
         windows in ``boundaries``. Coordinates are ``(N, 2)`` ``(latitude, longitude)``
         in **radians**.
@@ -362,7 +362,7 @@ class BaseAnemoiReader(ABC):
 class GriddedDataReader(BaseAnemoiReader):
     """Gridded dataset reader with static grid."""
 
-    sample_type = GriddedSourceSample
+    sample_type = GriddedSample
 
     @property
     def layout(self) -> TensorLayout:
@@ -453,7 +453,7 @@ class GriddedDataReader(BaseAnemoiReader):
         self,
         sequence: int,
         positions: TimeIndices,
-    ) -> GriddedSourceSample:
+    ) -> GriddedSample:
         """Return the per-sample payload in the unified contract."""
         latitudes, longitudes = self.get_latlons()
         data = self.get_data(sequence, positions)
@@ -480,7 +480,7 @@ class TabularDataReader(BaseAnemoiReader):
     :attr:`Batch.metadata` rather than being moved to device.
     """
 
-    sample_type = TabularSourceSample
+    sample_type = TabularSample
 
     @property
     def layout(self) -> TensorLayout:
@@ -515,7 +515,7 @@ class TabularDataReader(BaseAnemoiReader):
         self,
         sequence: int,
         positions: TimeIndices,
-    ) -> TabularSourceSample:
+    ) -> TabularSample:
         """Get a sample from the observation dataset.
 
         Parameters
@@ -527,7 +527,7 @@ class TabularDataReader(BaseAnemoiReader):
 
         Returns
         -------
-        TabularSourceSample
+        TabularSample
             Data of shape ``(1, N, V)`` (leading size-1 ensemble axis), ``(N,)``
             latitudes and longitudes in **radians** (converted by
             :func:`create_source_sample`), ``(N,)``

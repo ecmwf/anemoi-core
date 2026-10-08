@@ -201,7 +201,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return persistent_workers
 
     def _make_collate_fn(self, ds: MultiDataset) -> Callable[[list[dict]], Batch]:
-        del ds  # each SourceSample carries everything collation needs
+        del ds  # each BaseSample carries everything collation needs
         return Batch.collate
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> DataLoader:

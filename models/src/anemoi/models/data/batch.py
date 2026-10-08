@@ -23,7 +23,7 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
-from anemoi.models.data.sample import SourceSample
+from anemoi.models.data.sample import BaseSample
 from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import Template
 
@@ -303,12 +303,12 @@ class Batch:
         return Batch(sources=new_sources)
 
     @staticmethod
-    def collate(samples: list[dict[str, SourceSample]] | dict[str, SourceSample]) -> "Batch":
-        """Collate per-sample :class:`SourceSample` payloads into a :class:`Batch`.
+    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> "Batch":
+        """Collate per-sample :class:`BaseSample` payloads into a :class:`Batch`.
 
-        Each sample is a mapping ``{dataset_name: SourceSample}``. The class of each
+        Each sample is a mapping ``{dataset_name: BaseSample}``. The class of each
         dataset's sample decides how it is collated (see
-        :meth:`GriddedSourceSample.collate` and :meth:`TabularSourceSample.collate`),
+        :meth:`GriddedSample.collate` and :meth:`TabularSample.collate`),
         so every sample of a dataset must be of the same class.
         """
         if isinstance(samples, dict):
@@ -325,9 +325,9 @@ class Batch:
         for name, head in first.items():
             per_sample = [sample[name] for sample in samples]
             sample_cls = type(head)
-            if not isinstance(head, SourceSample) or any(type(s) is not sample_cls for s in per_sample):
+            if not isinstance(head, BaseSample) or any(type(s) is not sample_cls for s in per_sample):
                 kinds = sorted({type(s).__name__ for s in per_sample})
-                msg = f"Dataset {name!r} must be collated from samples of a single SourceSample subclass; got {kinds}."
+                msg = f"Dataset {name!r} must be collated from samples of a single BaseSample subclass; got {kinds}."
                 raise TypeError(msg)
 
             sources[name] = sample_cls.collate(name, per_sample)

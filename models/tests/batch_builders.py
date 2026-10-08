@@ -10,7 +10,7 @@
 """Builders for constructing already-collated batches in tests.
 
 Production code builds a :class:`~anemoi.models.data.batch.Batch` through
-:meth:`Batch.collate` from reader :class:`~anemoi.models.data.sample.SourceSample`
+:meth:`Batch.collate` from reader :class:`~anemoi.models.data.sample.BaseSample`
 objects. Tests frequently need the *result* of collation directly - a batch whose
 tensors already carry a batch axis. :func:`build_batch` takes per-dataset dicts
 and builds a :class:`TabularSource` for list payloads and a :class:`GriddedSource` otherwise.
