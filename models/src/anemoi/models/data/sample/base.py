@@ -29,8 +29,8 @@ class BaseSample(ABC):
     """One dataset's contribution to one sample, as produced by a data reader.
 
     Everything needed to build the collated :class:`~anemoi.models.data.sources.Source` travels with the sample, so
-    collation needs no side channel. Build samples with :func:`~anemoi.models.data.sample.create_source_sample`; each
-    kind is registered in :data:`~anemoi.models.data.sample.source_sample_registry`.
+    collation needs no side channel. Build samples with :func:`~anemoi.models.data.sample.create_sample`; each
+    kind is registered in :data:`~anemoi.models.data.sample.sample_registry`.
 
     Subclasses must implement :meth:`from_validated`, :meth:`_collate_layout` and
     :meth:`_collate_data`, and set the class variable :attr:`source_type` to the
@@ -70,7 +70,7 @@ class BaseSample(ABC):
         coordinates: torch.Tensor,
         **kwargs: Any,
     ) -> Self:
-        """Build a sample from inputs already checked by :func:`create_source_sample`.
+        """Build a sample from inputs already checked by :func:`create_sample`.
 
         ``coordinates`` is an ``(N, 2)`` tensor of ``(latitude, longitude)`` in radians.
         ``kwargs`` holds the other common fields, already converted, plus the arguments

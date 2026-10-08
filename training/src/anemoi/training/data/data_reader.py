@@ -25,7 +25,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data.sample import GriddedSample
 from anemoi.models.data.sample import BaseSample
 from anemoi.models.data.sample import TabularSample
-from anemoi.models.data.sample import create_source_sample
+from anemoi.models.data.sample import create_sample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
 from anemoi.models.distributed.shapes import ShardSizes
@@ -457,7 +457,7 @@ class GriddedDataReader(BaseAnemoiReader):
         """Return the per-sample payload in the unified contract."""
         latitudes, longitudes = self.get_latlons()
         data = self.get_data(sequence, positions)
-        return create_source_sample(
+        return create_sample(
             data_type="gridded",
             data=data,
             variables=self.variables,
@@ -530,7 +530,7 @@ class TabularDataReader(BaseAnemoiReader):
         TabularSample
             Data of shape ``(1, N, V)`` (leading size-1 ensemble axis), ``(N,)``
             latitudes and longitudes in **radians** (converted by
-            :func:`create_source_sample`), ``(N,)``
+            :func:`create_sample`), ``(N,)``
             timedeltas and the per-window ``boundaries``.
         """
         del sequence
@@ -555,7 +555,7 @@ class TabularDataReader(BaseAnemoiReader):
             reader_group_size=self.reader_group_size,
         )
 
-        return create_source_sample(
+        return create_sample(
             data_type="tabular",
             data=data.unsqueeze(0),  # add a leading, size-1 ensemble axis
             variables=self.variables,

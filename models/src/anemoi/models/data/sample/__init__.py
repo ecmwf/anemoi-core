@@ -16,7 +16,7 @@ the matching :class:`~anemoi.models.data.sources.Source`.
 Each kind is registered in :data:`sample_registry` under its name (``"gridded"``,
 ``"tabular"``). Both the data readers (training) and
 :meth:`AnemoiModelInterface.predict_step` (inference) build their samples with
-:func:`create_source_sample`, which validates the inputs and converts them to the
+:func:`create_sample`, which validates the inputs and converts them to the
 canonical form.
 """
 
@@ -29,7 +29,7 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.utils.registry import Registry
 
-source_sample_registry = Registry(__name__)
+sample_registry = Registry(__name__)
 
 # Imported after the registry is defined: each kind registers itself on import.
 from anemoi.models.data.sample.base import BaseSample  # noqa: E402
@@ -40,12 +40,12 @@ __all__ = [
     "GriddedSample",
     "BaseSample",
     "TabularSample",
-    "create_source_sample",
-    "source_sample_registry",
+    "create_sample",
+    "sample_registry",
 ]
 
 
-def create_source_sample(
+def create_sample(
     *,
     data_type: str,
     variables: Sequence[str],
@@ -66,7 +66,7 @@ def create_source_sample(
     Parameters
     ----------
     data_type : str
-        Name of the kind in :data:`source_sample_registry`, e.g. ``"gridded"`` or ``"tabular"``.
+        Name of the kind in :data:`sample_registry`, e.g. ``"gridded"`` or ``"tabular"``.
     variables : Sequence[str]
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout or Sequence[str]
@@ -82,7 +82,6 @@ def create_source_sample(
         samples; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)`` pairs)
         and ``shard_sizes`` for tabular samples.
     """
-    source_sample_class = source_sample_registry.lookup(data_type)
     device = data.device if data is not None else None
 
     latitudes = _as_radians(latitudes, device)
@@ -113,7 +112,8 @@ def create_source_sample(
             msg = f"data carries {n_grid} points but {num_points} coordinates were given."
             raise ValueError(msg)
 
-    return source_sample_class.from_validated(
+    sample_cls = sample_registry.lookup(data_type)
+    return sample_cls.from_validated(
         n_points=num_points,
         device=device,
         data=data,

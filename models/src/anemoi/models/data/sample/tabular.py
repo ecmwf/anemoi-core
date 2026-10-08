@@ -16,13 +16,13 @@ from typing import Self
 import torch
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sample import source_sample_registry
+from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sample.base import BaseSample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.shapes import ShardSizes
 
 
-@source_sample_registry.register("tabular")
+@sample_registry.register("tabular")
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class TabularSample(BaseSample):
     """A sample of points that change from sample to sample (e.g. observations).
@@ -66,6 +66,25 @@ class TabularSample(BaseSample):
     def _collate_data(cls, samples: Sequence[Self]) -> list[torch.Tensor]:
         """Collate the per-sample data tensors into a list of tensors."""
         return [s.data for s in samples]
+
+    @classmethod
+    def _collate_dynamic_attrs(cls, samples: Sequence[Self]) -> dict[str, Any]:
+        """Keep one value per sample, collapsing unsharded ``shard_sizes`` to ``None``.
+
+        :class:`TabularSource` treats ``shard_sizes is None`` as replicated, so a list of
+        ``None`` entries would wrongly read as sharded. A mix of sharded and unsharded
+        samples cannot be gathered consistently and is rejected.
+        """
+        # No zero-argument super(): slots=True rebuilds the class, which breaks it.
+        attrs = {attr: [getattr(s, attr) for s in samples] for attr in cls._DYNAMIC_ATTRS}
+        shard_sizes = attrs["shard_sizes"]
+        n_unsharded = sum(sizes is None for sizes in shard_sizes)
+        if n_unsharded == len(shard_sizes):
+            attrs["shard_sizes"] = None
+        elif n_unsharded:
+            msg = f"The batch mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
+            raise ValueError(msg)
+        return attrs
 
     @classmethod
     def from_validated(

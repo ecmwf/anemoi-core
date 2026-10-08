@@ -197,6 +197,23 @@ class AnemoiModelInterface(torch.nn.Module):
             }
         )
 
+    def _get_template(
+        self, x: dict[str, dict], ensemble_size: int = 1, batch_size: int = 1, num_target_timesteps: int = 1
+    ) -> Batch:
+        """Build a template batch with the given ensemble size, batch size, and number of target timesteps."""
+        return Batch.collate(
+            {
+                name: create_template(
+                    statistics=self._statistics_for(name, payload["variables"]),
+                    **payload,
+                    ensemble_size=ensemble_size,
+                    batch_size=batch_size,
+                    time_size=num_target_timesteps,
+                )
+                for name, payload in x.items()
+            }
+        )
+
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
         The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
@@ -276,9 +293,7 @@ class AnemoiModelInterface(torch.nn.Module):
 
         # Convert to batch
         x = self._get_batch(x)
-        breakpoint()
-        target = self._get_batch(target_template)
-        breakpoint()
+        target = self._get_template(target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size)
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
@@ -298,7 +313,6 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
-        breakpoint()
         return self.unwrap_batch(pred_batch)
 
     def _update_metadata(self) -> None:

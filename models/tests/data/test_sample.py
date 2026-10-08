@@ -14,8 +14,8 @@ from anemoi.models.data import Batch
 from anemoi.models.data import GriddedSample
 from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data import create_source_sample
-from anemoi.models.data.sample import source_sample_registry
+from anemoi.models.data import create_sample
+from anemoi.models.data.sample import sample_registry
 
 LATS = [0.0, 45.0, 90.0]
 LONS = [0.0, 90.0, 180.0]
@@ -30,7 +30,7 @@ def _gridded(**overrides):
         "latitudes": LATS,
         "longitudes": LONS,
     }
-    return create_source_sample(**(kwargs | overrides))
+    return create_sample(**(kwargs | overrides))
 
 
 def _tabular(**overrides):
@@ -44,7 +44,7 @@ def _tabular(**overrides):
         "timedeltas": [0.0, 0.0, 3600.0],
         "boundaries": [(0, 2), (2, 3)],
     }
-    return create_source_sample(**(kwargs | overrides))
+    return create_sample(**(kwargs | overrides))
 
 
 def test_gridded_converts_layout_and_degrees():
@@ -105,8 +105,8 @@ def test_tabular_validation(overrides, match):
 
 
 def test_registry_holds_both_kinds():
-    assert source_sample_registry.lookup("gridded") is GriddedSample
-    assert source_sample_registry.lookup("tabular") is TabularSample
+    assert sample_registry.lookup("gridded") is GriddedSample
+    assert sample_registry.lookup("tabular") is TabularSample
 
 
 @pytest.mark.parametrize(
