@@ -7,9 +7,11 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import logging
 import math
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 from hydra.utils import instantiate
@@ -18,9 +20,12 @@ from torch import nn
 
 from anemoi.models.layers.ensemble import SphericalInputConditionedNoise
 from anemoi.models.layers.ensemble import SphericalInputNoise
+from anemoi.models.layers.ensemble import kT_from_length_scale
 from anemoi.models.layers.spectral_helpers import quadrature_weights
 from anemoi.models.layers.spectral_transforms import SphericalSpectralFilter
-from anemoi.models.layers.spherical_noise import diffusion_band_limit
+from anemoi.models.layers.spherical_noise import band_limit
+from anemoi.models.layers.spherical_noise import degree_variance
+from anemoi.models.layers.spherical_noise import heat_kernel_response
 from anemoi.models.models.ens_encoder_processor_decoder import AnemoiEnsModelEncProcDec
 
 NLAT = 16
@@ -216,46 +221,138 @@ def test_accepts_an_omegaconf_config() -> None:
     assert noise.sample().shape == (1, 2, 1, 2, NUM_POINTS)
 
 
+# --- named channels and seeds -------------------------------------------------------------
+
+
+def test_named_kt_channels_match_the_fcn3_ladder() -> None:
+    kT = [0.05, 0.1]
+    ladder = SphericalInputNoise(
+        grid=NLAT, noise={"type": "diffusion", "kT": kT}, n_channels=2, num_time_steps=N_STEP_INPUT
+    )
+    named = SphericalInputNoise(
+        grid=NLAT,
+        noise={"type": "diffusion"},
+        channels={"small": {"kT": kT[0]}, "large": {"kT": kT[1]}},
+        num_time_steps=N_STEP_INPUT,
+    )
+    assert named.n_channels == 2
+
+    for fcstep in range(2):
+        for noise in (ladder, named):
+            noise.advance(fcstep=fcstep, batch_size=2, ensemble_size=2, seed=1)
+        torch.testing.assert_close(named.sample(), ladder.sample(), atol=1e-5, rtol=1e-4)
+
+
+@pytest.mark.parametrize(
+    "noise, channels, match",
+    [
+        ({"type": "diffusion"}, {"a": {"kT": 0.1, "spread": ["t"]}}, "SphericalInputConditionedNoise"),
+        ({"type": "diffusion", "kT": [0.1]}, {"a": {"kT": 0.1}}, "per channel"),
+        ({"type": "white"}, {"a": {"kT": 0.1}}, "diffusion"),
+        ({"type": "diffusion"}, {"a": {"kT": 0.1, "spectrum": {"degree": [1, 2], "sigma2": [1, 1]}}}, "exactly one"),
+        ({"type": "diffusion"}, {"a": {"kT": 0.1, "spred": ["t"]}}, "unknown keys"),
+    ],
+)
+def test_invalid_channels_are_rejected(noise, channels, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        SphericalInputNoise(grid=NLAT, noise=noise, channels=channels, num_time_steps=1)
+
+
+def test_channel_count_must_agree_with_n_channels() -> None:
+    with pytest.raises(ValueError, match="n_channels=3"):
+        SphericalInputNoise(grid=NLAT, noise={"type": "diffusion"}, channels={"a": {"kT": 0.1}}, n_channels=3)
+
+
+def test_seed_sets_the_noise_stream(input_noise) -> None:
+    other = SphericalInputNoise(
+        grid=NLAT,
+        noise={"type": "diffusion", "sigma": 1.0, "lambd": 1.0},
+        n_channels=NUM_NOISE,
+        num_time_steps=N_STEP_INPUT,
+    )
+    input_noise.advance(fcstep=0, batch_size=1, ensemble_size=2, seed=11)
+    other.advance(fcstep=0, batch_size=1, ensemble_size=2, seed=11)
+    torch.testing.assert_close(input_noise.sample(), other.sample())
+
+    other.advance(fcstep=0, batch_size=1, ensemble_size=2, seed=12)
+    assert not torch.allclose(input_noise.sample(), other.sample())
+
+
+def test_without_a_seed_the_noise_follows_torch() -> None:
+    """How inference draws different members: each run is seeded differently."""
+
+    def draw(torch_seed: int) -> torch.Tensor:
+        torch.manual_seed(torch_seed)
+        noise = SphericalInputNoise(grid=NLAT, noise={"type": "diffusion"}, n_channels=1, num_time_steps=1)
+        noise.advance(fcstep=0, batch_size=1, ensemble_size=1)
+        return noise.sample()
+
+    torch.testing.assert_close(draw(3), draw(3))
+    assert not torch.allclose(draw(3), draw(4))
+
+
 # --- spread-conditioned noise -------------------------------------------------------------
 
-# Model input of the stub: two plain variables interleaved with three spread fields.
+# Model input of the stub: two plain variables interleaved with three spread fields. The stub's
+# data and model inputs coincide, so the statistics are indexed the same way.
 STD_NAME_TO_INDEX = {"a": 0, "std_t_850": 1, "b": 2, "std_q_850": 3, "std_2t": 4}
 STD_IDX = [1, 3, 4]
 KEPT_IDX = [0, 2]
-# Large enough kT that every channel's band ends well below the grid's degree 15.
-KT = [0.05, 0.1, 0.05]
-MODULATION = {"groups": {"A": ["t", "2t"], "C": ["q"]}, "channel_group": ["A", "A", "C"]}
+STATISTICS = {
+    "mean": np.array([0.0, 2.0, 0.0, 0.5, 1.0]),
+    "stdev": np.array([1.0, 1.0, 1.0, 0.25, 0.5]),
+    "maximum": np.array([1.0, 8.0, 1.0, 2.0, 4.0]),
+}
+SPREAD_MEAN = torch.tensor([2.0, 0.5, 1.0])  # of the spread inputs, in input order
+# Every band ends well below the grid's degree 15: kT large, and a table falling off by degree 8.
+SPECTRUM = {"degree": [1.0, 2.0, 4.0, 8.0], "sigma2": [1.0, 0.6, 0.1, 1e-6]}
+CHANNELS = {
+    "t": {"kT": 0.05, "spread": ["t_850", "2t"]},
+    "q": {"spectrum": SPECTRUM, "spread": ["q_850"]},
+    "large": {"kT": 0.1},
+}
+SCALED, UNSCALED = [0, 1], [2]
+MODULATION = {"reference": "climatology", "normalizer": "none", "smoothing_km": None}
 
 
 def noise_params() -> dict:
-    return {"type": "diffusion", "sigma": 1.0, "lambd": 1.0, "kT": list(KT)}
+    return {"type": "diffusion", "sigma": 1.0, "lambd": 1.0}
+
+
+def unscaled_channels() -> dict:
+    return {name: {key: value for key, value in spec.items() if key != "spread"} for name, spec in CHANNELS.items()}
 
 
 def make_plain(**kwargs) -> SphericalInputNoise:
-    params = {"grid": NLAT, "noise": noise_params(), "n_channels": NUM_NOISE, "dataset": "era5"}
+    params = {"grid": NLAT, "noise": noise_params(), "channels": unscaled_channels(), "dataset": "era5"}
     params.update(num_time_steps=N_STEP_INPUT, num_grid_points=NUM_POINTS, **kwargs)
     return SphericalInputNoise(**params)
 
 
-def make_conditioned(modulation: dict | None = None, **kwargs) -> SphericalInputConditionedNoise:
-    params = {"grid": NLAT, "noise": noise_params(), "n_channels": NUM_NOISE, "dataset": "era5"}
+def make_conditioned(modulation: dict | None = None, channels: dict | None = None, **kwargs):
+    params = {"grid": NLAT, "noise": noise_params(), "channels": channels or CHANNELS, "dataset": "era5"}
     params.update(num_time_steps=N_STEP_INPUT, num_grid_points=NUM_POINTS, **kwargs)
     return SphericalInputConditionedNoise(
-        modulation={**MODULATION, **(modulation or {})}, name_to_index=STD_NAME_TO_INDEX, **params
+        modulation={**MODULATION, **(modulation or {})},
+        name_to_index=STD_NAME_TO_INDEX,
+        statistics=STATISTICS,
+        name_to_index_stats=STD_NAME_TO_INDEX,
+        **params,
     )
 
 
 def spread_inputs(batch: int = 2, seed: int = 0, constant: bool = False) -> torch.Tensor:
-    """Positive spread fields, shape (batch, time, points, variables)."""
+    """Positive spread fields around their climatological mean, shape (batch, time, points, variables)."""
     if constant:
-        return torch.full((batch, N_STEP_INPUT, NUM_POINTS, len(STD_IDX)), 2.0)
+        return SPREAD_MEAN.expand(batch, N_STEP_INPUT, NUM_POINTS, len(STD_IDX)).clone()
     generator = torch.Generator().manual_seed(seed)
-    return torch.rand(batch, N_STEP_INPUT, NUM_POINTS, len(STD_IDX), generator=generator) * 3.0 + 0.1
+    ratio = torch.rand(batch, N_STEP_INPUT, NUM_POINTS, len(STD_IDX), generator=generator) * 3.0 + 0.1
+    return ratio * SPREAD_MEAN
 
 
 def advance(noise, fcstep: int, inputs: torch.Tensor | None = None, ensemble_size: int = 2) -> torch.Tensor:
     batch = inputs.shape[0] if inputs is not None else 2
-    noise.advance(fcstep=fcstep, batch_size=batch, ensemble_size=ensemble_size, inputs=inputs)
+    noise.advance(fcstep=fcstep, batch_size=batch, ensemble_size=ensemble_size, inputs=inputs, seed=5)
     return noise.sample().clone()
 
 
@@ -270,9 +367,9 @@ class _ConfiguredStubEnsModel(_StubEnsModel):
         super().__init__(None)
         self._input_noise_config = OmegaConf.create(config)
         self.input_datasets = ["era5"]
-        self.data_indices = {
-            "era5": SimpleNamespace(model=SimpleNamespace(input=SimpleNamespace(name_to_index=STD_NAME_TO_INDEX)))
-        }
+        self.statistics = {"era5": STATISTICS}
+        indices = SimpleNamespace(input=SimpleNamespace(name_to_index=STD_NAME_TO_INDEX))
+        self.data_indices = {"era5": SimpleNamespace(model=indices, data=indices)}
         self._build_input_noise()
 
 
@@ -280,8 +377,8 @@ def conditioned_config(**modulation) -> dict:
     return {
         "_target_": "anemoi.models.layers.ensemble.SphericalInputConditionedNoise",
         "grid": NLAT,
-        "n_channels": NUM_NOISE,
         "noise": noise_params(),
+        "channels": CHANNELS,
         "modulation": {**MODULATION, **modulation},
     }
 
@@ -291,6 +388,7 @@ def test_conditioned_noise_replaces_its_inputs_in_the_encoder_width() -> None:
     without = _StubEnsModel(None)._calculate_input_dim("era5")
 
     assert model.input_noise.consumed_input_idx == STD_IDX
+    assert model.input_noise.modulated_channels == SCALED
     assert model._calculate_input_dim("era5") - without == N_STEP_INPUT * (NUM_NOISE - len(STD_IDX))
 
 
@@ -355,22 +453,23 @@ class _ForwardStubEnsModel(_ConfiguredStubEnsModel):
 @pytest.mark.parametrize("fcstep, expects_inputs", [(0, True), (1, False), (3, False)])
 def test_forward_passes_the_spread_only_at_the_first_step(fcstep, expects_inputs) -> None:
     model = _ForwardStubEnsModel(conditioned_config())
-    x = {"era5": torch.rand(1, N_STEP_INPUT, 2, NUM_POINTS, NUM_VARS) + 0.5}
+    x = {"era5": (torch.rand(1, N_STEP_INPUT, 2, NUM_POINTS, NUM_VARS) + 0.5) * 2.0}
     if fcstep > 0:
         with pytest.raises(_NoiseAdvanced):
-            model.forward(x, fcstep=0)
+            model.forward(x, fcstep=0, input_noise_seed=17)
 
     with pytest.raises(_NoiseAdvanced):
-        model.forward(x, fcstep=fcstep)
+        model.forward(x, fcstep=fcstep, input_noise_seed=17)
 
-    inputs = model.advance_calls[-1]["inputs"]
+    call = model.advance_calls[-1]
+    assert call["seed"] == 17
     if expects_inputs:
-        torch.testing.assert_close(inputs, x["era5"][:, :, 0][..., STD_IDX])
+        torch.testing.assert_close(call["inputs"], x["era5"][:, :, 0][..., STD_IDX])
     else:
-        assert inputs is None
+        assert call["inputs"] is None
 
 
-def test_disabled_modulation_is_plain_fcn3_noise() -> None:
+def test_disabled_modulation_is_the_same_channels_unscaled() -> None:
     conditioned = make_conditioned({"enabled": False})
     plain = make_plain()
 
@@ -378,9 +477,18 @@ def test_disabled_modulation_is_plain_fcn3_noise() -> None:
         torch.testing.assert_close(advance(conditioned, fcstep), advance(plain, fcstep))
 
 
-def test_unit_amplitude_with_an_all_pass_band_is_plain_fcn3_noise() -> None:
-    """Uniform spread and no filtering must leave the FourCastNet 3 noise untouched, step after step."""
-    conditioned = make_conditioned({"band_filter": {"quantile": 1.0, "taper": 0.0}})
+def test_channels_without_spread_are_untouched() -> None:
+    conditioned = make_conditioned()
+    plain = make_plain()
+
+    for fcstep, inputs in ((0, spread_inputs()), (1, None)):
+        scaled, unscaled = advance(conditioned, fcstep, inputs), advance(plain, fcstep)
+        torch.testing.assert_close(scaled[:, :, :, UNSCALED], unscaled[:, :, :, UNSCALED])
+        assert not torch.allclose(scaled[:, :, :, SCALED], unscaled[:, :, :, SCALED])
+
+
+def test_spread_at_its_climatology_with_an_all_pass_band_leaves_the_noise_unchanged() -> None:
+    conditioned = make_conditioned({"rescale": "none", "band_filter": {"quantile": 1.0, "taper": 0.0}})
     plain = make_plain()
 
     torch.testing.assert_close(
@@ -390,57 +498,75 @@ def test_unit_amplitude_with_an_all_pass_band_is_plain_fcn3_noise() -> None:
 
 
 def test_noise_is_stronger_where_the_spread_is_higher() -> None:
-    conditioned = make_conditioned({"smooth_to_channel": False})
-    inputs = torch.ones(4, N_STEP_INPUT, NUM_POINTS, len(STD_IDX))
+    conditioned = make_conditioned()
+    inputs = spread_inputs(batch=4, constant=True)
     north = NUM_POINTS // 2  # rings run north to south
-    inputs[:, :, :north] = 3.0
+    inputs[:, :, :north] *= 3.0
 
-    field = advance(conditioned, 0, inputs, ensemble_size=4)
+    field = advance(conditioned, 0, inputs, ensemble_size=4)[:, :, :, SCALED]
 
-    north_variance = field[..., :north].pow(2).mean()
-    south_variance = field[..., north:].pow(2).mean()
-    assert north_variance > 3.0 * south_variance
+    assert field[..., :north].pow(2).mean() > 3.0 * field[..., north:].pow(2).mean()
 
 
-@pytest.mark.parametrize("smooth, raw_leakage", [(False, 1e-3), (True, 1e-5)])
-def test_each_channel_is_confined_to_its_own_band(smooth, raw_leakage) -> None:
-    """Modulation leaks energy to small scales; the band filter must return each channel to its band.
+@pytest.mark.parametrize("reference, ratio", [("climatology", 4.0), ("sample_mean", 1.0)])
+def test_climatology_keeps_how_uncertain_the_whole_analysis_is(reference, ratio) -> None:
+    """Twice the spread everywhere: twice the noise against the climatology, unchanged per sample."""
+    modulation = {"reference": reference, "clip": None, "band_filter": {"quantile": 1.0, "taper": 0.0}}
+    inputs = spread_inputs()
 
-    Smoothing the amplitude to the channel scale already removes most of the leakage, the
-    band filter the rest.
+    once = advance(make_conditioned(modulation), 0, inputs)[:, :, :, SCALED]
+    twice = advance(make_conditioned(modulation), 0, 2.0 * inputs)[:, :, :, SCALED]
+
+    torch.testing.assert_close(area_mean(twice**2), ratio * area_mean(once**2), rtol=1e-4, atol=1e-6)
+
+
+def test_fixed_rescale_brings_the_long_term_mean_square_to_one() -> None:
+    conditioned = make_conditioned()
+    mean_square = 1.0 + (STATISTICS["stdev"][STD_IDX] / STATISTICS["mean"][STD_IDX]) ** 2
+    expected = torch.tensor([(mean_square[0] + mean_square[2]) / 2, mean_square[1]], dtype=torch.float32) ** -0.5
+
+    torch.testing.assert_close(conditioned.std_modulation.channel_scale, expected)
+
+
+@pytest.mark.parametrize("smoothing_km, raw_leakage", [(None, 1e-3), (2000.0, 1e-5)])
+def test_each_scaled_channel_is_confined_to_its_own_band(smoothing_km, raw_leakage) -> None:
+    """Scaling leaks energy to small scales; the band filter must return each channel to its band.
+
+    Smoothing the multiplier already removes most of the leakage, the band filter the rest.
     """
-    conditioned = make_conditioned({"smooth_to_channel": smooth})
+    conditioned = make_conditioned({"smoothing_km": smoothing_km})
     plain = make_plain()
     inputs = spread_inputs(batch=2)
 
     field = advance(conditioned, 0, inputs)
-    raw_product = advance(plain, 0) * conditioned.std_modulation(inputs).unsqueeze(1)
+    raw_product = advance(plain, 0)[:, :, :, SCALED] * conditioned.std_modulation(inputs).unsqueeze(1)
 
     # the module's own filter stops at the band edge; measure at full resolution
     full_resolution = SphericalSpectralFilter([2 * NLAT] * NLAT, truncation=NLAT - 1)
     assert conditioned.spectral_filter.truncation < full_resolution.truncation
-    coeffs = full_resolution.analyse(field)
+    coeffs = full_resolution.analyse(field[:, :, :, SCALED])
     raw_coeffs = full_resolution.analyse(raw_product)
-    for channel, kT in enumerate(KT):
-        end = math.ceil(int(diffusion_band_limit(torch.tensor([kT]), NLAT)[0]) * 1.25)
-        total = (coeffs[:, :, :, channel].abs() ** 2).sum()
-        assert (raw_coeffs[:, :, :, channel, end:].abs() ** 2).sum() > raw_leakage * total
-        assert (coeffs[:, :, :, channel, end:].abs() ** 2).sum() < 1e-8 * total
+    variance = degree_variance(conditioned._coefficient_variance[SCALED])
+    for row, limit in enumerate(band_limit(variance).tolist()):
+        end = math.ceil(limit * 1.25)
+        total = (coeffs[:, :, :, row].abs() ** 2).sum()
+        assert (raw_coeffs[:, :, :, row, end:].abs() ** 2).sum() > raw_leakage * total
+        assert (coeffs[:, :, :, row, end:].abs() ** 2).sum() < 1e-8 * total
 
 
-def test_filtering_preserves_the_modulated_variance() -> None:
+def test_filtering_preserves_the_scaled_variance() -> None:
     conditioned = make_conditioned()
     plain = make_plain()
     inputs = spread_inputs()
 
-    field = advance(conditioned, 0, inputs)
-    raw_product = advance(plain, 0) * conditioned.std_modulation(inputs).unsqueeze(1)
+    field = advance(conditioned, 0, inputs)[:, :, :, SCALED]
+    raw_product = advance(plain, 0)[:, :, :, SCALED] * conditioned.std_modulation(inputs).unsqueeze(1)
 
     torch.testing.assert_close(area_mean(field**2), area_mean(raw_product**2), rtol=1e-4, atol=1e-6)
 
 
-def test_modulated_field_decays_by_phi_and_slides_with_the_history() -> None:
-    """After the first step the spread is no longer read: the OU process carries the modulation forward."""
+def test_scaled_field_decays_by_phi_and_slides_with_the_history() -> None:
+    """After the first step the spread is no longer read: the OU process carries the scaling forward."""
     conditioned = make_conditioned()
     first = advance(conditioned, 0, spread_inputs())
     conditioned.noise._draw_normal = lambda out: out.zero_()  # no innovation: only the decay remains
@@ -460,7 +586,7 @@ def test_history_slides_in_lockstep_with_innovations() -> None:
         previous = current
 
 
-def test_antithetic_pairs_survive_modulation() -> None:
+def test_antithetic_pairs_survive_scaling() -> None:
     conditioned = make_conditioned(centered=True)
     field = advance(conditioned, 0, spread_inputs(), ensemble_size=4)
 
@@ -468,7 +594,7 @@ def test_antithetic_pairs_survive_modulation() -> None:
     torch.testing.assert_close(field[:, 2], -field[:, 3])
 
 
-def test_modulation_runs_in_fp32_under_autocast() -> None:
+def test_scaling_runs_in_fp32_under_autocast() -> None:
     inputs = spread_inputs()
     reference = advance(make_conditioned(), 0, inputs)
 
@@ -477,6 +603,32 @@ def test_modulation_runs_in_fp32_under_autocast() -> None:
 
     assert field.dtype == torch.float32
     torch.testing.assert_close(field, reference, atol=0.05, rtol=0.05)
+
+
+def test_smoothing_takes_the_coarsest_of_a_channels_variables() -> None:
+    channels = {**CHANNELS, "q": {**CHANNELS["q"], "smoothing_km": 300.0}}
+    conditioned = make_conditioned({"smoothing_km": 100.0, "smoothing_km_by_variable": {"2t": 400.0}}, channels)
+
+    # t: the coarser of t_850 (default 100 km) and 2t (400 km); q: its own override
+    expected = heat_kernel_response(torch.tensor([kT_from_length_scale(400.0), kT_from_length_scale(300.0)]), NLAT)
+    response = conditioned.std_modulation.smooth_response
+    torch.testing.assert_close(response, expected[:, : response.shape[-1]].float())
+
+
+def test_smooth_to_channel_needs_kt_channels() -> None:
+    with pytest.raises(ValueError, match="smoothing_km"):
+        make_conditioned({"smooth_to_channel": True})
+    make_conditioned({"smooth_to_channel": True}, {**CHANNELS, "q": {**CHANNELS["q"], "smoothing_km": 500.0}})
+
+
+def test_layout_and_first_draw_are_logged(caplog) -> None:
+    """The layout and first-draw lines are how a run is checked, so they must format."""
+    caplog.set_level(logging.INFO, logger="anemoi.models.layers.ensemble")
+    advance(make_conditioned(), 0, spread_inputs())
+
+    messages = "\n".join(caplog.messages)
+    assert "2 of 3 channels scaled by 3 'std_' inputs (2 distinct groups); reference=climatology" in messages
+    assert "scaled draw; multiplier in" in messages
 
 
 def test_first_step_requires_the_spread() -> None:
@@ -489,21 +641,43 @@ def test_spread_shape_is_validated() -> None:
         advance(make_conditioned(), 0, spread_inputs()[..., :2])
 
 
-def test_modulation_needs_a_diffusion_state() -> None:
-    with pytest.raises(ValueError, match="diffusion"):
+def test_wrong_normalizer_fails_on_the_first_sample() -> None:
+    with pytest.raises(ValueError, match="normalizer"):
+        advance(make_conditioned(), 0, spread_inputs() * 1000.0)
+
+
+@pytest.mark.parametrize(
+    "modulation, match",
+    [
+        ({"normalizer": None}, "needs modulation.normalizer"),
+        ({"normalizer": "mean-std"}, "rescales without shifting"),
+        ({"reference": "sample_mean", "rescale": "climatology"}, "needs reference 'climatology'"),
+        ({"rescale": "sometimes"}, "rescale must be one of"),
+        ({"smooth_to_chanel": True}, "unknown keys"),
+    ],
+)
+def test_invalid_modulation_is_rejected(modulation, match) -> None:
+    with pytest.raises(ValueError, match=match):
+        make_conditioned(modulation)
+
+
+def test_climatology_needs_the_dataset_statistics() -> None:
+    with pytest.raises(ValueError, match="statistics"):
         SphericalInputConditionedNoise(
             grid=NLAT,
-            noise={"type": "white"},
-            n_channels=NUM_NOISE,
-            num_time_steps=N_STEP_INPUT,
+            noise=noise_params(),
+            channels=CHANNELS,
             modulation=MODULATION,
             name_to_index=STD_NAME_TO_INDEX,
+            num_time_steps=N_STEP_INPUT,
         )
 
 
-def test_every_channel_needs_a_group() -> None:
-    with pytest.raises(ValueError, match="channel_group"):
-        make_conditioned({"channel_group": ["A", "C"]})
+def test_scaling_needs_a_channel_with_spread_and_a_diffusion_state() -> None:
+    with pytest.raises(ValueError, match="names 'spread'"):
+        make_conditioned(channels=unscaled_channels())
+    with pytest.raises(ValueError, match="diffusion"):
+        make_conditioned(noise={"type": "white"})
 
 
 def test_spread_buffers_are_not_checkpointed() -> None:

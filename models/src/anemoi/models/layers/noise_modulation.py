@@ -11,16 +11,17 @@ r"""Spatial amplitude maps for input noise, built from ensemble spread fields.
 
 The FourCastNet 3 perturbation (:class:`~anemoi.models.layers.ensemble.SphericalInputNoise`)
 has the same amplitude everywhere on the globe. Real analysis uncertainty does
-not: it concentrates in fronts, convection, jets and data-sparse regions. The
-modules here turn a set of spread fields -- e.g. the ERA5 EDA standard deviation,
-joined into the input dataset as ``std_``-prefixed forcings -- into one
-dimensionless amplitude map per noise channel, so a channel can be redistributed
-in space without changing how much noise it carries overall.
+not: it concentrates in fronts, convection, jets and data-sparse regions, and it
+was larger in decades with fewer observations. The modules here turn a set of
+spread fields -- e.g. the ERA5 EDA standard deviation, joined into the input
+dataset as ``std_``-prefixed forcings -- into one dimensionless amplitude map per
+noise channel.
 """
 
 import logging
 from typing import Optional
 
+import numpy as np
 import torch
 from torch import Tensor
 from torch import nn
@@ -28,6 +29,77 @@ from torch import nn
 from anemoi.models.layers.spectral_transforms import SphericalSpectralFilter
 
 LOGGER = logging.getLogger(__name__)
+
+# Data normalisers that only rescale a variable. A spread divided by its mean is unit-free
+# only if the normaliser does not shift it, which rules out 'mean-std' and 'min-max'.
+SCALE_ONLY_NORMALIZERS = ("none", "std", "max")
+
+# The area-mean of a spread field over its climatological mean is about 1 on any sample
+# (0.5-2.5 across the ERA5 record). Far outside these bounds the reference is in the wrong
+# units, i.e. ``normalizer`` does not match the data config.
+REFERENCE_CHECK_BOUNDS = (0.1, 10.0)
+
+
+def climatological_spread_statistics(
+    variables: list[str],
+    statistics: dict,
+    name_to_index_stats: dict[str, int],
+    normalizer: str,
+) -> tuple[Tensor, Tensor]:
+    r"""Climatological reference and mean square of each spread variable.
+
+    For a spread field :math:`S_v` with dataset mean :math:`\mu_v` and standard
+    deviation :math:`s_v` over the statistics period:
+
+    - the **reference** is :math:`\mu_v` in the units the model receives, i.e. after
+      the data normaliser, so :math:`S_v / \mathrm{reference}_v` is the spread in
+      multiples of its climatological mean whatever the normaliser;
+    - the **mean square** of that ratio over all times and points is
+      :math:`1 + (s_v / \mu_v)^2`. Dividing by its square root makes the long-term
+      mean square of the multiplier about one (a little less once it is smoothed
+      and clipped), while keeping its variations in space and time.
+
+    Parameters
+    ----------
+    variables : list[str]
+        Spread variables, as named in the dataset (e.g. ``std_t_850``).
+    statistics : dict
+        Dataset statistics (``mean``, ``stdev``, ``maximum``), indexed like ``name_to_index_stats``.
+    name_to_index_stats : dict[str, int]
+        Position of each variable in ``statistics``, i.e. ``data_indices.data.input.name_to_index``.
+    normalizer : str
+        How the data config normalises these variables: one of :data:`SCALE_ONLY_NORMALIZERS`.
+
+    Returns
+    -------
+    tuple[Tensor, Tensor]
+        Reference and mean square, each of shape ``(variables,)``.
+    """
+    if normalizer not in SCALE_ONLY_NORMALIZERS:
+        raise ValueError(
+            f"normalizer '{normalizer}' is not supported for spread fields: a spread over its mean is only "
+            f"unit-free if the data normaliser rescales without shifting, i.e. one of {SCALE_ONLY_NORMALIZERS}."
+        )
+    missing = sorted(set(variables) - set(name_to_index_stats))
+    if missing:
+        raise ValueError(f"spread variables {missing} have no dataset statistics.")
+
+    index = [name_to_index_stats[name] for name in variables]
+    mean = np.asarray(statistics["mean"], dtype=np.float64)[index]
+    stdev = np.asarray(statistics["stdev"], dtype=np.float64)[index]
+    if np.any(mean <= 0):
+        bad = [name for name, value in zip(variables, mean) if value <= 0]
+        raise ValueError(f"spread variables {bad} have a non-positive climatological mean.")
+
+    if normalizer == "std":
+        mean_in_model_units = mean / stdev
+    elif normalizer == "max":
+        mean_in_model_units = mean / np.asarray(statistics["maximum"], dtype=np.float64)[index]
+    else:
+        mean_in_model_units = mean
+
+    mean_square = 1.0 + (stdev / mean) ** 2
+    return torch.as_tensor(mean_in_model_units), torch.as_tensor(mean_square)
 
 
 def strip_level(name: str) -> str:
@@ -46,21 +118,35 @@ class GroupedStdModulation(nn.Module):
 
     For variable group :math:`g` and channel :math:`c` assigned to it:
 
-    1. **Normalise** every spread field by its own area-weighted global mean, so
-       that :math:`R_v = S_v / \langle S_v \rangle_A`. This makes fields in
-       different units (``q`` in kg/kg, ``z`` in m^2/s^2) comparable, and because
-       it is a ratio it is independent of any per-variable scaling the data
-       normaliser applied.
-    2. **Group** by averaging, :math:`G_g = \mathrm{mean}_{v \in g} R_v`, so that
-       the group map has :math:`\langle G_g \rangle_A = 1` exactly.
+    1. **Normalise** every spread field to a dimensionless ratio, so fields in
+       different units (``q`` in kg/kg, ``z`` in m^2/s^2) are comparable. The
+       ratio is :math:`R_v = S_v / \mathrm{ref}_v`, with
+
+       - ``reference`` given, a fixed :math:`\mathrm{ref}_v` per variable,
+         typically its climatological mean
+         (:func:`climatological_spread_statistics`). The ratio then keeps how
+         uncertain the whole analysis is, e.g. that the 1980s were less well
+         observed than the 2020s;
+       - without it, the field's own area-weighted global mean on that sample,
+         so that :math:`\mathrm{ref}_v = \langle S_v \rangle_A`. The ratio keeps
+         only where the uncertainty is, and is independent of any per-variable
+         scaling the data normaliser applied.
+    2. **Group** by averaging, :math:`G_g = \mathrm{mean}_{v \in g} R_v`.
     3. **Smooth** (optional) with a per-channel spectral response, so the
-       amplitude varies no faster than the channel it modulates.
-    4. **Clip** to ``clip``. The global mean is one, so the bounds read as
-       multiples of the global mean amplitude.
-    5. **Renormalise** (optional) so :math:`\langle M_c^2 \rangle_A = 1`. Noise of
-       unit variance multiplied by :math:`M_c` then keeps unit variance on
-       average over the globe: the map moves noise around, never adds or
-       removes it.
+       amplitude varies no faster than the noise it scales and the sampling noise
+       of a small ensemble's spread is damped.
+    4. **Clip** to ``clip``, in multiples of the reference.
+    5. **Rescale**, with one of:
+
+       - with ``mean_square``, divide by a fixed constant per channel, the square
+         root of :math:`\mathrm{mean}_{v \in g}\,\overline{R_v^2}`, where each
+         ratio's long-term mean square is :math:`\overline{R_v^2}`. The multiplier
+         then has a long-term mean square of about one but still varies from
+         sample to sample;
+       - with ``preserve_total_variance``, renormalise every sample to unit
+         area-weighted mean square, :math:`\langle M_c^2 \rangle_A = 1`. Noise of
+         unit variance multiplied by the map keeps unit variance over the globe:
+         the map moves noise around, never adds or removes it.
 
     All spatial means are area-weighted with ``area_weights``, so the dense
     polar rows of a reduced grid do not dominate.
@@ -80,10 +166,16 @@ class GroupedStdModulation(nn.Module):
         Per-grid-point weights summing to one, shape ``(points,)``.
     variable_prefix : str, optional
         Prefix identifying the spread variables, ``"std_"`` by default.
+    reference : Tensor, optional
+        Fixed reference of every spread variable, in model-input units and in the
+        order of :attr:`variables`. ``None`` uses each sample's own global mean.
+    mean_square : Tensor, optional
+        Long-term mean square of every ratio :math:`R_v`, in the order of
+        :attr:`variables`. Selects the fixed rescaling; needs ``reference``.
     clip : tuple[float, float], optional
         Bounds applied after smoothing. ``None`` disables clipping.
     preserve_total_variance : bool, optional
-        Renormalise each map to unit area-weighted mean square.
+        Renormalise each map to unit area-weighted mean square. Not with ``mean_square``.
     spectral_filter : SphericalSpectralFilter, optional
         Transform used for smoothing. Required with ``smooth_response``.
     smooth_response : Tensor, optional
@@ -99,6 +191,8 @@ class GroupedStdModulation(nn.Module):
         name_to_index: dict[str, int],
         area_weights: Tensor,
         variable_prefix: str = "std_",
+        reference: Optional[Tensor] = None,
+        mean_square: Optional[Tensor] = None,
         clip: Optional[tuple[float, float]] = (0.25, 4.0),
         preserve_total_variance: bool = True,
         spectral_filter: Optional[SphericalSpectralFilter] = None,
@@ -116,6 +210,10 @@ class GroupedStdModulation(nn.Module):
             raise ValueError(f"clip must be (low, high) with 0 <= low < high, got {self.clip}")
         if smooth_response is not None and spectral_filter is None:
             raise ValueError("smooth_response requires a spectral_filter to apply it.")
+        if mean_square is not None and reference is None:
+            raise ValueError("mean_square is the mean square of the ratio to a fixed reference; give a reference.")
+        if mean_square is not None and preserve_total_variance:
+            raise ValueError("choose one rescaling: a fixed one (mean_square) or per sample (preserve_total_variance).")
 
         consumed = resolve_prefixed_variables(name_to_index, variable_prefix)
         if not consumed:
@@ -132,6 +230,29 @@ class GroupedStdModulation(nn.Module):
         self.register_buffer("group_weights", group_weights, persistent=False)
         self.register_buffer("channel_index", channel_index, persistent=False)
         self.register_buffer("area_weights", torch.as_tensor(area_weights, dtype=torch.float32), persistent=False)
+
+        self._reference_checked = reference is None
+        if reference is not None:
+            reference = torch.as_tensor(reference, dtype=torch.float32)
+            if tuple(reference.shape) != (len(self.variables),) or torch.any(reference <= 0):
+                raise ValueError(
+                    f"reference must hold one positive value per spread variable ({len(self.variables)}), "
+                    f"got shape {tuple(reference.shape)}."
+                )
+            self.register_buffer("reference", reference, persistent=False)
+        else:
+            self.reference = None
+        if mean_square is not None:
+            mean_square = torch.as_tensor(mean_square, dtype=torch.float32)
+            if tuple(mean_square.shape) != (len(self.variables),) or torch.any(mean_square <= 0):
+                raise ValueError(
+                    f"mean_square must hold one positive value per spread variable ({len(self.variables)}), "
+                    f"got shape {tuple(mean_square.shape)}."
+                )
+            scale = torch.rsqrt(group_weights @ mean_square)[channel_index]
+            self.register_buffer("channel_scale", scale, persistent=False)
+        else:
+            self.channel_scale = None
 
         self.spectral_filter = spectral_filter
         if smooth_response is not None:
@@ -215,13 +336,18 @@ class GroupedStdModulation(nn.Module):
         """
         std = std.to(torch.float32).transpose(-1, -2)  # (batch, time, variables, points)
 
-        global_mean = self.area_mean(std)
-        if not torch.all(global_mean > 0):
-            raise ValueError(
-                f"'{self.variable_prefix}' fields must be positive spreads, but some have a non-positive global "
-                "mean. Normalise them with 'std' or 'none', not 'mean-std'."
-            )
-        ratio = std / global_mean.unsqueeze(-1)
+        if self.reference is None:
+            global_mean = self.area_mean(std)
+            if not torch.all(global_mean > 0):
+                raise ValueError(
+                    f"'{self.variable_prefix}' fields must be positive spreads, but some have a non-positive global "
+                    "mean. Normalise them with 'std' or 'none', not 'mean-std'."
+                )
+            ratio = std / global_mean.unsqueeze(-1)
+        else:
+            ratio = std / self.reference.unsqueeze(-1)
+            if not self._reference_checked:
+                self._check_reference(ratio)
         group_maps = torch.einsum("btvp,gv->btgp", ratio, self.group_weights)
 
         if self.smooth_response is not None:
@@ -232,6 +358,30 @@ class GroupedStdModulation(nn.Module):
 
         if self.clip is not None:
             modulation = modulation.clamp(*self.clip)
-        if self.preserve_total_variance:
+        if self.channel_scale is not None:
+            modulation = modulation * self.channel_scale.unsqueeze(-1)
+        elif self.preserve_total_variance:
             modulation = modulation / torch.sqrt(self.area_mean(modulation**2)).unsqueeze(-1)
         return modulation
+
+    def _check_reference(self, ratio: Tensor) -> None:
+        """Fail on the first sample if the fixed reference is in the wrong units.
+
+        Checked once: it synchronises with the device.
+        """
+        level = self.area_mean(ratio).mean(dim=(0, 1))  # (variables,)
+        low, high = REFERENCE_CHECK_BOUNDS
+        outside = torch.nonzero((level < low) | (level > high)).flatten().tolist()
+        if outside:
+            examples = ", ".join(f"{self.variables[i]} {level[i].item():.3g}" for i in outside[:5])
+            raise ValueError(
+                f"The area mean of {len(outside)} spread fields over their climatological mean is far from 1 "
+                f"({examples}; expected {low}-{high}). The reference is probably in the wrong units: is "
+                "modulation.normalizer set to how the data config normalises the spread variables?"
+            )
+        self._reference_checked = True
+        LOGGER.info(
+            "GroupedStdModulation: spread over its climatological mean on the first sample, area mean %.2f-%.2f.",
+            level.min().item(),
+            level.max().item(),
+        )

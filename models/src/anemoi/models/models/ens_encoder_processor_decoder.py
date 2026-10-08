@@ -88,6 +88,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         name_to_index = self.data_indices[dataset_name].model.input.name_to_index
         self.input_noise_dataset = dataset_name
+        # Statistics are addressed by data-input position, as for the output boundings.
         self.input_noise = instantiate(
             self._input_noise_config,
             _recursive_=False,
@@ -95,6 +96,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             num_time_steps=self.n_step_input,
             num_grid_points=self.node_attributes.num_nodes[dataset_name],
             name_to_index=name_to_index,
+            statistics=self.statistics[dataset_name] if self.statistics is not None else None,
+            name_to_index_stats=self.data_indices[dataset_name].data.input.name_to_index,
         )
 
         # Channels the noise reads (e.g. spread fields) shape the perturbation only; they
@@ -255,6 +258,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         ensemble_member_offset: int = 0,
         ensemble_members_total: Optional[int] = None,
         ensemble_group_id: int = 0,
+        input_noise_seed: Optional[int] = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -262,11 +266,11 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         Parameters
         ----------
         x : dict[str, torch.Tensor]
-            Input tensor, shape (bs, m, e, n, f)
+            Input tensor, shape (bs, m, e, n, f).
         fcstep : int
-            Forecast step
+            Forecast step.
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
@@ -278,13 +282,17 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Total number of ensemble members across the whole ensemble group.
         ensemble_group_id : int, optional
             Index of the ensemble communication group, decorrelating concurrent batches.
+        input_noise_seed : int, optional
+            Base seed of the input noise, set by training from the run seed. Without
+            it the noise follows torch's seed, so differently seeded inference runs
+            draw different members.
         **kwargs
-            Additional keyword arguments
+            Additional keyword arguments.
 
         Returns
         -------
         dict[str, Tensor]
-            Output tensor per dataset
+            Output tensor per dataset.
         """
         dataset_names = list(x.keys())
 
@@ -316,6 +324,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 group_id=ensemble_group_id,
                 device=x[self.input_noise_dataset].device,
                 inputs=noise_inputs,
+                seed=input_noise_seed,
             )
             input_noise = self.input_noise.sample()
 

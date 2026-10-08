@@ -20,6 +20,7 @@ class SeedContext(IntEnum):
     TRAINER = 0
     MODEL = 1
     DATALOADER = 2
+    INPUT_NOISE = 3
 
 
 def derive_seed(base_seed: int, context: SeedContext, *keys: int) -> int:

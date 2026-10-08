@@ -546,17 +546,29 @@ class SphericalSpectralFilter(torch.nn.Module):
         self._sht.weight = self._sht.weight.to(torch.float32)
         self._isht.pct = self._isht.pct.to(torch.float32)
 
-        # Gauss-Legendre quadrature on nlat rings is exact in latitude for any degree
-        # the grid carries, but a reduced grid's short polar rings cannot resolve high
-        # zonal wavenumbers, which limits exact analysis to roughly nlat/2 degrees.
-        exact_truncation = nlat - 1 if len(set(lons_per_lat)) == 1 else nlat // 2 - 1
-        if truncation > exact_truncation:
+        # How high a degree a grid analyses exactly depends on its ring layout: a linear
+        # reduced Gaussian grid such as N320 is exact up to nlat - 1, an octahedral one only
+        # to about nlat / 2. Measure it rather than infer it from the grid type.
+        self.round_trip_error = self._round_trip_error()
+        if self.round_trip_error > 1e-4:
             LOGGER.warning(
-                "SphericalSpectralFilter: truncation %d exceeds %d, the highest degree this grid analyses "
-                "exactly; the filtered field will carry aliasing error.",
+                "SphericalSpectralFilter: this %d-ring grid does not analyse degrees up to %d exactly "
+                "(round-trip error %.1e); the filtered field will carry aliasing error.",
+                nlat,
                 truncation,
-                exact_truncation,
+                self.round_trip_error,
             )
+
+    def _round_trip_error(self) -> float:
+        """Relative error of re-analysing a random field band-limited to the truncation."""
+        generator = torch.Generator().manual_seed(0)
+        shape = (self.lmax, self.lmax)
+        coeffs = torch.complex(torch.randn(shape, generator=generator), torch.randn(shape, generator=generator))
+        coeffs[:, 0] = coeffs[:, 0].real.to(coeffs.dtype)  # m = 0 coefficients of a real field are real
+        coeffs = torch.tril(coeffs)  # only m <= l exists
+        with torch.no_grad():
+            recovered = self.analyse(self.synthesise(coeffs))
+        return float(torch.linalg.vector_norm(recovered - coeffs) / torch.linalg.vector_norm(coeffs))
 
     @property
     def lmax(self) -> int:

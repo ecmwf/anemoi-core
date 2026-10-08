@@ -1492,6 +1492,30 @@ def test_ensemble_expand_ens_dim_tiles_ensemble_dimension() -> None:
     assert expanded["data"].shape == (b, t, 3, g, v)
 
 
+def test_ensemble_forward_seeds_the_input_noise_from_the_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    """One seed controls all randomness: the input noise is seeded from ANEMOI_BASE_SEED, on every rank."""
+    from anemoi.training.utils.seeding import SeedContext
+    from anemoi.training.utils.seeding import derive_seed
+
+    forecaster = EnsembleTraining.__new__(EnsembleTraining)
+    pl.LightningModule.__init__(forecaster)
+    captured = {}
+    forecaster.model = lambda _x, **kwargs: captured.update(kwargs)
+    forecaster.model_comm_group = None
+    forecaster.grid_shard_sizes = None
+    forecaster.model_comm_group_size = 1
+    forecaster.nens_per_device = 2
+
+    forecaster({"data": torch.zeros(1)})
+    assert captured["input_noise_seed"] is None  # not set up: the noise follows torch's seed
+
+    monkeypatch.setenv("ANEMOI_BASE_SEED", "199")
+    forecaster.input_noise_seed = derive_seed(199, SeedContext.INPUT_NOISE)
+    forecaster({"data": torch.zeros(1)}, rollout_step=1)
+    assert captured["input_noise_seed"] == derive_seed(199, SeedContext.INPUT_NOISE)
+    assert captured["fcstep"] == 1
+
+
 # ── EnsembleTraining._step integration ────────────────────────────────────────
 
 

@@ -108,12 +108,20 @@ def test_legendre_tables_are_float32_and_not_checkpointed() -> None:
     assert spectral_filter.state_dict() == {}
 
 
-def test_inexact_truncation_on_a_reduced_grid_warns(caplog) -> None:
+def test_exactness_is_measured_not_assumed(caplog) -> None:
+    """How high a grid analyses exactly depends on its rings; the filter measures it and warns."""
+    octahedral_32 = [20 + 4 * i for i in range(16)] + [20 + 4 * i for i in reversed(range(16))]
     with caplog.at_level(logging.WARNING):
-        SphericalSpectralFilter(OCTAHEDRAL, truncation=NLAT // 2 + 2)
-    assert "analyses exactly" in caplog.text
+        inexact = SphericalSpectralFilter(octahedral_32, truncation=31)
+    assert inexact.round_trip_error > 1e-4
+    assert "does not analyse degrees up to" in caplog.text
 
     caplog.clear()
     with caplog.at_level(logging.WARNING):
-        SphericalSpectralFilter(OCTAHEDRAL, truncation=NLAT // 2 - 1)
-    assert "analyses exactly" not in caplog.text
+        exact = [
+            SphericalSpectralFilter(octahedral_32, truncation=25),
+            SphericalSpectralFilter(OCTAHEDRAL, truncation=NLAT - 1),
+            SphericalSpectralFilter(REGULAR, truncation=NLAT - 1),
+        ]
+    assert all(spectral_filter.round_trip_error < 1e-5 for spectral_filter in exact)
+    assert "does not analyse degrees up to" not in caplog.text

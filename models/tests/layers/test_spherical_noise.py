@@ -12,18 +12,24 @@ import math
 import pytest
 import torch
 
+from anemoi.models.layers.spectral_helpers import quadrature_weights
 from anemoi.models.layers.spectral_transforms import RegularSHT
+from anemoi.models.layers.spherical_noise import DiffusionNoiseS2
 from anemoi.models.layers.spherical_noise import DummyNoiseS2
+from anemoi.models.layers.spherical_noise import band_limit
 from anemoi.models.layers.spherical_noise import build_inverse_sht
 from anemoi.models.layers.spherical_noise import build_noise
+from anemoi.models.layers.spherical_noise import degree_variance
 from anemoi.models.layers.spherical_noise import diffusion_band_limit
 from anemoi.models.layers.spherical_noise import diffusion_degree_variance
 from anemoi.models.layers.spherical_noise import diffusion_lowpass_response
 from anemoi.models.layers.spherical_noise import filter_truncation
 from anemoi.models.layers.spherical_noise import heat_kernel_response
+from anemoi.models.layers.spherical_noise import lowpass_response
 from anemoi.models.layers.spherical_noise import noise_seeds_reflects
 from anemoi.models.layers.spherical_noise import orthonormal_basis_scale
 from anemoi.models.layers.spherical_noise import per_channel_values
+from anemoi.models.layers.spherical_noise import tabulated_coefficient_variance
 
 NLAT = 32
 ENSEMBLE = 4
@@ -335,3 +341,200 @@ def test_per_channel_values() -> None:
     torch.testing.assert_close(per_channel_values([1, 2], 2, "kT"), torch.tensor([1.0, 2.0]))
     with pytest.raises(ValueError, match="entries"):
         per_channel_values([1, 2], 3, "kT")
+
+
+# --- per-channel spectra ------------------------------------------------------------------
+
+
+def make_channels(transform, coefficient_variance, *, batch_size=2, ensemble_size=ENSEMBLE, num_time_steps=1):
+    seeds, reflects = noise_seeds_reflects(ensemble_size, centered=False)
+    return build_noise(
+        {"type": "diffusion", "sigma": 1.0, "lambd": 1.0},
+        transform=transform,
+        batch_size=batch_size,
+        ensemble_size=ensemble_size,
+        num_channels=coefficient_variance.shape[0],
+        num_time_steps=num_time_steps,
+        seeds=seeds,
+        reflects=reflects,
+        coefficient_variance=coefficient_variance,
+    )
+
+
+# A spread-like spectrum: rising to degree ~6, falling steeply beyond.
+TABLE = {"degree": [1.0, 3.0, 6.0, 12.0, 24.0], "sigma2": [1.0, 0.8, 0.5, 0.05, 1e-6]}
+
+
+def test_tabulated_spectrum_interpolates_in_log_log_space() -> None:
+    values = tabulated_coefficient_variance(TABLE["degree"], TABLE["sigma2"], 32)
+
+    assert values.dtype == torch.float64
+    assert values[0] == 0.0  # the global mean is not a spatial scale
+    for degree, sigma2 in zip(TABLE["degree"], TABLE["sigma2"]):
+        assert values[int(degree)].item() == pytest.approx(sigma2, rel=1e-12)
+    # between entries, log(sigma2) is linear in log(l)
+    weight = math.log(4 / 3) / math.log(6 / 3)
+    assert values[4].item() == pytest.approx(math.exp((1 - weight) * math.log(0.8) + weight * math.log(0.5)), rel=1e-12)
+    assert torch.all(values[24:] == values[24])  # held flat beyond the table
+
+
+@pytest.mark.parametrize(
+    "degree, sigma2",
+    [([1.0], [1.0]), ([1.0, 2.0], [1.0]), ([2.0, 1.0], [1.0, 1.0]), ([0.5, 2.0], [1.0, 1.0]), ([1.0, 2.0], [1.0, 0.0])],
+)
+def test_tabulated_spectrum_rejects_invalid_tables(degree, sigma2) -> None:
+    with pytest.raises(ValueError):
+        tabulated_coefficient_variance(degree, sigma2, 16)
+
+
+def test_band_limit_of_a_kt_channel_is_unchanged() -> None:
+    kT = torch.tensor([1.2322e-4, 7.8862e-3])
+    variance = degree_variance(heat_kernel_response(kT, 640))
+
+    torch.testing.assert_close(band_limit(variance), diffusion_band_limit(kT, 640))
+    torch.testing.assert_close(lowpass_response(variance), diffusion_lowpass_response(kT, 640))
+
+
+def test_lowpass_follows_a_tabulated_spectrum() -> None:
+    variance = degree_variance(tabulated_coefficient_variance(TABLE["degree"], TABLE["sigma2"], 64))[None]
+    response = lowpass_response(variance, quantile=0.99, taper=0.25)
+    limit = int(band_limit(variance, 0.99)[0])
+
+    assert 6 < limit < 30
+    assert torch.all(response[0, : limit + 1] == 1.0)
+    assert torch.all(response[0, math.ceil(limit * 1.25) :] == 0.0)
+
+
+def test_kt_channel_through_its_coefficient_variance_matches_the_kt_path(transform) -> None:
+    kT = 0.01
+    reference = make_noise(transform, {"type": "diffusion", "sigma": 1.0, "lambd": 1.0, "kT": kT})
+    explicit = make_channels(transform, heat_kernel_response(torch.tensor([kT]), NLAT))
+    for noise in (reference, explicit):
+        noise.update(replace_state=True)
+
+    torch.testing.assert_close(explicit(), reference(), atol=1e-5, rtol=1e-4)
+
+
+def test_tabulated_channel_has_the_stationary_variance(transform) -> None:
+    """Area-weighted, and with power at small scales: a large-scale field has too few modes to pin it down."""
+    table = tabulated_coefficient_variance([1.0, 8.0, 16.0, 31.0], [0.01, 1.0, 0.5, 0.01], NLAT)
+    noise = make_channels(transform, table[None], batch_size=4)
+    fields = collect(noise, 40)
+    area = torch.as_tensor(quadrature_weights([2 * NLAT] * NLAT)).float()
+
+    assert torch.sqrt((fields**2 * area).sum(dim=-1).mean()).item() == pytest.approx(1.0, rel=0.03)
+
+
+def test_tabulated_channel_power_follows_the_table() -> None:
+    band = NLAT // 2
+    table = tabulated_coefficient_variance(TABLE["degree"], TABLE["sigma2"], band)
+    noise = make_channels(build_inverse_sht(NLAT, lmax=band), table[None], batch_size=8)
+    fields = collect(noise, 40)
+
+    sht = RegularSHT(nlat=NLAT, truncation=band - 1)
+    coeffs = sht(fields.reshape(-1, 1, 1, fields.shape[-1], 1))
+    measured = sht.power_spectral_density(coeffs).mean(dim=(0, 1, 2, -1))
+    ratio = measured[1:].double() / degree_variance(table)[1:]
+
+    assert (ratio.std() / ratio.mean()).item() < 0.05
+
+
+def test_coefficient_variance_is_validated(transform) -> None:
+    with pytest.raises(ValueError, match="expected"):
+        make_channels(transform, torch.ones(2, NLAT + 1))
+    with pytest.raises(ValueError, match="non-negative"):
+        make_channels(transform, -torch.ones(1, NLAT))
+    with pytest.raises(ValueError, match="diffusion"):
+        seeds, reflects = noise_seeds_reflects(1, centered=False)
+        build_noise(
+            {"type": "white"},
+            transform=transform,
+            batch_size=1,
+            ensemble_size=1,
+            num_channels=1,
+            num_time_steps=1,
+            seeds=seeds,
+            reflects=reflects,
+            coefficient_variance=torch.ones(1, NLAT),
+        )
+
+
+# --- in-place updates and chunked transforms ----------------------------------------------
+
+
+def _known_draws(noise, seed: int = 7):
+    """Make the noise draw reproducible standard normals we can also compute with."""
+    generator = torch.Generator().manual_seed(seed)
+    draws = []
+
+    def draw(out):
+        values = torch.randn(out.shape, generator=generator)
+        draws.append(values.clone())
+        return out.copy_(values)
+
+    noise._draw_normal = draw
+    return draws
+
+
+@pytest.mark.parametrize("num_time_steps", [1, 2, 4])
+def test_redrawn_history_is_the_toeplitz_discount_of_the_draws(transform, num_time_steps) -> None:
+    lambd = [0.5, 1.5]
+    seeds, reflects = noise_seeds_reflects(2, centered=False)
+    noise = build_noise(
+        {"type": "diffusion", "sigma": 1.0, "kT": [1e-3, 1e-2], "lambd": lambd},
+        transform=transform,
+        batch_size=1,
+        ensemble_size=2,
+        num_channels=2,
+        num_time_steps=num_time_steps,
+        seeds=seeds,
+        reflects=reflects,
+    )
+    draws = _known_draws(noise)
+    noise.update(replace_state=True)
+
+    scaled = noise.sigma_l * draws[0]
+    phi = torch.exp(-torch.tensor(lambd))
+    scaled[:, :, 0] = scaled[:, :, 0] / torch.sqrt(1 - phi**2)[None, None, :, None, None, None]
+    # discount[c, t, r] = phi_c^(t - r) for r <= t
+    steps = torch.arange(num_time_steps)
+    lags = (steps[:, None] - steps[None, :]).clamp(min=0)
+    discount = torch.where(steps[:, None] >= steps[None, :], phi[:, None, None] ** lags, 0.0)
+    expected = torch.einsum("ctr,berclmu->betclmu", discount, scaled)
+
+    torch.testing.assert_close(noise.state, expected, atol=1e-6, rtol=1e-5)
+
+
+@pytest.mark.parametrize("num_time_steps", [1, 3])
+def test_rollout_step_slides_the_history_and_advances_the_newest(transform, num_time_steps) -> None:
+    noise = make_noise(transform, {"type": "diffusion", "sigma": 1.0, "lambd": 1.0}, num_time_steps=num_time_steps)
+    noise.update(replace_state=True)
+    previous = noise.state.clone()
+    draws = _known_draws(noise)
+
+    noise.update()
+
+    expected_newest = math.exp(-1.0) * previous[:, :, -1] + (noise.sigma_l * draws[0])[:, :, 0]
+    torch.testing.assert_close(noise.state[:, :, -1], expected_newest, atol=1e-6, rtol=1e-5)
+    torch.testing.assert_close(noise.state[:, :, :-1], previous[:, :, 1:])
+
+
+def test_chunked_transform_matches_the_whole(transform, monkeypatch) -> None:
+    seeds, reflects = noise_seeds_reflects(ENSEMBLE, centered=False)
+    noise = build_noise(
+        {"type": "diffusion", "sigma": 1.0, "kT": [1e-3, 5e-3, 1e-2, 5e-2, 1e-1]},
+        transform=transform,
+        batch_size=2,
+        ensemble_size=ENSEMBLE,
+        num_channels=5,
+        num_time_steps=2,
+        seeds=seeds,
+        reflects=reflects,
+    )
+    noise.update(replace_state=True)
+    monkeypatch.setattr(DiffusionNoiseS2, "transform_chunk_channels", None)
+    whole = noise()
+    monkeypatch.setattr(DiffusionNoiseS2, "transform_chunk_channels", 2)
+
+    torch.testing.assert_close(noise(), whole)
+    torch.testing.assert_close(noise.transform_channels(slice(1, 3)), whole[:, :, :, 1:3])

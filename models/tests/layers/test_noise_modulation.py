@@ -13,6 +13,7 @@ import pytest
 import torch
 
 from anemoi.models.layers.noise_modulation import GroupedStdModulation
+from anemoi.models.layers.noise_modulation import climatological_spread_statistics
 from anemoi.models.layers.noise_modulation import resolve_prefixed_variables
 from anemoi.models.layers.noise_modulation import strip_level
 from anemoi.models.layers.spectral_helpers import quadrature_weights
@@ -215,3 +216,104 @@ def test_nothing_is_checkpointed(area_weights, spectral_filter) -> None:
         area_weights, spectral_filter=spectral_filter, smooth_response=heat_kernel_response(kT, NLAT)
     )
     assert modulation.state_dict() == {}
+
+
+# --- climatological reference -------------------------------------------------------------
+
+# Dataset statistics of the stub's spread variables, by data-input position.
+STATS_MEAN = torch.tensor([0.0, 2.0, 0.5, 0.0, 4.0, 1.0, 3.0, 0.2]).numpy()
+STATS_STDEV = torch.tensor([1.0, 1.0, 0.25, 1.0, 2.0, 1.0, 3.0, 0.1]).numpy()
+STATS_MAX = torch.tensor([1.0, 8.0, 2.0, 1.0, 16.0, 4.0, 12.0, 1.0]).numpy()
+STATISTICS = {"mean": STATS_MEAN, "stdev": STATS_STDEV, "maximum": STATS_MAX}
+SPREAD = [name for _, name in resolve_prefixed_variables(NAME_TO_INDEX, "std_")]
+SPREAD_INDEX = [NAME_TO_INDEX[name] for name in SPREAD]
+
+
+@pytest.mark.parametrize(
+    "normalizer, scale", [("none", None), ("std", STATS_STDEV), ("max", STATS_MAX)], ids=["none", "std", "max"]
+)
+def test_climatological_reference_is_the_mean_in_model_units(normalizer, scale) -> None:
+    reference, mean_square = climatological_spread_statistics(SPREAD, STATISTICS, NAME_TO_INDEX, normalizer)
+
+    expected = STATS_MEAN[SPREAD_INDEX] / (scale[SPREAD_INDEX] if scale is not None else 1.0)
+    torch.testing.assert_close(reference, torch.as_tensor(expected, dtype=torch.float64))
+    expected_square = 1.0 + (STATS_STDEV[SPREAD_INDEX] / STATS_MEAN[SPREAD_INDEX]) ** 2
+    torch.testing.assert_close(mean_square, torch.as_tensor(expected_square, dtype=torch.float64))
+
+
+@pytest.mark.parametrize("normalizer", ["mean-std", "min-max"])
+def test_shifting_normalizers_are_rejected(normalizer) -> None:
+    with pytest.raises(ValueError, match="rescales without shifting"):
+        climatological_spread_statistics(SPREAD, STATISTICS, NAME_TO_INDEX, normalizer)
+
+
+def test_spread_without_a_positive_mean_is_rejected() -> None:
+    statistics = {**STATISTICS, "mean": STATS_MEAN.copy()}
+    statistics["mean"][NAME_TO_INDEX["std_q_850"]] = 0.0
+    with pytest.raises(ValueError, match="non-positive climatological mean"):
+        climatological_spread_statistics(SPREAD, statistics, NAME_TO_INDEX, "none")
+    with pytest.raises(ValueError, match="no dataset statistics"):
+        climatological_spread_statistics(SPREAD + ["std_tp"], STATISTICS, NAME_TO_INDEX, "none")
+
+
+def climatological(area_weights, **kwargs) -> GroupedStdModulation:
+    reference, mean_square = climatological_spread_statistics(SPREAD, STATISTICS, NAME_TO_INDEX, "none")
+    params = {"reference": reference, "clip": None, "preserve_total_variance": False}
+    params.update(kwargs)
+    if params.pop("rescale", False):
+        params["mean_square"] = mean_square
+    return make_modulation(area_weights, **params)
+
+
+def test_climatological_reference_keeps_the_level(area_weights) -> None:
+    """Twice the spread everywhere is twice the multiplier: the era's uncertainty survives."""
+    std = random_std() * torch.as_tensor(STATS_MEAN[SPREAD_INDEX], dtype=torch.float32)
+    fixed = climatological(area_weights)
+    per_sample = make_modulation(area_weights, clip=None, preserve_total_variance=False)
+
+    torch.testing.assert_close(fixed(2.0 * std), 2.0 * fixed(std))
+    torch.testing.assert_close(per_sample(2.0 * std), per_sample(std))
+
+
+def test_spread_at_its_climatological_mean_gives_unit_multiplier(area_weights) -> None:
+    std = torch.ones(2, 2, NUM_POINTS, NUM_STD) * torch.as_tensor(STATS_MEAN[SPREAD_INDEX], dtype=torch.float32)
+
+    torch.testing.assert_close(climatological(area_weights)(std), torch.ones(2, 2, len(CHANNEL_GROUP), NUM_POINTS))
+
+
+def test_fixed_rescale_divides_by_the_groups_mean_square(area_weights) -> None:
+    std = random_std() * torch.as_tensor(STATS_MEAN[SPREAD_INDEX], dtype=torch.float32)
+    unscaled = climatological(area_weights)(std)
+    scaled = climatological(area_weights, rescale=True)(std)
+
+    mean_square = 1.0 + (STATS_STDEV[SPREAD_INDEX] / STATS_MEAN[SPREAD_INDEX]) ** 2
+    by_variable = dict(zip([name[len("std_") :] for name in SPREAD], mean_square))
+    group_square = {
+        "A": (by_variable["t_850"] + by_variable["2t"]) / 2,
+        "B": (by_variable["u_500"] + by_variable["10u"]) / 2,
+    }
+    group_square["C"] = by_variable["q_850"]
+    expected_scale = torch.tensor([group_square[group] ** -0.5 for group in CHANNEL_GROUP], dtype=torch.float32)
+
+    torch.testing.assert_close(scaled, unscaled * expected_scale[:, None])
+
+
+def test_reference_in_the_wrong_units_fails_on_the_first_sample(area_weights) -> None:
+    modulation = climatological(area_weights)
+    std = random_std() * torch.as_tensor(STATS_MEAN[SPREAD_INDEX], dtype=torch.float32)
+
+    with pytest.raises(ValueError, match="normalizer"):
+        modulation(std * 1000.0)  # e.g. 'none' declared for fields the data config normalised differently
+    modulation(std)  # sound units pass, and the check then stops running
+    assert modulation._reference_checked
+    modulation(std * 1000.0)
+
+
+def test_fixed_rescale_needs_a_reference_and_excludes_per_sample_rms(area_weights) -> None:
+    with pytest.raises(ValueError, match="give a reference"):
+        make_modulation(area_weights, mean_square=torch.ones(NUM_STD), preserve_total_variance=False)
+    reference, mean_square = climatological_spread_statistics(SPREAD, STATISTICS, NAME_TO_INDEX, "none")
+    with pytest.raises(ValueError, match="choose one rescaling"):
+        make_modulation(area_weights, reference=reference, mean_square=mean_square, preserve_total_variance=True)
+    with pytest.raises(ValueError, match="one positive value per spread variable"):
+        make_modulation(area_weights, reference=reference[:2], preserve_total_variance=False)

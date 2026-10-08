@@ -52,9 +52,10 @@ def test_derive_seed_distinguishes_contexts() -> None:
         derive_seed(base_seed, SeedContext.TRAINER),
         derive_seed(base_seed, SeedContext.MODEL, 0),
         derive_seed(base_seed, SeedContext.DATALOADER, 0),
+        derive_seed(base_seed, SeedContext.INPUT_NOISE),
     }
 
-    assert len(seeds) == 3
+    assert len(seeds) == 4
 
 
 @pytest.mark.parametrize(

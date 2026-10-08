@@ -300,6 +300,42 @@ NoiseInjectorUnion = Annotated[
 ]
 
 
+class SpectrumTableSchema(BaseModel):
+    """Tabulated angular power spectrum of one noise channel."""
+
+    degree: list[PositiveFloat] = Field(..., min_length=2, examples=[[1, 2, 4, 8, 16, 32, 64, 128]])
+    "Strictly increasing spherical-harmonic degrees, all at least 1."
+    sigma2: list[PositiveFloat] = Field(..., min_length=2)
+    "Variance of each coefficient at those degrees; interpolated in log-log, only its shape matters."
+
+    @model_validator(mode="after")
+    def check_table(self) -> SpectrumTableSchema:
+        if len(self.degree) != len(self.sigma2):
+            raise ValueError(f"spectrum has {len(self.degree)} degrees but {len(self.sigma2)} values.")
+        if any(degree < 1 for degree in self.degree) or any(b <= a for a, b in zip(self.degree, self.degree[1:])):
+            raise ValueError("spectrum degrees must be strictly increasing and at least 1.")
+        return self
+
+
+class NoiseChannelSchema(BaseModel):
+    """One named input-noise channel: its spectrum and, optionally, the spread that scales it."""
+
+    kT: Optional[PositiveFloat] = Field(default=None, examples=[3.1545e-2])
+    "FourCastNet 3 spectrum exp(-kT l(l+1)), kT = (L / 6370 km)^2 / 2 for a length scale L."
+    spectrum: Optional[SpectrumTableSchema] = Field(default=None)
+    "Tabulated spectrum, e.g. the measured spread spectrum of the variable the channel stands for."
+    spread: list[str] = Field(default_factory=list, examples=[["u_850", "v_850"]])
+    "Spread variables whose map scales this channel, by base, exact or full name. Empty: never scaled."
+    smoothing_km: Optional[PositiveFloat] = Field(default=None)
+    "Smoothing length scale of this channel's spread map, overriding the modulation rule."
+
+    @model_validator(mode="after")
+    def check_one_spectrum(self) -> NoiseChannelSchema:
+        if (self.kT is None) == (self.spectrum is None):
+            raise ValueError("a noise channel needs exactly one of 'kT' and 'spectrum'.")
+        return self
+
+
 class SphericalInputNoiseSchema(BaseModel):
     """Schema for SphericalInputNoise - FourCastNet 3 style input perturbation."""
 
@@ -309,14 +345,32 @@ class SphericalInputNoiseSchema(BaseModel):
     "Grid the data nodes live on: 'nNNN' reduced Gaussian, 'oNNN' octahedral, or an integer nlat."
     noise: dict = Field(...)
     "Noise field configuration: 'type' (diffusion/white/dummy) plus that type's parameters."
-    n_channels: PositiveInt = Field(default=1)
-    "Number of noise channels appended per input time step."
+    n_channels: Optional[PositiveInt] = Field(default=None)
+    "Number of noise channels appended per input time step: one per noise.kT. Defaults to one, or to len(channels)."
+    channels: Optional[dict[str, NoiseChannelSchema]] = Field(default=None)
+    "Named channels, each with its own spectrum; replaces noise.kT and needs a diffusion field."
     centered: bool = Field(default=False)
     "Antithetic pairing of ensemble members."
     dataset: Optional[str] = Field(default=None)
     "Dataset whose input the noise is appended to. Required if the model has multiple input datasets."
     default_lambd: float = Field(default=1.0)
     "Default temporal decorrelation rate, dt / 6h in FourCastNet 3."
+
+    @model_validator(mode="after")
+    def check_channels(self) -> SphericalInputNoiseSchema:
+        if not self.channels:
+            return self
+        if self.noise.get("type") != "diffusion":
+            raise ValueError("named channels set their own spectra, which needs noise.type 'diffusion'.")
+        if "kT" in self.noise:
+            raise ValueError("give kT per channel under 'channels', not under 'noise'.")
+        if self.n_channels is not None and self.n_channels != len(self.channels):
+            raise ValueError(f"n_channels={self.n_channels} but {len(self.channels)} channels are defined.")
+        if self.target_ == "anemoi.models.layers.ensemble.SphericalInputNoise":
+            spread = sorted(name for name, channel in self.channels.items() if channel.spread)
+            if spread:
+                raise ValueError(f"channels {spread} name 'spread', which needs SphericalInputConditionedNoise.")
+        return self
 
 
 class BandFilterSchema(BaseModel):
@@ -326,55 +380,72 @@ class BandFilterSchema(BaseModel):
     "Share of the channel's own variance below its band edge."
     taper: NonNegativeFloat = Field(default=0.25)
     "Raised-cosine roll-off beyond the band edge, as a fraction of the edge degree. 0 gives a hard cut."
+    preserve_variance: bool = Field(default=True)
+    "Rescale each filtered channel to its variance before filtering: the filter moves energy, never removes it."
 
 
 class StdModulationSchema(BaseModel):
-    """Spatial amplitude modulation of the input noise by ensemble spread fields."""
+    """How ensemble spread fields scale the input noise channels that name them."""
 
     enabled: bool = Field(default=True)
-    "Modulate the noise. When False the spread inputs are still dropped from the encoder, giving a matched baseline."
-    groups: dict[str, list[str]] = Field(..., example={"A": ["t", "skt", "2t"], "C": ["q", "2d"]})
-    "Group name to spread variables, by base name (t), exact name (t_850) or full name (std_t_850)."
-    channel_group: list[str] = Field(..., example=["A", "A", "C", "C"])
-    "Group modulating each noise channel, one entry per channel."
+    "Scale the noise. When False the spread inputs are still dropped from the encoder, giving a matched baseline."
     variable_prefix: str = Field(default="std_")
     "Prefix of the spread variables in the input dataset."
     source: Literal["eda_stdev"] = Field(default="eda_stdev")
     "Kind of spread field the variables hold."
+    reference: Literal["climatology", "sample_mean"] = Field(default="climatology")
+    "Divide each spread by its dataset mean (keeps the level of each era), or by each sample's own global mean."
+    normalizer: Optional[Literal["none", "std", "max"]] = Field(default=None)
+    "How the data config normalises the spread variables; needed by reference 'climatology'."
+    rescale: Optional[Literal["climatology", "sample_rms", "none"]] = Field(default=None)
+    "Fixed constant per channel (climatology), unit mean square per sample (sample_rms) or none. Follows reference."
+    smoothing_km: Optional[PositiveFloat] = Field(default=100.0)
+    "Default smoothing length scale of the multipliers. None disables smoothing."
+    smoothing_km_by_variable: dict[str, PositiveFloat] = Field(default_factory=dict, examples=[{"t": 200, "z": 400}])
+    "Smoothing length scale per base or exact variable name; a channel takes the coarsest of its variables."
+    smooth_to_channel: bool = Field(default=False)
+    "Smooth each kT channel's multiplier at the channel's own scale instead."
+    clip: Optional[tuple[NonNegativeFloat, PositiveFloat]] = Field(default=(0.05, 10.0))
+    "Bounds on the multiplier, in multiples of the reference. None disables clipping."
     area_weight: bool = Field(default=True)
     "Weight spatial means by grid-cell area (Gauss-Legendre quadrature) rather than per point."
-    smooth_to_channel: bool = Field(default=True)
-    "Smooth each amplitude map with the heat kernel of its channel's kT before clipping."
-    clip: Optional[tuple[NonNegativeFloat, PositiveFloat]] = Field(default=(0.25, 4.0))
-    "Bounds on the amplitude, in multiples of its global mean. None disables clipping."
-    preserve_total_variance: bool = Field(default=True)
-    "Keep the injected area-weighted variance equal to the unmodulated noise."
     band_filter: BandFilterSchema = Field(default_factory=BandFilterSchema)
-    "Low-pass returning each modulated channel to its own scale band."
+    "Low-pass returning each scaled channel to its own scale band."
 
     @model_validator(mode="after")
-    def check_channel_groups_exist(self) -> StdModulationSchema:
-        unknown = sorted(set(self.channel_group) - set(self.groups))
-        if unknown:
-            raise ValueError(f"channel_group refers to undefined groups {unknown}.")
+    def check_modes(self) -> StdModulationSchema:
+        if self.rescale is None:
+            self.rescale = "climatology" if self.reference == "climatology" else "sample_rms"
+        if self.rescale == "climatology" and self.reference != "climatology":
+            raise ValueError("rescale 'climatology' needs reference 'climatology'.")
+        if self.enabled and self.reference == "climatology" and self.normalizer is None:
+            raise ValueError(
+                "reference 'climatology' needs normalizer: how the data config normalises the spread variables."
+            )
         return self
 
 
 class SphericalInputConditionedNoiseSchema(SphericalInputNoiseSchema):
-    """Schema for SphericalInputConditionedNoise - FourCastNet 3 noise modulated by analysis spread."""
+    """Schema for SphericalInputConditionedNoise - FourCastNet 3 noise scaled channel by channel by analysis spread."""
 
     target_: Literal["anemoi.models.layers.ensemble.SphericalInputConditionedNoise"] = Field(..., alias="_target_")
     "Spread-conditioned spherical input noise class"
-    modulation: StdModulationSchema = Field(...)
-    "Spread modulation configuration."
+    channels: dict[str, NoiseChannelSchema] = Field(..., min_length=1)
+    "Named channels, each with its own spectrum and optionally the spread variables that scale it."
+    modulation: StdModulationSchema = Field(default_factory=StdModulationSchema)
+    "How the spread scales the channels."
 
     @model_validator(mode="after")
-    def check_one_group_per_channel(self) -> SphericalInputConditionedNoiseSchema:
-        if self.modulation.enabled and len(self.modulation.channel_group) != self.n_channels:
-            raise ValueError(
-                f"modulation.channel_group has {len(self.modulation.channel_group)} entries, "
-                f"expected n_channels={self.n_channels}."
-            )
+    def check_spread_channels(self) -> SphericalInputConditionedNoiseSchema:
+        if not self.modulation.enabled:
+            return self
+        spread = {name: channel for name, channel in self.channels.items() if channel.spread}
+        if not spread:
+            raise ValueError("no channel names 'spread' variables: give some, or set modulation.enabled: False.")
+        if self.modulation.smooth_to_channel:
+            tabulated = sorted(name for name, ch in spread.items() if ch.kT is None and ch.smoothing_km is None)
+            if tabulated:
+                raise ValueError(f"smooth_to_channel needs kT channels; give {tabulated} a smoothing_km.")
         return self
 
 

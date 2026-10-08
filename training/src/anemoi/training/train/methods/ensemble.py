@@ -20,6 +20,9 @@ from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapt
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
 
 if TYPE_CHECKING:
     from omegaconf import DictConfig
@@ -43,6 +46,8 @@ class EnsembleTraining(BaseTrainingModule):
     ens_comm_group_rank = 0
     ens_comm_num_groups = 1
     ens_comm_group_size = 1
+    # Set from the run seed in __init__; None lets the input noise follow torch's seed.
+    input_noise_seed: int | None = None
 
     def __init__(
         self,
@@ -108,6 +113,10 @@ class EnsembleTraining(BaseTrainingModule):
         self.nens_per_device = config.training.ensemble_size_per_device
         self.nens_per_group = self.nens_per_device * num_gpus_per_ensemble // num_gpus_per_model
         LOGGER.info("Ensemble size: per device = %d, per ens-group = %d", self.nens_per_device, self.nens_per_group)
+
+        # The input noise draws from its own generators; seeding them from the run seed keeps
+        # one seed (ANEMOI_BASE_SEED) in control of all randomness, identical on every rank.
+        self.input_noise_seed = derive_seed(get_base_seed(), SeedContext.INPUT_NOISE)
 
         # lazy init ensemble group info, will be set by the DDPEnsGroupStrategy.
         # Defaults are the single-device values used by SingleDeviceStrategy,
@@ -260,6 +269,7 @@ class EnsembleTraining(BaseTrainingModule):
         kwargs.setdefault("ensemble_member_offset", self.ensemble_member_offset)
         kwargs.setdefault("ensemble_members_total", self.ensemble_members_total)
         kwargs.setdefault("ensemble_group_id", self.ens_comm_group_id)
+        kwargs.setdefault("input_noise_seed", self.input_noise_seed)
 
         return self.model(
             x,

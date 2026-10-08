@@ -65,13 +65,76 @@ def per_channel_values(value: Union[float, list], num_channels: int, name: str) 
     return tensor
 
 
-def diffusion_degree_variance(kT: torch.Tensor, lmax: int) -> torch.Tensor:
-    r"""Variance per spherical-harmonic degree of a :class:`DiffusionNoiseS2` channel.
+def tabulated_coefficient_variance(degree: list[float], sigma2: list[float], lmax: int) -> torch.Tensor:
+    r"""Per-degree coefficient variance of a channel, interpolated from a table.
 
-    A channel draws :math:`2l+1` coefficients per degree, each with standard
-    deviation proportional to :math:`e^{-kT\,l(l+1)/2}`, so its variance per degree
-    is proportional to :math:`(2l+1)\,e^{-kT\,l(l+1)}`. Unnormalised: only its shape
+    The table gives :math:`\sigma_l^2`, the variance of every spherical-harmonic
+    coefficient of degree :math:`l`, at a few degrees -- for instance the measured
+    spread spectrum of the variable a channel stands for, averaged in bins of degree.
+    It is interpolated linearly in :math:`(\log l, \log \sigma_l^2)` and held flat
+    beyond the first and last entry. Only the shape matters: the noise is normalised
+    to its configured ``sigma`` afterwards.
+
+    Degree 0 is the global mean, not a spatial scale, so it is given no variance.
+
+    Parameters
+    ----------
+    degree : list of float
+        Strictly increasing degrees, all at least 1.
+    sigma2 : list of float
+        Positive coefficient variance at each degree.
+    lmax : int
+        Number of degrees, ``l = 0 .. lmax-1``.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of shape ``(lmax,)``.
+    """
+    degree = np.asarray(degree, dtype=np.float64)
+    sigma2 = np.asarray(sigma2, dtype=np.float64)
+    if degree.ndim != 1 or degree.shape != sigma2.shape or degree.size < 2:
+        raise ValueError(
+            f"a tabulated spectrum needs matching 1-D 'degree' and 'sigma2' lists of at least two entries, "
+            f"got {degree.shape} and {sigma2.shape}."
+        )
+    if np.any(degree < 1) or np.any(np.diff(degree) <= 0):
+        raise ValueError("tabulated spectrum degrees must be strictly increasing and at least 1.")
+    if np.any(sigma2 <= 0) or not np.all(np.isfinite(sigma2)):
+        raise ValueError("tabulated spectrum values must be positive and finite.")
+
+    ls = np.arange(1, lmax, dtype=np.float64)
+    values = np.zeros(lmax, dtype=np.float64)
+    values[1:] = np.exp(np.interp(np.log(ls), np.log(degree), np.log(sigma2)))
+    return torch.as_tensor(values)
+
+
+def degree_variance(coefficient_variance: torch.Tensor) -> torch.Tensor:
+    r"""Variance per spherical-harmonic degree, :math:`(2l+1)\,\sigma_l^2`.
+
+    A channel draws :math:`2l+1` coefficients of degree :math:`l`, each with
+    variance proportional to :math:`\sigma_l^2`. Unnormalised: only its shape
     matters to the responses built from it.
+
+    Parameters
+    ----------
+    coefficient_variance : torch.Tensor
+        Per-degree coefficient variance, shape ``(..., lmax)``.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of the same shape.
+    """
+    ls = torch.arange(coefficient_variance.shape[-1], dtype=torch.float64)
+    return (2 * ls + 1) * coefficient_variance.to(torch.float64)
+
+
+def diffusion_degree_variance(kT: torch.Tensor, lmax: int) -> torch.Tensor:
+    r"""Variance per spherical-harmonic degree of a FourCastNet 3 ``kT`` channel.
+
+    Each coefficient has standard deviation proportional to :math:`e^{-kT\,l(l+1)/2}`,
+    so the variance per degree is proportional to :math:`(2l+1)\,e^{-kT\,l(l+1)}`.
 
     Parameters
     ----------
@@ -85,16 +148,36 @@ def diffusion_degree_variance(kT: torch.Tensor, lmax: int) -> torch.Tensor:
     torch.Tensor
         Float64 tensor of shape ``(channels, lmax)``.
     """
-    ls = torch.arange(lmax, dtype=torch.float64)
-    kT = torch.as_tensor(kT, dtype=torch.float64).reshape(-1, 1)
-    return (2 * ls + 1) * torch.exp(-kT * ls * (ls + 1))
+    return degree_variance(heat_kernel_response(kT, lmax))
+
+
+def band_limit(variance: torch.Tensor, quantile: float = 0.99) -> torch.Tensor:
+    r"""Lowest degree below which a channel holds ``quantile`` of its variance.
+
+    This is the upper edge of the scale band a channel represents.
+
+    Parameters
+    ----------
+    variance : torch.Tensor
+        Variance per degree (see :func:`degree_variance`), shape ``(channels, lmax)``.
+    quantile : float, optional
+        Share of the channel's variance below the returned degree.
+
+    Returns
+    -------
+    torch.Tensor
+        Integer degrees of shape ``(channels,)``, at most ``lmax - 1``.
+    """
+    lmax = variance.shape[-1]
+    cumulative = variance.cumsum(dim=-1) / variance.sum(dim=-1, keepdim=True)
+    # first degree whose cumulative share reaches the quantile
+    return (cumulative < quantile).sum(dim=-1).clamp(max=lmax - 1)
 
 
 def diffusion_band_limit(kT: torch.Tensor, lmax: int, quantile: float = 0.99) -> torch.Tensor:
-    r"""Lowest degree below which a channel holds ``quantile`` of its variance.
+    r"""Band limit (see :func:`band_limit`) of FourCastNet 3 ``kT`` channels.
 
-    This is the upper edge of the scale band a channel represents: about 193, 96,
-    48 and 24 at N320 for the 100, 200, 400 and 800 km FourCastNet 3 rungs.
+    About 193, 96, 48 and 24 at N320 for the 100, 200, 400 and 800 km rungs.
 
     Parameters
     ----------
@@ -110,10 +193,7 @@ def diffusion_band_limit(kT: torch.Tensor, lmax: int, quantile: float = 0.99) ->
     torch.Tensor
         Integer degrees of shape ``(channels,)``, at most ``lmax - 1``.
     """
-    variance = diffusion_degree_variance(kT, lmax)
-    cumulative = variance.cumsum(dim=-1) / variance.sum(dim=-1, keepdim=True)
-    # first degree whose cumulative share reaches the quantile
-    return (cumulative < quantile).sum(dim=-1).clamp(max=lmax - 1)
+    return band_limit(diffusion_degree_variance(kT, lmax), quantile)
 
 
 def heat_kernel_response(kT: torch.Tensor, lmax: int) -> torch.Tensor:
@@ -142,18 +222,50 @@ def heat_kernel_response(kT: torch.Tensor, lmax: int) -> torch.Tensor:
     return torch.exp(-kT * ls * (ls + 1))
 
 
+def lowpass_response(variance: torch.Tensor, quantile: float = 0.99, taper: float = 0.25) -> torch.Tensor:
+    r"""Low-pass response confining each channel to its own scale band.
+
+    Unity up to the channel's band limit :math:`l_c` (see :func:`band_limit`), then
+    a raised-cosine roll-off reaching zero at :math:`\lceil l_c (1 + \mathrm{taper}) \rceil`.
+    Inside the band the channel's own spectrum passes untouched; the taper avoids
+    the ringing of a hard truncation.
+
+    Parameters
+    ----------
+    variance : torch.Tensor
+        Variance per degree of each channel (see :func:`degree_variance`), shape
+        ``(channels, lmax)``.
+    quantile : float, optional
+        Share of the channel's own variance below its band edge, in ``(0, 1]``.
+    taper : float, optional
+        Length of the roll-off as a fraction of the band edge. ``0`` gives a hard cut.
+
+    Returns
+    -------
+    torch.Tensor
+        Float64 tensor of shape ``(channels, lmax)``.
+    """
+    if not 0.0 < quantile <= 1.0:
+        raise ValueError(f"quantile must lie in (0, 1], got {quantile}")
+    if taper < 0.0:
+        raise ValueError(f"taper must be non-negative, got {taper}")
+
+    ls = torch.arange(variance.shape[-1], dtype=torch.float64)
+    cutoff = band_limit(variance, quantile).to(torch.float64).reshape(-1, 1)
+    end = torch.ceil(cutoff * (1.0 + taper))
+    width = (end - cutoff).clamp(min=1.0)
+    roll_off = 0.5 * (1.0 + torch.cos(math.pi * (ls - cutoff) / width))
+    response = torch.where(ls <= cutoff, 1.0, torch.where(ls < end, roll_off, 0.0))
+    return response
+
+
 def diffusion_lowpass_response(
     kT: torch.Tensor,
     lmax: int,
     quantile: float = 0.99,
     taper: float = 0.25,
 ) -> torch.Tensor:
-    r"""Low-pass response confining each channel to its own scale band.
-
-    Unity up to the channel's band limit :math:`l_c` (see
-    :func:`diffusion_band_limit`), then a raised-cosine roll-off reaching zero at
-    :math:`\lceil l_c (1 + \mathrm{taper}) \rceil`. Inside the band the channel's own
-    spectrum passes untouched; the taper avoids the ringing of a hard truncation.
+    r"""Low-pass response (see :func:`lowpass_response`) of FourCastNet 3 ``kT`` channels.
 
     Parameters
     ----------
@@ -171,18 +283,7 @@ def diffusion_lowpass_response(
     torch.Tensor
         Float64 tensor of shape ``(channels, lmax)``.
     """
-    if not 0.0 < quantile <= 1.0:
-        raise ValueError(f"quantile must lie in (0, 1], got {quantile}")
-    if taper < 0.0:
-        raise ValueError(f"taper must be non-negative, got {taper}")
-
-    ls = torch.arange(lmax, dtype=torch.float64)
-    cutoff = diffusion_band_limit(kT, lmax, quantile).to(torch.float64).reshape(-1, 1)
-    end = torch.ceil(cutoff * (1.0 + taper))
-    width = (end - cutoff).clamp(min=1.0)
-    roll_off = 0.5 * (1.0 + torch.cos(math.pi * (ls - cutoff) / width))
-    response = torch.where(ls <= cutoff, 1.0, torch.where(ls < end, roll_off, 0.0))
-    return response
+    return lowpass_response(diffusion_degree_variance(kT, lmax), quantile=quantile, taper=taper)
 
 
 def filter_truncation(responses: list[torch.Tensor], lmax: int, tolerance: float = 1e-3) -> int:
@@ -271,30 +372,6 @@ def orthonormal_basis_scale(isht: InverseSpectralTransform) -> float:
     with torch.no_grad():
         constant_field = isht(coeffs)[0, 0].item()
     return (1.0 / math.sqrt(4.0 * math.pi)) / constant_field
-
-
-def toep(c, r=None):
-    r"""Construct a Toeplitz matrix from its first column and row.
-
-    Every diagonal of the result is constant: ``T[i, j]`` depends only on
-    ``i - j``. Used to build the discount matrix of powers of :math:`\phi` that
-    correlates a freshly drawn noise history, so that resampling the whole
-    history reproduces the temporal correlation of the process instead of giving
-    independent steps.
-
-    Vendored from SciPy to avoid a runtime dependency on it:
-    https://github.com/scipy/scipy/blob/v1.13.0/scipy/linalg/_special_matrices.py#L17-L77
-    """
-    c = np.asarray(c).ravel()
-    if r is None:
-        r = c.conjugate()
-    else:
-        r = np.asarray(r).ravel()
-    vals = np.concatenate((c[::-1], r[1:]))
-    out_shp = len(c), len(r)
-    n = vals.strides[0]
-
-    return np.lib.stride_tricks.as_strided(vals[len(c) - 1 :], shape=out_shp, strides=(-n, n)).copy()
 
 
 class BaseSphericalNoise(nn.Module):
@@ -649,15 +726,27 @@ class DiffusionNoiseS2(BaseSphericalNoise):
     carry perturbations at different scales. FourCastNet 3 uses eight channels
     whose ``kT`` spans five orders of magnitude.
 
+    The spatial spectrum need not come from ``kT``: ``coefficient_variance`` sets the
+    per-degree coefficient variance :math:`\sigma_l^2` of every channel directly, e.g.
+    a tabulated spectrum (:func:`tabulated_coefficient_variance`). It replaces
+    :math:`e^{-kT\,l(l+1)}` in the formulae above and is normalised the same way, so
+    the stationary variance is still :math:`\sigma^2`.
+
     Parameters
     ----------
     sigma : float, default is 1.0
         Stationary standard deviation.
     kT : float or list, default is 0.5 * (500 km / 6370 km)^2
-        Spatial correlation length. A list must match ``num_channels``.
+        Spatial correlation length. A list must match ``num_channels``. Ignored
+        when ``coefficient_variance`` is given.
     lambd : float or list, default is 1.0
         Temporal correlation length, i.e. ``dt / tau``. A list must match
         ``num_channels``.
+    coefficient_variance : torch.Tensor, optional
+        Per-degree coefficient variance of every channel, shape
+        ``(num_channels, lmax)``; only its shape per channel matters.
+    **kwargs
+        Passed to :class:`BaseSphericalNoise`.
 
     References
     ----------
@@ -665,30 +754,47 @@ class DiffusionNoiseS2(BaseSphericalNoise):
     Technical Memorandum 598, 2009, appendix 8.1.
     """
 
+    # Channels inverse-transformed at once: bounds the transient memory of the transform,
+    # which for lmax=640 holds about 3 MB per channel and time step for every member.
+    transform_chunk_channels = 16
+
     def __init__(
         self,
         *,
         sigma: float = 1.0,
         kT: Union[float, list] = 0.5 * (500.0 / 6370.0) ** 2,
         lambd: Union[float, list] = 1.0,
+        coefficient_variance: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
 
         self.sigma = sigma
-        self.kT = kT
+        self.kT = kT if coefficient_variance is None else "per-channel spectrum"
         self.lambd = lambd
 
         ls = torch.arange(self.lmax)
 
-        kT = self._as_per_channel_tensor(kT, "kT")
         lambd = self._as_per_channel_tensor(lambd, "lambd")
-
-        ektllp1 = torch.exp(-kT * ls * (ls + 1))
+        if coefficient_variance is None:
+            kT = self._as_per_channel_tensor(kT, "kT")
+            ektllp1 = torch.exp(-kT * ls * (ls + 1))
+        else:
+            ektllp1 = torch.as_tensor(coefficient_variance, dtype=torch.float32)
+            if tuple(ektllp1.shape) != (self.num_channels, self.lmax):
+                raise ValueError(
+                    f"coefficient_variance has shape {tuple(ektllp1.shape)}, expected "
+                    f"(num_channels, lmax) = ({self.num_channels}, {self.lmax})."
+                )
+            if torch.any(ektllp1 < 0) or torch.any(ektllp1[:, 1:].sum(dim=-1) <= 0):
+                raise ValueError("coefficient_variance must be non-negative with some variance above degree 0.")
         F0norm = torch.sum((2 * ls[1:] + 1) * ektllp1[..., 1:], dim=-1, keepdim=True)
         phi = torch.exp(-lambd)
         F0 = sigma * torch.sqrt(0.5 * (1 - phi**2) / F0norm)
-        sigma_l = F0 * torch.exp(-0.5 * kT * ls * (ls + 1))
+        if coefficient_variance is None:
+            sigma_l = F0 * torch.exp(-0.5 * kT * ls * (ls + 1))  # FourCastNet 3's own expression, unchanged
+        else:
+            sigma_l = F0 * torch.sqrt(ektllp1)
         # The ECMWF formulation above is 4-pi normalised; lift it into the
         # orthonormal convention the rest of the derivation assumes.
         sigma_l = math.sqrt(4 * math.pi) * sigma_l
@@ -703,18 +809,6 @@ class DiffusionNoiseS2(BaseSphericalNoise):
 
         self.register_buffer("phi", phi, persistent=False)
         self.register_buffer("sigma_l", sigma_l * self.basis_scale, persistent=False)
-
-        # For a multi-step history, resampling needs the Toeplitz discount matrix
-        #            [    1,     0,   0, 0]
-        # discount = [  phi,     1,   0, 0]
-        #            [phi^2,   phi,   1, 0]
-        #            [phi^3, phi^2, phi, 1]
-        if self.num_time_steps > 1:
-            discount = []
-            for phi_tmp in self.phi.reshape(-1).tolist():
-                phivec = np.power(phi_tmp, np.arange(0, self.num_time_steps))
-                discount.append(torch.as_tensor(toep(phivec, np.zeros(self.num_time_steps))).to(dtype=torch.float32))
-            self.register_buffer("discount", torch.stack(discount, dim=0), persistent=False)
 
     def _as_per_channel_tensor(self, value: Union[float, list], name: str) -> torch.Tensor:
         return per_channel_values(value, self.num_channels, name).reshape(self.num_channels, 1)
@@ -739,7 +833,13 @@ class DiffusionNoiseS2(BaseSphericalNoise):
             If ``True``, discard the state and draw a fresh history from the
             *stationary* distribution. The first time step is scaled by
             :math:`1/\sqrt{1-\phi^2}` and, for ``num_time_steps > 1``, the history
-            is correlated by a Toeplitz discount matrix of powers of :math:`\phi`.
+            is correlated by the Toeplitz discount matrix of powers of :math:`\phi`,
+
+            .. math::
+
+                \eta_t = \sum_{r \le t} \phi^{t-r} \xi_r,
+
+            computed in place as :math:`\eta_t = \xi_t + \phi\,\eta_{t-1}`.
             This matters when starting a rollout: drawing independent steps instead
             would begin from a field with the wrong variance and no temporal
             structure, and the process would need many steps to spin up.
@@ -749,10 +849,19 @@ class DiffusionNoiseS2(BaseSphericalNoise):
         if batch_size is not None:
             self._ensure_state(batch_size)
 
+        # The state is updated in place: at lmax=640 it holds several GB for a few
+        # tens of channels, and out-of-place arithmetic would double or triple that.
+        phi = self.phi[:, :, 0]  # (1, 1, channels, 1, 1, 1), like one time step of the state
         with torch.no_grad():
             with amp.autocast(device_type=self.state.device.type, enabled=False):
                 if replace_state:
-                    eta_l = torch.empty_like(self.state)
+                    self._draw_normal(self.state)
+                    self.state.mul_(self.sigma_l)
+                    # the first element of the history needs a different weighting to
+                    # sample the stationary distribution
+                    self.state[:, :, 0].div_(torch.sqrt(1.0 - phi**2))
+                    for step in range(1, self.num_time_steps):
+                        self.state[:, :, step].add_(phi * self.state[:, :, step - 1])
                 else:
                     batch = self.state.shape[0]
                     eta_l = torch.empty(
@@ -760,29 +869,39 @@ class DiffusionNoiseS2(BaseSphericalNoise):
                         dtype=self.state.dtype,
                         device=self.state.device,
                     )
-                eta_l = self._draw_normal(eta_l)
-                eta_l = self.sigma_l * eta_l
+                    eta_l = self._draw_normal(eta_l).mul_(self.sigma_l)
+                    # drop the oldest step, then advance the newest by one
+                    for step in range(self.num_time_steps - 1):
+                        self.state[:, :, step].copy_(self.state[:, :, step + 1])
+                    self.state[:, :, -1].mul_(phi).add_(eta_l[:, :, 0])
 
-                if not replace_state:
-                    if self.num_time_steps > 1:
-                        last_state = self.state[:, :, -1, ...].unsqueeze(2)
-                        newstep = self.phi * last_state + eta_l
-                        newstate = torch.cat([self.state[:, :, 1:, ...], newstep], dim=2)
-                    else:
-                        newstate = self.phi * self.state + eta_l
-                else:
-                    newstate = eta_l
-                    # the first element of the history needs a different weighting to
-                    # sample the stationary distribution
-                    newstate[:, :, 0, ...] = newstate[:, :, 0, ...] / torch.sqrt(1.0 - self.phi**2)
-                    if self.num_time_steps > 1:
-                        newstate = torch.einsum("ctr,berclmu->betclmu", self.discount, newstate).contiguous()
+    def transform_channels(self, channels: slice) -> torch.Tensor:
+        r"""Noise field of a contiguous block of channels.
 
-                self.state.copy_(newstate)
+        Parameters
+        ----------
+        channels : slice
+            The channels to transform.
+
+        Returns
+        -------
+        torch.Tensor
+            Real-valued noise of shape ``(batch, ensemble, num_time_steps, len(channels), num_grid_points)``.
+        """
+        state = self.state[:, :, :, channels]
+        return self._transform(torch.complex(state[..., 0], state[..., 1]))
 
     @torch.compiler.disable
     def forward(self, update_internal_state: bool = False) -> torch.Tensor:
         r"""Transform the current spectral state to a noise field on the node list.
+
+        The channels are transformed in blocks of :attr:`transform_chunk_channels`,
+        so the transient memory of the transform does not scale with their number.
+
+        Parameters
+        ----------
+        update_internal_state : bool, optional
+            Advance the state by one step after transforming it.
 
         Returns
         -------
@@ -790,9 +909,16 @@ class DiffusionNoiseS2(BaseSphericalNoise):
             Real-valued noise of shape
             ``(batch, ensemble, num_time_steps, num_channels, num_grid_points)``.
         """
-        cstate = torch.complex(self.state[..., 0], self.state[..., 1])
-
-        eta = self._transform(cstate)
+        batch = self.state.shape[0]
+        eta = torch.empty(
+            (batch, self.ensemble_size, self.num_time_steps, self.num_channels, self.num_grid_points),
+            dtype=self.state.dtype,
+            device=self.state.device,
+        )
+        chunk = self.transform_chunk_channels or self.num_channels
+        for start in range(0, self.num_channels, chunk):
+            block = slice(start, min(start + chunk, self.num_channels))
+            eta[:, :, :, block] = self.transform_channels(block)
 
         if update_internal_state:
             self.update()
@@ -898,6 +1024,11 @@ def noise_seeds_reflects(
     base_seed, seed_offset : int, optional
         Fixed offsets. ``seed_offset`` lets independent noise sources draw from
         decorrelated streams while keeping the same per-member structure.
+
+    Returns
+    -------
+    tuple[list[int], list[bool]]
+        The seed and the reflection flag of every local member.
     """
     num_members_total = num_members_total or (member_offset + ensemble_size)
 
@@ -928,11 +1059,15 @@ def build_noise(
     grid: Optional[Union[str, int]] = None,
     transform: Optional[tuple[InverseSpectralTransform, int, int]] = None,
     default_lambd: float = 1.0,
+    coefficient_variance: Optional[torch.Tensor] = None,
 ) -> BaseSphericalNoise:
     """Construct a noise module from a config dict.
 
     ``default_lambd`` supplies the temporal correlation default (``dt / 6h`` in
     FourCastNet 3) since it depends on the dataset cadence.
+
+    ``coefficient_variance`` gives a ``diffusion`` field an explicit per-channel
+    spectrum, shape ``(num_channels, lmax)``, in place of its ``kT``.
 
     Pass ``transform`` (the triple returned by :func:`build_inverse_sht`) to reuse
     an existing transform. Building one is expensive -- the Legendre basis is
@@ -965,11 +1100,15 @@ def build_noise(
         "reflects": reflects,
     }
 
+    if coefficient_variance is not None and noise_type != "diffusion":
+        raise ValueError(f"a per-channel spectrum needs a 'diffusion' noise field, got type '{noise_type}'.")
+
     if noise_type == "diffusion":
         return DiffusionNoiseS2(
             sigma=noise_params.get("sigma", 1.0),
             kT=noise_params.get("kT", DEFAULT_DIFFUSION_KT),
             lambd=noise_params.get("lambd", default_lambd),
+            coefficient_variance=coefficient_variance,
             **common,
         )
     if noise_type == "white":
