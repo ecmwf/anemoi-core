@@ -26,7 +26,7 @@ from anemoi.graphs.create import GraphCreator
 from anemoi.graphs.utils import load_graph_from_file
 from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sources import Template
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
@@ -575,7 +575,7 @@ class BaseGraphModel(nn.Module):
             grid_shard_sizes[dataset_name] = output_grid_shard_sizes
         return tuple(projected_tensors)
 
-    def output_templates(self, batch: Batch) -> dict[str, Template]:
+    def output_templates(self, batch: Batch) -> dict[str, BaseTemplate]:
         """Return what the model predicts at the nodes of ``batch``, one template per decoded dataset.
 
         Each template has the nodes of ``batch``'s source (coordinates, timedeltas, sizes),

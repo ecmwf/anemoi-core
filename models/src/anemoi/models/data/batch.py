@@ -25,7 +25,7 @@ from torch.distributed import ProcessGroup
 
 from anemoi.models.data.sample import BaseSample
 from anemoi.models.data.sources.base import Source
-from anemoi.models.data.sources.base import Template
+from anemoi.models.data.sources.base import BaseTemplate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class Batch:
 
     sources: dict[str, Source]
 
-    def template(self) -> dict[str, Template]:
+    def template(self) -> dict[str, BaseTemplate]:
         """Return every source without its data, keyed by dataset name (see :meth:`Source.template`)."""
         return {name: source.template() for name, source in self.sources.items()}
 

@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import create_sample
+from anemoi.models.data.sample import create_batched_struct
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -192,7 +192,7 @@ class AnemoiModelInterface(torch.nn.Module):
         """Utility function to build a :class:`Batch` from raw per-dataset payload dicts."""
         return Batch.collate(
             {
-                name: create_sample(statistics=self._statistics_for(name, payload["variables"]), **payload)
+                name: create_batched_struct(statistics=self._statistics_for(name, payload["variables"]), **payload)
                 for name, payload in x.items()
             }
         )
@@ -201,7 +201,8 @@ class AnemoiModelInterface(torch.nn.Module):
         """Build a template batch with the given ensemble size, batch size, and number of target timesteps."""
         return Batch.collate(
             {
-                name: create_template(
+                name: create_batched_struct(
+                    name=name,
                     statistics=self._statistics_for(name, payload["variables"]),
                     **payload,
                     ensemble_size=ensemble_size,

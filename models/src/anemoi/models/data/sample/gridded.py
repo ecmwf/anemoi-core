@@ -14,6 +14,7 @@ from typing import ClassVar
 from typing import Self
 
 import torch
+from anemoi.models.data.sources import GriddedTemplate
 from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
@@ -42,6 +43,7 @@ class GriddedSample(BaseSample):
     shard_sizes: ShardSizes | None = None
 
     source_type: ClassVar[type[GriddedSource]] = GriddedSource
+    template_type: ClassVar[type[GriddedTemplate]] = GriddedTemplate
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics", "coordinates", "shard_sizes")
     _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
 

@@ -37,7 +37,7 @@ from anemoi.utils.config import DotDict
 if TYPE_CHECKING:
     from anemoi.models.data.flat import FlatSource
     from anemoi.models.data.sources.base import Source
-    from anemoi.models.data.sources.base import Template
+    from anemoi.models.data.sources.base import BaseTemplate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -402,7 +402,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         x_input_data: "Source",
         x_encoded_data: Tensor | None,
         x_target_forcing: "Source",
-        target_spec: "Template",
+        target_spec: "BaseTemplate",
         batch_size: int,
         grid_shard_sizes: DatasetShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -421,7 +421,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             Encoder-updated source features, when requested by the decoder configuration.
         x_target_forcing : Source
             Target-side forcing data and coordinates used by decoder target features.
-        target_spec : Template
+        target_spec : BaseTemplate
             What to decode for this dataset: its nodes (coordinates, timedeltas, sizes) and variables.
         batch_size : int
             Flattened batch size used to assemble target features.
@@ -496,7 +496,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         x_out: torch.Tensor,
         x_skip: torch.Tensor | None,
-        template: "Template",
+        template: "BaseTemplate",
         dtype: torch.dtype,
         dataset_name: str,
     ) -> "Source":
@@ -643,7 +643,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         self,
         batch: Batch,
         target_forcings: Batch,
-        target_template: dict[str, "Template"],
+        target_template: dict[str, "BaseTemplate"],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -660,7 +660,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             views (``view.flatten().shard_sizes``).
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
-        target_template : dict[str, Template]
+        target_template : dict[str, BaseTemplate]
             What to predict per decoded dataset: the output variables and target nodes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.

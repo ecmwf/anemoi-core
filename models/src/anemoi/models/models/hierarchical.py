@@ -35,7 +35,7 @@ from anemoi.models.utils.config import COORDS_DIM
 from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
-    from anemoi.models.data.sources.base import Template
+    from anemoi.models.data.sources.base import BaseTemplate
 
 LOGGER = logging.getLogger(__name__)
 
@@ -264,7 +264,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
         self,
         batch: Batch,
         target_forcings: Batch,
-        target_template: dict[str, "Template"],
+        target_template: dict[str, "BaseTemplate"],
         *,
         model_comm_group: Optional[ProcessGroup] = None,
         **kwargs,
@@ -277,7 +277,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             Input sources per dataset. Per-dataset grid sharding is carried by the sources.
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
-        target_template : dict[str, Template]
+        target_template : dict[str, BaseTemplate]
             What to predict per decoded dataset: the output variables and target nodes.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, by default None.

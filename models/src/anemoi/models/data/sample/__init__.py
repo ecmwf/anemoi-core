@@ -16,7 +16,7 @@ the matching :class:`~anemoi.models.data.sources.Source`.
 Each kind is registered in :data:`sample_registry` under its name (``"gridded"``,
 ``"tabular"``). Both the data readers (training) and
 :meth:`AnemoiModelInterface.predict_step` (inference) build their samples with
-:func:`create_sample`, which validates the inputs and converts them to the
+:func:`create_batched_struct`, which validates the inputs and converts them to the
 canonical form.
 """
 
@@ -40,12 +40,12 @@ __all__ = [
     "GriddedSample",
     "BaseSample",
     "TabularSample",
-    "create_sample",
+    "create_batched_struct",
     "sample_registry",
 ]
 
 
-def create_sample(
+def create_batched_struct(
     *,
     data_type: str,
     variables: Sequence[str],
@@ -82,6 +82,8 @@ def create_sample(
         samples; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)`` pairs)
         and ``shard_sizes`` for tabular samples.
     """
+    sample_cls = sample_registry.lookup(data_type)
+
     device = data.device if data is not None else None
 
     latitudes = _as_radians(latitudes, device)
@@ -99,20 +101,27 @@ def create_sample(
         layout = TensorLayout.from_tuple(*layout)
     variables = list(variables)
 
-    if data is not None:
-        if data.ndim != layout.ndim:
-            msg = f"data of shape {tuple(data.shape)} does not match the layout {layout!r}."
-            raise ValueError(msg)
-        n_vars = data.shape[layout.axis("variables", ndim=data.ndim)]
-        if n_vars != len(variables):
-            msg = f"data carries {n_vars} variables but {len(variables)} names were given."
-            raise ValueError(msg)
-        n_grid = data.shape[layout.axis("grid", ndim=data.ndim)]
-        if n_grid != num_points:
-            msg = f"data carries {n_grid} points but {num_points} coordinates were given."
-            raise ValueError(msg)
+    if data is None:
+        return sample_cls.template_type(
+            variables=variables,
+            layout=layout,
+            coordinates=coordinates,
+            statistics=statistics,
+            **kwargs,
+        )
 
-    sample_cls = sample_registry.lookup(data_type)
+    if data.ndim != layout.ndim:
+        msg = f"data of shape {tuple(data.shape)} does not match the layout {layout!r}."
+        raise ValueError(msg)
+    n_vars = data.shape[layout.axis("variables", ndim=data.ndim)]
+    if n_vars != len(variables):
+        msg = f"data carries {n_vars} variables but {len(variables)} names were given."
+        raise ValueError(msg)
+    n_grid = data.shape[layout.axis("grid", ndim=data.ndim)]
+    if n_grid != num_points:
+        msg = f"data carries {n_grid} points but {num_points} coordinates were given."
+        raise ValueError(msg)
+
     return sample_cls.from_validated(
         n_points=num_points,
         device=device,

@@ -20,7 +20,7 @@ from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
 from anemoi.models.data.sources.base import Source
-from anemoi.models.data.sources.base import Template
+from anemoi.models.data.sources.base import BaseTemplate
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
@@ -383,7 +383,7 @@ class GriddedSource(Source):
 
 
 @dataclass(frozen=True, eq=False, kw_only=True)
-class GriddedTemplate(Template):
+class GriddedTemplate(BaseTemplate):
     """A :class:`GriddedSource` without its data.
 
     Parameters
@@ -439,7 +439,7 @@ class GriddedTemplate(Template):
         )
         if tuple(data.shape) != expected:
             msg = (
-                f"Template {self.name!r} expects flat data of shape {expected} "
+                f"{self.__class__.__name__} {self.name!r} expects flat data of shape {expected} "
                 f"(batch*ensemble*grid, time*variables), got {tuple(data.shape)}."
             )
             raise ValueError(msg)

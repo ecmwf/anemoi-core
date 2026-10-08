@@ -14,7 +14,7 @@ from typing import ClassVar
 from typing import Self
 
 import torch
-
+from anemoi.models.data.sources import TabularTemplate
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sample.base import BaseSample
@@ -46,6 +46,7 @@ class TabularSample(BaseSample):
     shard_sizes: list[ShardSizes] | None = None
 
     source_type: ClassVar[type[TabularSource]] = TabularSource
+    template_type: ClassVar[type[TabularTemplate]] = TabularTemplate
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
     _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("coordinates", "timedeltas", "boundaries", "shard_sizes")
 

@@ -21,6 +21,8 @@ from typing import Self
 import torch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import Source
+from anemoi.models.data.sources import BaseTemplate
+
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
@@ -28,7 +30,7 @@ class BaseSample(ABC):
     """One dataset's contribution to one sample, as produced by a data reader.
 
     Everything needed to build the collated :class:`~anemoi.models.data.sources.Source` travels with the sample, so
-    collation needs no side channel. Build samples with :func:`~anemoi.models.data.sample.create_sample`; each
+    collation needs no side channel. Build samples with :func:`~anemoi.models.data.sample.create_batched_struct`; each
     kind is registered in :data:`~anemoi.models.data.sample.sample_registry`.
 
     Subclasses must implement :meth:`from_validated`, :meth:`_collate_layout` and
@@ -69,7 +71,7 @@ class BaseSample(ABC):
         coordinates: torch.Tensor,
         **kwargs: Any,
     ) -> Self:
-        """Build a sample from inputs already checked by :func:`create_sample`.
+        """Build a sample from inputs already checked by :func:`create_batched_struct`.
 
         ``coordinates`` is an ``(N, 2)`` tensor of ``(latitude, longitude)`` in radians.
         ``kwargs`` holds the other common fields, already converted, plus the arguments
@@ -80,6 +82,9 @@ class BaseSample(ABC):
 
     # The :class:`Source` subclass this kind collates into.
     source_type: ClassVar[type[Source]]
+
+    # The :class:`BaseTemplate` subclass this kind uses for inference target templates.
+    template_type: ClassVar[type[BaseTemplate]]
 
     # Fields that describe the dataset rather than the sample: identical across the batch.
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")

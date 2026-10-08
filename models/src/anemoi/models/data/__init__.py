@@ -14,26 +14,26 @@ from .layout import TensorLayout
 from .sample import BaseSample
 from .sample import GriddedSample
 from .sample import TabularSample
-from .sample import create_sample
+from .sample import create_batched_struct
 from .sources import GriddedSource
 from .sources import GriddedTemplate
 from .sources import Source
 from .sources import TabularSource
 from .sources import TabularTemplate
-from .sources import Template
+from .sources import BaseTemplate
 
 __all__ = [
     "Batch",
     "BaseSample",
     "GriddedSample",
     "TabularSample",
-    "create_sample",
+    "create_batched_struct",
     "TensorLayout",
     "GriddedSource",
     "TabularSource",
     "Source",
     "FlatSource",
-    "Template",
+    "BaseTemplate",
     "GriddedTemplate",
     "TabularTemplate",
 ]

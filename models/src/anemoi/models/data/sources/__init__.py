@@ -8,7 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from .base import Source
-from .base import Template
+from .base import BaseTemplate
 from .gridded import GriddedSource
 from .gridded import GriddedTemplate
 from .tabular import TabularSource
@@ -20,5 +20,5 @@ __all__ = [
     "TabularSource",
     "TabularTemplate",
     "Source",
-    "Template",
+    "BaseTemplate",
 ]

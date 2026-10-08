@@ -14,7 +14,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data import GriddedSample
 from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
-from anemoi.models.data import create_sample
+from anemoi.models.data import create_batched_struct
 from anemoi.models.data.sample import sample_registry
 
 LATS = [0.0, 45.0, 90.0]
@@ -30,7 +30,7 @@ def _gridded(**overrides):
         "latitudes": LATS,
         "longitudes": LONS,
     }
-    return create_sample(**(kwargs | overrides))
+    return create_batched_struct(**(kwargs | overrides))
 
 
 def _tabular(**overrides):
@@ -44,7 +44,7 @@ def _tabular(**overrides):
         "timedeltas": [0.0, 0.0, 3600.0],
         "boundaries": [(0, 2), (2, 3)],
     }
-    return create_sample(**(kwargs | overrides))
+    return create_batched_struct(**(kwargs | overrides))
 
 
 def test_gridded_converts_layout_and_degrees():

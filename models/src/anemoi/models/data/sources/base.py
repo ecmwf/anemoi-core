@@ -217,7 +217,7 @@ class Source(ABC):
         ...
 
     @abstractmethod
-    def template(self) -> "Template":
+    def template(self) -> "BaseTemplate":
         """Return this source without its data: what it holds and where, but not the values.
 
         ``template.unflatten(x)`` rebuilds a source of the same kind and shape from a flat
@@ -514,7 +514,7 @@ class Source(ABC):
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
-class Template(ABC):
+class BaseTemplate(ABC):
     """A source without its data: what it holds (variables) and where (its nodes).
 
     A template describes a source completely except for the values: the dataset name,
@@ -550,7 +550,7 @@ class Template(ABC):
 
     def __post_init__(self) -> None:
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"Template {self.name!r} requires unique variable names.")
+            raise ValueError(f"BaseTemplate {self.name!r} requires unique variable names.")
 
     @property
     def n_variables(self) -> int:
@@ -567,21 +567,21 @@ class Template(ABC):
             "metadata": self.metadata,
         }
 
-    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "Template":
+    def select_variables(self, indices: Sequence[int] | torch.Tensor | slice) -> "BaseTemplate":
         """Return the same nodes with only the variables at ``indices`` (and their statistics)."""
         index = _index_list(indices, self.n_variables)
         variables = [self.variables[i] for i in index]
         statistics = {key: value[index] for key, value in self.statistics.items()}
         return replace(self, variables=variables, statistics=statistics)
 
-    def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "Template":
+    def with_variables(self, variables: list[str], statistics: Mapping[str, Any] | None = None) -> "BaseTemplate":
         """Return the same nodes with other variables to decode.
 
         ``statistics`` should cover exactly ``variables``; it defaults to none.
         """
         return replace(self, variables=list(variables), statistics={} if statistics is None else statistics)
 
-    def with_ensemble_size(self, ensemble_size: int) -> "Template":
+    def with_ensemble_size(self, ensemble_size: int) -> "BaseTemplate":
         """Return the same template for ``ensemble_size`` members per sample."""
         return replace(self, ensemble_size=ensemble_size)
 

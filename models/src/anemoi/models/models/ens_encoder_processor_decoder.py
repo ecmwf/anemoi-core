@@ -20,7 +20,7 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sources import Template
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -126,7 +126,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         self,
         batch: Batch,
         target_forcings: Batch,
-        target_template: dict[str, Template],
+        target_template: dict[str, BaseTemplate],
         *,
         fcstep: int = 0,
         model_comm_group: Optional[ProcessGroup] = None,
@@ -140,7 +140,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Batch envelope, one source view per dataset.
         target_forcings : Batch
             Decoder conditioning: the forcing variables at the output valid times.
-        target_template : dict[str, Template]
+        target_template : dict[str, BaseTemplate]
             What to predict for each decoded dataset: its nodes (coordinates, timedeltas,
             sizes) and variables. See :meth:`BaseModel.output_templates`.
         fcstep : int, optional
