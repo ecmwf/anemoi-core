@@ -53,18 +53,26 @@ class SourceSample(ABC):
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout
         The **per-sample** layout, without a batch axis.
-    coordinates : torch.Tensor
-        ``(N, 2)`` stacking ``(latitudes, longitudes)`` in **radians**.
+    latitudes : torch.Tensor
+        ``(N,)`` array of latitudes in **radians**.
+    longitudes : torch.Tensor
+        ``(N,)`` array of longitudes in **radians**.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis, as produced by
         ``anemoi-datasets``.
     """
 
-    data: torch.Tensor
+    data: torch.Tensor | None
     variables: list[str]
     layout: TensorLayout
-    coordinates: torch.Tensor
+    latitudes: torch.Tensor
+    longitudes: torch.Tensor
+    data_type: str
     statistics: Mapping[str, Any] = field(default_factory=dict)
+
+    def coordinates(self) -> torch.Tensor:
+        """Return the coordinates as a ``(N, 2)`` tensor stacking ``(latitudes, longitudes)`` in radians."""
+        return torch.stack([self.latitudes, self.longitudes], dim=-1)
 
     @classmethod
     @abstractmethod
@@ -77,9 +85,6 @@ class SourceSample(ABC):
     def collate(cls, name: str, samples: Sequence[Self]) -> Source:
         """Collate the samples of one dataset into a batched source."""
         ...
-
-    def __repr__(self) -> str:
-        return f"<{self.__class__.__name__} shape={tuple(self.data.shape)} dtype={self.data.dtype}>"
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
@@ -98,6 +103,7 @@ class GriddedSourceSample(SourceSample):
 
     grid_size: int | None = None
     shard_sizes: ShardSizes | None = None
+    data_type: str = "gridded"
 
     def __post_init__(self) -> None:
         if not self.layout.has_axis("time"):
@@ -126,7 +132,7 @@ class GriddedSourceSample(SourceSample):
             layout=layout,
             statistics=head.statistics,
             data=data,
-            coordinates=head.coordinates,
+            coordinates=head.coordinates(),
             shard_sizes=head.shard_sizes,
         )
 
@@ -152,6 +158,7 @@ class TabularSourceSample(SourceSample):
     timedeltas: torch.Tensor
     boundaries: tuple[slice, ...]
     shard_sizes: list[ShardSizes] | None = None
+    data_type: str = "tabular"
 
     def __post_init__(self) -> None:
         if self.layout.has_axis("time") or self.layout.has_axis("batch"):
@@ -180,7 +187,7 @@ class TabularSourceSample(SourceSample):
             layout=layout,
             statistics=head.statistics,
             data=data,
-            coordinates=[s.coordinates for s in samples],
+            coordinates=[s.coordinates() for s in samples],
             timedeltas=[s.timedeltas for s in samples],
             boundaries=[s.boundaries for s in samples],
             shard_sizes=_collate_tabular_shard_sizes(name, samples),

@@ -22,6 +22,7 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import GriddedSourceSample
 from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
 
 if TYPE_CHECKING:
     from pytest_mock import MockFixture
@@ -78,9 +79,15 @@ def test_gridded_reader_is_not_tabular(mocker: MockFixture) -> None:
 
 def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader = mocker.MagicMock()
-    reader.num_sequences = 1
     # (sequence, position) anchors of a 20-date series sampled with relative indices [0, 1]
     reader.compute_anchors.return_value = np.column_stack([np.zeros(19, dtype=np.int64), np.arange(19)])
+    positions = np.arange(19, dtype=np.int64)  # 20 dates, window of 2
+    reader.valid_anchors.return_value = ReaderAnchors(
+        positions.astype("datetime64[s]"),
+        np.zeros_like(positions),
+        positions,
+    )
+    reader.sampling = None
     reader.get_sample.return_value = GriddedSourceSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],

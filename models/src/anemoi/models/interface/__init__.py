@@ -9,6 +9,7 @@
 
 import uuid
 from typing import Optional
+from anemoi.models.data.sample import GriddedSourceSample, TabularSourceSample
 
 import torch
 from hydra.utils import instantiate
@@ -18,11 +19,21 @@ from torch.distributed.distributed_c10d import ProcessGroup
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import SourceSample
-from anemoi.models.data.sample import TabularSourceSample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
+
+
+def _create_source(dataset_name: str, payload: dict) -> SourceSample:
+    if payload["type"] == "tabular":
+        source_class = TabularSourceSample
+    elif payload["type"] == "gridded":
+        source_class = GriddedSourceSample
+    else:
+        raise ValueError(f"Unsupported source type: {payload['type']}")
+
+    return source_class(**payload)
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -83,10 +94,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
 
-        self.sample_types = {name: reader.sample_type for name, reader in data_readers.items()}
-        self.is_dataset_static = {
-            name: not issubclass(sample_type, TabularSourceSample) for name, sample_type in self.sample_types.items()
-        }
+        self.is_dataset_static = {name: not reader.is_tabular for name, reader in data_readers.items()}
 
         self._build_model()
         self._update_metadata()
@@ -207,6 +215,7 @@ class AnemoiModelInterface(torch.nn.Module):
         data_input = self.data_indices[dataset_name].data.input
         return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
 
+
     def _source_sample(self, dataset_name: str, payload: dict) -> SourceSample:
         """Build one dataset's SourceSample from a plain inference payload.
 
@@ -231,8 +240,6 @@ class AnemoiModelInterface(torch.nn.Module):
         coordinates = torch.deg2rad(torch.stack([latitudes, longitudes], dim=-1)).to(device=data.device)
 
         layout_names = tuple(payload["layout"])
-        if "batch" in layout_names:
-            raise ValueError(f"Dataset {dataset_name!r}: the sample layout {layout_names} must not have a batch axis.")
         if data.ndim != len(layout_names):
             raise ValueError(
                 f"Dataset {dataset_name!r}: data of shape {tuple(data.shape)} does not match the layout {layout_names}."
@@ -247,7 +254,6 @@ class AnemoiModelInterface(torch.nn.Module):
             )
 
         common = {
-            "data": data,
             "variables": variables,
             "layout": layout,
             "statistics": self._statistics_for(dataset_name, variables),
@@ -260,16 +266,11 @@ class AnemoiModelInterface(torch.nn.Module):
         for key in ("timedeltas", "boundaries"):
             if payload.get(key) is None:
                 raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the tabular sample.")
+
         return sample_type(
             **common,
             timedeltas=torch.as_tensor(payload["timedeltas"], dtype=torch.float32).reshape(-1).to(device=data.device),
             boundaries=tuple(slice(int(start), int(stop)) for start, stop in payload["boundaries"]),
-        )
-
-    def get_batch(self, data: dict[str, dict]) -> Batch:
-        """Collate the per-dataset payloads into a single-sample Batch."""
-        return Batch.collate(
-            {dataset_name: self._source_sample(dataset_name, payload) for dataset_name, payload in data.items()},
         )
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
@@ -350,8 +351,8 @@ class AnemoiModelInterface(torch.nn.Module):
         assert target_template is not None, "target_template must be provided for prediction."
 
         # Convert to batch
-        x = self.get_batch(x)
-        target = self.get_batch(target_template)
+        x = Batch.collate({dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in x.items()})
+        target = Batch.collate({dataset_name: _create_source(dataset_name, payload) for dataset_name, payload in target_template.items()})
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

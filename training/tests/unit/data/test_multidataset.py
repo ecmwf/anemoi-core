@@ -17,6 +17,8 @@ from pytest_mock import MockFixture
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.usable_indices import ReaderAnchors
+from anemoi.training.data.usable_indices import get_usable_indices
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
@@ -43,6 +45,16 @@ class TestMultiDataset:
             relative_indices,
             sampling,
         )
+        reader.dates = list(range(num_dates))
+        reader.frequency = "3h"
+        reader.has_trajectories = False
+        reader.sampling = None
+
+        def valid_anchors(relative_indices: list[int]) -> ReaderAnchors:
+            positions = get_usable_indices(reader.missing, len(reader.dates), relative_indices)
+            return ReaderAnchors(positions.astype("datetime64[s]"), np.zeros_like(positions), positions)
+
+        reader.valid_anchors.side_effect = valid_anchors
         return reader
 
     @pytest.fixture
@@ -70,10 +82,10 @@ class TestMultiDataset:
     def test_get_sample_offsets_each_reader(self, multi_dataset: MultiDataset) -> None:
         """get_sample(i) asks every reader for anchor i's sequence and position + its relative date indices."""
         multi_dataset.worker_id = 0
-        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 11)
+        sample = multi_dataset.get_sample(1)  # anchor 1 is (sequence 0, position 1)  # anchor 1 is (sequence 0, position 11)
 
         for name, reader in multi_dataset.data_readers.items():
-            reader.get_sample.assert_called_once_with(0, [11, 13, 17])
+            reader.get_sample.assert_called_once_with(0, 0, [11, 13, 17])
             assert sample[name] is reader.get_sample.return_value
 
     def test_set_epoch_updates_contiguous_relative_date_indices(self, multi_dataset: MultiDataset) -> None:

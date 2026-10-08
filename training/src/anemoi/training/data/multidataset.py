@@ -74,27 +74,24 @@ class MultiDataset(IterableDataset):
 
         self.epoch = epoch
         self.rollout = rollout
+        self.stride = self._sampling_stride(data_readers)
         self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
 
         self.fake_dataloading = fake_dataloading
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (GriddedDataReader, global time axis)
-        # with multi-sequence (TrajectoryDataReader, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
         self._lazy_init_model_and_reader_group_info()
+
+    @staticmethod
+    def _sampling_stride(data_readers: dict[str, BaseAnemoiReader]) -> int | None:
+        """Return the anchor stride the readers agree on; stride 1 when none is configured."""
+        configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
+        strides = set(configured.values())
+        if len(strides) > 1:
+            msg = f"Data readers disagree on the sampling stride: {configured}."
+            raise ValueError(msg)
+        return strides.pop() if strides else 1
 
     def set_epoch(
         self,
@@ -111,10 +108,10 @@ class MultiDataset(IterableDataset):
         if relative_date_indices is None:
             return
 
-        # Refresh which sample dates can provide the currently required time steps.
-        # A valid (sequence, position) anchor is a tuple identifying a specific position within a sequence.
-        # The flat index over them allows the shuffle/shard logic to operate efficiently.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        # Refresh the anchors (times every reader can sample) for the required time steps.
+        # Each reader gets its own (sequence, position) per anchor, so readers need not share
+        # a frequency or date range. The flat index over anchors drives the shuffle/shard logic.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices, stride=self.stride)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
         # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
@@ -347,24 +344,16 @@ class MultiDataset(IterableDataset):
         Each value is the reader's :class:`~anemoi.models.data.SourceSample`, so that
         the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
         """
-        sequence, position = (int(v) for v in self.anchors[index])
-
         x: dict[str, SourceSample] = {}
         for name, data_reader in self.data_readers.items():
+            sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
             x[name] = data_reader.get_sample(sequence, time_steps)
 
         return x
 
-    def __iter__(self) -> Iterator[dict[str, dict]]:
-        """Return an iterator that yields per-dataset coordinate-rich payloads.
-
-        Yields
-        ------
-        dict[str, dict]
-            Mapping ``{name: {"data": tensor, "coordinates": tensor, ...}}``
-            for each synchronized sample.
-        """
+    def __iter__(self) -> Iterator[dict[str, SourceSample]]:
+        """Yield ``{dataset_name: SourceSample}`` for each synchronized sample."""
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
         if self.shuffle:
