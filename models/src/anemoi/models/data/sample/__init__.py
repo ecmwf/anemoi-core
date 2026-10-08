@@ -25,9 +25,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import torch
-from anemoi.utils.registry import Registry
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.utils.registry import Registry
 
 source_sample_registry = Registry(__name__)
 

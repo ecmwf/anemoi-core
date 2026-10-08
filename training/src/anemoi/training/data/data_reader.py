@@ -465,7 +465,6 @@ class GriddedDataReader(BaseAnemoiReader):
         )
 
 
-
 class TabularDataReader(BaseAnemoiReader):
     """Observation dataset reader (e.g. from tabular zarrs).
 

@@ -24,7 +24,6 @@ from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 
-
 def _create_source(dataset_name: str, payload: dict) -> SourceSample:
     """Build one dataset's SourceSample from a plain inference payload.
 
