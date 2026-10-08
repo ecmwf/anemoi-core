@@ -2,12 +2,13 @@
 # Task — SpatialDownscaler
 # Input datasets are conditioning inputs; target datasets are residual targets.
 #
-# offsets (optional): list of time-offset strings shared by inputs and outputs.
-#   Each offset is one snapshot slot processed simultaneously.
-#   Defaults to ["0H"] (single-snapshot).
-#   Example for three simultaneous snapshots: offsets: ["0H", "6H", "12H"]
+# input_offsets / output_offsets: lists of time-offset strings, one per
+#   snapshot processed simultaneously. Both default to ["0H"].
+#   Residual prediction (training.transport.prediction_mode: residual)
+#   requires output_offsets == input_offsets.
 # ============================================================
 _target_: anemoi.training.tasks.SpatialDownscaler
 input_datasets: [in_lres, in_hres]
 target_datasets: [out_hres]
-offsets: ["0H", "6H"]  # uncomment and extend to enable multiple simultaneous inputs and outputs
+input_offsets: ["0H", "6H"]
+output_offsets: ["0H", "6H"]

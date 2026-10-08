@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import datetime
 from types import SimpleNamespace
 from typing import TYPE_CHECKING
 from typing import Any
@@ -2612,6 +2613,8 @@ def _make_residual_module(
         target_datasets=[target_name],
         input_datasets=[lres_name],
         get_targets=lambda batch, **_kw: {n: batch[n] for n in [target_name]},
+        get_input_offsets=lambda **_kw: [datetime.timedelta(0)],
+        get_output_offsets=lambda **_kw: [datetime.timedelta(0)],
     )
 
     def _get_data_output_target(target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -2857,4 +2860,27 @@ def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missin
     )
     module.model.pre_processors_residual = {}
     with pytest.raises(AssertionError, match="pre_processors_residual"):
+        ResidualPredictionMode(module)
+
+
+@pytest.mark.parametrize(
+    ("input_hours", "output_hours"),
+    [([0], [0, 6]), ([0, 6], [6, 12])],
+    ids=["different_count", "same_count_different_times"],
+)
+def test_residual_prediction_mode_rejects_different_input_and_output_offsets(
+    input_hours: list[int],
+    output_hours: list[int],
+) -> None:
+    """The residual pairs output snapshot *i* with input snapshot *i*, so the offsets must match."""
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    module.task.get_input_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in input_hours]
+    module.task.get_output_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in output_hours]
+
+    with pytest.raises(ValueError, match="input_offsets == output_offsets"):
         ResidualPredictionMode(module)

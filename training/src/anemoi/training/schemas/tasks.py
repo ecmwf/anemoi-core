@@ -94,11 +94,12 @@ class SpatialDownscalerSchema(BaseModel):
     "Datasets fed to the encoder. Split from targets by name, not by time position."
     target_datasets: list[str] = Field(example=["out_hres"])
     "Datasets the model predicts."
-    offsets: list[str] | None = Field(default=None, example=["0H", "6H"])
-    """Time offsets shared by inputs and outputs, one per simultaneous snapshot.
+    input_offsets: list[str] = Field(default=["0H"], example=["0H", "6H"], min_length=1)
+    "Input time offsets as duration strings."
+    output_offsets: list[str] = Field(default=["0H"], example=["0H", "6H"], min_length=1)
+    """Output time offsets as duration strings.
 
-    Snapshot *i* of each input dataset corresponds to snapshot *i* of each
-    target dataset.  Defaults to ``["0H"]`` (single snapshot).
+    Residual prediction requires ``output_offsets == input_offsets``.
     """
 
 

@@ -31,11 +31,12 @@ def test_default_offsets_are_single_zero() -> None:
 
 
 def test_multiple_offsets_parsed_correctly() -> None:
-    """Three offsets are parsed, sorted, and shared between input and output."""
+    """Three offsets are parsed and sorted for both input and output."""
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H", "12H"],
+        input_offsets=["12H", "0H", "6H"],
+        output_offsets=["0H", "6H", "12H"],
     )
     expected = [
         datetime.timedelta(hours=0),
@@ -47,27 +48,18 @@ def test_multiple_offsets_parsed_correctly() -> None:
     assert task._offsets == expected
 
 
-def test_input_and_output_offsets_are_always_equal() -> None:
-    """The invariant ``input_offsets == output_offsets`` must hold for any offset list."""
-    task = SpatialDownscaler(
-        input_datasets=["in_lres"],
-        target_datasets=["out_hres"],
-        offsets=["3H", "0H", "6H"],  # unsorted on purpose
-    )
-    assert task._input_offsets == task._output_offsets
-
-
 # ---------------------------------------------------------------------------
 # Batch index helpers
 # ---------------------------------------------------------------------------
 
 
 def test_batch_input_indices_match_batch_output_indices() -> None:
-    """For multiple offsets, input and output batch positions are identical."""
+    """For identical multiple offsets, input and output batch positions are identical."""
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H"],
+        input_offsets=["0H", "6H"],
+        output_offsets=["0H", "6H"],
     )
     assert task.get_batch_input_indices() == task.get_batch_output_indices()
 
@@ -77,7 +69,8 @@ def test_batch_indices_are_zero_indexed_positions() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H", "12H"],
+        input_offsets=["0H", "6H", "12H"],
+        output_offsets=["0H", "6H", "12H"],
     )
     # All offsets go into a single shared _offsets list, so positions are 0, 1, 2.
     assert task.get_batch_input_indices() == [0, 1, 2]
@@ -141,7 +134,8 @@ def test_get_inputs_multi_offset_time_dimension() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H", "12H"],
+        input_offsets=["0H", "6H", "12H"],
+        output_offsets=["0H", "6H", "12H"],
     )
     batch = _make_batch(["in_lres", "out_hres"], num_times=n_offsets, grid=8, nvar=5)
     data_indices = {"in_lres": _FakeIndices(5), "out_hres": _FakeIndices(5)}
@@ -155,7 +149,8 @@ def test_get_targets_multi_offset_time_dimension() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H", "12H"],
+        input_offsets=["0H", "6H", "12H"],
+        output_offsets=["0H", "6H", "12H"],
     )
     batch = _make_batch(["in_lres", "out_hres"], num_times=n_offsets, grid=8, nvar=5)
     y = task.get_targets(batch)
@@ -204,7 +199,8 @@ def test_fill_metadata_records_the_offsets_explicitly() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H"],
+        input_offsets=["0H", "6H"],
+        output_offsets=["6H"],
     )
     md_dict = _make_metadata_dict(["in_lres", "out_hres"])
 
@@ -213,7 +209,7 @@ def test_fill_metadata_records_the_offsets_explicitly() -> None:
     timesteps = md_dict["metadata_inference"]["out_hres"]["timesteps"]
     assert timesteps["timestep"] == "0H"
     assert timesteps["input_offsets"] == ["0h", "6h"]
-    assert timesteps["output_offsets"] == ["0h", "6h"]
+    assert timesteps["output_offsets"] == ["6h"]
 
 
 def test_fill_metadata_states_that_there_is_no_feedback() -> None:
@@ -235,7 +231,8 @@ def test_fill_metadata_writes_no_rollout_shift() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
-        offsets=["0H", "6H"],
+        input_offsets=["0H", "6H"],
+        output_offsets=["0H", "6H"],
     )
     md_dict = _make_metadata_dict(["in_lres", "out_hres"])
 

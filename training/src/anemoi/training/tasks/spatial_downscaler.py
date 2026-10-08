@@ -26,16 +26,7 @@ class SpatialDownscaler(BaseSingleStepTask):
     """Spatial downscaling task implementation.
 
     Distinguishes input-only datasets (e.g. ``in_lres``, ``in_hres``) from
-    output-only datasets (e.g. ``out_hres``) by explicit name lists rather than
-    by time position.
-    Supports multiple simultaneous snapshots via ``offsets``.  Each offset
-    represents one time slot; the same list is used for both input and output
-    so that snapshot *i* of each input dataset corresponds to snapshot *i* of
-    each target dataset.  The default (``offsets=None``) is equivalent to
-    ``offsets=["0H"]`` for single-snapshot behaviour.
-    The batch is normalized in the standard way; ``ResidualPredictionMode``
-    denormalizes lres and target internally to compute ``y - interp(x_lres)`` in
-    physical space, then renormalizes the residual with tendency-space statistics.
+    output-only datasets (e.g. ``out_hres``) by explicit name lists.
     """
 
     name: str = "spatial_downscaler"
@@ -44,11 +35,14 @@ class SpatialDownscaler(BaseSingleStepTask):
         self,
         input_datasets: list[str],
         target_datasets: list[str],
-        offsets: list[str] | None = None,
+        input_offsets: list[str] | None = None,
+        output_offsets: list[str] | None = None,
         **_kwargs,
     ) -> None:
-        shared_offsets = [as_timedelta(o) for o in (offsets or ["0H"])]
-        super().__init__(input_offsets=shared_offsets, output_offsets=shared_offsets)
+        super().__init__(
+            input_offsets=[as_timedelta(o) for o in (input_offsets or ["0H"])],
+            output_offsets=[as_timedelta(o) for o in (output_offsets or ["0H"])],
+        )
         self.input_datasets = input_datasets
         self.target_datasets = target_datasets
         # No-op placeholder; a proper adapter will be added with downscaling diagnostics.
@@ -96,8 +90,8 @@ class SpatialDownscaler(BaseSingleStepTask):
     ) -> dict[str, torch.Tensor]:
         """Extract model inputs from a batch, restricted to ``input_datasets``.
 
-        Unlike the forecaster, the split between inputs and targets is by dataset name. All
-        inputs and outputs have the same set of time offsets (configured via ``offsets``).
+        Unlike the forecaster, the split between inputs and targets is by dataset name;
+        the time slots are selected by ``input_offsets``.
 
         Parameters
         ----------
@@ -112,8 +106,7 @@ class SpatialDownscaler(BaseSingleStepTask):
         dict[str, torch.Tensor]
             Input tensors for ``input_datasets`` only, variable-filtered to
             ``data.input.full``,
-            shape ``(bs, num_offsets` only, variable-filtered to
-            ``data.input.full``, shape ``(bs, 1, ensemble, grid, n_input_vars)``.
+            shape ``(bs, num_input_offsets, ensemble, grid, n_input_vars)``.
         """
         time_indices = normalize_time_indices(self.get_batch_input_indices())
         x = {}
@@ -145,8 +138,7 @@ class SpatialDownscaler(BaseSingleStepTask):
         -------
         dict[str, torch.Tensor]
             Target tensors for ``target_datasets`` only (all variables),
-            shape ``(bs, num_offsets for ``target_datasets`` only (all variables),
-            shape ``(bs, 1, ensemble, grid, nvar)``.
+            shape ``(bs, num_output_offsets, ensemble, grid, nvar)``.
         """
         time_indices = normalize_time_indices(self.get_batch_output_indices())
         y = {}

@@ -328,6 +328,7 @@ class ResidualPredictionMode(PredictionMode):
         super().__init__(module)
         self._validate_objective()
         self._validate_source_kind()
+        self._validate_offsets()
         self._reference_by_target = self.target_anchors(self.module.config)
         self._validate_residual_processors()
 
@@ -366,6 +367,22 @@ class ResidualPredictionMode(PredictionMode):
                 "reference-state source has not been implemented yet."
             )
             raise NotImplementedError(msg)
+
+    def _validate_offsets(self) -> None:
+        """Require ``input_offsets == output_offsets``.
+
+        The residual of output snapshot *i* is taken against input snapshot *i*,
+        so both must refer to the same times.
+        """
+        input_offsets = list(self.module.task.get_input_offsets())
+        output_offsets = list(self.module.task.get_output_offsets())
+        if input_offsets != output_offsets:
+            msg = (
+                "ResidualPredictionMode requires input_offsets == output_offsets, got "
+                f"input_offsets={[str(o) for o in input_offsets]} and "
+                f"output_offsets={[str(o) for o in output_offsets]}."
+            )
+            raise ValueError(msg)
 
     def _validate_residual_processors(self) -> None:
         """Assert residual processors exist for every target at construction time."""
