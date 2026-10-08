@@ -240,9 +240,14 @@ class BaseAnemoiReader(ABC):
         """Return dataset grid size."""
         return self.data.shape[0]
 
-    @property
+    @cached_property
     def statistics(self) -> dict:
-        """Return dataset statistics."""
+        """Return dataset statistics.
+
+        Cached: some ``anemoi.datasets`` stores rebuild the dict (and re-read the arrays)
+        on every access, and every sample must carry the same statistics object for
+        :meth:`SourceSample.collate` to accept them together.
+        """
         return self.data.statistics
 
     def statistics_tendencies(
@@ -463,7 +468,6 @@ class GriddedDataReader(BaseAnemoiReader):
             longitudes=longitudes,
             shard_sizes=self.grid_shard_sizes,
         )
-
 
 
 class TabularDataReader(BaseAnemoiReader):

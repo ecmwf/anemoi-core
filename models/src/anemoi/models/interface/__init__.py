@@ -16,34 +16,11 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import SourceSample
 from anemoi.models.data.sample import create_source_sample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
-
-
-
-def _create_source(dataset_name: str, payload: dict) -> SourceSample:
-    """Build one dataset's SourceSample from a plain inference payload.
-
-    The payload carries ``latitudes`` / ``longitudes`` (degrees), ``layout`` (per-sample
-    axis names, no batch axis), ``variables`` and, optionally, ``data``; tabular datasets
-    also carry ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time
-    window). The dataset kind and the statistics come from the checkpoint; an optional
-    ``type`` key must agree with the checkpoint. The payload is not modified.
-    """
-    payload = dict(payload)
-
-    try:
-        return create_source_sample(
-            data_type=payload.pop("type"),
-            statistics=self._statistics_for(dataset_name, payload["variables"]),
-            **payload,
-        )
-    except (TypeError, ValueError) as e:
-        raise ValueError(f"Dataset {dataset_name!r}: {e}") from e
 
 
 class AnemoiModelInterface(torch.nn.Module):
@@ -211,6 +188,15 @@ class AnemoiModelInterface(torch.nn.Module):
         positions = [name_to_index[name] for name in variables]
         return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
 
+    def _get_batch(self, x: dict[str, dict]) -> Batch:
+        """Utility function to build a :class:`Batch` from raw per-dataset payload dicts."""
+        return Batch.collate(
+            {
+                name: create_source_sample(statistics=self._statistics_for(name, payload["variables"]), **payload)
+                for name, payload in x.items()
+            }
+        )
+
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
         The coordinates are converted from radians to degrees, and the batch axis of one is dropped.
@@ -289,8 +275,10 @@ class AnemoiModelInterface(torch.nn.Module):
         assert target_template is not None, "target_template must be provided for prediction."
 
         # Convert to batch
-        x = Batch.collate({name: _create_source(name, payload) for name, payload in x.items()})
-        target = Batch.collate({name: _create_source(name, payload) for name, payload in target_template.items()})
+        x = self._get_batch(x)
+        breakpoint()
+        target = self._get_batch(target_template)
+        breakpoint()
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
@@ -310,6 +298,7 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         pred_batch = self.model.predict_step(**predict_kwargs, **kwargs)
+        breakpoint()
         return self.unwrap_batch(pred_batch)
 
     def _update_metadata(self) -> None:

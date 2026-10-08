@@ -25,9 +25,9 @@ from collections.abc import Sequence
 from typing import Any
 
 import torch
-from anemoi.utils.registry import Registry
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.utils.registry import Registry
 
 source_sample_registry = Registry(__name__)
 
@@ -93,7 +93,8 @@ def create_source_sample(
             "must describe the same points."
         )
         raise ValueError(msg)
-    n_points = latitudes.shape[0]
+    coordinates = torch.stack((latitudes, longitudes), dim=-1)
+    num_points = latitudes.shape[0]
 
     if not isinstance(layout, TensorLayout):
         layout = TensorLayout.from_tuple(*layout)
@@ -108,19 +109,18 @@ def create_source_sample(
             msg = f"data carries {n_vars} variables but {len(variables)} names were given."
             raise ValueError(msg)
         n_grid = data.shape[layout.axis("grid", ndim=data.ndim)]
-        if n_grid != n_points:
-            msg = f"data carries {n_grid} points but {n_points} coordinates were given."
+        if n_grid != num_points:
+            msg = f"data carries {n_grid} points but {num_points} coordinates were given."
             raise ValueError(msg)
 
     return source_sample_class.from_validated(
-        n_points=n_points,
+        n_points=num_points,
         device=device,
         data=data,
         variables=variables,
         layout=layout,
-        latitudes=latitudes,
-        longitudes=longitudes,
-        statistics={} if statistics is None else statistics,
+        coordinates=coordinates,
+        statistics=statistics,
         **kwargs,
     )
 

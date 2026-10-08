@@ -10,6 +10,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+from typing import ClassVar
 from typing import Self
 
 import torch
@@ -17,8 +18,6 @@ import torch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import source_sample_registry
 from anemoi.models.data.sample.base import SourceSample
-from anemoi.models.data.sample.base import require_data
-from anemoi.models.data.sample.base import validate_layout_against
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.shapes import ShardSizes
 
@@ -46,6 +45,10 @@ class TabularSourceSample(SourceSample):
     boundaries: tuple[slice, ...]
     shard_sizes: list[ShardSizes] | None = None
 
+    source_type: ClassVar[type[TabularSource]] = TabularSource
+    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
+    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ("coordinates", "timedeltas", "boundaries", "shard_sizes")
+
     def __post_init__(self) -> None:
         if self.layout.has_axis("time") or self.layout.has_axis("batch"):
             msg = (
@@ -53,6 +56,16 @@ class TabularSourceSample(SourceSample):
                 f"given by 'boundaries' and the batch is a list. Got {self.layout!r}."
             )
             raise ValueError(msg)
+
+    @classmethod
+    def _collate_layout(cls, layout: TensorLayout) -> TensorLayout:
+        """Return the layout of the collated source, given the per-sample ``layout``."""
+        return layout
+
+    @classmethod
+    def _collate_data(cls, samples: Sequence[Self]) -> list[torch.Tensor]:
+        """Collate the per-sample data tensors into a list of tensors."""
+        return [s.data for s in samples]
 
     @classmethod
     def from_validated(
@@ -68,55 +81,15 @@ class TabularSourceSample(SourceSample):
         if timedeltas is None or boundaries is None:
             msg = "tabular samples require timedeltas and boundaries."
             raise ValueError(msg)
+
         timedeltas = torch.as_tensor(timedeltas, dtype=torch.float32, device=device).reshape(-1)
         if timedeltas.shape[0] != n_points:
             msg = f"{timedeltas.shape[0]} timedeltas were given for {n_points} points."
             raise ValueError(msg)
+
         boundaries = tuple(b if isinstance(b, slice) else slice(int(b[0]), int(b[1])) for b in boundaries)
         if any(b.stop is not None and b.stop > n_points for b in boundaries):
             msg = f"boundaries {boundaries} extend past the {n_points} points of the sample."
             raise ValueError(msg)
+
         return cls(**common, timedeltas=timedeltas, boundaries=boundaries)
-
-    @classmethod
-    def collated_layout(cls, layout: TensorLayout) -> TensorLayout:
-        """The samples are kept as a list, so the layout does not change."""
-        return layout
-
-    @classmethod
-    def collate(cls, name: str, samples: Sequence[Self]) -> TabularSource:
-        """Keep the samples as lists of length ``B``, since their grid sizes differ."""
-        require_data(name, samples)
-        head = samples[0]
-        layout = cls.collated_layout(head.layout)
-        data = [s.data for s in samples]
-        validate_layout_against(name, layout, data)
-
-        return TabularSource(
-            name=name,
-            variables=head.variables,
-            layout=layout,
-            statistics=head.statistics,
-            data=data,
-            coordinates=[s.coordinates() for s in samples],
-            timedeltas=[s.timedeltas for s in samples],
-            boundaries=[s.boundaries for s in samples],
-            shard_sizes=_collate_shard_sizes(name, samples),
-        )
-
-
-def _collate_shard_sizes(name: str, samples: Sequence[TabularSourceSample]) -> list[Any] | None:
-    """Collate per-sample shard sizes, or ``None`` when no sample is sharded.
-
-    Sources treat ``shard_sizes is None`` as replicated, so a list of ``None``
-    entries would wrongly read as sharded. A mix of sharded and unsharded samples
-    cannot be gathered consistently and is rejected.
-    """
-    shard_sizes = [s.shard_sizes for s in samples]
-    n_unsharded = sum(sizes is None for sizes in shard_sizes)
-    if n_unsharded == len(shard_sizes):
-        return None
-    if n_unsharded:
-        msg = f"Dataset {name!r} mixes sharded and unsharded samples ({n_unsharded} of {len(shard_sizes)} unsharded)."
-        raise ValueError(msg)
-    return shard_sizes

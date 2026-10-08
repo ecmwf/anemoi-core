@@ -10,6 +10,7 @@
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+from typing import ClassVar
 from typing import Self
 
 import torch
@@ -18,8 +19,6 @@ from torch.utils.data import default_collate
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import source_sample_registry
 from anemoi.models.data.sample.base import SourceSample
-from anemoi.models.data.sample.base import require_data
-from anemoi.models.data.sample.base import validate_layout_against
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.distributed.shapes import ShardSizes
 
@@ -42,10 +41,24 @@ class GriddedSourceSample(SourceSample):
     grid_size: int | None = None
     shard_sizes: ShardSizes | None = None
 
+    source_type: ClassVar[type[GriddedSource]] = GriddedSource
+    _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics", "coordinates", "shard_sizes")
+    _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
+
     def __post_init__(self) -> None:
         if not self.layout.has_axis("time"):
             msg = f"{self.__class__.__name__} requires a layout with a time axis; got {self.layout!r}."
             raise ValueError(msg)
+
+    @classmethod
+    def _collate_layout(cls, layout: TensorLayout) -> TensorLayout:
+        """Return the layout of the collated source, given the per-sample ``layout``."""
+        return layout.with_batch_dim()
+
+    @classmethod
+    def _collate_data(cls, samples: Sequence[Self]) -> torch.Tensor:
+        """Collate the per-sample data tensors into a single tensor."""
+        return default_collate([s.data for s in samples])
 
     @classmethod
     def from_validated(
@@ -66,37 +79,13 @@ class GriddedSourceSample(SourceSample):
         full_size = n_points if shard_sizes is None else sum(shard_sizes)
         if grid_size is None:
             grid_size = full_size
+
         if grid_size != full_size:
             msg = f"grid_size {grid_size} does not match the full grid of {full_size} points."
             raise ValueError(msg)
+
         if shard_sizes is not None and n_points not in shard_sizes:
             msg = f"The sample's {n_points} points do not match any of the shard sizes {list(shard_sizes)}."
             raise ValueError(msg)
+
         return cls(**common, grid_size=grid_size, shard_sizes=shard_sizes)
-
-    @classmethod
-    def collated_layout(cls, layout: TensorLayout) -> TensorLayout:
-        """Samples are stacked along a new leading batch axis."""
-        return layout.with_batch_dim()
-
-    @classmethod
-    def collate(cls, name: str, samples: Sequence[Self]) -> GriddedSource:
-        """Stack the samples along a new leading batch axis.
-
-        The coordinates of the first sample are used for the whole batch.
-        """
-        require_data(name, samples)
-        head = samples[0]
-        layout = cls.collated_layout(head.layout)
-        data = default_collate([s.data for s in samples])
-        validate_layout_against(name, layout, data)
-
-        return GriddedSource(
-            name=name,
-            variables=head.variables,
-            layout=layout,
-            statistics=head.statistics,
-            data=data,
-            coordinates=head.coordinates(),
-            shard_sizes=head.shard_sizes,
-        )

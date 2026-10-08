@@ -96,7 +96,7 @@ class TabularSource(Source):
     coordinates: list[torch.Tensor]
     timedeltas: list[torch.Tensor]
     boundaries: list[tuple[slice, ...]]
-    shard_sizes: list[list[ShardSizes]] | None = None
+    shard_sizes: list[list[ShardSizes] | None] | None = None
 
     _PAYLOAD_FIELDS = ("data", "timedeltas")
 
@@ -240,6 +240,11 @@ class TabularSource(Source):
     def grid_shard_sizes(self) -> ShardSizes:
         # Sharded per time window, not along a single grid axis.
         return None
+    
+    @property
+    def is_sharded(self) -> bool:
+        """Return ``True`` if the source is sharded per time window."""
+        return self.shard_sizes is not None and any(sizes is not None for sizes in self.shard_sizes)
 
     @property
     def condition_shape(self) -> tuple[int, int, int, int, int]:
@@ -368,7 +373,7 @@ class TabularSource(Source):
 
     def shard(self, group: ProcessGroup | None) -> "TabularSource":
         """Not supported: observation grids vary per sample."""
-        if self.shard_sizes is not None or not model_is_distributed(group):
+        if self.is_sharded or not model_is_distributed(group):
             return self
 
         msg = (
@@ -396,7 +401,7 @@ class TabularSource(Source):
         TabularSource
             A new view with allgathered data and coordinates.
         """
-        if self.shard_sizes is None:
+        if self.shard_sizes is None or all(sizes is None for sizes in self.shard_sizes):
             return self  # nothing to gather
 
         # Validate every per-window descriptor up front, so a wrong-group gather is reported
@@ -504,7 +509,7 @@ class TabularSource(Source):
         new_coords = []
         new_timedeltas = []
         new_boundaries = []
-        new_shard_sizes = [] if self.shard_sizes is not None else None
+        new_shard_sizes = [] if self.is_sharded else None
 
         for sample_idx, sample_bounds in enumerate(self.boundaries):
             selected_slices = [sample_bounds[t] for t in idx_list]
@@ -701,7 +706,7 @@ class TabularTemplate(Template):
         #   GPU0  GPU1   GPU0  GPU1            GPU0        GPU1
         #   w1_0, w1_1 | w2_0, w2_1  becomes  w1_0, w2_0, w1_1, w2_1
         flat_shard_sizes = None
-        if self.shard_sizes is not None:
+        if self.shard_sizes is not None and all(sizes is not None for sizes in self.shard_sizes):
             if len(self.shard_sizes) != 1:
                 msg = (
                     f"Source {self.name!r}: a sharded tabular source is supported only at batch size 1, "

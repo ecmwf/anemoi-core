@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import functools
 from dataclasses import replace
 
 import pytest
@@ -25,13 +26,22 @@ from tests.batch_builders import build_batch
 GRIDDED_LAYOUT = TensorLayout(time=0, ensemble=1, grid=2, variables=3)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 
+# One statistics object per dataset, shared by its samples as a reader does
+# (SourceSample.collate checks the statistics by identity).
+TABULAR_STATISTICS = {"mean": torch.tensor([1.0, 2.0])}
+
+
+@functools.cache
+def gridded_statistics(n_vars: int) -> dict[str, torch.Tensor]:
+    return {"mean": torch.arange(n_vars, dtype=torch.float32)}
+
 
 def gridded_payload(variables: list[str] = ["a", "b", "c"]) -> GriddedSourceSample:
     n_vars = len(variables)
     return GriddedSourceSample(
         data=torch.arange(2 * 1 * 4 * n_vars, dtype=torch.float32).reshape(2, 1, 4, n_vars),
         variables=variables,
-        statistics={"mean": torch.arange(n_vars, dtype=torch.float32)},
+        statistics=gridded_statistics(n_vars),
         layout=GRIDDED_LAYOUT,
         coordinates=torch.zeros(4, 2),
         grid_size=4,
@@ -42,7 +52,7 @@ def tabular_payload(n_points: int = 4) -> TabularSourceSample:
     return TabularSourceSample(
         data=torch.ones(1, n_points, 2),
         variables=["t2m", "sp"],
-        statistics={"mean": torch.tensor([1.0, 2.0])},
+        statistics=TABULAR_STATISTICS,
         layout=TABULAR_LAYOUT,
         coordinates=torch.zeros(n_points, 2),
         timedeltas=torch.zeros(n_points),

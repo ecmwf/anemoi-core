@@ -52,8 +52,8 @@ def test_gridded_converts_layout_and_degrees():
     assert isinstance(sample, GriddedSourceSample)
     assert sample.layout == TensorLayout(time=0, ensemble=1, grid=2, variables=3)
     assert sample.grid_size == 3
-    torch.testing.assert_close(sample.latitudes, torch.deg2rad(torch.tensor(LATS)))
-    torch.testing.assert_close(sample.longitudes, torch.deg2rad(torch.tensor(LONS)))
+    torch.testing.assert_close(sample.coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
+    torch.testing.assert_close(sample.coordinates[:, 1], torch.deg2rad(torch.tensor(LONS)))
 
 
 def test_tabular_converts_boundaries_and_timedeltas():
@@ -141,3 +141,45 @@ def test_collate_matches_direct_construction():
     batch = Batch.collate([{"ds": _gridded()}, {"ds": _gridded()}])
     assert batch["ds"].data.shape == (2, 2, 1, 3, 2)
     torch.testing.assert_close(batch["ds"].coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
+
+
+def test_tabular_collate_keeps_one_entry_per_sample():
+    source = Batch.collate([{"obs": _tabular()}, {"obs": _tabular(shard_sizes=None)}])["obs"]
+    assert len(source.data) == len(source.coordinates) == len(source.timedeltas) == 2
+    assert source.boundaries[0] == (slice(0, 2), slice(2, 3))
+    assert source.shard_sizes is None
+
+
+def test_tabular_collate_rejects_mixed_sharding():
+    sharded = _tabular(shard_sizes=[[2], [1]])
+    with pytest.raises(ValueError, match="mixes sharded and unsharded"):
+        Batch.collate([{"obs": sharded}, {"obs": _tabular()}])
+
+
+@pytest.mark.parametrize("build", [_gridded, _tabular])
+def test_collate_rejects_mixed_data_presence(build):
+    with pytest.raises(ValueError, match="mixes samples with and without data"):
+        Batch.collate([{"ds": build()}, {"ds": build(data=None)}])
+
+
+@pytest.mark.parametrize(
+    ("other", "match"),
+    [
+        ({"variables": ["a", "c"]}, "different variables"),
+        ({"statistics": {"mean": torch.zeros(2)}}, "different statistics objects"),
+    ],
+)
+def test_collate_rejects_samples_with_different_metadata(other, match):
+    with pytest.raises(ValueError, match=match):
+        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(**other)}])
+
+
+def test_collate_accepts_samples_sharing_statistics():
+    statistics = {"mean": torch.zeros(2)}
+    source = Batch.collate([{"ds": _gridded(statistics=statistics)}, {"ds": _gridded(statistics=statistics)}])["ds"]
+    assert source.statistics is statistics
+
+
+def test_tabular_layout_without_batch_axis():
+    source = Batch.collate([{"obs": _tabular()}, {"obs": _tabular()}])["obs"]
+    assert source.layout == TensorLayout(ensemble=0, grid=1, variables=2)
