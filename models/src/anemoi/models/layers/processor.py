@@ -29,15 +29,20 @@ from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.utils import model_is_distributed
+from anemoi.models.layers.block import ADRProcessorBlock
+from anemoi.models.layers.block import FlowersProcessorBlock
 from anemoi.models.layers.block import GraphConvProcessorBlock
 from anemoi.models.layers.block import GraphTransformerProcessorBlock
 from anemoi.models.layers.block import PointWiseMLPProcessorBlock
 from anemoi.models.layers.block import TransformerProcessorBlock
 from anemoi.models.layers.mlp import MLPImplementation
+from anemoi.models.layers.semi_lagrangian import EARTH_ROTATION_RATE
+from anemoi.models.layers.semi_lagrangian import latlon_grid_shape
 from anemoi.models.layers.utils import compute_mlp_hidden_dim
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.models.layers.utils import maybe_checkpoint
 from anemoi.utils.config import DotDict
+from anemoi.utils.dates import frequency_to_seconds
 
 LOGGER = logging.getLogger(__name__)
 
@@ -318,6 +323,228 @@ class TransformerProcessor(BaseProcessor):
                 model_comm_group.size() == 1 or batch_size == 1
             ), "Only batch size of 1 is supported when model is sharded accross GPUs"
 
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
+
+        return x
+
+
+class ADRProcessor(BaseProcessor):
+    """Advection-diffusion-reaction processor on a regular latitude-longitude hidden grid (PARADIS).
+
+    The hidden nodes must be the cell centres of a regular latitude-longitude grid, stored row by
+    row from north to south, with longitudes running east from zero, as built by
+    ``anemoi.graphs.nodes.RegularLatLonNodes``. The grid size is read from the node coordinates.
+
+    The layers split one model time step into equal sub-steps.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        node_coordinates: Tensor,
+        timestep: str,
+        advection_channels: int = 768,
+        num_heads: Optional[int] = None,
+        velocity_hidden_dim: int = 384,
+        reaction_hidden_dim: int = 896,
+        reaction_num_layers: int = 4,
+        kernel_size: int = 5,
+        interpolation: str = "bicubic",
+        bias_rank: int = 128,
+        bias_base_maps: int = 8,
+        cartesian_displacement: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+        **kwargs,
+    ) -> None:
+        """Initialize ADRProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of layers
+        num_channels : int
+            Number of channels
+        num_chunks: int
+            Number of chunks in processor
+        node_coordinates : Tensor
+            Latitude and longitude of the hidden nodes in radians, shape (num_nodes, 2)
+        timestep : str
+            Model time step, e.g. "6h". Sets how far the learned velocities move the state.
+        advection_channels : int
+            Number of channels moved by the advection step
+        num_heads : int, optional
+            Number of velocity fields; each moves advection_channels // num_heads channels.
+            By default every moved channel has its own velocity field.
+        velocity_hidden_dim : int
+            Hidden dimension of the velocity network
+        reaction_hidden_dim : int
+            Hidden dimension of the reaction MLP
+        reaction_num_layers : int
+            Number of linear layers in the reaction MLP, at least 2
+        kernel_size : int
+            Size of the square stencils of the spatial mixers, must be odd
+        interpolation : str
+            "bicubic" or "bilinear", by default "bicubic"
+        bias_rank : int
+            Number of latitude-longitude profile pairs in each learned bias field
+        bias_base_maps : int
+            Number of base maps each learned bias field is mixed from
+        cartesian_displacement : bool
+            Predict velocities as 3D vectors instead of local east and north components (the
+            paper's choice, default). 3D vectors do not turn round across the poles.
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        """
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+            **kwargs,
+        )
+
+        nlat, nlon = latlon_grid_shape(node_coordinates)
+        self.build_layers(
+            ADRProcessorBlock,
+            num_channels=num_channels,
+            advection_channels=advection_channels,
+            num_heads=num_heads if num_heads is not None else advection_channels,
+            velocity_hidden_dim=velocity_hidden_dim,
+            reaction_hidden_dim=reaction_hidden_dim,
+            reaction_num_layers=reaction_num_layers,
+            nlat=nlat,
+            nlon=nlon,
+            time_step=frequency_to_seconds(timestep) * EARTH_ROTATION_RATE / num_layers,
+            layer_kernels=self.layer_factory,
+            kernel_size=kernel_size,
+            interpolation=interpolation,
+            bias_rank=bias_rank,
+            bias_base_maps=bias_base_maps,
+            cartesian_displacement=cartesian_displacement,
+        )
+
+        self.offload_layers(cpu_offload)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
+        (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
+
+        return x
+
+
+class FlowersProcessor(BaseProcessor):
+    """Processor of FLOWERS warp blocks on a regular latitude-longitude hidden grid.
+
+    The blocks are stacked at a single resolution. The hidden nodes must be the cell centres of a
+    regular latitude-longitude grid, stored row by row from north to south, with longitudes
+    running east from zero, as built by ``anemoi.graphs.nodes.RegularLatLonNodes``. The grid
+    size is read from the node coordinates.
+    """
+
+    def __init__(
+        self,
+        *,
+        num_layers: int,
+        num_channels: int,
+        num_chunks: int,
+        node_coordinates: Tensor,
+        num_heads: Optional[int] = None,
+        mlp_hidden_ratio: float = 4.0,
+        mlp_implementation: MLPImplementation = "mlp",
+        block_style: str = "pre_norm",
+        interpolation: str = "bilinear",
+        cartesian_displacement: bool = False,
+        cpu_offload: bool = False,
+        layer_kernels: DotDict,
+        **kwargs,
+    ) -> None:
+        """Initialize FlowersProcessor.
+
+        Parameters
+        ----------
+        num_layers : int
+            Number of layers
+        num_channels : int
+            Number of channels
+        num_chunks: int
+            Number of chunks in processor
+        node_coordinates : Tensor
+            Latitude and longitude of the hidden nodes in radians, shape (num_nodes, 2)
+        num_heads : int, optional
+            Number of displacement fields per block; each moves num_channels // num_heads
+            channels. By default 4 channels per head, as in FLOWERS.
+        mlp_hidden_ratio : float
+            Ratio of the MLP hidden dimension to num_channels, used by the "pre_norm" block
+        mlp_implementation : MLPImplementation
+            Implementation of the MLP in the "pre_norm" block
+        block_style : str
+            "pre_norm" (residual warp and MLP, each after a layer norm) or "flowers" (the
+            original FLOWERS block)
+        interpolation : str
+            "bilinear" or "bicubic", by default "bilinear" as in FLOWERS
+        cartesian_displacement : bool
+            Predict displacements as 3D vectors instead of local east and north angles (default).
+            3D vectors do not turn round across the poles.
+        cpu_offload : bool
+            Whether to offload processing to CPU, by default False
+        layer_kernels : DotDict
+            A dict of layer implementations e.g. layer_kernels.Linear = "torch.nn.Linear"
+            Defined in config/models/<model>.yaml
+        """
+        super().__init__(
+            num_layers=num_layers,
+            num_channels=num_channels,
+            num_chunks=num_chunks,
+            cpu_offload=cpu_offload,
+            layer_kernels=layer_kernels,
+            **kwargs,
+        )
+
+        nlat, nlon = latlon_grid_shape(node_coordinates)
+        self.build_layers(
+            FlowersProcessorBlock,
+            num_channels=num_channels,
+            hidden_dim=compute_mlp_hidden_dim(num_channels, mlp_hidden_ratio),
+            num_heads=num_heads if num_heads is not None else num_channels // 4,
+            nlat=nlat,
+            nlon=nlon,
+            layer_kernels=self.layer_factory,
+            block_style=block_style,
+            interpolation=interpolation,
+            mlp_implementation=mlp_implementation,
+            cartesian_displacement=cartesian_displacement,
+        )
+
+        self.offload_layers(cpu_offload)
+
+    def forward(
+        self,
+        x: Tensor,
+        batch_size: int,
+        shard_info: GraphShardInfo,
+        edge_attr: Optional[Tensor] = None,
+        edge_index: Optional[Adj] = None,
+        model_comm_group: Optional[ProcessGroup] = None,
+        *args,
+        **kwargs,
+    ) -> Tensor:
         (x,) = self.run_layers((x,), shard_info, batch_size, model_comm_group=model_comm_group, **kwargs)
 
         return x

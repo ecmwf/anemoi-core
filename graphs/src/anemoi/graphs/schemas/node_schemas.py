@@ -72,6 +72,13 @@ class ReducedGaussianGridNodeSchema(BaseModel):
     "Reduced gaussian grid."
 
 
+class RegularLatLonNodeSchema(BaseModel):
+    target_: Literal["anemoi.graphs.nodes.RegularLatLonNodes"] = Field(..., alias="_target_")
+    "Nodes at the cell centres of a regular latitude-longitude grid, from anemoi.graphs.nodes."
+    resolution: PositiveFloat
+    "Grid spacing in degrees. 180 / resolution must be a whole number."
+
+
 class ICONMeshNodeSchema(BaseModel):
     target_: Literal[
         "anemoi.graphs.nodes.ICONMultiMeshNodes",
@@ -158,6 +165,7 @@ NodeBuilderSchemas = Annotated[
     | ICONMeshNodeSchema
     | LimitedAreaNPZFileNodesSchema
     | ReducedGaussianGridNodeSchema
+    | RegularLatLonNodeSchema
     | IcosahedralandHealPixNodeSchema
     | HealPixNodeSchema
     | LimitedAreaIcosahedralandHealPixNodeSchema

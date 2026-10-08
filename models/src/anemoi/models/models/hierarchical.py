@@ -101,6 +101,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.down_level_processor_graph_providers[nodes_names].edge_dim,
+                    node_coordinates=self._graph_data[nodes_names].x,
                     num_layers=model_config.level_process_num_layers,
                 )
 
@@ -118,6 +119,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
                     _recursive_=False,  # Avoids instantiation of layer_kernels here
                     num_channels=self.hidden_dims[nodes_names],
                     edge_dim=self.up_level_processor_graph_providers[nodes_names].edge_dim,
+                    node_coordinates=self._graph_data[nodes_names].x,
                     num_layers=model_config.level_process_num_layers,
                 )
 
@@ -137,6 +139,7 @@ class AnemoiModelEncProcDecHierarchical(AnemoiModelEncProcDec):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.hidden_dims[self._graph_name_hidden[self.num_hidden - 1]],
             edge_dim=self.processor_graph_provider.edge_dim,
+            node_coordinates=self._graph_data[self._graph_name_hidden[self.num_hidden - 1]].x,
         )
 
         # Upscale

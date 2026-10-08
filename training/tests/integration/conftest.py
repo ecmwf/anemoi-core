@@ -158,8 +158,26 @@ def build_global_config(
 
 
 @pytest.fixture(
-    params=[["model=gnn"], ["model=graphtransformer"]],
-    ids=["gnn", "graphtransformer"],
+    params=[
+        ["model=gnn"],
+        ["model=graphtransformer"],
+        [
+            "model=paradis",
+            "graph=encoder_decoder_latlon",
+            "graph.nodes.hidden.node_builder.resolution=4.0",
+            "model.processor.advection_channels=8",
+            "model.processor.velocity_hidden_dim=8",
+            "model.processor.reaction_hidden_dim=16",
+            "model.compile=[]",
+        ],
+        [
+            "model=flowers",
+            "graph=encoder_decoder_latlon",
+            "graph.nodes.hidden.node_builder.resolution=4.0",
+            "model.compile=[]",
+        ],
+    ],
+    ids=["gnn", "graphtransformer", "paradis", "flowers"],
 )
 def global_config(
     request: pytest.FixtureRequest,

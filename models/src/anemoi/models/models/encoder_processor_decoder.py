@@ -88,6 +88,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             model_config.processor,
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             edge_dim=self.processor_graph_provider.edge_dim,
+            node_coordinates=self._graph_data[self._graph_name_hidden].x,
         )
 
         assert (
