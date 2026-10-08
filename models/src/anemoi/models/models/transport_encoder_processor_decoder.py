@@ -113,14 +113,9 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 )
 
             anchor = self.dataset2anchor[attached_to]
-            anchor_nodes = self.node_attributes.num_nodes[anchor]
-            target_nodes = self.node_attributes.num_nodes[target_name]
-            if anchor_nodes != target_nodes:
-                raise ValueError(
-                    f"Target '{target_name}' is decoded from anchor '{anchor}', whose graph node set has "
-                    f"{anchor_nodes} nodes, but the target's node set has {target_nodes}. They must describe "
-                    f"the same grid."
-                )
+            self._validate_same_grid(
+                anchor, target_name, context=f"Target '{target_name}' is decoded from anchor '{anchor}'"
+            )
             self.target2anchor[target_name] = anchor
 
     def _anchor_of_target(self, target_name: str) -> str:

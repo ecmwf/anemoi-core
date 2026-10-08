@@ -94,7 +94,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         Loaded from ``data.datasets.<name>.residual_statistics`` (a path to a
         ``.npz`` file) for datasets that set it — e.g. spatial downscaler
-        targets. Datasets without the field are absent from the result.
+        targets. Datasets without the field are absent from the result. Only the
+        prognostic variables are predicted as residuals, so only they need entries.
         """
         data_config = get_multiple_datasets_config(self.config.data)
         stats_by_dataset: dict[str, dict] = {}
@@ -102,7 +103,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             path = getattr(data_config[dataset_name], "residual_statistics", None)
             if path is None:
                 continue
-            stats_by_dataset[dataset_name] = load_residual_statistics(path, dataset.variables)
+            stats_by_dataset[dataset_name] = load_residual_statistics(
+                path,
+                dataset.variables,
+                residual_variables=self.data_indices[dataset_name].prognostic,
+            )
         return stats_by_dataset or None
 
     @cached_property

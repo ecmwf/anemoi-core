@@ -112,8 +112,8 @@ class SpatialDownscaler(BaseSingleStepTask):
         x = {}
         for name in self.input_datasets:
             if name not in batch:
-                LOGGER.warning("Input dataset '%s' not found in batch — skipping.", name)
-                continue
+                msg = f"Input dataset '{name}' not found in batch."
+                raise ValueError(msg)
             ds = batch[name][:, time_indices]
             x[name] = ds[..., data_indices[name].data.input.full]
             LOGGER.debug("SHAPE: x[%s].shape = %s", name, list(x[name].shape))
@@ -144,8 +144,8 @@ class SpatialDownscaler(BaseSingleStepTask):
         y = {}
         for name in self.target_datasets:
             if name not in batch:
-                LOGGER.warning("Target dataset '%s' not found in batch — skipping.", name)
-                continue
+                msg = f"Target dataset '{name}' not found in batch."
+                raise ValueError(msg)
             y[name] = batch[name][:, time_indices]
             LOGGER.debug("SHAPE: y[%s].shape = %s", name, list(y[name].shape))
         return y

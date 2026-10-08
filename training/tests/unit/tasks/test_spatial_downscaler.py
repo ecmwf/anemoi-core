@@ -9,7 +9,6 @@
 
 import datetime
 
-import pytest
 import torch
 
 from anemoi.training.tasks.spatial_downscaler import SpatialDownscaler
@@ -155,22 +154,6 @@ def test_get_targets_multi_offset_time_dimension() -> None:
     batch = _make_batch(["in_lres", "out_hres"], num_times=n_offsets, grid=8, nvar=5)
     y = task.get_targets(batch)
     assert y["out_hres"].shape[1] == n_offsets
-
-
-def test_get_inputs_missing_dataset_is_skipped_with_warning(caplog: pytest.LogCaptureFixture) -> None:
-    """A missing input dataset logs a warning and is absent from the output."""
-    import logging
-
-    task = SpatialDownscaler(
-        input_datasets=["in_lres", "in_missing"],
-        target_datasets=["out_hres"],
-    )
-    batch = _make_batch(["in_lres", "out_hres"], num_times=1, grid=4, nvar=3)
-    data_indices = {"in_lres": _FakeIndices(3), "out_hres": _FakeIndices(3)}
-    with caplog.at_level(logging.WARNING):
-        x = task.get_inputs(batch, data_indices=data_indices)
-    assert "in_missing" not in x
-    assert any("in_missing" in record.message for record in caplog.records)
 
 
 # ---------------------------------------------------------------------------

@@ -189,6 +189,7 @@ def _build_dummy_model(
     source_datasets: tuple[str, ...] = ("data",),
     fusing_strategy: str = "not_supported",
     model_cls: type[BaseGraphModel] = DummyGraphModel,
+    graph_data: HeteroData | None = None,
 ) -> BaseGraphModel:
     encoder_config: dict = {
         "source_datasets": list(source_datasets),
@@ -222,7 +223,7 @@ def _build_dummy_model(
         statistics={name: None for name in source_datasets},
         n_step_input=1,
         n_step_output=1,
-        graph_data=_make_graph(source_datasets),
+        graph_data=graph_data if graph_data is not None else _make_graph(source_datasets),
     )
 
 
@@ -267,6 +268,35 @@ def test_fusion_anchors_the_encoder_at_its_first_source_dataset() -> None:
 
     assert model.encoder2anchors == {0: ["extra"]}
     assert model.dataset2anchor == {"extra": "extra", "data": "extra"}
+
+
+def test_fusion_rejects_a_source_with_a_different_number_of_nodes_than_its_anchor() -> None:
+    graph = _make_graph(("data", "extra"))
+    graph["extra"].x = torch.zeros(3, 2)
+    graph["extra"].num_nodes = 3
+
+    with pytest.raises(ValueError, match=r"fuses 'extra'.*2 nodes.*3"):
+        _build_dummy_model(
+            source_datasets=("data", "extra"),
+            fusing_strategy="concatenate_inputs_along_variable_dim",
+            model_cls=FusingGraphModel,
+            graph_data=graph,
+        )
+
+
+def test_fusion_rejects_a_source_whose_nodes_differ_from_its_anchor() -> None:
+    """Fused features are concatenated node by node, so the same node count is not enough."""
+    graph = _make_graph(("data", "extra"))
+    graph["data"].x = torch.tensor([[0.0, 0.0], [1.0, 1.0]])
+    graph["extra"].x = torch.tensor([[1.0, 1.0], [0.0, 0.0]])
+
+    with pytest.raises(ValueError, match="different coordinates"):
+        _build_dummy_model(
+            source_datasets=("data", "extra"),
+            fusing_strategy="concatenate_inputs_along_variable_dim",
+            model_cls=FusingGraphModel,
+            graph_data=graph,
+        )
 
 
 def test_without_fusion_every_source_dataset_is_its_own_anchor() -> None:

@@ -13,9 +13,19 @@ import numpy as np
 
 RESIDUAL_STATISTICS_KEYS = ("mean", "minimum", "maximum", "stdev")
 
+# Leave a variable unchanged under every normalizer method (mean-std, std, min-max, max).
+IDENTITY_STATISTICS = {"mean": 0.0, "minimum": 0.0, "maximum": 1.0, "stdev": 1.0}
 
-def load_residual_statistics(path: str, variables: list[str]) -> dict[str, np.ndarray]:
+
+def load_residual_statistics(
+    path: str,
+    variables: list[str],
+    residual_variables: list[str],
+) -> dict[str, np.ndarray]:
     """Load precomputed residual normalization statistics from an ``.npz`` file.
+
+    Only ``residual_variables`` are read from the file. Every other variable has
+    no residual (forcings, diagnostics) and gets identity statistics.
 
     Parameters
     ----------
@@ -25,6 +35,8 @@ def load_residual_statistics(path: str, variables: list[str]) -> dict[str, np.nd
         ``{variable_name: float}`` mapping.
     variables : list[str]
         Variable names, ordered to match the target dataset's full variable index.
+    residual_variables : list[str]
+        Variables predicted as residuals, i.e. the target's prognostic variables.
 
     Returns
     -------
@@ -35,15 +47,34 @@ def load_residual_statistics(path: str, variables: list[str]) -> dict[str, np.nd
     Raises
     ------
     KeyError
-        If a variable in ``variables`` is missing from one of the statistics.
+        If a residual variable is missing from one of the statistics.
     ValueError
-        If any loaded value is not finite.
+        If a loaded value is not finite.
     """
     npz = np.load(path, allow_pickle=True)
     stats_by_name = {key: npz[key].item() for key in RESIDUAL_STATISTICS_KEYS}
+    residual_variables = set(residual_variables)
+
+    missing = sorted(
+        {
+            variable
+            for variable in residual_variables
+            for key in RESIDUAL_STATISTICS_KEYS
+            if variable not in stats_by_name[key]
+        },
+    )
+    if missing:
+        msg = f"Residual statistics in {path} have no entry for residual variables {missing}."
+        raise KeyError(msg)
 
     statistics = {
-        key: np.array([stats_by_name[key][variable] for variable in variables], dtype=np.float32)
+        key: np.array(
+            [
+                stats_by_name[key][variable] if variable in residual_variables else IDENTITY_STATISTICS[key]
+                for variable in variables
+            ],
+            dtype=np.float32,
+        )
         for key in RESIDUAL_STATISTICS_KEYS
     }
 

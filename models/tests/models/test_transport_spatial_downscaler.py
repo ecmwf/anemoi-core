@@ -1039,6 +1039,7 @@ def _make_target_routing_model(
     sources: tuple[str, ...] = ("in_lres", "in_hres"),
     target_datasets: tuple[str, ...] = ("out_hres",),
     num_nodes: dict[str, int] | None = None,
+    coordinates: dict[str, torch.Tensor] | None = None,
 ) -> AnemoiTransportModelEncProcDec:
     """Routing state after ``_build_encoder_routing`` / ``_build_decoder_routing`` for one fused encoder."""
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
@@ -1046,9 +1047,12 @@ def _make_target_routing_model(
     model.dataset2encoder = {name: "enc0" for name in sources}
     model.dataset2anchor = {name: sources[0] for name in sources}
     model.target_datasets = list(target_datasets)
-    model.node_attributes = SimpleNamespace(
-        num_nodes=num_nodes or {name: 4 for name in (*sources, *target_datasets)},
-    )
+    num_nodes = num_nodes or {name: 4 for name in (*sources, *target_datasets)}
+    model.node_attributes = SimpleNamespace(num_nodes=num_nodes)
+    graph = HeteroData()
+    for name, count in num_nodes.items():
+        graph[name].x = (coordinates or {}).get(name, torch.zeros(count, 2))
+    model._graph_data = graph
     return model
 
 
@@ -1111,6 +1115,18 @@ def test_target_routing_rejects_an_anchor_on_a_different_grid_than_its_target() 
     )
 
     with pytest.raises(ValueError, match="4 nodes.*5"):
+        model._build_target_routing()
+
+
+def test_target_routing_rejects_an_anchor_whose_nodes_differ_from_its_target() -> None:
+    """The decoder writes the target onto the anchor's nodes, so the node order must match too."""
+    coordinates = torch.arange(8.0).reshape(4, 2)
+    model = _make_target_routing_model(
+        target_anchors={"out_hres": "in_lres"},
+        coordinates={"in_lres": coordinates, "out_hres": coordinates.flip(0)},
+    )
+
+    with pytest.raises(ValueError, match="different coordinates"):
         model._build_target_routing()
 
 

@@ -135,6 +135,10 @@ class BaseGraphModel(nn.Module):
             for d in datasets_to_encode:
                 self.dataset2encoder[d] = encoder_name
                 self.dataset2anchor[d] = anchors[0] if fused else d
+                if fused and d != anchors[0]:
+                    self._validate_same_grid(
+                        anchors[0], d, context=f"Encoder '{encoder_name}' fuses '{d}' onto anchor '{anchors[0]}'"
+                    )
 
         # Only anchors are encoded in their own right; fused datasets ride along
         # as extra features on their anchor's node set.
@@ -176,6 +180,34 @@ class BaseGraphModel(nn.Module):
                 f"which {type(self).__name__} does not support."
             )
         return [source_datasets[0]]
+
+    def _validate_same_grid(self, anchor: str, dataset_name: str, context: str) -> None:
+        """Raise unless ``dataset_name``'s graph nodes are ``anchor``'s, in the same order.
+
+        Parameters
+        ----------
+        anchor : str
+            Dataset whose graph node set the features of ``dataset_name`` are placed on.
+        dataset_name : str
+            Dataset that must share that node set.
+        context : str
+            Why the two must match, prefixed to the error message.
+        """
+        anchor_nodes = self.node_attributes.num_nodes[anchor]
+        dataset_nodes = self.node_attributes.num_nodes[dataset_name]
+        if anchor_nodes != dataset_nodes:
+            raise ValueError(
+                f"{context}: '{anchor}' has {anchor_nodes} nodes but '{dataset_name}' has {dataset_nodes}. "
+                "They must describe the same grid."
+            )
+
+        anchor_coords = self._graph_data[anchor].x.double()
+        dataset_coords = self._graph_data[dataset_name].x.double()
+        if not torch.allclose(anchor_coords, dataset_coords):
+            raise ValueError(
+                f"{context}: '{anchor}' and '{dataset_name}' have the same number of nodes but different "
+                "coordinates or node order. They must describe the same grid."
+            )
 
     def _build_decoder_routing(self, decoders_config: DotDict) -> None:
         """Builds the dataset routing for decoders."""
