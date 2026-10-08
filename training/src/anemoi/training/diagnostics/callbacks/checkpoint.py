@@ -199,6 +199,13 @@ class AnemoiCheckpoint(ModelCheckpoint):
             tmp_supporting_arrays = model.supporting_arrays
             model.supporting_arrays = None
 
+            # Graph providers already store all needed graph information as buffers.
+            # Clear raw graph to avoid redundantly saving it to checkpoint.
+            tmp_graph_data = model.graph_data
+            model.graph_data = None
+            tmp_inner_graph_data = model.model._graph_data
+            model.model._graph_data = None
+
             # Make sure we don't accidentally modify these
             metadata = tmp_metadata.copy()
             supporting_arrays = tmp_supporting_arrays.copy()
@@ -213,6 +220,8 @@ class AnemoiCheckpoint(ModelCheckpoint):
             model.config = save_config
             model.metadata = tmp_metadata
             model.supporting_arrays = tmp_supporting_arrays
+            model.graph_data = tmp_graph_data
+            model.model._graph_data = tmp_inner_graph_data
 
             self._last_global_step_saved = trainer.global_step
 
