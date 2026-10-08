@@ -12,6 +12,7 @@ import torch
 
 from anemoi.models.layers.aggregator import ConcatAggregator
 from anemoi.models.layers.aggregator import MeanAggregator
+from anemoi.models.layers.aggregator import PointwiseCrossAttentionAggregator
 from anemoi.models.layers.aggregator import SumAggregator
 
 
@@ -60,3 +61,82 @@ def test_aggregator_validates_named_source_shapes(latents: dict[str, torch.Tenso
 
     with pytest.raises(ValueError, match=error):
         aggregator(torch.randn(6, 3), latents)
+
+
+@pytest.mark.parametrize("gradient_checkpointing", [False, True])
+@pytest.mark.parametrize("qk_norm", [False, True])
+def test_pointwise_cross_attention_aggregator_supports_different_source_widths_and_gradients(
+    gradient_checkpointing: bool, qk_norm: bool
+) -> None:
+    aggregator = PointwiseCrossAttentionAggregator(
+        input_channels=3,
+        source_channels={"global": 4, "regional": 6},
+        num_channels=8,
+        num_heads=2,
+        layer_kernels={},
+        attn_channels=6,
+        qk_norm=qk_norm,
+        gradient_checkpointing=gradient_checkpointing,
+    )
+    hidden = torch.randn(7, 3, requires_grad=True)
+    latents = {
+        "global": torch.randn(7, 4, requires_grad=True),
+        "regional": torch.randn(7, 6, requires_grad=True),
+    }
+
+    output = aggregator(hidden, latents)
+    output.square().mean().backward()
+
+    assert output.shape == (7, 8)
+    assert aggregator.hidden_dim == 8
+    assert hidden.grad is not None
+    assert all(latent.grad is not None for latent in latents.values())
+    assert all(parameter.grad is not None for parameter in aggregator.parameters())
+
+
+def test_pointwise_cross_attention_aggregator_accepts_an_active_source_subset() -> None:
+    aggregator = PointwiseCrossAttentionAggregator(
+        input_channels=3,
+        source_channels={"a": 4, "b": 6},
+        num_channels=8,
+        num_heads=2,
+        layer_kernels={},
+    ).eval()
+
+    output = aggregator(torch.randn(7, 3), {"b": torch.randn(7, 6)})
+
+    assert output.shape == (7, 8)
+
+
+def test_pointwise_cross_attention_aggregator_is_shard_local() -> None:
+    aggregator = PointwiseCrossAttentionAggregator(
+        input_channels=3,
+        source_channels={"a": 4, "b": 4},
+        num_channels=8,
+        num_heads=2,
+        layer_kernels={},
+    ).eval()
+    hidden = torch.randn(9, 3)
+    latents = {"a": torch.randn(9, 4), "b": torch.randn(9, 4)}
+
+    full_output = aggregator(hidden, latents)
+    sharded_output = torch.cat(
+        [
+            aggregator(hidden[:4], {name: latent[:4] for name, latent in latents.items()}),
+            aggregator(hidden[4:], {name: latent[4:] for name, latent in latents.items()}),
+        ],
+    )
+
+    torch.testing.assert_close(full_output, sharded_output)
+
+
+def test_pointwise_cross_attention_aggregator_validates_attention_width() -> None:
+    with pytest.raises(ValueError, match="must be divisible by number of heads"):
+        PointwiseCrossAttentionAggregator(
+            input_channels=3,
+            source_channels={"a": 4},
+            num_channels=8,
+            num_heads=3,
+            attn_channels=8,
+            layer_kernels={},
+        )
