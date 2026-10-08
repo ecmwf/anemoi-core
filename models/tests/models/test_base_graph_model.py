@@ -80,34 +80,32 @@ def _make_hierarchical_graph() -> HeteroData:
 def test_base_graph_model_builds_with_omegaconf_config() -> None:
     model_config = OmegaConf.create(
         {
-            "model": {
-                "node_trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                },
-                "model": {
-                    "hidden_nodes_name": "hidden",
-                    "latent_skip": False,
-                },
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
-                },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
+            "node_trainable_parameters": {
+                "data": 0,
+                "hidden": 0,
             },
+            "model": {
+                "hidden_nodes_name": "hidden",
+                "latent_skip": False,
+            },
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+            },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         },
     )
 
@@ -127,35 +125,33 @@ def test_base_graph_model_builds_with_omegaconf_config() -> None:
 def test_base_graph_model_accepts_omegaconf_hidden_node_lists() -> None:
     model_config = OmegaConf.create(
         {
-            "model": {
-                "num_channels": 8,
-                "node_trainable_parameters": {
-                    "data": 0,
-                    "hidden": 0,
-                },
-                "model": {
-                    "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
-                    "latent_skip": False,
-                },
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
-                },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
+            "num_channels": 8,
+            "node_trainable_parameters": {
+                "data": 0,
+                "hidden": 0,
             },
+            "model": {
+                "hidden_nodes_name": ["hidden_1", "hidden_2", "hidden_3"],
+                "latent_skip": False,
+            },
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
+                },
+            },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         },
     )
 
@@ -334,29 +330,27 @@ def _make_minimal_model():
     """Return a DummyGraphModel with a working predict_step."""
     model_config = OmegaConf.create(
         {
-            "model": {
-                "num_channels": 8,
-                "node_trainable_parameters": {"data": 0, "hidden": 0},
-                "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
-                "encoders": {
-                    0: {
-                        "source_datasets": ["data"],
-                        "dataset_fusing_strategy": "not_supported",
-                        "mapper": {},
-                    },
+            "num_channels": 8,
+            "node_trainable_parameters": {"data": 0, "hidden": 0},
+            "model": {"hidden_nodes_name": "hidden", "latent_skip": False},
+            "encoders": {
+                0: {
+                    "source_datasets": ["data"],
+                    "dataset_fusing_strategy": "not_supported",
+                    "mapper": {},
                 },
-                "decoders": {
-                    0: {
-                        "target_datasets": ["data"],
-                        "target_node_features": ["coordinates"],
-                        "mapper": {},
-                    },
-                },
-                "residual": {
-                    "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
-                },
-                "bounding": {"datasets": {"data": []}},
             },
+            "decoders": {
+                0: {
+                    "target_datasets": ["data"],
+                    "target_node_features": ["coordinates"],
+                    "mapper": {},
+                },
+            },
+            "residual": {
+                "datasets": {"data": {"_target_": "anemoi.models.layers.residual.SkipConnection"}},
+            },
+            "bounding": {"datasets": {"data": []}},
         }
     )
     return DummyGraphModel(
@@ -450,3 +444,19 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
     )
 
     assert out["data"].shape[-2] == 2
+
+
+def test_predict_step_skips_input_only_datasets(monkeypatch):
+    """Datasets without a decoder (input-only) have no output and must not be post-processed."""
+    model = _make_minimal_model()
+
+    # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
+    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": x["data"][:, -1:] + 1.0})
+
+    processors = {"data": _identity_pre_processor(), "forcing": _identity_pre_processor()}
+    batch = {"data": torch.zeros(1, 1, 4, 1), "forcing": torch.zeros(1, 1, 4, 2)}  # (batch, time, grid, vars)
+
+    out = model.predict_step(batch, pre_processors=processors, post_processors=processors, n_step_input=1)
+
+    assert set(out) == {"data"}
+    assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))

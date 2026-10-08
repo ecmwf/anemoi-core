@@ -277,7 +277,7 @@ class AnemoiModelInterface(torch.nn.Module):
         model_kwargs = {"target_anchors": self.target_anchors} if self.target_anchors is not None else {}
         self.model = instantiate(
             model_instantiate_config,
-            model_config=self.config,
+            model_config=self.config.model,
             data_indices=self.data_indices,
             statistics=self.statistics,
             graph_data=self.graph_data,
@@ -329,11 +329,12 @@ class AnemoiModelInterface(torch.nn.Module):
             predict_kwargs["pre_processors_tendencies"] = self.pre_processors_tendencies
         if hasattr(self, "post_processors_tendencies"):
             predict_kwargs["post_processors_tendencies"] = self.post_processors_tendencies
+
         if hasattr(self, "pre_processors_residual") and len(self.pre_processors_residual) > 0:
             predict_kwargs["pre_processors_residual"] = self.pre_processors_residual
         if hasattr(self, "post_processors_residual") and len(self.post_processors_residual) > 0:
             predict_kwargs["post_processors_residual"] = self.post_processors_residual
-        if self.spatial_pre_processors:
+        if getattr(self, "spatial_pre_processors", None):
             predict_kwargs["spatial_pre_processors"] = self.spatial_pre_processors
 
         # Delegate to the model's predict_step implementation with processors

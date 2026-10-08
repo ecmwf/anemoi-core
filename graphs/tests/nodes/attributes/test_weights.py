@@ -144,10 +144,10 @@ def test_masked_planar_area_weights_subset():
 
     weights = MaskedPlanarAreaWeights(mask_node_attr_name="patch").compute(graph, "test_nodes")
     assert torch.all(weights[~mask] == 0)
-    np.testing.assert_allclose(weights[mask].numpy(), weights[mask].max().item(), rtol=1e-6)
+    np.testing.assert_allclose(weights[mask].cpu().numpy(), weights[mask].max().item(), rtol=1e-6)
 
     halved = MaskedPlanarAreaWeights(mask_node_attr_name="patch_half").compute(graph, "test_nodes")
-    np.testing.assert_allclose(halved.numpy(), 0.5 * weights.numpy(), rtol=1e-6)
+    np.testing.assert_allclose(halved.cpu().numpy(), 0.5 * weights.cpu().numpy(), rtol=1e-6)
 
 
 def test_voronoi_region_areas_matches_convexhull():

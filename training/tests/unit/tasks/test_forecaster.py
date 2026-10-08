@@ -110,6 +110,20 @@ def test_forecaster_validation_rollout_none_follows_training_rollout() -> None:
     ]
 
 
+def test_forecaster_validation_unrolls_at_least_training_rollout() -> None:
+    """validation_rollout below the training rollout still unrolls all training steps."""
+    task = Forecaster(
+        multistep_input=1,
+        multistep_output=1,
+        timestep="6h",
+        rollout={"start": 3, "maximum": 3},
+        validation_rollout=2,
+    )
+
+    assert list(task.steps("validation")) == [{"rollout_step": 0}, {"rollout_step": 1}, {"rollout_step": 2}]
+    assert task.get_offsets(mode="validation") == task.get_offsets(mode="training")
+
+
 def test_forecaster_steps_reflect_validation_rollout() -> None:
     """Rollout with validation_rollout=3 produces three steps for validation only."""
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", validation_rollout=3)

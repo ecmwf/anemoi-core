@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import List
 from typing import Optional
 
 import torch
@@ -45,9 +46,6 @@ def _split(input_: Tensor, dim_: int, sizes_: ShardSizes, group: Optional[Proces
     comm_size = dist.get_world_size(group=group)
     if comm_size == 1:
         return input_
-
-    # sanity checks
-    assert dim_ < input_.dim(), f"Error, cannot split along {dim_} for tensor with {input_.dim()} dimensions."
 
     input_list = torch.split(input_, sizes_, dim=dim_)
 
@@ -167,11 +165,6 @@ def _gather(
     if dist.get_world_size(group=group) == 1:
         return input_
 
-    # sanity checks
-    assert (
-        -input_.dim() <= dim_ < input_.dim()
-    ), f"Error, cannot gather along {dim_} for tensor with {input_.dim()} dimensions."
-
     all_shards_equal_shape = all(size == sizes[0] for size in sizes)
     if dim_ == 0 and all_shards_equal_shape:  # requirement for all_gather_into_tensor
         return _gather_into_tensor(input_, dim_, sizes, group)
@@ -196,10 +189,6 @@ def _expand_sharded_tensor(
     """
     if dist.get_world_size(group=group) == 1:
         return input_
-
-    assert (
-        -input_.dim() <= dim_ < input_.dim()
-    ), f"Error, cannot expand along {dim_} for tensor with {input_.dim()} dimensions."
 
     input_format = get_memory_format(input_)
     input_ = input_.contiguous(memory_format=input_format)
@@ -273,6 +262,8 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
     """
     comm_size = dist.get_world_size(group=group)
+    assert len(input_list) == comm_size, f"Expected {comm_size} all-to-all input tensors, but got {len(input_list)}."
+    assert len(output_list) == comm_size, f"Expected {comm_size} all-to-all output tensors, but got {len(output_list)}."
 
     # cant call dist.get_backend(group) in torch.compile() so we check is_compiling first
     if (not torch.compiler.is_compiling()) and dist.get_backend(group) == "gloo":
@@ -304,11 +295,11 @@ def _alltoallwrapper(output_list: list, input_list: list, group: ProcessGroup):
 
 @torch.library.custom_op("anemoi_distributed::alltoall", mutates_args=())
 def _alltoall_op(
-    input_list: list[Tensor],
-    output_shapes_flat: list[int],
+    input_list: List[Tensor],
+    output_shapes_flat: List[int],
     ndim: int,
     group_name: str,
-) -> list[Tensor]:
+) -> List[Tensor]:
     """torch.compile-traceable wrapper around the list-based ``dist.all_to_all``.
 
     torch.compile() cannot trace ``dist.all_to_all`` with list inputs.
@@ -357,9 +348,9 @@ def _resolve_group_name(group: Optional[ProcessGroup]) -> str:
 def _alltoall_transpose(
     input_: Tensor,
     dim_split: int,
-    split_sizes: list[int],
+    split_sizes: list[int] | tuple[int, ...],
     dim_concat: int,
-    concat_sizes: list[int],
+    concat_sizes: list[int] | tuple[int, ...],
     group: Optional[ProcessGroup] = None,
 ) -> Tensor:
     """Unified all-to-all distributed transpose along arbitrary dimensions.
@@ -397,7 +388,6 @@ def _alltoall_transpose(
     ndim = input_.dim()
     dim_split = dim_split % ndim
     dim_concat = dim_concat % ndim
-    assert dim_split != dim_concat, "Error, all-to-all split and concat dimensions must be different."
 
     myrank = dist.get_rank(group=group)
     input_format = get_memory_format(input_)
