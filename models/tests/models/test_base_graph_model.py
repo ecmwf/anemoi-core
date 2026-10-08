@@ -316,3 +316,37 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
 
     assert out["data"].data.shape[-2] == 2
     assert out["data"].shard_sizes == target_grid_shard_sizes
+
+
+def test_predict_step_skips_input_only_datasets(monkeypatch):
+    """Datasets without a decoder (input-only) have no output and must not be post-processed."""
+    model = _make_minimal_model(monkeypatch)
+
+    # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
+    monkeypatch.setattr(
+        model, "forward", lambda x, **kw: Batch({"data": x["data"].clone(data=x["data"].data + 1.0)})
+    )
+
+    class _NotCalled:
+        def __call__(self, x, in_place=False):
+            msg = "input-only datasets must not be post-processed"
+            raise AssertionError(msg)
+
+    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    batch = build_batch(
+        data={"data": torch.zeros(1, 1, 1, 4, 1), "forcing": torch.zeros(1, 1, 1, 4, 2)},
+        coordinates={"data": torch.zeros(4, 2), "forcing": torch.zeros(4, 2)},
+        layouts={"data": layout, "forcing": layout},
+        variables={"data": ["var"], "forcing": ["f1", "f2"]},
+    )
+
+    out = model.predict_step(
+        batch,
+        target=_gridded_batch(grid=4, variables=[]),
+        pre_processors={"data": _identity_pre_processor(), "forcing": _identity_pre_processor()},
+        post_processors={"data": _identity_pre_processor(), "forcing": _NotCalled()},
+        n_step_input={"data": 1, "forcing": 1},
+    )
+
+    assert set(out.dataset_names) == {"data"}
+    assert torch.equal(out["data"].data, torch.ones(1, 1, 1, 4, 1))

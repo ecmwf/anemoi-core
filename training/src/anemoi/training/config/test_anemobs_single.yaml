@@ -580,6 +580,7 @@ dataloader:
         end: 2025
         trajectory: null
 diagnostics:
+  callbacks: []
   plot:
     settings:
       asynchronous: true

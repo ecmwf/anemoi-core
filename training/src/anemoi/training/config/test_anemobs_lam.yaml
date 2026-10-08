@@ -260,6 +260,7 @@ dataloader:
         end: 2021-05-31
         trajectory: null
 diagnostics:
+  callbacks: []
   plot:
     settings:
       asynchronous: true
