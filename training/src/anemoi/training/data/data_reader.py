@@ -22,8 +22,8 @@ from rich.tree import Tree
 
 from anemoi.datasets import open_dataset
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sample import GriddedSample
 from anemoi.models.data.sample import BaseSample
+from anemoi.models.data.sample import GriddedSample
 from anemoi.models.data.sample import TabularSample
 from anemoi.models.data.sample import create_sample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
