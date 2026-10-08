@@ -16,7 +16,7 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import create_source_sample
+from anemoi.models.data.sample import create_sample
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
@@ -192,14 +192,12 @@ class AnemoiModelInterface(torch.nn.Module):
         """Utility function to build a :class:`Batch` from raw per-dataset payload dicts."""
         return Batch.collate(
             {
-                name: create_source_sample(statistics=self._statistics_for(name, payload["variables"]), **payload)
+                name: create_sample(statistics=self._statistics_for(name, payload["variables"]), **payload)
                 for name, payload in x.items()
             }
         )
 
-    def _get_template(
-        self, x: dict[str, dict], ensemble_size: int = 1, batch_size: int = 1, num_target_timesteps: int = 1
-    ) -> Batch:
+    def _get_template(self, x: dict[str, dict], ensemble_size: int = 1, batch_size: int = 1) -> Batch:
         """Build a template batch with the given ensemble size, batch size, and number of target timesteps."""
         return Batch.collate(
             {
@@ -208,7 +206,7 @@ class AnemoiModelInterface(torch.nn.Module):
                     **payload,
                     ensemble_size=ensemble_size,
                     batch_size=batch_size,
-                    time_size=num_target_timesteps,
+                    time_size=self.n_step_output[name],
                 )
                 for name, payload in x.items()
             }
@@ -257,8 +255,8 @@ class AnemoiModelInterface(torch.nn.Module):
     def predict_step(
         self,
         x: dict[str, dict],
-        target_forcing: dict[str, dict] = None,
         target_template: dict[str, dict] = None,
+        target_forcing: dict[str, dict] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
@@ -290,15 +288,19 @@ class AnemoiModelInterface(torch.nn.Module):
             Predicted data.
         """
         assert target_template is not None, "target_template must be provided for prediction."
+        if target_forcing is None:
+            target_forcing = {}
 
         # Convert to batch
         x = self._get_batch(x)
+        target_forcing = self._get_batch(target_forcing)
         target = self._get_template(target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size)
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
             "x": x,
-            "target": target,
+            "target_template": target,
+            "target_forcing": target_forcing,
             "pre_processors": self.pre_processors,
             "post_processors": self.post_processors,
             "n_step_input": self.n_step_input,

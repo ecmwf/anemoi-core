@@ -19,7 +19,6 @@ from typing import ClassVar
 from typing import Self
 
 import torch
-
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import Source
 
@@ -79,13 +78,13 @@ class BaseSample(ABC):
         """
         ...
 
-    #: The :class:`Source` subclass this kind collates into.
+    # The :class:`Source` subclass this kind collates into.
     source_type: ClassVar[type[Source]]
 
-    #: Fields that describe the dataset rather than the sample: identical across the batch.
+    # Fields that describe the dataset rather than the sample: identical across the batch.
     _METADATA_ATTRS: ClassVar[tuple[str, ...]] = ("variables", "statistics")
 
-    #: Fields that vary between samples, kept as one value per sample by :meth:`_collate_dynamic_attrs`.
+    # Fields that vary between samples, kept as one value per sample by :meth:`_collate_dynamic_attrs`.
     _DYNAMIC_ATTRS: ClassVar[tuple[str, ...]] = ()
 
     @classmethod

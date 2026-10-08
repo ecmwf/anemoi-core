@@ -93,7 +93,7 @@ def create_sample(
         )
         raise ValueError(msg)
     coordinates = torch.stack((latitudes, longitudes), dim=-1)
-    num_points = latitudes.shape[0]
+    num_points = coordinates.shape[0]
 
     if not isinstance(layout, TensorLayout):
         layout = TensorLayout.from_tuple(*layout)
