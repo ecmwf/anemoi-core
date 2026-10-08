@@ -704,13 +704,14 @@ def test_training_cycle_mlflow_dry_run(
     run_id, _ = prepare_mlflow_run_id(
         config=cfg,
     )
-    cfg["training"]["checkpoint"] = {
-        "source": {
-            "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
-            "run_id": run_id,
-            "fork": False,
-        },
-    }
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": run_id,
+                "fork": False,
+            },
+        }
 
     # Get training data
     get_test_archive(url)
@@ -832,13 +833,14 @@ def test_evaluator(
     run_dirs = [item for item in output_dir.iterdir() if item.is_dir()]
     checkpoint_dir = run_dirs[0]
 
-    cfg.training.checkpoint = {
-        "source": {
-            "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
-            "run_id": checkpoint_dir.name,
-        },
-        "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
-    }
+    with open_dict(cfg):
+        cfg.training.checkpoint = {
+            "source": {
+                "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                "run_id": checkpoint_dir.name,
+            },
+            "loading": {"_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader"},
+        }
     evaluator = AnemoiEvaluator(cfg)
     evaluator.evaluate()
 
