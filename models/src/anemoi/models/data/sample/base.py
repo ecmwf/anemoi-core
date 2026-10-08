@@ -32,7 +32,7 @@ class SourceSample(ABC):
     :class:`~anemoi.models.data.sources.Source` travels with the sample, so
     collation needs no side channel. Build samples with
     :func:`~anemoi.models.data.sample.create_source_sample`; each kind is registered
-    in :data:`~anemoi.models.data.sample.sample_registry`.
+    in :data:`~anemoi.models.data.sample.source_sample_registry`.
 
     Parameters
     ----------

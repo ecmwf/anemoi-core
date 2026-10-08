@@ -24,6 +24,28 @@ from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
 
+
+def _create_source(dataset_name: str, payload: dict) -> SourceSample:
+    """Build one dataset's SourceSample from a plain inference payload.
+
+    The payload carries ``latitudes`` / ``longitudes`` (degrees), ``layout`` (per-sample
+    axis names, no batch axis), ``variables`` and, optionally, ``data``; tabular datasets
+    also carry ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time
+    window). The dataset kind and the statistics come from the checkpoint; an optional
+    ``type`` key must agree with the checkpoint. The payload is not modified.
+    """
+    payload = dict(payload)
+
+    try:
+        return create_source_sample(
+            data_type=payload.pop("type"),
+            statistics=self._statistics_for(dataset_name, payload["variables"]),
+            **payload,
+        )
+    except (TypeError, ValueError) as e:
+        raise ValueError(f"Dataset {dataset_name!r}: {e}") from e
+
+
 class AnemoiModelInterface(torch.nn.Module):
     """An interface for Anemoi models.
 
@@ -181,13 +203,6 @@ class AnemoiModelInterface(torch.nn.Module):
                 batch = batch.replace(dataset_name, projected)
         return batch
 
-    @staticmethod
-    def _as_payload(ds_data: torch.Tensor | dict) -> dict:
-        """Normalise one dataset entry to the payload dict of the inference boundary.
-        A bare tensor is accepted as a data-only payload.
-        """
-        return ds_data if isinstance(ds_data, dict) else {"data": ds_data}
-
     def _statistics_for(self, dataset_name: str, variables: list[str]) -> dict:
         """Slice the checkpoint's data-space statistics down to the variables.
         Same alignment that is done for the model outputs in AnemoiModelEncProcDec._assemble_output.
@@ -195,42 +210,6 @@ class AnemoiModelInterface(torch.nn.Module):
         name_to_index = self.data_indices[dataset_name].name_to_index
         positions = [name_to_index[name] for name in variables]
         return {name: values[positions] for name, values in self.statistics[dataset_name].items()}
-
-    def _target_forcing_names(self, dataset_name: str) -> list[str]:
-        """Returns the names of the output-time forcing variables that condition this dataset's decoder.
-        Mirrors the BaseTask.get_forcings method.
-        """
-        data_input = self.data_indices[dataset_name].data.input
-        return [data_input.full_index_to_name[int(index)] for index in data_input.forcing]
-
-    def _create_source(self, dataset_name: str, payload: dict) -> SourceSample:
-        """Build one dataset's SourceSample from a plain inference payload.
-
-        The payload carries ``latitudes`` / ``longitudes`` (degrees), ``layout`` (per-sample
-        axis names, no batch axis), ``variables`` and, optionally, ``data``; tabular datasets
-        also carry ``timedeltas`` and ``boundaries`` (``(start, stop)`` pairs, one per time
-        window). The dataset kind and the statistics come from the checkpoint; an optional
-        ``type`` key must agree with the checkpoint. The payload is not modified.
-        """
-        payload = dict(payload)
-        data_type = "gridded" if self.is_dataset_static[dataset_name] else "tabular"
-        requested_type = payload.pop("type", data_type)
-        if requested_type != data_type:
-            raise ValueError(
-                f"Dataset {dataset_name!r}: the payload is {requested_type!r} but the checkpoint expects {data_type!r}."
-            )
-        for key in ("latitudes", "longitudes", "layout", "variables"):
-            if payload.get(key) is None:
-                raise ValueError(f"Dataset {dataset_name!r}: missing {key!r} in the sample.")
-
-        try:
-            return create_source_sample(
-                data_type=data_type,
-                statistics=self._statistics_for(dataset_name, payload["variables"]),
-                **payload,
-            )
-        except (TypeError, ValueError) as e:
-            raise ValueError(f"Dataset {dataset_name!r}: {e}") from e
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
@@ -310,8 +289,8 @@ class AnemoiModelInterface(torch.nn.Module):
         assert target_template is not None, "target_template must be provided for prediction."
 
         # Convert to batch
-        x = Batch.collate({name: self._create_source(name, payload) for name, payload in x.items()})
-        target = Batch.collate({name: self._create_source(name, payload) for name, payload in target_template.items()})
+        x = Batch.collate({name: _create_source(name, payload) for name, payload in x.items()})
+        target = Batch.collate({name: _create_source(name, payload) for name, payload in target_template.items()})
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

@@ -29,7 +29,7 @@ from anemoi.utils.registry import Registry
 
 from anemoi.models.data.layout import TensorLayout
 
-sample_registry: Registry = Registry(__name__)
+source_sample_registry = Registry(__name__)
 
 # Imported after the registry is defined: each kind registers itself on import.
 from anemoi.models.data.sample.base import SourceSample  # noqa: E402
@@ -41,7 +41,7 @@ __all__ = [
     "SourceSample",
     "TabularSourceSample",
     "create_source_sample",
-    "sample_registry",
+    "source_sample_registry",
 ]
 
 
@@ -66,7 +66,7 @@ def create_source_sample(
     Parameters
     ----------
     data_type : str
-        Name of the kind in :data:`sample_registry`, e.g. ``"gridded"`` or ``"tabular"``.
+        Name of the kind in :data:`source_sample_registry`, e.g. ``"gridded"`` or ``"tabular"``.
     variables : Sequence[str]
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout or Sequence[str]
@@ -82,7 +82,7 @@ def create_source_sample(
         samples; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)`` pairs)
         and ``shard_sizes`` for tabular samples.
     """
-    sample_type = sample_registry.lookup(data_type)
+    source_sample_class = source_sample_registry.lookup(data_type)
     device = data.device if data is not None else None
 
     latitudes = _as_radians(latitudes, device)
@@ -112,7 +112,7 @@ def create_source_sample(
             msg = f"data carries {n_grid} points but {n_points} coordinates were given."
             raise ValueError(msg)
 
-    return sample_type.from_validated(
+    return source_sample_class.from_validated(
         n_points=n_points,
         device=device,
         data=data,

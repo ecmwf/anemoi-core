@@ -15,7 +15,7 @@ from typing import Self
 import torch
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sample import sample_registry
+from anemoi.models.data.sample import source_sample_registry
 from anemoi.models.data.sample.base import SourceSample
 from anemoi.models.data.sample.base import require_data
 from anemoi.models.data.sample.base import validate_layout_against
@@ -23,7 +23,7 @@ from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.shapes import ShardSizes
 
 
-@sample_registry.register("tabular")
+@source_sample_registry.register("tabular")
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class TabularSourceSample(SourceSample):
     """A sample of points that change from sample to sample (e.g. observations).

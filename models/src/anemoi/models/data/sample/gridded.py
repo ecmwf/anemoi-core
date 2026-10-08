@@ -16,7 +16,7 @@ import torch
 from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sample import sample_registry
+from anemoi.models.data.sample import source_sample_registry
 from anemoi.models.data.sample.base import SourceSample
 from anemoi.models.data.sample.base import require_data
 from anemoi.models.data.sample.base import validate_layout_against
@@ -24,7 +24,7 @@ from anemoi.models.data.sources import GriddedSource
 from anemoi.models.distributed.shapes import ShardSizes
 
 
-@sample_registry.register("gridded")
+@source_sample_registry.register("gridded")
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)
 class GriddedSourceSample(SourceSample):
     """A sample on a grid that every sample of the dataset shares.

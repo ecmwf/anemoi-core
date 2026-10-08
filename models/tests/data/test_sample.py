@@ -15,7 +15,7 @@ from anemoi.models.data import GriddedSourceSample
 from anemoi.models.data import TabularSourceSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data import create_source_sample
-from anemoi.models.data.sample import sample_registry
+from anemoi.models.data.sample import source_sample_registry
 
 LATS = [0.0, 45.0, 90.0]
 LONS = [0.0, 90.0, 180.0]
@@ -105,8 +105,8 @@ def test_tabular_validation(overrides, match):
 
 
 def test_registry_holds_both_kinds():
-    assert sample_registry.lookup("gridded") is GriddedSourceSample
-    assert sample_registry.lookup("tabular") is TabularSourceSample
+    assert source_sample_registry.lookup("gridded") is GriddedSourceSample
+    assert source_sample_registry.lookup("tabular") is TabularSourceSample
 
 
 @pytest.mark.parametrize(
