@@ -404,6 +404,22 @@ class HierarchicalModelSchema(BaseModelSchema):
     )
     "Mapper used to downscale from a higher level to a lower level in the hierarchy."
 
+    @model_validator(mode="before")
+    @classmethod
+    def default_num_channels_in_hierarchical_mapper(cls, data: Any) -> Any:
+        """Allow num_channels to be omitted.
+
+        It will be set at model build time.
+        """
+        for mapper_field in ("upscale_mapper", "downscale_mapper"):
+            if mapper_field in data:
+                mapper = data[mapper_field]
+                if isinstance(data, dict):
+                    mapper["num_channels"] = 1
+                elif isinstance(data, DictConfig):
+                    OmegaConf.update(mapper, "num_channels", 1, force_add=True)
+        return data
+
 
 ModelSchema = Union[
     BaseModelSchema,

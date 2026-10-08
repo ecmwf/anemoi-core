@@ -1,4 +1,4 @@
-# Single-GPU anemobs test config with a GNN encoder-processor-decoder.
+# Anemobs test config with a GNN encoder-processor-decoder.
 # Same data, graph and training setup as test_anemobs_single.yaml; only the model block differs:
 # every GraphTransformer mapper/processor is replaced by its GNN counterpart (GNNForwardMapper,
 # GNNProcessor, GNNBackwardMapper), including the observation encoders that run on dynamic graphs.
@@ -683,10 +683,6 @@ diagnostics:
           _partial_: true
           per_sample: 6
           accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
-  callbacks:
-    - _target_: anemoi.training.diagnostics.callbacks.mapper_graph.MapperGraphExport
-      output_dir: ${system.output.root}/mapper_graphs
-      batch_index: 10
   benchmark_profiler:
     memory:
       enabled: true
@@ -718,7 +714,7 @@ diagnostics:
       project_name: AIFS
       system: false
       terminal: true
-      run_name: 'anemoi-fastda-gnn-debug'
+      run_name: 'test-anemobs-gnn'
       prefix: ''
       log_hyperparams: true
       on_resume_create_child: true
@@ -780,8 +776,8 @@ system:
     warm_start: null
   hardware:
     accelerator: auto
-    num_gpus_per_node: 1
-    num_nodes: 1
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES,1}}
     num_gpus_per_model: 1
 graph:
   overwrite: true

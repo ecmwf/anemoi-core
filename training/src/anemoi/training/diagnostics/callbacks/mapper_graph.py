@@ -99,6 +99,9 @@ class MapperGraphExport(Callback):
 
         model = self._torch_drop_down(pl_module)
         hidden_name = model._graph_name_hidden
+        if not isinstance(hidden_name, str):
+            # Hierarchical model: the encoders and decoders connect to the first hidden level.
+            hidden_name = hidden_name[0]
         for dataset_name, provider in model.encoder_graph_provider.items():
             self._arm_provider(
                 provider,

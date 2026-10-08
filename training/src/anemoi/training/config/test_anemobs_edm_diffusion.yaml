@@ -1,21 +1,14 @@
-# Anemobs test config for a limited-area model (LAM).
-#
-# Gridded dataset `lam`: CERRA (5.5 km, thinned to every 10th point, ~55 km) cut out of ERA5 o96.
-# The ERA5 points within 300 km of the CERRA domain form the lateral boundary; the output mask
-# (graph attribute `cutout_mask`) restricts the loss to the CERRA domain and, in rollout, refills
-# the boundary with the true state.
-# Observation dataset `combined_surface`: conventional surface observations, used as encoder
-# input only. Tabular datasets cannot be cropped to an area yet, so the observations stay
-# global; the obs->hidden edges use a 150 km cut-off, so observations far from the domain get
-# no edges. There is no observation decoder: a loss on global observations would be dominated
-# by points outside the domain.
-#
-#   anemoi-training train --config-name=test_anemobs_lam
+# Anemobs test config for the EDM diffusion transport model
+# (AnemoiTransportModelEncProcDec, TransportTraining). Derived from test_anemobs_ens_afcrps.yaml: same data,
+# single hidden mesh and GraphTransformer model. Two datasets, both encoded and decoded: ERA5 (`era`) and
+# conventional surface observations (`combined_surface`, without `reportype`). State prediction with the
+# `edm_diffusion` objective; inference samples with Heun, 50 steps.
+#   anemoi-training train --config-name=test_anemobs_edm_diffusion
 data:
   format: zarr
-  frequency: 6h
+  frequency: 12h
   datasets:
-    lam:
+    era:
       forcing:
       - cos_latitude
       - cos_longitude
@@ -27,16 +20,20 @@ data:
       - sin_local_time
       - insolation
       - lsm
+      - sdor
+      - slor
       - z
-      diagnostic: []
+      diagnostic:
+      - tp
+      - cp
       processors:
         normalizer:
           _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
           config:
             default: mean-std
-            std: null
+            std: [tp]
             min-max: null
-            max: [z]
+            max: [sdor, slor, z]
             none:
             - cos_latitude
             - cos_longitude
@@ -58,7 +55,6 @@ data:
       - cos_local_time
       - sin_julian_day
       - sin_local_time
-      - reportype
       - stalt
       - lsm
       - cos_sza
@@ -103,110 +99,15 @@ dataloader:
     training: 20
     validation: 10
     test: 20
-  # The LAM dataset: CERRA cut out of ERA5. Both are restricted to the same variables, because
-  # soil and 100 m wind fields have incompatible level metadata between the two.
-  dataset:
-    cutout:
-    - dataset: ${system.input.lam}
-      thinning: 10
-      select: &lam_variables
-      - 10u
-      - 10v
-      - 2d
-      - 2t
-      - msl
-      - sp
-      - skt
-      - tcc
-      - lsm
-      - z
-      - insolation
-      - cos_latitude
-      - cos_longitude
-      - sin_latitude
-      - sin_longitude
-      - cos_julian_day
-      - cos_local_time
-      - sin_julian_day
-      - sin_local_time
-      - q_50
-      - q_100
-      - q_150
-      - q_200
-      - q_250
-      - q_300
-      - q_400
-      - q_500
-      - q_600
-      - q_700
-      - q_850
-      - q_925
-      - q_1000
-      - t_50
-      - t_100
-      - t_150
-      - t_200
-      - t_250
-      - t_300
-      - t_400
-      - t_500
-      - t_600
-      - t_700
-      - t_850
-      - t_925
-      - t_1000
-      - u_50
-      - u_100
-      - u_150
-      - u_200
-      - u_250
-      - u_300
-      - u_400
-      - u_500
-      - u_600
-      - u_700
-      - u_850
-      - u_925
-      - u_1000
-      - v_50
-      - v_100
-      - v_150
-      - v_200
-      - v_250
-      - v_300
-      - v_400
-      - v_500
-      - v_600
-      - v_700
-      - v_850
-      - v_925
-      - v_1000
-      - z_50
-      - z_100
-      - z_150
-      - z_200
-      - z_250
-      - z_300
-      - z_400
-      - z_500
-      - z_600
-      - z_700
-      - z_850
-      - z_925
-      - z_1000
-    - dataset: ${system.input.forcing_dataset}
-      select: *lam_variables
-    adjust: all
-    min_distance_km: 0
-    max_distance_km: 300
   training:
     datasets:
-      lam:
+      era:
         dataset_config:
-          dataset: ${dataloader.dataset}
+          dataset: ${system.input.era}
           frequency: ${data.frequency}
-        start: 2010
-        end: 2019
+          drop: [cdww, 100u, 100v, h1012, h1214, h1417, h1721, h2125, h2530, hcc, lcc, mcc, wmb, sin_mwd, cos_mwd, mwp, snowc, ssrd, stl1, stl2, strd, swh, swvl1, swvl2, ro, sd]
+        start: 1979
+        end: 2023
         trajectory: null
       combined_surface:
         dataset_config:
@@ -215,18 +116,20 @@ dataloader:
           drop:
           - seqno
           - obsvalue_td2m_0
-          window: (-6h,0]
-        start: 2010
-        end: 2019
+          - reportype
+          window: (-12h,0]
+        start: 2008
+        end: 2023
         trajectory: null
   validation:
     datasets:
-      lam:
+      era:
         dataset_config:
-          dataset: ${dataloader.dataset}
+          dataset: ${system.input.era}
           frequency: ${data.frequency}
-        start: 2020
-        end: 2020
+          drop: [cdww, 100u, 100v, h1012, h1214, h1417, h1721, h2125, h2530, hcc, lcc, mcc, wmb, sin_mwd, cos_mwd, mwp, snowc, ssrd, stl1, stl2, strd, swh, swvl1, swvl2, ro, sd]
+        start: 2024
+        end: 2024
         trajectory: null
       combined_surface:
         dataset_config:
@@ -235,19 +138,13 @@ dataloader:
           drop:
           - seqno
           - obsvalue_td2m_0
-          window: (-6h,0]
-        start: 2020
-        end: 2020
+          - reportype
+          window: (-12h,0]
+        start: 2024
+        end: 2024
         trajectory: null
   test:
     datasets:
-      lam:
-        dataset_config:
-          dataset: ${dataloader.dataset}
-          frequency: ${data.frequency}
-        start: 2021-01-01
-        end: 2021-05-31
-        trajectory: null
       combined_surface:
         dataset_config:
           dataset: ${system.input.combined_surface}
@@ -255,9 +152,10 @@ dataloader:
           drop:
           - seqno
           - obsvalue_td2m_0
-          window: (-6h,0]
-        start: 2021-01-01
-        end: 2021-05-31
+          - reportype
+          window: (-12h,0]
+        start: 2025
+        end: 2025
         trajectory: null
 diagnostics:
   plot:
@@ -265,7 +163,7 @@ diagnostics:
       asynchronous: true
       datashader: true
       projection_kind: equirectangular
-      precip_and_related_fields: []
+      precip_and_related_fields: [tp, cp]
       colormaps:
         default:
           _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
@@ -273,6 +171,24 @@ diagnostics:
         error:
           _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
           name: bwr
+        precip:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+          clevels:
+          - '#ffffff'
+          - '#04e9e7'
+          - '#019ff4'
+          - '#0300f4'
+          - '#02fd02'
+          - '#01c501'
+          - '#008e00'
+          - '#fdf802'
+          - '#e5bc00'
+          - '#fd9500'
+          - '#fd0000'
+          - '#d40000'
+          - '#bc0000'
+          - '#f800fd'
+          variables: ${diagnostics.plot.settings.precip_and_related_fields}
     frequency:
       batch: 5
       epoch: 1
@@ -281,29 +197,46 @@ diagnostics:
     datasets_to_plot: []
     focus_areas: {}
     callbacks:
-      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
-        dataset_names: ["lam"]
-        parameter_groups: {}
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        plot_fn:
-          _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
-          _partial_: true
-      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
-        tag_infix: sample
-        dataset_names: ["lam"]
-        sample_idx: ${diagnostics.plot.sample_idx}
-        parameters:
-          - z_500
-          - t_850
-          - 2t
-          - 10u
-          - 10v
-        every_n_batches: ${diagnostics.plot.frequency.batch}
-        plot_fn:
-          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
-          _partial_: true
-          per_sample: 6
-  callbacks: []
+    - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        # group parameters by categories when visualizing contributions to the loss
+      dataset_names: ["era", "combined_surface"]
+      parameter_groups: {}
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      plot_fn:
+        _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
+        _partial_: true
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+      tag_infix: ens
+      dataset_names: ["era"]
+      sample_idx: ${diagnostics.plot.sample_idx}
+      parameters:
+      - z_500
+      - tp
+      - 2t
+      - 10u
+      - 10v
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      members: null
+      plot_fn:
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn
+        _partial_: true
+        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+    - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+      tag_infix: ens
+      dataset_names: ["combined_surface"]
+      sample_idx: ${diagnostics.plot.sample_idx}
+      parameters:
+      - obsvalue_t2m_0
+      - obsvalue_u10m_0
+      - obsvalue_v10m_0
+      - obsvalue_ps_0
+      - obsvalue_pmsl_0
+      every_n_batches: ${diagnostics.plot.frequency.batch}
+      members: null
+      plot_fn:
+        _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.ensemble_plot_fn
+        _partial_: true
+        accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
   benchmark_profiler:
     memory:
       enabled: true
@@ -335,19 +268,20 @@ diagnostics:
       project_name: AIFS
       system: false
       terminal: true
-      run_name: 'test-anemobs-lam'
+      run_name: 'test-anemobs-edm-diffusion'
       prefix: ''
       log_hyperparams: true
       on_resume_create_child: true
       expand_hyperparams:
       - config
       http_max_retries: 35
-      max_params_length: 3000
+      max_params_length: 5000
       save_dir: ${system.output.logs.mlflow}
       log_model: false
     interval: 100
     wandb:
-      entity: a
+      enabled: false
+      entity: null
   debug:
     anomaly_detection: false
   enable_checkpointing: true
@@ -369,7 +303,7 @@ diagnostics:
   print_memory_summary: false
 system:
   output:
-    root: ${oc.env:SCRATCH}/anemoi-test/fastda-lam/
+    root: ${oc.env:SCRATCH}/anemobs-test/edm_diffusion/
     logs:
       root: logs
       wandb: wandb
@@ -383,10 +317,8 @@ system:
     plots: plots
     profiler: profiler
   input:
-    lam: cerra-rr-an-oper-0001-mars-5p5km-1984-2021-3h-v3-rmi
-    forcing_dataset: aifs-ea-an-oper-0001-mars-o96-1979-2024-6h-v1-for-single-v2
+    era: aifs-ea-an-oper-0001-mars-o96-1979-2024-6h-v1-for-single-v2
     combined_surface: dop-ea-ofb-0001-1979-2025-v2-combined-surface-observations
-    graph: null
     loss_matrices_path: null
     truncation: null
     truncation_inv: null
@@ -399,10 +331,10 @@ system:
 graph:
   overwrite: true
   nodes:
-    lam:
+    era:
       node_builder:
         _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
-        dataset: ${dataloader.training.datasets.lam.dataset_config}
+        dataset: ${dataloader.training.datasets.era.dataset_config}
       attributes: ${graph.attributes.nodes}
     combined_surface:
       node_builder:
@@ -411,38 +343,25 @@ graph:
       attributes: {}
     hidden:
       node_builder:
-        _target_: anemoi.graphs.nodes.LimitedAreaTriNodes
-        resolution: 6
-        reference_node_name: lam
-        mask_attr_name: cutout_mask
-        # Hidden nodes are kept within this distance of a LAM point. The thinned CERRA grid is
-        # ~55 km apart, so the margin must exceed half its diagonal (~39 km); the 10 km of the
-        # packaged graph/limited_area.yaml suits the full 5.5 km grid and leaves holes here.
-        margin_radius_km: 50
+        _target_: anemoi.graphs.nodes.TriNodes
+        resolution: 5
   edges:
-  # Encoders
-  - source_name: lam
+  - source_name: era
     target_name: hidden
     edge_builders:
     - _target_: anemoi.graphs.edges.CutOffEdges
-      cutoff_factor: 0.6
+      cutoff_factor: 0.7
       source_mask_attr_name: null
-      target_mask_attr_name: null
-    - _target_: anemoi.graphs.edges.CutOffEdges # connects only boundary nodes
-      cutoff_factor: 1.5
-      source_mask_attr_name: boundary_mask
       target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
   - source_name: combined_surface
     target_name: hidden
     edge_builders:
-    - _target_: anemoi.graphs.edges.CutOffEdges
-      cutoff_distance_km: 150
-      max_num_neighbours: 32
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
       source_mask_attr_name: null
       target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
-  # Processor
   - source_name: hidden
     target_name: hidden
     edge_builders:
@@ -452,27 +371,28 @@ graph:
       source_mask_attr_name: null
       target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
-  # Decoder: only onto the CERRA domain
   - source_name: hidden
-    target_name: lam
+    target_name: era
     edge_builders:
     - _target_: anemoi.graphs.edges.KNNEdges
       num_nearest_neighbours: 3
       source_mask_attr_name: null
-      target_mask_attr_name: cutout_mask
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: combined_surface
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
     attributes: ${graph.attributes.edges}
   attributes:
     nodes:
-      cutout_mask:
-        _target_: anemoi.graphs.nodes.attributes.CutOutMask
-      boundary_mask:
-        _target_: anemoi.graphs.nodes.attributes.BooleanNot
-        masks:
-          _target_: anemoi.graphs.nodes.attributes.CutOutMask
       area_weight:
-        _target_: anemoi.graphs.nodes.attributes.MaskedPlanarAreaWeights
-        mask_node_attr_name: cutout_mask
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
         norm: unit-max
+        fill_value: 0
     edges:
       edge_length:
         _target_: anemoi.graphs.edges.attributes.EdgeLength
@@ -480,18 +400,52 @@ graph:
       edge_dirs:
         _target_: anemoi.graphs.edges.attributes.EdgeDirection
         norm: unit-std
+      # add 2*order extra features, to test
+      dir_harmonics:
+        _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+        order: 3
   post_processors: []
 model:
-  num_channels: 512
   cpu_offload: false
   keep_batch_sharded: false
   model:
-    _target_: anemoi.models.models.AnemoiModelEncProcDec
+    _target_: anemoi.models.models.AnemoiTransportModelEncProcDec
     hidden_nodes_name: hidden
     latent_skip: true
+    transport:
+      objective: edm_diffusion
+      sigma_data: 1.0
+      noise_channels: 32
+      noise_cond_dim: 16
+      sigma_max: 100.0
+      sigma_min: 0.02
+      rho: 7.0
+      noise_embedder:
+        _target_: anemoi.models.layers.diffusion.SinusoidalEmbeddings
+        num_channels: ${model.model.transport.noise_channels}
+        max_period: 1000
+      training_condition:
+        distribution: karras
+        sigma_max: ${model.model.transport.sigma_max}
+        sigma_min: ${model.model.transport.sigma_min}
+        rho: ${model.model.transport.rho}
+      inference_defaults:
+        sampling_schedule:
+          schedule_type: karras
+          sigma_max: 100.0
+          sigma_min: 0.02
+          rho: 7.0
+          num_steps: 50
+        sampler:
+          sampler: heun
+  # The noise level (EDM) or bridge time (SI) conditions every layer norm: encoders, processor, decoders.
   layer_kernels:
     LayerNorm:
-      _target_: torch.nn.LayerNorm
+      _target_: anemoi.models.layers.normalization.ConditionalLayerNorm
+      normalized_shape: ${model.processor.num_channels}
+      condition_shape: ${model.model.transport.noise_cond_dim}
+      zero_init: true
+      autocast: false
     Linear:
       _target_: torch.nn.Linear
     Activation:
@@ -504,11 +458,11 @@ model:
       bias: false
   processor:
     _target_: anemoi.models.layers.processor.GraphTransformerProcessor
-    num_channels: ${model.num_channels}
+    num_channels: 768
     trainable_size: 8
-    sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
     num_layers: 16
-    num_chunks: 2
+    num_chunks: 4
     mlp_hidden_ratio: 4
     num_heads: 16
     qk_norm: false
@@ -517,16 +471,31 @@ model:
     layer_kernels: ${model.layer_kernels}
     graph_attention_backend: triton
     edge_pre_mlp: false
+  obs_encoder:
+    _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
+    num_channels: 768
+    trainable_size: 0
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+    num_chunks: 4
+    mlp_hidden_ratio: 4
+    num_heads: 16
+    qk_norm: false
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+    shard_strategy: edges
+    graph_attention_backend: triton
+    edge_pre_mlp: false
   encoders:
     analysis:
-      source_datasets: [ "lam" ]
+      source_datasets: ["era"]
       dataset_fusing_strategy: "none"
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-        num_channels: ${model.num_channels}
+        num_channels: 768
         trainable_size: 8
-        sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
-        num_chunks: 1
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+        num_chunks: 4
         mlp_hidden_ratio: 4
         num_heads: 16
         qk_norm: false
@@ -536,36 +505,23 @@ model:
         shard_strategy: edges
         graph_attention_backend: triton
         edge_pre_mlp: false
+    # Observations: combined_surface, also decoded (see decoders)
     combined_surface:
-      source_datasets: [ "combined_surface" ]
-      dataset_fusing_strategy: "none"
-      mapper:
-        _target_: anemoi.models.layers.mapper.GraphTransformerForwardMapper
-        num_channels: ${model.num_channels}
-        trainable_size: 0
-        sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
-        num_chunks: 1
-        mlp_hidden_ratio: 4
-        num_heads: 16
-        qk_norm: false
-        cpu_offload: ${model.cpu_offload}
-        gradient_checkpointing: true
-        layer_kernels: ${model.layer_kernels}
-        shard_strategy: edges
-        graph_attention_backend: triton
-        edge_pre_mlp: false
+      source_datasets: [combined_surface]
+      dataset_fusing_strategy: none
+      mapper: ${model.obs_encoder}
   latent_aggregator:
     _target_: anemoi.models.layers.aggregator.SumAggregator
   decoders:
     analysis:
-      target_datasets: [ "lam" ]
-      target_node_features: [ "encoded_data" ]
+      target_datasets: ["era"]
+      target_node_features: ["encoded_data"]
       mapper:
         _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
-        num_channels: ${model.num_channels}
+        num_channels: 768
         trainable_size: 8
-        sub_graph_edge_attributes: ["edge_length", "edge_dirs"]
-        num_chunks: 1
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+        num_chunks: 4
         mlp_hidden_ratio: 4
         num_heads: 16
         initialise_data_extractor_zero: false
@@ -576,65 +532,91 @@ model:
         shard_strategy: edges
         graph_attention_backend: triton
         edge_pre_mlp: false
+    combined_surface:
+      target_datasets: ["combined_surface"]
+      target_node_features: ["coordinates", "target_forcings"]
+      mapper:
+        _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
+        num_channels: 768
+        trainable_size: 0
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+        num_chunks: 4
+        mlp_hidden_ratio: 4
+        num_heads: 16
+        initialise_data_extractor_zero: false
+        qk_norm: false
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+        shard_strategy: edges
+        graph_attention_backend: triton
+        edge_pre_mlp: false
+  # Transport models take no bounding.
   bounding:
     datasets:
-      lam: []
+      era: []
+      combined_surface: []
   residual:
     datasets:
-      lam:
+      era:
         _target_: anemoi.models.layers.residual.SkipConnection
         step: -1
   output_mask:
     datasets:
-      lam:
-        _target_: anemoi.training.utils.masks.Boolean1DMask
-        attribute_name: cutout_mask
+      era:
+        _target_: anemoi.training.utils.masks.NoOutputMask
       combined_surface:
         _target_: anemoi.training.utils.masks.NoOutputMask
   compile: []
   node_trainable_parameters:
-    lam: 8
+    era: 8
     combined_surface: 0
     hidden: 8
+  # - module: anemoi.models.layers.conv.GraphTransformerConv
 task:
   _target_: anemoi.training.tasks.Forecaster
-  # With multistep_input > 1, observation windows are stacked on the node axis
   multistep_input: 1
   multistep_output: 1
-  timestep: 6H
+  timestep: 12H
   rollout:
     start: 1
     epoch_increment: 0
     maximum: 1
-  # Two validation steps exercise the LAM boundary refill (`Boolean1DMask.rollout_boundary`).
-  validation_rollout: 2
+  validation_rollout: 1
 training:
   scalers:
     datasets:
-      lam:
+      era:
         general_variable:
           _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
           weights:
             default: 1
-            q: 0.6
+            q: 0.8
             t: 6
             u: 0.8
             v: 0.5
+            w: 0.001
             z: 12
             sp: 10
             10u: 0.1
             10v: 0.1
             2d: 0.5
+            tp: 0.025
+            cp: 0.0025
         pressure_level:
           _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
           group: pl
           y_intercept: 0.2
           slope: 0.001
-        # Area weights of the CERRA domain; the output mask sets them to zero on the boundary.
         node_weights:
           _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
           nodes_attribute_name: area_weight
           norm: unit-sum
+      combined_surface:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
   optimization:
     optimizer:
       _target_: torch.optim.AdamW
@@ -664,31 +646,46 @@ training:
     val: 1.0
     algorithm: norm
   method:
-    _target_: anemoi.training.train.methods.SingleTraining
+    _target_: anemoi.training.train.methods.TransportTraining
+  transport:
+    prediction_mode: state
+    objective: edm_diffusion
   strategy:
     _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
     num_gpus_per_model: ${system.hardware.num_gpus_per_model}
     read_group_size: ${dataloader.read_group_size}
+    use_local_synchronization: true
+    broadcast_buffers: false
   loss_gradient_scaling: false
   max_epochs: 100
   max_steps: 75000
   submodules_to_freeze: []
+  # EDM-weighted MSE (noise-level loss weights).
   training_loss:
     datasets:
-      lam:
-        _target_: anemoi.training.losses.MSELoss
+      era:
+        _target_: anemoi.training.losses.WeightedMSELoss
         scalers: ["general_variable", "pressure_level", "node_weights"]
+        ignore_nans: true
+      combined_surface:
+        _target_: anemoi.training.losses.WeightedMSELoss
+        scalers: ["general_variable"]
         ignore_nans: true
   validation_metrics:
     datasets:
-      lam:
+      era:
         mse:
           _target_: anemoi.training.losses.MSELoss
           scalers: ["node_weights"]
           ignore_nans: true
+      combined_surface:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: []
+          ignore_nans: true
   variable_groups:
     datasets:
-      lam:
+      era:
         default: sfc
         pl:
           param:
@@ -696,15 +693,29 @@ training:
           - t
           - u
           - v
-          - z
+          - w
+        sfc:
+          param:
+          - tp
+          - cp
+          - 10u
+          - 10v
+          - 2d
+          - sp
       combined_surface:
         default: sfc
   metrics:
     datasets:
-      lam:
+      era:
       - z_500
-      - t_850
+      - z_1000
+      - t_500
       - u_850
       - v_850
-      - 2t
+      combined_surface:
+      - obsvalue_t2m_0
+      - obsvalue_u10m_0
+      - obsvalue_v10m_0
+      - obsvalue_ps_0
+      - obsvalue_pmsl_0
 config_validation: false
