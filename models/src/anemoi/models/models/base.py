@@ -513,14 +513,14 @@ class BaseGraphModel(nn.Module):
                 **kwargs,
             )
 
-            # Apply post-processing
-            for dataset_name in dataset_names:
+            # Apply post-processing (input-only datasets, i.e. without a decoder, have no output)
+            for dataset_name in y_hat:
                 y_hat[dataset_name] = post_processors[dataset_name](y_hat[dataset_name], in_place=False)
 
             # Gather output if needed
             if gather_out and model_comm_group is not None:
                 assert grid_shard_sizes is not None
-                for dataset_name in dataset_names:
+                for dataset_name in y_hat:
                     y_hat[dataset_name] = gather_tensor(
                         y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
                     )

@@ -70,6 +70,47 @@ def edge_index_to_csc(
     return (row, colptr), perm
 
 
+# Triton is imported inside the helpers below rather than at module level, so that this
+# module (e.g. edge_index_to_csc, is_triton_available) stays importable without Triton.
+
+
+def torch_dtype_to_triton(dtype):
+    import triton.language as tl
+
+    if dtype == torch.float16:
+        return tl.float16
+    elif dtype == torch.bfloat16:
+        return tl.bfloat16
+    elif dtype == torch.float32:
+        return tl.float32
+    else:
+        raise ValueError(f"Unsupported dtype: {dtype}")
+
+
+def is_hip():
+    import triton
+
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "hip"
+
+
+def is_cuda():
+    import triton
+
+    return torch.cuda.is_available() and triton.runtime.driver.active.get_current_target().backend == "cuda"
+
+
+def supports_host_descriptor():
+    return is_cuda() and torch.cuda.get_device_capability()[0] >= 9
+
+
+def is_blackwell():
+    return is_cuda() and torch.cuda.get_device_capability()[0] == 10
+
+
+def is_hopper():
+    return is_cuda() and torch.cuda.get_device_capability()[0] == 9
+
+
 def is_triton_available():
     """Checks if triton is available.
 
