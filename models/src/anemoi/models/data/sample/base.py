@@ -19,10 +19,10 @@ from typing import ClassVar
 from typing import Self
 
 import torch
-from anemoi.models.data.layout import TensorLayout
-from anemoi.models.data.sources import Source
-from anemoi.models.data.sources import BaseTemplate
 
+from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import BaseTemplate
+from anemoi.models.data.sources import Source
 
 
 @dataclass(frozen=True, eq=False, slots=True, kw_only=True)

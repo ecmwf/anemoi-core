@@ -14,11 +14,12 @@ from typing import ClassVar
 from typing import Self
 
 import torch
-from anemoi.models.data.sources import TabularTemplate
+
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sample.base import BaseSample
 from anemoi.models.data.sources import TabularSource
+from anemoi.models.data.sources import TabularTemplate
 from anemoi.models.distributed.shapes import ShardSizes
 
 

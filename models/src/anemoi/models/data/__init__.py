@@ -15,12 +15,12 @@ from .sample import BaseSample
 from .sample import GriddedSample
 from .sample import TabularSample
 from .sample import create_batched_struct
+from .sources import BaseTemplate
 from .sources import GriddedSource
 from .sources import GriddedTemplate
 from .sources import Source
 from .sources import TabularSource
 from .sources import TabularTemplate
-from .sources import BaseTemplate
 
 __all__ = [
     "Batch",

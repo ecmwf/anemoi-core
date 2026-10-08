@@ -14,13 +14,13 @@ from typing import ClassVar
 from typing import Self
 
 import torch
-from anemoi.models.data.sources import GriddedTemplate
 from torch.utils.data import default_collate
 
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sample.base import BaseSample
 from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import GriddedTemplate
 from anemoi.models.distributed.shapes import ShardSizes
 
 

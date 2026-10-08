@@ -7,8 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-from .base import Source
 from .base import BaseTemplate
+from .base import Source
 from .gridded import GriddedSource
 from .gridded import GriddedTemplate
 from .tabular import TabularSource

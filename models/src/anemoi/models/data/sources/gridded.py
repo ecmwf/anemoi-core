@@ -19,8 +19,8 @@ from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.flat import FlatSource
-from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import BaseTemplate
+from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import _index_list
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor

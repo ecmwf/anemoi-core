@@ -36,8 +36,8 @@ from anemoi.utils.config import DotDict
 
 if TYPE_CHECKING:
     from anemoi.models.data.flat import FlatSource
-    from anemoi.models.data.sources.base import Source
     from anemoi.models.data.sources.base import BaseTemplate
+    from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
 

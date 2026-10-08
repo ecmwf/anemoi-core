@@ -24,8 +24,8 @@ from rich.tree import Tree
 from torch.distributed import ProcessGroup
 
 from anemoi.models.data.sample import BaseSample
-from anemoi.models.data.sources.base import Source
 from anemoi.models.data.sources.base import BaseTemplate
+from anemoi.models.data.sources.base import Source
 
 LOGGER = logging.getLogger(__name__)
 
