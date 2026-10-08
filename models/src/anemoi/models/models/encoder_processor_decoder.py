@@ -95,6 +95,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             _recursive_=False,  # Avoids instantiation of layer_kernels here
             num_channels=self.num_channels,
             edge_dim=self.processor_graph_provider.edge_dim,
+            node_coordinates=self._graph_data[self._graph_name_hidden].x,
         )
 
         # Decoder hidden -> data

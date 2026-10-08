@@ -23,6 +23,7 @@ a file using the following methods:
    node_coordinates/anemoi_dataset
    node_coordinates/npz_file
    node_coordinates/reduced_gaussian
+   node_coordinates/regular_latlon
    node_coordinates/icon_mesh
    node_coordinates/text_file
    node_coordinates/latlon_arrays
