@@ -561,8 +561,31 @@ def test_before_sampling_applies_spatial_preprocessor_and_pre_processors() -> No
     # normalized (batch + 10) then denormalized (subtract 10) = batch.
     assert set(x_ref_by_target) == {"out_hres"}
     torch.testing.assert_close(x_ref_by_target["out_hres"], batch_lres.unsqueeze(2))
-    # The reference dataset's name_to_index is threaded through as a per-target dict.
-    assert ref_name_to_index_by_target == {"out_hres": model.data_indices["in_lres"].name_to_index}
+    # The reference dataset's model-input name_to_index is threaded through as a per-target dict.
+    assert ref_name_to_index_by_target == {"out_hres": model.data_indices["in_lres"].model.input.name_to_index}
+    assert post_lres.calls[0]["kwargs"]["skip_imputation"] is True
+
+
+def test_reference_on_target_grid_reads_the_model_input_layout_without_imputation() -> None:
+    """Training and inference both build the reference from the normalized model input.
+
+    ``aux`` is diagnostic in the reference, so its model-input layout differs from its full data layout.
+    """
+    model = _make_bare_model()
+    model.data_indices = {
+        **model.data_indices,
+        "in_lres": _make_index_collection({"t2m": 0, "aux": 1, "u10": 2}, diagnostic=["aux"]),
+    }
+    post_lres = _AdditiveProcessor(offset=-1.0)
+    x_lres = torch.full((1, 1, 1, 4, 2), 3.0)
+
+    references, columns = model.reference_on_target_grid({"in_lres": x_lres}, {"in_lres": post_lres})
+
+    torch.testing.assert_close(references["out_hres"], x_lres - 1.0)
+    assert columns == {"out_hres": {"t2m": 0, "u10": 1}}
+    (call,) = post_lres.calls
+    assert call["kwargs"]["skip_imputation"] is True
+    assert call["kwargs"]["data_index"].tolist() == model.data_indices["in_lres"].data.input.full.tolist()
 
 
 def test_inference_input_datasets_are_the_fused_inputs_without_the_target() -> None:

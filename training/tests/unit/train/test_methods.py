@@ -2795,6 +2795,8 @@ def _make_residual_module(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
     downscaler_model.data_indices = data_indices
+    downscaler_model.target_datasets = [target_name]
+    downscaler_model._reference_by_target = {target_name: lres_name}
     # Default transport source is Gaussian noise — residual mode requires a
     # non-``reference_state`` kind (see ``_validate_source_kind``).
     downscaler_model.transport_source = SimpleNamespace(kind="default")
@@ -2851,7 +2853,7 @@ def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes(
     target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
     batch = {"in_lres": lres_tensor, "out": target_tensor}
 
-    prepared = mode.prepare_target(batch, x={})
+    prepared = mode.prepare_target(batch, x={"in_lres": lres_tensor})
 
     # Denormalized reference cached for reconstruction: 5.0 + (-100.0) = -95.0
     assert set(prepared.aux) >= {"x_ref_on_target_grid"}
@@ -2892,12 +2894,35 @@ def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target(
     target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
     batch = {"in_lres": lres_tensor, "out": target_tensor}
 
-    prepared = mode.prepare_target(batch, x={})
+    prepared = mode.prepare_target(batch, x={"in_lres": lres_tensor})
     # Feed the model_target back as a perfect prediction.
     reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
 
     # Round-trip should return the original normalized target.
     torch.testing.assert_close(reconstructed["out"], target_tensor)
+
+
+def test_residual_prediction_mode_builds_the_reference_from_the_model_input() -> None:
+    """The reference comes from ``x``, as at inference, not from the full batch, and skips imputation."""
+    module, procs = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=-1.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+    mode._reference_by_target = {"out": "in_lres"}
+
+    b, t, e, g = 1, 1, 1, 4
+    x_lres = torch.full((b, t, e, g, 2), 5.0)
+    batch = {"in_lres": torch.full((b, t, e, g, 2), 99.0), "out": torch.zeros(b, t, e, g, 2)}
+
+    prepared = mode.prepare_target(batch, x={"in_lres": x_lres})
+
+    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], x_lres - 1.0)
+    (reference_call,) = procs["post_lres"].calls
+    assert reference_call["kwargs"]["skip_imputation"] is True
 
 
 def test_residual_prediction_mode_prepare_metric_target_is_identity() -> None:

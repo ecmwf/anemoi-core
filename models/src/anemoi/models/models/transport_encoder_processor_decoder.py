@@ -1375,6 +1375,43 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
         return state_outp
 
+    def reference_on_target_grid(
+        self,
+        x: dict[str, torch.Tensor],
+        post_processors: dict[str, Callable],
+    ) -> tuple[dict[str, torch.Tensor], dict[str, dict[str, int]]]:
+        """Denormalize the residual reference of each target from the model input.
+
+        Shared by training and inference so both build the reference identically.
+
+        Parameters
+        ----------
+        x : dict[str, torch.Tensor]
+            Normalized model inputs in model-input layout, already projected onto the target grid.
+        post_processors : dict[str, Callable]
+            State post-processors keyed by dataset name.
+
+        Returns
+        -------
+        tuple[dict[str, torch.Tensor], dict[str, dict[str, int]]]
+            Per target, the denormalized reference and the mapping from the reference's
+            variable names to its columns.
+        """
+        references: dict[str, torch.Tensor] = {}
+        columns: dict[str, dict[str, int]] = {}
+        for target_name in self.target_datasets:
+            reference_name = self._reference_by_target[target_name]
+            reference_indices = self.data_indices[reference_name]
+            # Imputed values are kept: re-inserting NaNs would poison the residual.
+            references[target_name] = post_processors[reference_name](
+                x[reference_name],
+                in_place=False,
+                data_index=reference_indices.data.input.full,
+                skip_imputation=True,
+            )
+            columns[target_name] = reference_indices.model.input.name_to_index
+        return references, columns
+
     # ── sampling hooks ────────────────────────────────────────────────────────
 
     def _before_sampling(
@@ -1397,10 +1434,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         3. Apply spatial pre-processors on the sharded raw values so ``in_lres``
            is projected onto the target grid.
         4. Apply per-dataset ``pre_processors`` (state normalization).
-        5. Cache the denormalized projected reference and the reference dataset's
-           ``name_to_index`` as per-target dicts so ``_after_sampling`` can
-           reconstruct the state without any further wrapping — mirrors how
-           ``ResidualPredictionMode`` caches ``x_ref_on_target_grid`` in training.
+        5. Build the denormalized reference of each target with
+           :meth:`reference_on_target_grid`, the same call training makes.
 
         Only ``inference_input_datasets`` are read. The targets are sampled, so
         ``batch`` need not carry them; any entry for one is ignored.
@@ -1453,23 +1488,13 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             x = pre_processors[dataset_name](x, in_place=False)
             xs[dataset_name] = x
 
-        # 5. Denormalize each target's projected reference and build the
-        #    per-target ``name_to_index`` mapping in one place so
-        #    ``_after_sampling`` doesn't need to re-wrap anything.
+        # 5. Denormalize each target's projected reference, exactly as training does.
         assert (
             post_processors is not None
         ), "Downscaler _before_sampling needs post_processors to denormalize the projected reference."
-        x_ref_on_target_grid_by_target: dict[str, torch.Tensor] = {}
-        reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]] = {}
-        for target_name in self.target_datasets:
-            reference_name = self._reference_by_target[target_name]
-            x_ref_on_target_grid_by_target[target_name] = post_processors[reference_name](
-                xs[reference_name],
-                in_place=False,
-            )
-            reference_variable_name_to_column_index_by_target[target_name] = self.data_indices[
-                reference_name
-            ].name_to_index
+        x_ref_on_target_grid_by_target, reference_variable_name_to_column_index_by_target = (
+            self.reference_on_target_grid(xs, post_processors)
+        )
 
         # 6. The targets never pass through the loop above, so their shard sizes
         #    come from the graph. The projector splits its output grid the same

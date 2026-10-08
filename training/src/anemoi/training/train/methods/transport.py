@@ -420,14 +420,6 @@ class ResidualPredictionMode(PredictionMode):
             raise ValueError(msg)
         return residual_proc
 
-    def _reference_dataset_name_for_target(self, target_dataset_name: str) -> str:
-        """Return the reference dataset name for a given target dataset."""
-        reference = self._reference_by_target.get(target_dataset_name)
-        if reference is None:
-            msg = f"No transport.residual_reference entry found for target dataset '{target_dataset_name}'."
-            raise ValueError(msg)
-        return reference
-
     def prepare_target(
         self,
         batch: dict[str, torch.Tensor],
@@ -435,30 +427,19 @@ class ResidualPredictionMode(PredictionMode):
     ) -> PreparedPredictionTarget:
         """Compute the normalized residual target from an already-normalized batch.
 
-        For each target dataset, looks up its paired reference dataset from
-        ``_reference_by_target``, denormalizes the reference projection, and delegates
-        the per-channel residual/state split to
+        The reference of each target is denormalized from the model input ``x`` by
+        :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.reference_on_target_grid`,
+        the same call inference makes. The per-channel residual/state split is delegated to
         :meth:`anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec.compute_residual`.
         Prognostic channels become normalized residuals; diagnostic channels are kept
         as normalized state.
         """
-        del x
-
         target_full = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         target_data_output = self.module.get_data_output_target(target_full)
 
-        # Build per-target dicts: denormalized reference projection and name→index mapping.
-        x_ref_on_target_grid: dict[str, torch.Tensor] = {}
-        reference_variable_name_to_column_index_by_target: dict[str, dict] = {}
-        for target_name in target_data_output:
-            ref_name = self._reference_dataset_name_for_target(target_name)
-            x_ref_on_target_grid[target_name] = self.module.model.post_processors[ref_name](
-                batch[ref_name],
-                in_place=False,
-            )
-            reference_variable_name_to_column_index_by_target[target_name] = self.module.data_indices[
-                ref_name
-            ].name_to_index
+        x_ref_on_target_grid, reference_variable_name_to_column_index_by_target = (
+            self.module.model.model.reference_on_target_grid(x, self.module.model.post_processors)
+        )
 
         # Delegate the residual / diagnostic split to the model.
         residual_pre = self._residual_pre_processors()
