@@ -330,7 +330,6 @@ class Batch:
                 msg = f"Dataset {name!r} must be collated from samples of a single BaseSample subclass; got {kinds}."
                 raise TypeError(msg)
 
-            
             sources[name] = sample_cls.collate(name, per_sample)
 
         batch = Batch(sources)
