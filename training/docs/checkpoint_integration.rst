@@ -343,8 +343,8 @@ want to see what is available:
 
    from anemoi.training.checkpoint import ComponentCatalog
 
-   ComponentCatalog.list_sources()     # e.g. ['local', 'run', 's3', 'http']
-   ComponentCatalog.list_loaders()     # loading strategies
+   ComponentCatalog.list_sources()     # ['http', 'local', 'run_id', 's3']
+   ComponentCatalog.list_loaders()     # ['cold_start', 'transfer_learning', 'warm_start', 'weights_only']
    ComponentCatalog.list_modifiers()   # model modifiers
    ComponentCatalog.get_source_target("local")  # full _target_ path
 

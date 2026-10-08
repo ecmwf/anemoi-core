@@ -58,7 +58,7 @@ async def test_transfer_learning_skips_mismatched_shapes() -> None:
 
 @pytest.mark.asyncio
 async def test_transfer_learning_filter_is_non_mutating() -> None:
-    """CRITICAL: Must not mutate the checkpoint_data dict. PR #458 approach, NOT legacy."""
+    """The loader leaves ``checkpoint_data`` untouched; ``filter_state_dict`` returns a new mapping."""
     target = TargetModel()
     source_state = {
         "shared.weight": torch.randn(5, 10),

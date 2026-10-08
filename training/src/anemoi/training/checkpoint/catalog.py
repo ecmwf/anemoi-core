@@ -27,7 +27,7 @@ Example
 >>>
 >>> # List dynamically discovered components
 >>> print(ComponentCatalog.list_sources())
->>> ['http', 'local', 's3']
+>>> ['http', 'local', 'run_id', 's3']
 >>>
 >>> # Get component target path
 >>> target = ComponentCatalog.get_source_target('s3')
@@ -178,8 +178,8 @@ class ComponentCatalog:
                 logger.debug("Discovered %s -> %s", simple_name, full_path)
 
         except ImportError as e:
-            # This is expected if the module doesn't exist yet
-            logger.debug("Module %s not found (this is normal if not yet implemented): %s", module_name, e)
+            # Surface import problems at debug level; the caller warns if nothing is found.
+            logger.debug("Module %s could not be imported: %s", module_name, e)
         except (AttributeError, TypeError, ValueError) as e:
             logger.warning(
                 "Error discovering components in %s: %s. "
@@ -235,7 +235,6 @@ class ComponentCatalog:
         if not discovered:
             logger.warning(
                 "No %s components were discovered. This might indicate:\n"
-                "  • The %s module is not yet implemented\n"
                 "  • Import errors in the %s module\n"
                 "  • No concrete classes inherit from the base class\n"
                 "To check for issues, try importing the module manually:\n"
@@ -243,17 +242,6 @@ class ComponentCatalog:
                 component_type,
                 component_type,
                 component_type,
-                component_type,
-            )
-        elif len(discovered) < cls._get_expected_component_count(component_type):
-            expected = cls._get_expected_component_count(component_type)
-            logger.info(
-                "Discovered %d %s components (expected ~%d). Available: %s\n"
-                "This is normal during development when not all components are implemented yet.",
-                len(discovered),
-                component_type,
-                expected,
-                list(discovered.keys()),
             )
         else:
             logger.debug(
@@ -262,16 +250,6 @@ class ComponentCatalog:
                 component_type,
                 list(discovered.keys()),
             )
-
-    @classmethod
-    def _get_expected_component_count(cls, component_type: str) -> int:
-        """Get expected number of components for smart warnings."""
-        expectations = {
-            "sources": 4,  # local, s3, http, run
-            "loaders": 4,  # weights_only, transfer_learning, warm_start, cold_start
-            "modifiers": 3,  # freeze, lora, quantize (initially)
-        }
-        return expectations.get(component_type, 1)
 
     @classmethod
     def _get_sources(cls) -> dict[str, str]:
@@ -283,15 +261,7 @@ class ComponentCatalog:
 
     @classmethod
     def _get_loaders(cls) -> dict[str, str]:
-        """Get the registry of loaders, discovering if needed.
-
-        The ``anemoi.training.checkpoint.loading`` package ships the
-        ``LoadingStrategy`` base class but no concrete strategies in this
-        revision — concrete loaders (``WeightsOnlyLoader``, ``ColdStartLoader``,
-        ``TransferLearningLoader``, ``WarmStartLoader``) are introduced in
-        ``anemoi-core`` PR #998. Until that lands, this discovery returns an
-        empty registry; a discovery warning is therefore expected.
-        """
+        """Get the registry of loading strategies, discovering if needed."""
         if cls._loaders is None:
             cls._loaders = cls._discover_components("anemoi.training.checkpoint.loading", "LoadingStrategy")
             cls._warn_about_discovery_issues("loaders", cls._loaders)
@@ -299,14 +269,7 @@ class ComponentCatalog:
 
     @classmethod
     def _get_modifiers(cls) -> dict[str, str]:
-        """Get the registry of modifiers, discovering if needed.
-
-        The ``anemoi.training.checkpoint.modifiers`` package is populated by
-        ``anemoi-core`` PR #442, which introduces ``FreezingModifierStage``
-        and the rest of the model-transformation layer. Until that lands,
-        this discovery returns an empty registry; a discovery warning is
-        therefore expected.
-        """
+        """Get the registry of model modifiers, discovering if needed."""
         if cls._modifiers is None:
             cls._modifiers = cls._discover_components("anemoi.training.checkpoint.modifiers", "ModelModifier")
             cls._warn_about_discovery_issues("modifiers", cls._modifiers)
@@ -325,7 +288,7 @@ class ComponentCatalog:
         --------
         >>> sources = ComponentCatalog.list_sources()
         >>> print(sources)
-        ['http', 'local', 's3']
+        ['http', 'local', 'run_id', 's3']
         """
         return sorted(cls._get_sources().keys())
 
@@ -342,7 +305,7 @@ class ComponentCatalog:
         --------
         >>> loaders = ComponentCatalog.list_loaders()
         >>> print(loaders)
-        ['cold_start', 'standard', 'transfer_learning', 'warm_start', 'weights_only']
+        ['cold_start', 'transfer_learning', 'warm_start', 'weights_only']
         """
         return sorted(cls._get_loaders().keys())
 
@@ -359,7 +322,7 @@ class ComponentCatalog:
         --------
         >>> modifiers = ComponentCatalog.list_modifiers()
         >>> print(modifiers)
-        ['freeze', 'lora', 'prune', 'quantize']
+        ['freezing_modifier_stage']
         """
         return sorted(cls._get_modifiers().keys())
 
@@ -649,12 +612,7 @@ class ComponentCatalog:
             return ""
 
         descriptions = "\n\nCommon modifier types:"
-        modifier_docs = {
-            "freeze": "Freeze specific layers/parameters",
-            "lora": "Low-Rank Adaptation fine-tuning",
-            "quantize": "Model quantization for efficiency",
-            "prune": "Remove less important connections",
-        }
+        modifier_docs = {"freezing_modifier_stage": "Freeze specific submodules"}
 
         for modifier_name, description in modifier_docs.items():
             if modifier_name in available:

@@ -7,7 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""FreezingModifierStage — native PipelineStage for freezing model submodules."""
+"""Pipeline stage that freezes named submodules of the model."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ _CONFIG_PATH = "training.checkpoint.modifiers"
 
 
 class FreezingModifierStage(ModelModifier):
-    """Freezes specified submodules. Native PipelineStage — full feature port.
+    """Freeze the parameters of the named submodules.
 
     Submodules are addressed by their full path *within the root*: an exact
     child name or a dot-separated path (e.g., "processor", "encoder.global").

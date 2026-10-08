@@ -154,12 +154,6 @@ def pytorch_checkpoint(sample_state_dict: dict) -> dict:
 
 
 @pytest.fixture
-def minimal_checkpoint(sample_state_dict: dict) -> dict:
-    """Create a minimal checkpoint with just state dict."""
-    return sample_state_dict
-
-
-@pytest.fixture
 def temp_checkpoint_dir(tmp_path: Path) -> Path:
     """Create a temporary directory for checkpoint files."""
     checkpoint_dir = tmp_path / "checkpoints"
@@ -251,13 +245,6 @@ def network_urls() -> dict[str, str]:
         "server_error": "https://httpbin.org/status/500",  # Returns 500
         "large_file": "https://httpbin.org/bytes/10485760",  # 10MB file
     }
-
-
-@pytest.fixture(autouse=True)
-def _cleanup_temp_files(tmp_path: Path) -> None:
-    """Automatically cleanup temporary files after each test."""
-    # Cleanup happens automatically with tmp_path, but we can add custom cleanup here if needed
-    _ = tmp_path  # Use the parameter to prevent unused argument warnings
 
 
 # Custom markers for test categorization

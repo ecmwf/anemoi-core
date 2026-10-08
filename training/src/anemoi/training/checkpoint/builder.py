@@ -19,7 +19,7 @@ object without hand-assembling stages.
 Stage order is fixed: the acquisition source first, then the loading strategy,
 then any model-modifier stages in the order they are listed. Absent blocks are
 skipped; a configuration with no checkpoint section yields an empty (no-op)
-pipeline, leaving any legacy checkpoint handling unchanged.
+pipeline and the run starts from freshly initialised weights.
 """
 
 from __future__ import annotations
@@ -229,7 +229,7 @@ def build_checkpoint_pipeline(
     CheckpointPipeline
         A pipeline whose stages are ordered source → loader → modifiers. When
         nothing is configured the pipeline has zero stages and is a no-op, so the
-        caller's existing (legacy) checkpoint handling is left untouched.
+        model is returned as instantiated.
     """
     if not isinstance(cfg, DictConfig):
         cfg = OmegaConf.create(cfg)

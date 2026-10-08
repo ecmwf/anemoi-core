@@ -73,8 +73,8 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 #: Launcher rank variables, in the exact priority order of
-#: ``lightning_fabric.utilities.rank_zero._get_rank()`` — matching this set keeps
-#: the rank-0 missing-checkpoint gate at parity with the legacy guard.
+#: ``lightning_fabric.utilities.rank_zero._get_rank()``, so rank-0 detection here
+#: agrees with Lightning's.
 RANK_ENV_VARS = ("RANK", "LOCAL_RANK", "SLURM_PROCID", "JSM_NAMESPACE_RANK")
 
 

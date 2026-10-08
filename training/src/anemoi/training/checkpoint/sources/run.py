@@ -23,8 +23,7 @@ paths, so this stage only has to find and load the checkpoint.
 Server-to-server lineage overrides (``parent_run_server2server`` /
 ``fork_run_server2server``) are logger-derived at runtime, so the trainer injects
 them as constructor inputs — the acquisition layer must not import the
-trainer/MLflow logger. The path formula and the rank-0 missing-checkpoint
-behaviour match the legacy run-lineage resolution this source replaces.
+trainer/MLflow logger.
 
 Example
 -------
@@ -157,10 +156,9 @@ class RunIdSource(CheckpointSource):
     ) -> Path:
         """Build the run checkpoint path ``<checkpoints.root.parent>/<id>/last.ckpt``.
 
-        The ``.parent`` mirrors the legacy undo of the ``_update_paths``
-        lineage-append to ``checkpoints.root`` (the caller owns that mutation).
-        Shared by :meth:`process` and the trainer's resume-path resolution so the
-        two cannot drift.
+        The ``.parent`` undoes the run-id append that ``_update_paths`` performs on
+        ``checkpoints.root`` (the caller owns that mutation). Shared by
+        :meth:`process` and the tests so the formula lives in one place.
 
         Raises
         ------
@@ -187,7 +185,7 @@ class RunIdSource(CheckpointSource):
 
         Returns ``None`` (context untouched) on a rank that defers. On a missing or
         unreadable checkpoint, raises ``RuntimeError`` on rank 0 and defers (warns,
-        returns ``None``) on other ranks — mirroring the legacy resolver. A deferring
+        returns ``None``) on other ranks. A deferring
         rank records ``source_deferred`` on the context so a loading stage can say
         "rank 0 is reporting the real error" instead of failing with a message about
         a corrupted file. The path is canonicalised through

@@ -401,9 +401,6 @@ def test_replacement_config_map_covers_every_deprecated_key() -> None:
 @pytest.mark.parametrize("deprecated_key", sorted(_DEPRECATED_KEYS))
 def test_deprecated_key_replacement_config_builds_and_validates(deprecated_key: str) -> None:
     """Each removed key's recommended replacement composes into a valid, buildable pipeline."""
-    if deprecated_key == "training.submodules_to_freeze":
-        pytest.importorskip("anemoi.training.checkpoint.modifiers.freezing", reason="PR #442")
-
     checkpoint_block = _replacement_checkpoint_config(deprecated_key)
 
     # The schema that governs this surface must accept the advice.

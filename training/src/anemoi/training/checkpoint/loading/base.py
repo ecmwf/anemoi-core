@@ -16,14 +16,14 @@ model. Different strategies handle different use cases: warm start
 
 Wiring to the Lightning trainer
 -------------------------------
-This module defines the strategy contract. The trainer-to-pipeline wiring has
-shipped (Issue #495): ``AnemoiTrainer.model`` builds and runs the pipeline at
-model-construction time, so a configured ``training.checkpoint`` loading
-strategy owns weight loading. For the weights-only, transfer-learning and
-cold-start paths Lightning never sees the checkpoint (its ``ckpt_path`` restore
-is suppressed), so each strategy must itself apply every correction that
-``BaseTrainingModule.on_load_checkpoint`` would have applied — otherwise the
-loaded state dict would silently differ from the legacy path.
+This module defines the strategy contract. ``AnemoiTrainer.model`` builds and
+runs the pipeline at model-construction time, so a configured
+``training.checkpoint`` loading strategy owns weight loading. For the
+weights-only, transfer-learning and cold-start paths Lightning never sees the
+checkpoint (its ``ckpt_path`` restore is suppressed), so each strategy must
+itself apply every correction that ``BaseTrainingModule.on_load_checkpoint``
+would have applied — otherwise the loaded state dict would silently differ from
+what a Lightning resume produces.
 
 Those corrections are one function, :func:`apply_checkpoint_corrections`, with
 one fixed order: format migrations, the trainable-edge-permutation migration,
@@ -201,8 +201,7 @@ class LoadingStrategy(PipelineStage):
     ) -> None:
         """Restore Anemoi metadata onto the model.
 
-        Thin wrapper over :func:`preserve_anemoi_metadata` (the shared parity
-        home, also used by ``AnemoiLightningModule.on_load_checkpoint``).
+        Thin wrapper over :func:`preserve_anemoi_metadata`, which ``BaseTrainingModule.on_load_checkpoint`` also calls.
         """
         preserve_anemoi_metadata(model, checkpoint_data)
 
@@ -272,8 +271,7 @@ class LoadingStrategy(PipelineStage):
 # Candidate import paths for the chunking_fix migration. Try the friendly
 # dotted name first; fall back to the timestamp-prefixed module that
 # anemoi-models currently ships
-# (``1762857428_chunking_fix``, also used by the legacy import in
-# ``anemoi.training.utils.checkpoint``). Both resolve to a ``migrate(ckpt)``
+# (``1762857428_chunking_fix``). Both resolve to a ``migrate(ckpt)``
 # function. Returns ``None`` if neither path is importable, which we treat
 # as "no chunking migration needed in this anemoi-models version".
 _CHUNKING_FIX_PATHS = (
@@ -339,10 +337,9 @@ def _outstanding_migrations(migrator: Any, checkpoint: dict[str, Any]) -> list[s
     This has to be asked of the *whole* ledger, not of one migration by name.
     ``register_migrations`` stamps every migration the writing version knew, not
     the ones it applied, so any checkpoint written after a given migration
-    shipped records it. Keying on a single name (the previous gate keyed on
-    ``chunking_fix``, the third of ten) reported "up to date" for every
-    checkpoint written since that migration existed, and every newer migration
-    was silently skipped.
+    shipped records it. Keying on a single name (for instance ``chunking_fix``)
+    would report "up to date" for every checkpoint written since that migration
+    existed, and every newer migration would be silently skipped.
 
     Parameters
     ----------
@@ -445,50 +442,10 @@ def _chunking_fix_applicable(checkpoint: dict[str, Any]) -> bool:
     return isinstance(num_layers, int) and isinstance(num_chunks, int) and num_chunks > 0
 
 
-def _sync_checkpoint_migrations(migrator: Any, checkpoint_path: Any) -> dict[str, Any] | None:
-    """Apply every migration the checkpoint is missing, ledger-driven, from its file.
-
-    Delegates to ``Migrator.sync``, which diffs the checkpoint's ledger against the
-    migrations the installed anemoi-models ships and runs only what is missing —
-    all of them, not the two this module can name. Returns the migrated checkpoint,
-    or ``None`` when the file is not a migratable Lightning training checkpoint so
-    the caller can fall back.
-
-    Raises
-    ------
-    CheckpointIncompatibleError
-        If the checkpoint is too old for the installed anemoi-models, or records
-        migrations this version does not know about.
-    """
-    from anemoi.models.migrations import IncompatibleCheckpointException
-    from anemoi.training.checkpoint.exceptions import CheckpointIncompatibleError
-
-    try:
-        _old_ckpt, migrated, ops = migrator.sync(checkpoint_path)
-    except IncompatibleCheckpointException as exc:
-        msg = f"Checkpoint at {checkpoint_path} cannot be migrated by the installed anemoi-models: {exc}"
-        raise CheckpointIncompatibleError(msg) from exc
-    except ValueError as exc:
-        # sync() migrates Lightning training checkpoints only; inference checkpoints
-        # and raw state_dict saves carry no 'pytorch-lightning_version' and are out
-        # of scope for it.
-        LOGGER.debug("Checkpoint at %s is not a migratable training checkpoint (%s)", checkpoint_path, exc)
-        return None
-
-    if ops:
-        LOGGER.info(
-            "Applied %d checkpoint migration(s) from the anemoi-models ledger: %s",
-            len(ops),
-            ", ".join(op.migration.name for op in ops),
-        )
-    return migrated
-
-
 # The trainable-edge permutation migration is runtime and model-dependent
 # (``migrate(ckpt, model)``); it ships alongside chunking_fix in anemoi-models.
 # Resolve the friendly name first, then the timestamp-prefixed module
-# (``1779202136_trainable_edge_perm_fix``, the name the legacy import in
-# ``anemoi.training.utils.checkpoint`` uses). Returns ``None`` when neither is
+# (``1779202136_trainable_edge_perm_fix``). Returns ``None`` when neither is
 # importable (older anemoi-models), treated as "no migration needed".
 _TRAINABLE_EDGE_PERM_PATHS = (
     "anemoi.models.migrations.scripts.trainable_edge_perm_fix",
@@ -527,9 +484,9 @@ def _inject_model_weights(
 ) -> int:
     """Copy model parameters into ``state_dict`` under ``model.<key>``; return count injected.
 
-    Mirrors the legacy refresh (``train/methods/base.py``): the configured processor
-    prefixes are extended with every live-model key containing ``model_output_idx``,
-    so those index buffers always carry the live values, not stale checkpoint ones.
+    The configured processor prefixes are extended with every live-model key
+    containing ``model_output_idx``, so those index buffers always carry the live
+    values, not stale checkpoint ones.
     """
     model_state_dict = model.state_dict()
     effective_prefixes = prefixes + tuple(f"model.{key}" for key in model_state_dict if "model_output_idx" in key)

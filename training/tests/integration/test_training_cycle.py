@@ -596,8 +596,7 @@ def test_transfer_learning_into_fewer_variables_cycle(
     ValueError. The run completing is the proof the fix works end-to-end on a real model.
 
     The dropped variable is chosen from the dataset at runtime (a prognostic that is not a
-    forcing/diagnostic and not a validation metric), so the scenario is self-contained; it
-    is flagged for domain review as a "realistic" transfer-learning example.
+    forcing/diagnostic and not a validation metric), so the scenario is self-contained.
     """
     from anemoi.datasets import open_dataset
 

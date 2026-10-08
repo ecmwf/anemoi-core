@@ -45,11 +45,7 @@ def _load_template(group: str, name: str) -> DictConfig:
 
 
 def _freezing_modifier(submodules: list[str] | None = None) -> dict:
-    """Inline FreezingModifierStage config.
-
-    The freezing template ships with the modifier layer (PR #442), not with this
-    layer, so the modifier config is constructed inline for the guarded tests.
-    """
+    """Inline FreezingModifierStage config with explicit submodules, for order-sensitive tests."""
     return {"_target_": _FREEZING_TARGET, "submodules_to_freeze": submodules or []}
 
 
@@ -77,7 +73,6 @@ def compose_test_config(
 
 
 def test_builder_orders_stages_source_loader_modifiers() -> None:
-    pytest.importorskip("anemoi.training.checkpoint.modifiers.freezing", reason="PR #442")
     cfg = compose_test_config(
         source="local",
         loading="weights_only",
@@ -111,8 +106,7 @@ def test_hydra_defaults_compose() -> None:
 
 
 def test_modifiers_list_order_preserved() -> None:
-    """D11: list order == execution order."""
-    pytest.importorskip("anemoi.training.checkpoint.modifiers.freezing", reason="PR #442")
+    """Modifiers run in the order they are listed."""
     cfg = compose_test_config(
         source="local",
         loading="weights_only",

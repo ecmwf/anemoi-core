@@ -529,7 +529,7 @@ async def test_autoencoder_checkpoint_behind_the_ledger_is_not_migrated_on_a_pip
     recorded: int,
     expect_warning: bool,
 ) -> None:
-    """An old autoencoder checkpoint on a weights-only load (the case raised in review).
+    """An old autoencoder checkpoint on a weights-only load.
 
     Its ledger says ``chunking_fix`` is outstanding, so the gate warns and falls
     through to the in-memory fallback; the fallback must then decline, because a

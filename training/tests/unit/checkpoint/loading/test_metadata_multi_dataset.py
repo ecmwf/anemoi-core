@@ -7,14 +7,13 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""Regression tests for _preserve_anemoi_metadata multi-dataset handling.
+"""Regression tests for multi-dataset metadata preservation.
 
-PR #998 review (Ana): production code at
-``anemoi.training.train.tasks.base.AnemoiLightningModule.on_load_checkpoint``
-builds ``_ckpt_model_name_to_index`` as a dict keyed by dataset name
-because ``hyper_parameters["data_indices"]`` is now
-``dict[str, IndexCollection]``. The pipeline handles that shape and rejects
-the legacy single-IndexCollection shape with a clear error pointing at the
+``hyper_parameters["data_indices"]`` is a ``dict[str, IndexCollection]`` keyed
+by dataset name, and ``preserve_anemoi_metadata`` (shared by the loading
+strategies and ``BaseTrainingModule.on_load_checkpoint``) must build
+``model._ckpt_model_name_to_index`` as a dict keyed per dataset. The legacy
+single-IndexCollection shape is rejected with a ``TypeError`` pointing at the
 checkpoint migration path.
 """
 

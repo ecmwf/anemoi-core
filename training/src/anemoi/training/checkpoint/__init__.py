@@ -72,5 +72,3 @@ __all__ = [
     "validate_checkpoint",
     "validate_pipeline_health",
 ]
-
-__version__ = "0.1.0"

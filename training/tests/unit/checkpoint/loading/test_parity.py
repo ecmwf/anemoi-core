@@ -11,7 +11,7 @@
 
 These functions are the single home for the checkpoint-load parity steps, called
 both by the pipeline loading strategies (via their ``_*`` wrappers) and by the
-trainer's ``AnemoiLightningModule.on_load_checkpoint``. They are tested here
+trainer's ``BaseTrainingModule.on_load_checkpoint``. They are tested here
 directly, independently of either caller.
 """
 

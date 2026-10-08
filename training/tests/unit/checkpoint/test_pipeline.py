@@ -312,8 +312,9 @@ class TestComposition:
 
     @staticmethod
     def _modifier() -> object:
-        modifiers = pytest.importorskip("anemoi.training.checkpoint.modifiers.freezing")
-        return modifiers.FreezingModifierStage(submodules_to_freeze=[])
+        from anemoi.training.checkpoint.modifiers.freezing import FreezingModifierStage
+
+        return FreezingModifierStage(submodules_to_freeze=[])
 
     def test_loader_before_source_raises(self) -> None:
         from anemoi.training.checkpoint.exceptions import CheckpointConfigError

@@ -9,9 +9,10 @@
 
 """Regression tests for the processor-refresh step of ``apply_checkpoint_corrections``.
 
-Mirrors the legacy ``_update_checkpoint_state_dict_for_load`` so that
-pipeline-based loading honours
-``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``.
+Pipeline-based loading must honour
+``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}`` exactly as
+``BaseTrainingModule.on_load_checkpoint`` does; both paths reach
+:func:`refresh_checkpoint_processors` through ``apply_checkpoint_corrections``.
 """
 
 from __future__ import annotations

@@ -136,7 +136,7 @@ its ``run_id`` left at ``null``.
 Any source works for a resume. ``LocalSource`` and ``RunIdSource`` resolve an
 existing path; ``S3Source`` and ``HTTPSource`` download the checkpoint to a
 node-local temporary file that is handed to Lightning and deleted when training
-finishes. Remote sources are no longer refused for warm start.
+finishes.
 
 **How to fix it:** either
 

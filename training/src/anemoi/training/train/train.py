@@ -496,9 +496,9 @@ class AnemoiTrainer(ABC):
         # deleted by :meth:`_remove_temporary_checkpoints` once training finishes.
         self._temporary_checkpoint_files = list(executed.temporary_files)
 
-        # Trainer-side parity until the dataset/units validators move into the
-        # pipeline: when a loading strategy applied weights, keep the current
-        # config's data indices and run the transfer-learning compatibility checks.
+        # When a loading strategy applied weights, keep the current config's data
+        # indices and run the transfer-learning compatibility checks (they live on
+        # the trainer because they need the datamodule and data indices).
         # A resume loads nothing here (same architecture, same data), so there is
         # no checkpoint metadata on the model to compare against yet.
         if getattr(loaded_model, "weights_initialized", False):
