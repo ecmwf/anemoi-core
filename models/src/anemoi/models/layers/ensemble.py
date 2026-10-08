@@ -414,9 +414,8 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
     3. Multiplying in grid space convolves the two spectra, which moves energy out
        of the channel's band, mostly to smaller scales. Each product is therefore
        low-pass filtered back to its own band (:func:`lowpass_response`, from the
-       channel's own spectrum) and, with ``band_filter.preserve_variance``, rescaled
-       to its variance before filtering: the filter moves energy back into the band
-       rather than discarding it.
+       channel's own spectrum) and rescaled to its variance before filtering: the
+       filter moves energy back into the band rather than discarding it.
     4. The result is written back into the spectral state of the noise process.
 
     Later rollout steps need no spread fields: the unchanged FourCastNet 3 update
@@ -436,22 +435,22 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
     modulation : dict, optional
         How the spread scales the channels:
 
-        - ``enabled`` (``True``); ``variable_prefix`` (``"std_"``); ``source`` (``"eda_stdev"``);
-        - ``reference``: ``climatology`` (each spread variable's dataset mean, which
-          keeps how uncertain the whole analysis is) or ``sample_mean`` (each
-          sample's own global mean, which keeps only where it is uncertain);
+        - ``enabled`` (``True``) and ``variable_prefix`` (``"std_"``);
+        - ``reference``: ``climatology`` divides each spread variable by its dataset
+          mean and the multiplier by a fixed constant per channel, so it keeps how
+          uncertain the whole analysis is and has a long-term mean square of about
+          one; ``sample_mean`` divides by each sample's own global mean and gives
+          every sample unit mean square, so it keeps only where the analysis is
+          uncertain;
         - ``normalizer``: how the data config normalises the spread variables,
           ``std``, ``max`` or ``none``; needed by ``climatology``;
-        - ``rescale``: ``climatology`` (a fixed constant per channel, giving the
-          multiplier a long-term mean square of about one), ``sample_rms`` (unit
-          mean square on every sample) or ``none``; unset, it follows ``reference``;
         - smoothing of each multiplier: ``smoothing_km`` (default length scale,
-          ``100``; ``None`` for none), ``smoothing_km_by_variable`` (per base
-          variable; a channel takes the coarsest of its variables), or
-          ``smooth_to_channel`` (each ``kT`` channel at its own scale);
-          a channel's own ``smoothing_km`` overrides all of them;
-        - ``clip`` (``(0.05, 10.0)``, in multiples of the reference); ``area_weight``;
-        - ``band_filter``: ``quantile``, ``taper``, ``preserve_variance``.
+          ``100``; ``None`` for none) and ``smoothing_km_by_variable`` (per base
+          variable; a channel takes the coarsest of its variables); a channel's own
+          ``smoothing_km`` overrides both;
+        - ``clip`` (``(0.05, 10.0)``, in multiples of the reference);
+        - ``band_filter``: ``quantile`` (``0.99``) and ``taper`` (``0.25``) of the
+          low-pass filter that keeps each channel in its band.
     name_to_index : dict
         Supplied by the model: the dataset's model-input name to position map.
     statistics : dict, optional
@@ -467,19 +466,15 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
     MODULATION_KEYS = (
         "enabled",
         "variable_prefix",
-        "source",
         "reference",
         "normalizer",
-        "rescale",
         "smoothing_km",
         "smoothing_km_by_variable",
-        "smooth_to_channel",
         "clip",
-        "area_weight",
         "band_filter",
     )
+    BAND_FILTER_KEYS = ("quantile", "taper")
     REFERENCES = ("climatology", "sample_mean")
-    RESCALINGS = ("climatology", "sample_rms", "none")
 
     def __init__(
         self,
@@ -504,9 +499,6 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
 
         self.enabled = bool(modulation.get("enabled", True))
         self.variable_prefix = modulation.get("variable_prefix", "std_")
-        source = modulation.get("source", "eda_stdev")
-        if source != "eda_stdev":
-            raise ValueError(f"modulation.source '{source}' is not supported; expected 'eda_stdev'.")
 
         spread_inputs = resolve_prefixed_variables(name_to_index, self.variable_prefix)
         self._consumed_input_idx = [index for index, _ in spread_inputs]
@@ -540,14 +532,18 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         ]
         groups = {name: list(spread) for spread, name in group_names.items()}
 
-        reference, mean_square, reference_mode, rescale = self._spread_reference(
+        reference, mean_square, reference_mode = self._spread_reference(
             modulation, [name for _, name in spread_inputs], statistics, name_to_index_stats
         )
 
         smoothing_kT = self._smoothing_kT(modulation)
-        band = dict(modulation.get("band_filter") or {})
+        band = dict(_to_container(modulation.get("band_filter")) or {})
+        unknown = sorted(set(band) - set(self.BAND_FILTER_KEYS))
+        if unknown:
+            raise ValueError(
+                f"modulation.band_filter has unknown keys {unknown}; expected {list(self.BAND_FILTER_KEYS)}."
+            )
         quantile, taper = float(band.get("quantile", 0.99)), float(band.get("taper", 0.25))
-        self.preserve_filtered_variance = bool(band.get("preserve_variance", True))
         variance = degree_variance(self._coefficient_variance[self.modulated_channels])
         band_response = lowpass_response(variance, quantile=quantile, taper=taper)
         smooth_response = None
@@ -570,25 +566,20 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         self.spectral_filter = SphericalSpectralFilter(lons_per_lat, truncation)
         self.register_buffer("band_response", band_response[:, : truncation + 1].to(torch.float32), persistent=False)
 
-        if modulation.get("area_weight", True):
-            area_weights = torch.as_tensor(quadrature_weights(lons_per_lat))
-        else:
-            area_weights = torch.full((self.num_grid_points,), 1.0 / self.num_grid_points)
-
         self.std_modulation = GroupedStdModulation(
             groups=groups,
             channel_group=channel_group,
             name_to_index=name_to_index,
-            area_weights=area_weights,
+            area_weights=torch.as_tensor(quadrature_weights(lons_per_lat)),
             variable_prefix=self.variable_prefix,
             reference=reference,
             mean_square=mean_square,
             clip=modulation.get("clip", (0.05, 10.0)),
-            preserve_total_variance=rescale == "sample_rms",
+            preserve_total_variance=reference is None,
             spectral_filter=self.spectral_filter if smooth_response is not None else None,
             smooth_response=smooth_response[:, : truncation + 1] if smooth_response is not None else None,
         )
-        self._log_layout(reference_mode, modulation.get("normalizer"), rescale, smoothing_kT, variance, quantile)
+        self._log_layout(reference_mode, modulation.get("normalizer"), smoothing_kT, variance, quantile)
 
     def _spread_reference(
         self,
@@ -596,19 +587,13 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         spread_variables: list[str],
         statistics: Optional[dict],
         name_to_index_stats: Optional[dict[str, int]],
-    ) -> tuple[Optional[Tensor], Optional[Tensor], str, str]:
-        """Reference and long-term mean square of every spread input, for the configured modes."""
+    ) -> tuple[Optional[Tensor], Optional[Tensor], str]:
+        """Fixed reference and long-term mean square of every spread input; both ``None`` for ``sample_mean``."""
         reference_mode = modulation.get("reference", "climatology")
         if reference_mode not in self.REFERENCES:
             raise ValueError(f"modulation.reference must be one of {self.REFERENCES}, got '{reference_mode}'.")
-        # Unset rescaling follows the reference; "none" switches it off.
-        rescale = modulation.get("rescale") or ("climatology" if reference_mode == "climatology" else "sample_rms")
-        if rescale not in self.RESCALINGS:
-            raise ValueError(f"modulation.rescale must be one of {self.RESCALINGS}, got '{rescale}'.")
-        if rescale == "climatology" and reference_mode != "climatology":
-            raise ValueError("modulation.rescale 'climatology' needs reference 'climatology'.")
-        if reference_mode != "climatology":
-            return None, None, reference_mode, rescale
+        if reference_mode == "sample_mean":
+            return None, None, reference_mode
 
         normalizer = modulation.get("normalizer")
         if normalizer is None:
@@ -623,11 +608,10 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         reference, mean_square = climatological_spread_statistics(
             spread_variables, statistics, name_to_index_stats, normalizer
         )
-        return reference, (mean_square if rescale == "climatology" else None), reference_mode, rescale
+        return reference, mean_square, reference_mode
 
     def _smoothing_kT(self, modulation: dict) -> list[Optional[float]]:
         """Smoothing ``kT`` of each scaled channel's multiplier, ``None`` for no smoothing."""
-        to_channel = bool(modulation.get("smooth_to_channel", False))
         default_km = modulation.get("smoothing_km", 100.0)
         by_variable = dict(modulation.get("smoothing_km_by_variable") or {})
 
@@ -636,14 +620,6 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
             channel = self.channels[index]
             if channel.smoothing_km is not None:
                 smoothing.append(kT_from_length_scale(channel.smoothing_km))
-                continue
-            if to_channel:
-                if channel.kT is None:
-                    raise ValueError(
-                        f"smooth_to_channel smooths at a channel's own kT, but '{channel.name}' has a tabulated "
-                        "spectrum; give it smoothing_km."
-                    )
-                smoothing.append(channel.kT)
                 continue
             scales = []
             for entry in channel.spread:
@@ -658,7 +634,6 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         self,
         reference_mode: str,
         normalizer: Optional[str],
-        rescale: str,
         smoothing_kT: list[Optional[float]],
         variance: Tensor,
         quantile: float,
@@ -667,7 +642,7 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
         smoothing_km = [round(EARTH_RADIUS_KM * math.sqrt(2 * kT)) if kT is not None else None for kT in smoothing_kT]
         LOGGER.info(
             "SphericalInputConditionedNoise: %d of %d channels scaled by %d '%s' inputs (%d distinct groups); "
-            "reference=%s%s, rescale=%s, clip=%s; multiplier smoothing (km: channels) %s; band limits l=%d-%d, "
+            "reference=%s%s, clip=%s; multiplier smoothing (km: channels) %s; band limits l=%d-%d, "
             "filter truncation %d.",
             len(self.modulated_channels),
             self.n_channels,
@@ -676,7 +651,6 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
             len(self.std_modulation.groups),
             reference_mode,
             f" (normalizer {normalizer})" if reference_mode == "climatology" else "",
-            rescale,
             self.std_modulation.clip,
             dict(sorted(Counter(smoothing_km).items(), key=lambda item: (item[0] is None, item[0]))),
             int(limits.min()),
@@ -768,15 +742,14 @@ class SphericalInputConditionedNoise(SphericalInputNoise):
             for channels, rows in self._modulated_blocks:
                 product = self.noise.transform_channels(channels) * amplitude[:, None, :, rows]
                 coeffs = self.spectral_filter.analyse(product) * self.band_response[rows].unsqueeze(-1)
-                if self.preserve_filtered_variance or log:
-                    before = self.std_modulation.area_mean(product**2)
-                    after = self.std_modulation.area_mean(self.spectral_filter.synthesise(coeffs) ** 2)
-                    if self.preserve_filtered_variance:
-                        scale = torch.sqrt(before / after.clamp(min=torch.finfo(after.dtype).tiny))
-                        coeffs = coeffs * scale[..., None, None]
-                    if log:
-                        before_total = before_total + before.sum()
-                        after_total = after_total + after.sum()
+                # Give the filtered field the product's variance, so the filter moves what left the
+                # band back into it; its variance comes from the coefficients, without a transform.
+                before = self.std_modulation.area_mean(product**2)
+                after = self.spectral_filter.mean_square(coeffs)
+                coeffs = coeffs * torch.sqrt(before / after.clamp(min=torch.finfo(after.dtype).tiny))[..., None, None]
+                if log:
+                    before_total = before_total + before.sum()
+                    after_total = after_total + after.sum()
 
                 # Coefficients below the filter truncation carry over unchanged at the full lmax.
                 state = self.noise.state[:, :, :, channels]  # a view: written in place

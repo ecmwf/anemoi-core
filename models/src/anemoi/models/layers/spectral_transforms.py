@@ -546,6 +546,17 @@ class SphericalSpectralFilter(torch.nn.Module):
         self._sht.weight = self._sht.weight.to(torch.float32)
         self._isht.pct = self._isht.pct.to(torch.float32)
 
+        # Parseval: the area mean of a synthesised field's square is a weighted sum of its
+        # coefficients' power, counting m > 0 twice (they stand for +m and -m). The scale of
+        # the basis is measured, as for the round trip, rather than assumed.
+        power_weight = torch.full((self.lmax, self.lmax), 2.0).tril()
+        power_weight[:, 0] = 1.0
+        unit = torch.zeros(1, self.lmax, self.lmax, dtype=torch.complex64)
+        unit[0, 0, 0] = 1.0
+        with torch.no_grad():
+            constant = self.synthesise(unit)[0, 0].item()
+        self.register_buffer("power_weight", power_weight * constant**2, persistent=False)
+
         # How high a degree a grid analyses exactly depends on its ring layout: a linear
         # reduced Gaussian grid such as N320 is exact up to nlat - 1, an octahedral one only
         # to about nlat / 2. Measure it rather than infer it from the grid type.
@@ -584,6 +595,25 @@ class SphericalSpectralFilter(torch.nn.Module):
         """Complex coefficients ``[..., lmax, lmax]`` to a real field ``[..., points]``."""
         with torch.amp.autocast(device_type=coeffs.device.type, enabled=False):
             return self._isht(coeffs)
+
+    def mean_square(self, coeffs: torch.Tensor) -> torch.Tensor:
+        """Area-weighted mean square of the field ``coeffs`` synthesise to, without synthesising it.
+
+        Equal to the quadrature-weighted mean of ``synthesise(coeffs) ** 2`` (Parseval), at
+        the cost of one pass over the coefficients instead of a transform.
+
+        Parameters
+        ----------
+        coeffs : torch.Tensor
+            Complex coefficients ``[..., lmax, lmax]`` of a real field.
+
+        Returns
+        -------
+        torch.Tensor
+            Real tensor of shape ``[...]``.
+        """
+        power = coeffs.real**2 + coeffs.imag**2
+        return torch.einsum("...lm,lm->...", power, self.power_weight.to(power.dtype))
 
     def forward(self, field: torch.Tensor, response: torch.Tensor) -> torch.Tensor:
         """Filter ``field`` of shape ``[..., points]`` with a per-degree ``response``.

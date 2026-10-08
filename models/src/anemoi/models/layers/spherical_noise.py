@@ -770,7 +770,7 @@ class DiffusionNoiseS2(BaseSphericalNoise):
         super().__init__(**kwargs)
 
         self.sigma = sigma
-        self.kT = kT if coefficient_variance is None else "per-channel spectrum"
+        self.kT = kT if coefficient_variance is None else None  # None: the spectrum is tabulated per channel
         self.lambd = lambd
 
         ls = torch.arange(self.lmax)
@@ -817,7 +817,8 @@ class DiffusionNoiseS2(BaseSphericalNoise):
         return True
 
     def extra_repr(self) -> str:
-        return super().extra_repr() + f", sigma={self.sigma}, kT={self.kT}, lambd={self.lambd}"
+        spectrum = f"kT={self.kT}" if self.kT is not None else "spectrum=per channel"
+        return super().extra_repr() + f", sigma={self.sigma}, {spectrum}, lambd={self.lambd}"
 
     def update(self, replace_state: bool = False, batch_size: Optional[int] = None) -> None:
         r"""Advance the noise process by one step, or resample the whole history.
@@ -861,7 +862,7 @@ class DiffusionNoiseS2(BaseSphericalNoise):
                     # sample the stationary distribution
                     self.state[:, :, 0].div_(torch.sqrt(1.0 - phi**2))
                     for step in range(1, self.num_time_steps):
-                        self.state[:, :, step].add_(phi * self.state[:, :, step - 1])
+                        self.state[:, :, step].addcmul_(phi, self.state[:, :, step - 1])
                 else:
                     batch = self.state.shape[0]
                     eta_l = torch.empty(

@@ -63,20 +63,19 @@ def test_conditioned_noise_validates_with_defaults() -> None:
 
     assert isinstance(schema, SphericalInputConditionedNoiseSchema)
     modulation = schema.modulation
-    assert (modulation.reference, modulation.rescale, modulation.variable_prefix) == (
-        "climatology",
-        "climatology",
-        "std_",
-    )
+    assert (modulation.reference, modulation.variable_prefix) == ("climatology", "std_")
     assert modulation.clip == (0.05, 10.0)
     assert modulation.smoothing_km == 100.0
-    assert modulation.band_filter.quantile == 0.99 and modulation.band_filter.preserve_variance
+    assert (modulation.band_filter.quantile, modulation.band_filter.taper) == (0.99, 0.25)
 
 
-def test_rescale_follows_the_reference() -> None:
-    assert validate(conditioned(reference="sample_mean")).modulation.rescale == "sample_rms"
-    with pytest.raises(ValidationError, match="needs reference 'climatology'"):
-        validate(conditioned(reference="sample_mean", rescale="climatology"))
+@pytest.mark.parametrize(
+    "modulation",
+    [{"rescale": "climatology"}, {"smooth_to_channel": True}, {"band_filter": {"preserve_variance": True}}],
+)
+def test_unknown_modulation_keys_are_rejected(modulation) -> None:
+    with pytest.raises(ValidationError):
+        validate(conditioned(**modulation))
 
 
 def test_climatology_needs_a_normalizer() -> None:
@@ -107,11 +106,6 @@ def test_scaling_needs_a_channel_with_spread() -> None:
     with pytest.raises(ValidationError, match="names 'spread'"):
         validate(conditioned({"a": {"kT": 0.01}}))
     validate(conditioned({"a": {"kT": 0.01}}, enabled=False))
-
-
-def test_smooth_to_channel_needs_kt_channels_or_overrides() -> None:
-    with pytest.raises(ValidationError, match="smoothing_km"):
-        validate(conditioned(smooth_to_channel=True))
 
 
 def test_channels_exclude_noise_kt_and_mismatched_counts() -> None:

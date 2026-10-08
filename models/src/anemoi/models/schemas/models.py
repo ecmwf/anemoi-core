@@ -380,8 +380,6 @@ class BandFilterSchema(BaseModel):
     "Share of the channel's own variance below its band edge."
     taper: NonNegativeFloat = Field(default=0.25)
     "Raised-cosine roll-off beyond the band edge, as a fraction of the edge degree. 0 gives a hard cut."
-    preserve_variance: bool = Field(default=True)
-    "Rescale each filtered channel to its variance before filtering: the filter moves energy, never removes it."
 
 
 class StdModulationSchema(BaseModel):
@@ -391,33 +389,22 @@ class StdModulationSchema(BaseModel):
     "Scale the noise. When False the spread inputs are still dropped from the encoder, giving a matched baseline."
     variable_prefix: str = Field(default="std_")
     "Prefix of the spread variables in the input dataset."
-    source: Literal["eda_stdev"] = Field(default="eda_stdev")
-    "Kind of spread field the variables hold."
     reference: Literal["climatology", "sample_mean"] = Field(default="climatology")
-    "Divide each spread by its dataset mean (keeps the level of each era), or by each sample's own global mean."
+    "climatology: divide each spread by its dataset mean and the multiplier by a fixed constant (keeps the level of "
+    "each era); sample_mean: divide by each sample's own global mean and give every sample unit mean square."
     normalizer: Optional[Literal["none", "std", "max"]] = Field(default=None)
     "How the data config normalises the spread variables; needed by reference 'climatology'."
-    rescale: Optional[Literal["climatology", "sample_rms", "none"]] = Field(default=None)
-    "Fixed constant per channel (climatology), unit mean square per sample (sample_rms) or none. Follows reference."
     smoothing_km: Optional[PositiveFloat] = Field(default=100.0)
     "Default smoothing length scale of the multipliers. None disables smoothing."
     smoothing_km_by_variable: dict[str, PositiveFloat] = Field(default_factory=dict, examples=[{"t": 200, "z": 400}])
     "Smoothing length scale per base or exact variable name; a channel takes the coarsest of its variables."
-    smooth_to_channel: bool = Field(default=False)
-    "Smooth each kT channel's multiplier at the channel's own scale instead."
     clip: Optional[tuple[NonNegativeFloat, PositiveFloat]] = Field(default=(0.05, 10.0))
     "Bounds on the multiplier, in multiples of the reference. None disables clipping."
-    area_weight: bool = Field(default=True)
-    "Weight spatial means by grid-cell area (Gauss-Legendre quadrature) rather than per point."
     band_filter: BandFilterSchema = Field(default_factory=BandFilterSchema)
     "Low-pass returning each scaled channel to its own scale band."
 
     @model_validator(mode="after")
     def check_modes(self) -> StdModulationSchema:
-        if self.rescale is None:
-            self.rescale = "climatology" if self.reference == "climatology" else "sample_rms"
-        if self.rescale == "climatology" and self.reference != "climatology":
-            raise ValueError("rescale 'climatology' needs reference 'climatology'.")
         if self.enabled and self.reference == "climatology" and self.normalizer is None:
             raise ValueError(
                 "reference 'climatology' needs normalizer: how the data config normalises the spread variables."
@@ -442,10 +429,6 @@ class SphericalInputConditionedNoiseSchema(SphericalInputNoiseSchema):
         spread = {name: channel for name, channel in self.channels.items() if channel.spread}
         if not spread:
             raise ValueError("no channel names 'spread' variables: give some, or set modulation.enabled: False.")
-        if self.modulation.smooth_to_channel:
-            tabulated = sorted(name for name, ch in spread.items() if ch.kT is None and ch.smoothing_km is None)
-            if tabulated:
-                raise ValueError(f"smooth_to_channel needs kT channels; give {tabulated} a smoothing_km.")
         return self
 
 

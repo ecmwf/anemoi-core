@@ -62,6 +62,18 @@ def test_filter_round_trips_a_band_limited_field() -> None:
     torch.testing.assert_close(filtered, field, atol=1e-5, rtol=1e-5)
 
 
+@pytest.mark.parametrize("lons_per_lat", [REGULAR, OCTAHEDRAL], ids=["regular", "octahedral"])
+def test_mean_square_from_the_coefficients_is_the_area_mean_of_the_field(lons_per_lat) -> None:
+    """Parseval: the area-mean square of the synthesised field, without synthesising it."""
+    spectral_filter = SphericalSpectralFilter(lons_per_lat, truncation=NLAT - 1)
+    coeffs = band_limited_coeffs(NLAT)
+    weights = torch.as_tensor(quadrature_weights(lons_per_lat), dtype=torch.float32)
+
+    grid_mean_square = (spectral_filter.synthesise(coeffs) ** 2 * weights).sum(dim=-1)
+
+    torch.testing.assert_close(spectral_filter.mean_square(coeffs), grid_mean_square, rtol=1e-5, atol=0.0)
+
+
 def test_filter_removes_the_energy_a_product_puts_above_the_cutoff() -> None:
     spectral_filter = SphericalSpectralFilter(REGULAR, truncation=NLAT - 1)
     low = band_limited_coeffs(NLAT, seed=1)

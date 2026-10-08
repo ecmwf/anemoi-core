@@ -351,6 +351,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 dataset_name=dataset_name,
                 input_noise=input_noise if dataset_name == self.input_noise_dataset else None,
             )
+            if dataset_name == self.input_noise_dataset:
+                input_noise = None  # now part of x_data_latent: free it before the encoder runs
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
 

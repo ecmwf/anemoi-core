@@ -487,14 +487,16 @@ def test_channels_without_spread_are_untouched() -> None:
         assert not torch.allclose(scaled[:, :, :, SCALED], unscaled[:, :, :, SCALED])
 
 
-def test_spread_at_its_climatology_with_an_all_pass_band_leaves_the_noise_unchanged() -> None:
-    conditioned = make_conditioned({"rescale": "none", "band_filter": {"quantile": 1.0, "taper": 0.0}})
+def test_spread_at_its_climatology_with_an_all_pass_band_only_rescales_the_noise() -> None:
+    """At its climatological mean the spread leaves each scaled channel times its fixed constant."""
+    conditioned = make_conditioned({"band_filter": {"quantile": 1.0, "taper": 0.0}})
     plain = make_plain()
+    scale = torch.ones(len(CHANNELS), 1)
+    scale[SCALED, 0] = conditioned.std_modulation.channel_scale
 
     torch.testing.assert_close(
-        advance(conditioned, 0, spread_inputs(constant=True)), advance(plain, 0), atol=1e-5, rtol=1e-5
+        advance(conditioned, 0, spread_inputs(constant=True)), advance(plain, 0) * scale, atol=1e-5, rtol=1e-5
     )
-    torch.testing.assert_close(advance(conditioned, 1), advance(plain, 1), atol=1e-5, rtol=1e-5)
 
 
 def test_noise_is_stronger_where_the_spread_is_higher() -> None:
@@ -615,12 +617,6 @@ def test_smoothing_takes_the_coarsest_of_a_channels_variables() -> None:
     torch.testing.assert_close(response, expected[:, : response.shape[-1]].float())
 
 
-def test_smooth_to_channel_needs_kt_channels() -> None:
-    with pytest.raises(ValueError, match="smoothing_km"):
-        make_conditioned({"smooth_to_channel": True})
-    make_conditioned({"smooth_to_channel": True}, {**CHANNELS, "q": {**CHANNELS["q"], "smoothing_km": 500.0}})
-
-
 def test_layout_and_first_draw_are_logged(caplog) -> None:
     """The layout and first-draw lines are how a run is checked, so they must format."""
     caplog.set_level(logging.INFO, logger="anemoi.models.layers.ensemble")
@@ -651,8 +647,9 @@ def test_wrong_normalizer_fails_on_the_first_sample() -> None:
     [
         ({"normalizer": None}, "needs modulation.normalizer"),
         ({"normalizer": "mean-std"}, "rescales without shifting"),
-        ({"reference": "sample_mean", "rescale": "climatology"}, "needs reference 'climatology'"),
-        ({"rescale": "sometimes"}, "rescale must be one of"),
+        ({"reference": "sometimes"}, "reference must be one of"),
+        ({"rescale": "climatology"}, "unknown keys"),
+        ({"band_filter": {"preserve_variance": False}}, "band_filter has unknown keys"),
         ({"smooth_to_chanel": True}, "unknown keys"),
     ],
 )
