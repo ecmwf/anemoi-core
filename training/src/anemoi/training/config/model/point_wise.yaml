@@ -35,7 +35,7 @@ processor:
 encoders:
   "0":
     source_datasets: [ "era5" ]
-    dataset_fusing_strategy:  "none" # Options: "none", "sequential", "joint"
+    dataset_fusing_strategy:  "none" # Options: "none", "sequential"
     mapper:
       _target_: anemoi.models.layers.mapper.PointWiseForwardMapper
       trainable_size: ${model.edge_trainable_parameters.data2hidden}

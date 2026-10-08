@@ -24,16 +24,11 @@ from anemoi.graphs.create import HeteroData
 from anemoi.models.data.batch import Batch
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.graph_fusion import FusableSource
-from anemoi.models.distributed.graph_fusion import build_fused_source_index
-from anemoi.models.distributed.graph_fusion import fuse_encoder_edges
-from anemoi.models.distributed.graph_fusion import fuse_source_features
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
-from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.models import BaseGraphModel
 from anemoi.models.models.base import PROJECTING_FUSING_STRATEGIES
@@ -103,8 +98,7 @@ def _mismatched_input_dims_message(encoder_name: str, in_dims: dict[str, int], s
         f"    which inserts a thin linear projection per dataset onto a common width "
         f"(default max = {max(in_dims.values())}, override with "
         f"model.encoders.{encoder_name}.fusion_projection_dim).\n"
-        "    Use 'joint' instead to encode all sources in a single pass, or give these datasets "
-        "separate encoders if they should not share weights."
+        "    Alternatively, give these datasets separate encoders if they should not share weights."
     )
 
 
@@ -134,12 +128,8 @@ class EncoderSource:
     dataset_name: str
     x_data_latent: Tensor
     x_skip: Tensor | None
-    coordinates: Tensor
-    batch_sizes: tuple[int, ...] | None
-    shard_sizes: ShardSizes
     edge_attr: Tensor
     edge_index: Tensor
-    edge_shard_sizes: ShardSizes
     shard_info: BipartiteGraphShardInfo
 
 
@@ -603,12 +593,8 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             dataset_name=dataset_name,
             x_data_latent=x_data_latent,
             x_skip=x_skip,
-            coordinates=data_coords,
-            batch_sizes=data_batch_sizes,
-            shard_sizes=shard_sizes_data,
             edge_attr=edge_attr,
             edge_index=edge_index,
-            edge_shard_sizes=edge_shard_sizes,
             shard_info=BipartiteGraphShardInfo(
                 src_nodes=shard_sizes_data,  # None if not sharded (in_out_sharded=False)
                 dst_nodes=shard_sizes_hidden,
@@ -626,25 +612,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         batch_size: int,
         model_comm_group: ProcessGroup | None = None,
     ) -> dict[str, Tensor]:
-        """Encode one encoder's source datasets, returning its latents keyed by latent key.
+        """Encode one encoder's source datasets, returning its latents keyed by dataset name.
 
         With ``sequential`` (and with ``none``) every source dataset gets its own
         pass through the shared encoder against the same unmodified hidden latent, and yields its
         own latent; the latent aggregator combines them.
-
-        With ``joint`` and more than one source dataset present, all sources are merged into one
-        bipartite graph and encoded in a single pass, yielding one already-fused latent (per encoder).
         """
-        if self.encoder_fusing_strategy[encoder_name] == "joint" and len(sources) > 1:
-            return self._encode_joint(
-                encoder_name,
-                sources,
-                x_hidden_latent=x_hidden_latent,
-                x_data_latent_dict=x_data_latent_dict,
-                batch_size=batch_size,
-                model_comm_group=model_comm_group,
-            )
-
         projects = self._encoder_projects_sources(encoder_name)
         latents: dict[str, Tensor] = {}
 
@@ -662,94 +635,9 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             # Decoder target features expect the *assembled* (pre-projection) width, so a
             # projecting encoder reports its input rather than the mapper's src passthrough.
             x_data_latent_dict[source.dataset_name] = source.x_data_latent if projects else x_data_latent
-            latents[self._latent_key(encoder_name, source.dataset_name)] = x_latent
+            latents[source.dataset_name] = x_latent
 
         return latents
-
-    def _encode_joint(
-        self,
-        encoder_name: str,
-        sources: list[EncoderSource],
-        *,
-        x_hidden_latent: Tensor,
-        x_data_latent_dict: dict[str, Tensor],
-        batch_size: int,
-        model_comm_group: ProcessGroup | None = None,
-    ) -> dict[str, Tensor]:
-        """Encode all of one encoder's source datasets in a single fused pass.
-
-        The source nodes of every dataset are merged into one index space and their edge sets are
-        concatenated and re-sorted by destination, so the mapper sees a single bipartite graph whose
-        source side is the union of all the datasets.
-        """
-        tabular = {source.dataset_name: source.batch_sizes is not None for source in sources}
-        if len(set(tabular.values())) > 1:
-            msg = (
-                f"Encoder '{encoder_name}' cannot jointly encode gridded and tabular sources "
-                f"({tabular}): they are built against different destination index spaces. "
-                "Use dataset_fusing_strategy: 'sequential' instead."
-            )
-            raise ValueError(msg)
-
-        rank = torch.distributed.get_rank(group=model_comm_group) if model_is_distributed(model_comm_group) else 0
-        world_size = model_comm_group.size() if model_is_distributed(model_comm_group) else 1
-
-        fusable = [
-            FusableSource(
-                name=source.dataset_name,
-                features=self._project_source(encoder_name, source.dataset_name, source.x_data_latent),
-                shard_sizes=source.shard_sizes,
-                batch_sizes=source.batch_sizes,
-                edge_attr=source.edge_attr,
-                edge_index=source.edge_index,
-                edge_shard_sizes=source.edge_shard_sizes,
-            )
-            for source in sources
-        ]
-
-        index = build_fused_source_index(fusable, batch_size=batch_size, rank=rank, world_size=world_size)
-
-        # The heads shard strategy reshapes nodes as "(batch grid) -> batch heads grid vars", which
-        # requires the same node count in every batch element.
-        if getattr(self.encoder[encoder_name], "shard_strategy", None) == "heads":
-            if len(set(index.merged_batch_sizes)) > 1:
-                msg = (
-                    f"Encoder '{encoder_name}' uses shard_strategy 'heads', which needs a uniform "
-                    f"node count per batch element, but the merged sources give "
-                    f"{index.merged_batch_sizes}. Use shard_strategy 'edges' for joint fusion of "
-                    "ragged sources."
-                )
-                raise ValueError(msg)
-
-        x_src = fuse_source_features(fusable, index)
-
-        # Every source of an encoder is built against the same hidden destination nodes, so the
-        # destination shard metadata is shared and can be taken from any of them.
-        shard_sizes_hidden = sources[0].shard_info.dst_nodes
-        num_dst = sum(shard_sizes_hidden) if shard_sizes_hidden is not None else x_hidden_latent.shape[0]
-
-        edge_attr, edge_index, edge_shard_sizes = fuse_encoder_edges(fusable, index, num_dst=num_dst)
-
-        _, x_latent = self.encoder[encoder_name](
-            (x_src, x_hidden_latent),
-            batch_size=batch_size,
-            shard_info=BipartiteGraphShardInfo(
-                src_nodes=index.merged_shard_sizes,
-                dst_nodes=shard_sizes_hidden,
-                edges=edge_shard_sizes,
-            ),
-            edge_attr=edge_attr,
-            edge_index=edge_index,
-            model_comm_group=model_comm_group,
-            keep_x_dst_sharded=True,  # always keep x_latent sharded for the processor
-        )
-
-        # Report each dataset's assembled (pre-projection) source tensor, which is the width the
-        # decoder target features expect
-        for source in sources:
-            x_data_latent_dict[source.dataset_name] = source.x_data_latent
-
-        return {self._latent_key(encoder_name, sources[0].dataset_name): x_latent}
 
     def forward(
         self,
@@ -801,8 +689,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # The graph and mappers operate on one node copy per sample and member.
         batch_size *= ensemble_size
 
-        # Latents produced by the encoders, keyed by latent key (dataset name today; a joint
-        # encoder will contribute a single entry under its own name)
+        # Latents produced by the encoders, keyed by dataset name
         dataset_latents = {}
         x_skip_dict = {}
         x_data_latent_dict = {}
@@ -955,17 +842,6 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             )
 
         return Batch(x_out_dict)
-
-    def _latent_key(self, encoder_name: str, dataset_name: str) -> str:
-        """Key under which one encoded latent is handed to the latent aggregator.
-
-        Strategies that encode each source dataset separately contribute one latent per dataset
-        and so key by dataset name. ``joint`` encodes all its sources in a single pass and
-        contributes one already-fused latent, keyed by the encoder name.
-        """
-        if self.encoder_fusing_strategy[encoder_name] == "joint":
-            return encoder_name
-        return dataset_name
 
     def fill_metadata(self, md_dict) -> None:
         for dataset in self.input_dim.keys():

@@ -81,8 +81,7 @@ choose stable, descriptive names.
 
 ``dataset_fusing_strategy``
    How multiple datasets within a single group are combined if passed during the
-   same forward pass: ``"none"`` (default), ``"sequential"`` or ``"joint"``. See
-   below.
+   same forward pass: ``"none"`` (default) or ``"sequential"``. See below.
 
 ``num_channels``
    Note that ``num_channels`` is configured **per mapper** (and on the
@@ -107,10 +106,6 @@ the following values:
 ``sequential``
    One encoder pass per source dataset, in the order listed in ``source_datasets``, with shared encoder weights. The
    resulting latents are combined by the latent aggregator.
-
-``joint``
-   A single encoder pass over the union of all source nodes, so each hidden node attends to every source dataset at
-   once.
 
 *******************
  Latent aggregator
