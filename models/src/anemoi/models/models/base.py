@@ -46,12 +46,11 @@ LOGGER = logging.getLogger(__name__)
 #   are only accepted if they share an input dimension, and each is encoded independently.
 # - "sequential": one encoder pass per source dataset with shared weights; the per-dataset
 #   latents are combined by the latent aggregator.
-# - "joint": a single encoder pass over the union of all source nodes.
-SUPPORTED_FUSING_STRATEGIES = {"none", "sequential", "joint"}
+SUPPORTED_FUSING_STRATEGIES = {"none", "sequential"}
 
 # Strategies for which per-dataset "thin" source projections are built, so that source
 # datasets of differing feature widths (channel counts) can share one encoder.
-PROJECTING_FUSING_STRATEGIES = {"sequential", "joint"}
+PROJECTING_FUSING_STRATEGIES = {"sequential"}
 
 
 def split_graph_config(
@@ -228,8 +227,6 @@ class BaseGraphModel(nn.Module):
         self._calculate_shapes_and_indices(data_indices)
 
         self._assert_model_routing()
-
-        self._assert_model_routing()
         self._assert_matching_indices(data_indices)
         self._assert_hidden_nodes_name(self._graph_name_hidden)
 
@@ -316,34 +313,12 @@ class BaseGraphModel(nn.Module):
             not not_target_datasets
         ), f"Datasets {not_target_datasets} are referenced by decoders but missing from data_indices provided to the model. "
 
-        # Only one dataset is currently supported per encoder. Work in progress.
-        for encoder_name, datasets in self.encoder2datasets.items():
-            assert (
-                len(datasets) == 1
-            ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
-
         for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
             if fusing_strategy not in SUPPORTED_FUSING_STRATEGIES:
                 raise ValueError(
                     f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'. "
                     + f"Valid options are: {SUPPORTED_FUSING_STRATEGIES}"
                 )
-
-            source_datasets = self.encoder2datasets[encoder_name]
-            if len(source_datasets) == 1:
-                continue
-
-            if fusing_strategy == "joint":
-                # Gridded and tabular sources disagree on the destination index space: tabular
-                # sources are encoded against a batch-repeated hidden node set, gridded ones
-                # against the plain hidden nodes. They cannot share one joint encoder pass.
-                static_flags = {d: self.is_dataset_static[d] for d in source_datasets}
-                if len(set(static_flags.values())) > 1:
-                    raise ValueError(
-                        f"Encoder '{encoder_name}' fuses gridded and non-gridded datasets jointly "
-                        f"({static_flags}), which is not supported because they use different "
-                        "destination index spaces. Use dataset_fusing_strategy: 'sequential' instead."
-                    )
 
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
