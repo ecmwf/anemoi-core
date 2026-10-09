@@ -259,7 +259,6 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
 def test_triton_attention_deterministic():
     """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
 
-
     DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
     attention = TritonAttention.apply
@@ -348,7 +347,6 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
         pytest.skip(
             "N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available."
         )
-
 
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
@@ -526,7 +524,6 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
 
     if not HAS_FLASH:
         pytest.skip("Flash Attention 2 is required for this comparison test")
-
 
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
