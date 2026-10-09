@@ -264,6 +264,11 @@ class AnemoiModelEncProcDec(BaseGraphModel):
 
         if self.variable_tokenizer is not None:
             x = self.variable_tokenizer(x, variables=variable_names)
+        else:
+            x = einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                )
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
@@ -271,10 +276,7 @@ class AnemoiModelEncProcDec(BaseGraphModel):
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(
-                    x,
-                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-                ),
+                x,
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension

@@ -134,20 +134,26 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
 
         if self.variable_tokenizer is not None:
             x = self.variable_tokenizer(x, variables=variable_names)
+        else:
+            x = einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                )
 
         if grid_shard_sizes is not None:
             node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
-
+        
         # add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(
-                    x,
-                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
-                ),
-                node_attributes_data,
-                torch.ones(batch_ens_size * x.shape[3], device=x.device).unsqueeze(-1) * fcstep,
-            ),
+                x, 
+                node_attributes_data, 
+                torch.full(
+                    (x.shape[0], 1), 
+                    fcstep, 
+                    dtype=x.dtype, 
+                    device=x.device)
+                ), 
             dim=-1,  # feature dimension
         )
 
@@ -157,10 +163,6 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 # [B, T, E, G, V] -> [B, 1, E, G, V]
                 x_skip_cond = x_skip_cond[:, :1]
                 x_skip_cond = self.variable_tokenizer(x=x_skip_cond, variables=variable_names)
-                x_skip_cond = einops.rearrange(
-                    x_skip_cond,
-                    "batch time ensemble grid vars " "-> (batch ensemble grid) (time vars)",
-                )
             else:
                 # [B, T, E, G, V] -> [B, E, G, V]
                 x_skip_cond = x_skip[:, 0] if x_skip.ndim == 5 else x_skip
