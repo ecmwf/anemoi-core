@@ -2919,14 +2919,27 @@ def test_residual_prediction_mode_builds_the_reference_from_the_model_input() ->
     assert reference_call["kwargs"]["skip_imputation"] is True
 
 
-def test_residual_prediction_mode_prepare_metric_target_is_identity() -> None:
-    """prepare_metric_target returns the normalized state target without an imputer inverse."""
+def _spy_on_imputer_inverse(module: SimpleNamespace) -> list[dict[str, Any]]:
+    """Replace the model's imputer inverse with one that marks its output and records each call."""
+    calls: list[dict[str, Any]] = []
+
+    def _imputer_inverse(post_processors: dict, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
+        calls.append({"post_processors": post_processors, "dataset_name": dataset_name, "x": x.clone()})
+        return x + 1000.0
+
+    module.model.model._apply_imputer_inverse = _imputer_inverse
+    return calls
+
+
+def test_residual_prediction_mode_prepare_metric_target_applies_imputer_inverse() -> None:
+    """Masked points of the target become NaN again, as for the tendency mode."""
     module, _ = _make_residual_module(
         pre_offset=1.0,
         post_offset=-1.0,
         tend_pre_offset=1.0,
         tend_post_offset=-1.0,
     )
+    calls = _spy_on_imputer_inverse(module)
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
 
@@ -2939,8 +2952,38 @@ def test_residual_prediction_mode_prepare_metric_target_is_identity() -> None:
         aux={},
     )
     metric_target = mode.prepare_metric_target(prepared)
-    # No transformation should be applied.
-    torch.testing.assert_close(metric_target["out"], target_tensor)
+
+    (call,) = calls
+    assert call["dataset_name"] == "out"
+    assert call["post_processors"] is module.model.post_processors
+    torch.testing.assert_close(call["x"], target_tensor)
+    torch.testing.assert_close(metric_target["out"], target_tensor + 1000.0)
+
+
+def test_residual_prediction_mode_reconstruct_prediction_applies_imputer_inverse_to_the_state() -> None:
+    """The imputer inverse runs on the reconstructed normalized state, not on the residual."""
+    module, _ = _make_residual_module(
+        pre_offset=100.0,
+        post_offset=-100.0,
+        tend_pre_offset=10.0,
+        tend_post_offset=-10.0,
+    )
+    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
+    mode.module = module
+
+    b, t, e, g = 2, 1, 1, 4
+    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
+    prepared = mode.prepare_target({"in_lres": lres_tensor, "out": target_tensor}, x={"in_lres": lres_tensor})
+    calls = _spy_on_imputer_inverse(module)
+
+    reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
+
+    (call,) = calls
+    assert call["dataset_name"] == "out"
+    assert call["post_processors"] is module.model.post_processors
+    torch.testing.assert_close(call["x"], target_tensor)
+    torch.testing.assert_close(reconstructed["out"], target_tensor + 1000.0)
 
 
 def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> None:

@@ -457,29 +457,25 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             **kwargs,
         )
 
-    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
+    def _processor_prefixes_to_refresh(self) -> tuple[str, ...]:
+        """State-dict prefixes of the processors to rebuild from the current statistics on checkpoint load."""
         update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
-        state_dict = checkpoint.get("state_dict")
+        prefixes: tuple[str, ...] = ()
+        if update_cfg.states:
+            prefixes += ("model.pre_processors.", "model.post_processors.")
+        if update_cfg.tendencies:
+            prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+        # Only residual models own residual processors; others must keep the early return in the caller.
+        if getattr(update_cfg, "residuals", True) and getattr(self.model, "pre_processors_residual", None):
+            prefixes += ("model.pre_processors_residual.", "model.post_processors_residual.")
+        return prefixes
 
-        update_residuals = getattr(update_cfg, "residuals", True) and bool(
-            getattr(self.model, "pre_processors_residual", None),
-        )
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies or update_residuals):
+    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
+        state_dict = checkpoint.get("state_dict")
+        if not isinstance(state_dict, dict):
             return
 
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-        if update_residuals:
-            processor_prefixes += ("model.pre_processors_residual.", "model.post_processors_residual.")
-
+        processor_prefixes = self._processor_prefixes_to_refresh()
         if not processor_prefixes:
             return
         for key in list(state_dict.keys()):

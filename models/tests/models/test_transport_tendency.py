@@ -8,11 +8,13 @@
 # nor does it submit to any jurisdiction.
 
 import numpy as np
+import pytest
 import torch
 from omegaconf import DictConfig
 
 import anemoi.models.models.transport_encoder_processor_decoder as transport_model_module
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
@@ -219,7 +221,10 @@ def test_tendency_roundtrip_skips_imputation() -> None:
     assert torch.allclose(state, x_t1, equal_nan=True)
 
 
-def test_apply_imputer_inverse_reinserts_nans() -> None:
+@pytest.mark.parametrize(
+    "model_cls", [AnemoiTransportTendModelEncProcDec, AnemoiTransportSpatialDownscalerModelEncProcDec]
+)
+def test_apply_imputer_inverse_reinserts_nans(model_cls: type) -> None:
     imputer, data_indices = _make_imputer_settings()
 
     x_full = torch.tensor(
@@ -239,7 +244,7 @@ def test_apply_imputer_inverse_reinserts_nans() -> None:
     out = torch.ones((1, 1, 2, len(data_indices.data.output.full)), dtype=torch.float32)
     expected = imputer.inverse_transform(out, in_place=False)
 
-    model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
+    model = model_cls.__new__(model_cls)
     result = model._apply_imputer_inverse(post_processors, "data", out)
 
     assert torch.allclose(result, expected, equal_nan=True)

@@ -448,13 +448,15 @@ class ResidualPredictionMode(PredictionMode):
         Delegates to
         :meth:`AnemoiTransportSpatialDownscalerModelEncProcDec.add_residual_to_state`;
         passes ``output_pre_processor`` so the returned tensor lives in the
-        same normalized state space as ``metric_target``.
+        same normalized state space as ``metric_target``. Masked points of the
+        target are then set back to NaN, using the mask its imputer saved when
+        the batch was normalized.
         """
         x_ref_on_target_grid = prepared.aux["x_ref_on_target_grid"]
         reference_variable_name_to_column_index_by_target = prepared.aux[
             "reference_variable_name_to_column_index_by_target"
         ]
-        return self.module.model.model.add_residual_to_state(
+        states = self.module.model.model.add_residual_to_state(
             x_reference_denorm=x_ref_on_target_grid,
             residual=prediction,
             post_processors_state=self.module.model.post_processors,
@@ -463,6 +465,20 @@ class ResidualPredictionMode(PredictionMode):
             output_pre_processor=self.module.model.pre_processors,
             skip_imputation=True,
         )
+        return self._apply_imputer_inverse(states)
+
+    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> dict[str, torch.Tensor]:
+        return self._apply_imputer_inverse(prepared.metric_target)
+
+    def _apply_imputer_inverse(self, states: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        return {
+            dataset_name: self.module.model.model._apply_imputer_inverse(
+                self.module.model.post_processors,
+                dataset_name,
+                state,
+            )
+            for dataset_name, state in states.items()
+        }
 
 
 PREDICTION_MODE_CLASSES = {

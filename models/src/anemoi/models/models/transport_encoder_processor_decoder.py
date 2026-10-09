@@ -130,6 +130,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         # Checkpoints pickled before target2anchor existed decode every target from itself.
         return getattr(self, "target2anchor", {}).get(target_name, target_name)
 
+    @staticmethod
+    def _apply_imputer_inverse(
+        post_processors: dict[str, nn.Module],
+        dataset_name: str,
+        x: torch.Tensor,
+    ) -> torch.Tensor:
+        """Set the points the imputer filled in the last normalized batch back to NaN."""
+        processors = post_processors[dataset_name]
+        if not hasattr(processors, "processors"):
+            return x
+        for processor in processors.processors.values():
+            if getattr(processor, "supports_skip_imputation", False):
+                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
+        return x
+
     def _targets_on_anchor(self, anchor: str) -> list[str]:
         """Targets whose noised state is encoded on ``anchor``'s node set."""
         return [name for name in self.target_datasets if self._anchor_of_target(name) == anchor]
@@ -761,20 +776,6 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
         if self.condition_on_residual:
             input_dim += len(self.data_indices[dataset_name].model.input.prognostic) * self.n_step_output
         return input_dim
-
-    @staticmethod
-    def _apply_imputer_inverse(
-        post_processors: dict[str, nn.Module],
-        dataset_name: str,
-        x: torch.Tensor,
-    ) -> torch.Tensor:
-        processors = post_processors[dataset_name]
-        if not hasattr(processors, "processors"):
-            return x
-        for processor in processors.processors.values():
-            if getattr(processor, "supports_skip_imputation", False):
-                x = processor(x, in_place=False, inverse=True, skip_imputation=False)
-        return x
 
     def _assemble_input(
         self,
