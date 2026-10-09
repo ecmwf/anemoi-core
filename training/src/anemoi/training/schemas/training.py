@@ -658,6 +658,8 @@ class BandNaNAwareMSELossSchema(BaseLossSchema):
     "Southern band edge in degrees (inclusive)."
     lat_max: float = Field(ge=-90.0, le=90.0, example=-20.0)
     "Northern band edge in degrees (exclusive, except at 90)."
+    metric_keys: list[str] | None = Field(default=None, example=["z_500", "t_850", "u_250", "t_250"])
+    "Log only these metric keys (variables from training.metrics, or group keys such as pl_t). Default: all."
 
 
 class RefractivityLevelSchema(BaseModel):

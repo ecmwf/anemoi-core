@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from types import SimpleNamespace
+
 import pytest
 import torch
 from omegaconf import DictConfig
@@ -201,3 +203,47 @@ def test_general_variable_scaler_per_level_fallback(
     assert by_name["z_500"] == 800  # full-name override wins
     assert by_name["z_850"] == 700  # base-variable fallback
     assert by_name["tp"] == 1.0  # default fallback
+
+
+def _val_metrics_module(metrics: dict) -> SimpleNamespace:
+    return SimpleNamespace(
+        model=SimpleNamespace(post_processors={"data": lambda x, **_kw: x}),
+        metrics={"data": torch.nn.ModuleDict(metrics)},
+        val_metric_ranges={"data": {"a": [0], "b": [1], "all": [0, 1]}},
+        model_comm_group=None,
+    )
+
+
+def test_band_metric_keys_limit_logged_ranges() -> None:
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
+    graph = _band_graph()
+    module = _val_metrics_module(
+        {
+            "mse": NaNAwareMSELoss(),
+            "mse_sh": BandNaNAwareMSELoss(-90.0, -20.0, graph_data=graph, data_node_name="data", metric_keys=["a"]),
+        },
+    )
+    pred, target = torch.zeros(1, 1, 1, 8, 2), torch.ones(1, 1, 1, 8, 2)
+
+    logged = BaseTrainingModule.calculate_val_metrics(module, pred, target, dataset_name="data", step=0)
+
+    assert sorted(logged) == [
+        "mse_metric/data/a/1",
+        "mse_metric/data/all/1",
+        "mse_metric/data/b/1",
+        "mse_sh_metric/data/a/1",
+    ]
+
+
+def test_unknown_metric_keys_raise() -> None:
+    from anemoi.training.train.methods.base import BaseTrainingModule
+
+    graph = _band_graph()
+    metrics = torch.nn.ModuleDict(
+        {"mse_sh": BandNaNAwareMSELoss(-90.0, -20.0, graph_data=graph, data_node_name="data", metric_keys=["z_500"])},
+    )
+    module = SimpleNamespace()
+    with pytest.raises(ValueError, match="z_500"):
+        BaseTrainingModule._check_metric_keys(module, metrics, {"a": [0], "all": [0]})
+    BaseTrainingModule._check_metric_keys(module, torch.nn.ModuleDict({"mse": NaNAwareMSELoss()}), {"a": [0]})

@@ -162,6 +162,7 @@ class BandNaNAwareMSELoss(NaNAwareMSELoss):
         graph_data: HeteroData | None = None,
         data_node_name: str | None = None,
         ignore_nans: bool = False,
+        metric_keys: list[str] | None = None,
         **kwargs,
     ) -> None:
         """Initialise BandNaNAwareMSELoss.
@@ -177,6 +178,10 @@ class BandNaNAwareMSELoss(NaNAwareMSELoss):
             Name of the data nodes, injected by the loss factory.
         ignore_nans : bool, optional
             Passed to :class:`NaNAwareMSELoss`, by default False.
+        metric_keys : list[str], optional
+            As a validation metric, log only these metric keys: variable names listed in
+            ``training.metrics`` (e.g. ``z_500``) or group keys (e.g. ``pl_t``, ``all``). Default:
+            every metric range, like the other metrics.
         """
         super().__init__(ignore_nans=ignore_nans)
         del kwargs
@@ -192,6 +197,7 @@ class BandNaNAwareMSELoss(NaNAwareMSELoss):
             msg = f"{self.__class__.__name__}: no grid point between {lat_min} and {lat_max} degrees."
             raise ValueError(msg)
         self.register_buffer("in_band", in_band, persistent=False)
+        self.metric_keys = list(metric_keys) if metric_keys is not None else None
 
     def forward(
         self,
