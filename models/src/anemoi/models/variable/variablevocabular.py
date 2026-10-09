@@ -72,9 +72,10 @@ class VariableSpecification:
 
     name: str
     param: str
-    vertical_coordinate: VerticalCoordinate
-    temporal_operator: TemporalOperator
+    vertical_coordinate: VerticalCoordinate | None = None
+    temporal_operator: TemporalOperator | None = None
     temporal_window: int | float | None = None
+    kind: Literal["physical", "forcing"] = "physical"
 
 
 @dataclass(frozen=True)
@@ -99,6 +100,7 @@ class DomainVariableMetadata:
 
     has_vertical_level: torch.Tensor
     has_temporal_window: torch.Tensor
+    is_forcing: torch.Tensor
 
 
 class VariableVocabulary:
@@ -301,8 +303,14 @@ class VariableVocabulary:
         )
 
         if mars.get("levtype") is None:
-            # skip forcings
-            return None
+            return VariableSpecification(
+                name=name,
+                param=mars.get("param", name),
+                vertical_coordinate=None,
+                temporal_operator=None,
+                temporal_window=None,
+                kind="forcing",
+            )
         (
             param_group,
             level,
@@ -327,6 +335,7 @@ class VariableVocabulary:
             vertical_coordinate=vertical_coordinate,
             temporal_operator=temporal_operator,
             temporal_window=temporal_window,
+            kind="physical",
         )
 
     # ------------------------------------------------------------------
@@ -391,12 +400,12 @@ class VariableVocabulary:
                 continue
 
             specifications[name] = spec
+            if spec.kind == "physical":
+                all_params.add(spec.param)
 
-            all_params.add(spec.param)
+                all_vertical_types.add(spec.vertical_coordinate.type)
 
-            all_vertical_types.add(spec.vertical_coordinate.type)
-
-            all_temporal_operators.add(spec.temporal_operator)
+                all_temporal_operators.add(spec.temporal_operator)
 
         # IDs are established once for the foundation model.
         #
@@ -488,15 +497,20 @@ class VariableVocabulary:
             # Categorical
             # ----------------------------------------------------------
             param_ids=torch.tensor(
-                [self.param_to_id[spec.param] for spec in specs],
+                [self.param_to_id[spec.param] if spec.kind == "physical" else -1 for spec in specs],
                 dtype=torch.long,
             ),
             vertical_type_ids=torch.tensor(
-                [self.vertical_type_to_id[spec.vertical_coordinate.type] for spec in specs],
+                [
+                    self.vertical_type_to_id[spec.vertical_coordinate.type]
+                    if spec.kind == "physical"
+                    else -1
+                    for spec in specs
+                ],
                 dtype=torch.long,
             ),
             temporal_operator_ids=torch.tensor(
-                [self.temporal_operator_to_id[spec.temporal_operator] for spec in specs],
+                [self.temporal_operator_to_id[spec.temporal_operator] if spec.kind == "physical" else -1 for spec in specs],
                 dtype=torch.long,
             ),
             # ----------------------------------------------------------
@@ -504,7 +518,12 @@ class VariableVocabulary:
             # ----------------------------------------------------------
             vertical_levels=torch.tensor(
                 [
-                    (0.0 if spec.vertical_coordinate.level is None else float(spec.vertical_coordinate.level))
+                    float(spec.vertical_coordinate.level)
+                    if (
+                        spec.vertical_coordinate is not None
+                        and spec.vertical_coordinate.level is not None
+                    )
+                    else 0.0
                     for spec in specs
                 ],
                 dtype=torch.float32,
@@ -517,13 +536,21 @@ class VariableVocabulary:
             # Missing-value masks
             # ----------------------------------------------------------
             has_vertical_level=torch.tensor(
-                [spec.vertical_coordinate.level is not None for spec in specs],
+                [
+                    spec.vertical_coordinate is not None
+                    and spec.vertical_coordinate.level is not None
+                    for spec in specs
+                ],
                 dtype=torch.bool,
             ),
             has_temporal_window=torch.tensor(
                 [spec.temporal_window is not None for spec in specs],
                 dtype=torch.bool,
             ),
+            is_forcing=torch.tensor(
+                [spec.kind == "forcing" for spec in specs],
+                dtype=torch.bool,
+            )
         )
 
     # ------------------------------------------------------------------
@@ -551,9 +578,10 @@ class VariableVocabulary:
                         "type": (spec.vertical_coordinate.type),
                         "level": (spec.vertical_coordinate.level),
                         "unit": (spec.vertical_coordinate.unit),
-                    },
+                    } if spec.vertical_coordinate is not None else None,
                     "temporal_operator": (spec.temporal_operator),
                     "temporal_window": (spec.temporal_window),
+                    "kind": (spec.kind),
                 }
                 for name, spec in self.specification_by_name.items()
             },
@@ -586,15 +614,23 @@ class VariableVocabulary:
         ] = {}
 
         for name, spec in state["specifications"].items():
-            vertical_coordinate = VerticalCoordinate(
-                type=spec["vertical_coordinate"]["type"],
-                level=spec["vertical_coordinate"]["level"],
-                unit=spec["vertical_coordinate"]["unit"],
+            kind = spec.get("kind", "physical")
+            vertical_data = spec["vertical_coordinate"]
+
+            vertical_coordinate = (
+                VerticalCoordinate(
+                    type=vertical_data["type"],
+                    level=vertical_data["level"],
+                    unit=vertical_data["unit"],
+                )
+                if vertical_data is not None
+                else None
             )
 
             specifications[name] = VariableSpecification(
                 name=spec["name"],
                 param=spec["param"],
+                kind=kind,
                 vertical_coordinate=vertical_coordinate,
                 temporal_operator=spec["temporal_operator"],
                 temporal_window=spec["temporal_window"],
