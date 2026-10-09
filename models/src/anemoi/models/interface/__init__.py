@@ -295,7 +295,7 @@ class AnemoiModelInterface(torch.nn.Module):
         # Convert to batch
         x = self._get_batch(x)
         target_forcing = self._get_batch(target_forcing)
-        target = self._get_template(target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size)
+        target = self._get_template(target_template, ensemble_size=x.ensemble_size)
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {

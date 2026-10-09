@@ -575,32 +575,13 @@ class BaseGraphModel(nn.Module):
             grid_shard_sizes[dataset_name] = output_grid_shard_sizes
         return tuple(projected_tensors)
 
-    def output_templates(self, batch: Batch) -> dict[str, BaseTemplate]:
-        """Return what the model predicts at the nodes of ``batch``, one template per decoded dataset.
-
-        Each template has the nodes of ``batch``'s source (coordinates, timedeltas, sizes),
-        paired with the model's output variables, in the model's output order, and their
-        statistics. ``batch`` only provides the nodes: its own variables do not matter, so
-        the targets or the output-time forcings both work.
-        """
-        templates = {}
-        for dataset_name, source in batch.items():
-            if dataset_name not in self.target_datasets:
-                continue
-            indices = self.data_indices[dataset_name]
-            variables = list(indices.model.output.ordered_names)
-            positions = [indices.name_to_index[name] for name in variables]
-            statistics = {key: values[positions] for key, values in (self.statistics[dataset_name] or {}).items()}
-            templates[dataset_name] = source.template().with_variables(variables, statistics)
-        return templates
-
     def predict_step(
         self,
         x: Batch,
-        target: Batch,
+        target_template: dict[str, BaseTemplate],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        n_step_input: dict[str, int],
+        target_forcing: Batch = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
@@ -615,15 +596,15 @@ class BaseGraphModel(nn.Module):
         ----------
         x : Batch
             Input batched data (before pre-processing).
-        target : Batch
+        target_template : dict[str, BaseTemplate]
             Decoder conditioning (before pre-processing): the forcing variables at the
             output valid times, carrying the decode geometry and the output time extent.
         pre_processors : nn.ModuleDict
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        n_step_input : dict[str, int]
-            Number of input time steps per dataset.
+        target_forcing : Batch, optional
+            Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
@@ -646,8 +627,12 @@ class BaseGraphModel(nn.Module):
             if model_is_distributed(model_comm_group):
                 for dataset_name in dataset_names:
                     x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
-                for dataset_name in target.dataset_names:
-                    target = target.replace(dataset_name, target[dataset_name].shard(model_comm_group))
+
+                if target_forcing is not None:
+                    for dataset_name in target_template.keys():
+                        target_forcing = target_forcing.replace(
+                            dataset_name, target_forcing[dataset_name].shard(model_comm_group)
+                        )
 
             # Spatial preprocessing: applied after grid sharding and, as in training, before
             # normalisation, so projectors see raw values. The projected source is on the
@@ -669,20 +654,20 @@ class BaseGraphModel(nn.Module):
                 )
 
             # The target forcings condition the decoder, and need to go through the input processors
-            processed_target = target
-            for dataset_name in target.dataset_names:
+            processed_target = target_forcing
+            for dataset_name in target_forcing.keys():
                 if dataset_name not in pre_processors:
                     continue
                 processed_target = processed_target.replace(
                     dataset_name,
-                    pre_processors[dataset_name](target[dataset_name], in_place=False, **kwargs),
+                    pre_processors[dataset_name](target_forcing[dataset_name], in_place=False, **kwargs),
                 )
 
             # Perform forward pass
             y_hat = self.forward(
                 processed_batch,
                 target_forcings=processed_target,
-                target_template=self.output_templates(target),
+                target_template=target_template,
                 model_comm_group=model_comm_group,
                 **kwargs,
             )
