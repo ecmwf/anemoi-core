@@ -3,21 +3,29 @@
 branch: feat/richer-batch
 
 ### General
--
-- [ ] Updates tests
-- [ ] Update docs
-- [ ] Update schemas
-- [ ] Update ensemble
-- [ ] Update diffusion/transport
-- [ ] Update temporal downscaler with forecast data. `compute_anchors` -> usable_indices.py. Instead of 4 sequences properties, a `DatasetSequence` (or similar) class with the `missing`, `length`, ... properties.
 
+- [ ] Update unit tests
+- [ ] Update integration
+- [ ] Update docs
+- [ ] Trajectory datasets
+
+
+### Inference
+- [ x ] Model interface `predict_step` with gridded datasets IN & OUT.
+- [ ] Diffusion model interface `predict_step`.
+- [ ] Add support for tabular datasets IN.
+- [ ] Add integration test in anemoi-models
+
+### Metadata
+- [ ] Bump model metadata version
+- [ ] add predic_step() signature to metadata_inference with dtypes and shapes? 
+- [ ] add data_type (tabular/gridded) to metadata_inferece
 
 ### Batch
 - Does it make sense to have the `Batch` or can we have a `dict[str, SourceView]`?
-- [ ] Add more information like `ds.metadata` (as variable_metadata ??), `ds.statistics`, ...
-- [ ] Split current `Batch` into `data` + `spec`. The motivation is to pass the target spec to the `model.forward()`. Another alternative would be implement an `empty()` to return a batch without the data.
-- [ ] We currently have `Batch.apply(func)` as a batch method, we would like something similar to use with 2 batches. Motivation: loss function -> `loss(y, y_pred)`.
-- [ ] Introduce `SingletonSourceView` to avoid `torch.cat` operation with lists of one dataset.
+- [ ] Add date to Sample/Sources/Templates, it should match `time_size`
+- [ ] Clean and refactor all examples
+- [ ] Write new explanation of Samples, Sources and Templates. Improve those connections and assumptions.
 
 ### Evaluation
 - [ ] Update scalers. Use `TensorLayout` from the batch instead of the `TensorDim`.
