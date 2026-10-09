@@ -252,7 +252,22 @@ class EMAWeights(pl.Callback):
                         device=self._shadow_device(param),
                         dtype=torch.float32,
                     )
-        self._shadows = shadows
+        # a half-life the config asks for but the checkpoint did not carry starts from the current weights
+        # (without this, update() and the export would fail with a KeyError on the new half-life)
+        added = [halflife for halflife in self.halflife_steps if halflife not in shadows]
+        for halflife in added:
+            shadows[halflife] = {
+                name: param.detach().to(device=self._shadow_device(param), dtype=torch.float32).clone()
+                for name, param in params.items()
+            }
+        if added:
+            LOGGER.warning(
+                "EMAWeights: half-lives %s are not in the checkpoint; initialised from the current weights "
+                "at this resume (restored: %s).",
+                added,
+                sorted(state["shadows"]),
+            )
+        self._shadows = {halflife: shadows[halflife] for halflife in self.halflife_steps}
         self._num_updates = int(state.get("num_updates", 0))
         self._last_seen_global_step = int(state.get("last_seen_global_step", -1))
         self._rebuild_views(model)

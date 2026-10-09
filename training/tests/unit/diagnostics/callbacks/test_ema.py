@@ -198,3 +198,30 @@ def test_missing_state_reinitialises_instead_of_failing() -> None:
     assert callback._pending_state is None
     callback.load_state_dict({"shadows": {"999": {}}})  # half-life the config does not ask for
     assert callback._pending_state is None
+
+
+def test_new_halflife_on_resume_starts_from_current_weights() -> None:
+    """A resume that asks for half-lives the checkpoint lacks restores the old ones and starts the new ones."""
+    model = _tiny_model()
+    callback = EMAWeights(_config(enabled=True, warmup=False, halflives=(4, 8)))
+    callback._initialise(model, source="test")
+    with torch.no_grad():
+        for param in model.parameters():
+            param.add_(1.0)
+    for step in range(1, 4):
+        callback.update(model, step)
+    state = callback.state_dict()
+
+    resumed = EMAWeights(_config(enabled=True, warmup=False, halflives=(2, 4, 8, 16)))
+    resumed.load_state_dict(state)
+    resumed._adopt_pending_state(model)
+    assert list(resumed._shadows) == [2, 4, 8, 16]
+    for name, tensor in callback._shadows[4].items():
+        torch.testing.assert_close(resumed._shadows[4][name], tensor, rtol=0, atol=0)
+    raw = dict(model.named_parameters())
+    for halflife in (2, 16):
+        for name, tensor in resumed._shadows[halflife].items():
+            torch.testing.assert_close(tensor, raw[name].detach(), rtol=0, atol=0)
+            assert tensor.data_ptr() != raw[name].data_ptr()
+    resumed.update(model, 4)  # every half-life updates (a KeyError here was the bug)
+    assert resumed._num_updates == 4
