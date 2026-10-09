@@ -264,8 +264,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
             reader = self.ds_train.data_readers[dataset_name]
-            metadata["metadata_inference"][dataset_name]["is_static_grid"] = not reader.is_tabular
-            metadata["metadata_inference"][dataset_name]["is_tabular"] = bool(reader.is_tabular)
+            metadata["metadata_inference"][dataset_name]["data_type"] = "tabular" if reader.is_tabular else "grid"
             metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size  # None for tabular readers
 
             name_to_index = {
