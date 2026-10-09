@@ -46,9 +46,6 @@ class AnemoiModelInterface(torch.nn.Module):
         Statistics for the tendencies of the data.
     residual_statistics : dict
         Precomputed residual normalization statistics, keyed by dataset name.
-    target_anchors : dict[str, str] | None
-        ``{target: dataset}`` pairs attaching targets to an encoder source dataset,
-        forwarded to the model when set.
     supporting_arrays : dict
         Numpy arraysto store in the checkpoint.
     data_indices : dict
@@ -74,7 +71,6 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics_tendencies: dict | None = None,
         residual_statistics: dict | None = None,
         supporting_arrays: dict | None = None,
-        target_anchors: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self.config = config
@@ -85,7 +81,6 @@ class AnemoiModelInterface(torch.nn.Module):
         self.statistics = statistics
         self.statistics_tendencies = statistics_tendencies
         self.residual_statistics = residual_statistics
-        self.target_anchors = target_anchors
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
@@ -273,8 +268,6 @@ class AnemoiModelInterface(torch.nn.Module):
             "_target_": self.config.model.model._target_,
             "_convert_": getattr(self.config.model.model, "_convert_", "none"),
         }
-        # Only models that attach targets to other encoder inputs accept target_anchors.
-        model_kwargs = {"target_anchors": self.target_anchors} if self.target_anchors is not None else {}
         self.model = instantiate(
             model_instantiate_config,
             model_config=self.config.model,
@@ -283,7 +276,6 @@ class AnemoiModelInterface(torch.nn.Module):
             graph_data=self.graph_data,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
-            **model_kwargs,
             _recursive_=False,  # Disables recursive instantiation by Hydra
         )
 

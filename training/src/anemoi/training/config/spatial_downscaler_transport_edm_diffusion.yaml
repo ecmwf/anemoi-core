@@ -72,9 +72,6 @@ data:
 training:
   transport:
     prediction_mode: residual
-    # Residual baseline per target dataset; encoded inputs come from model.encoders.*.source_datasets.
-    residual_reference:
-      out_hres: in_lres
   max_epochs: 2
 
 # TODO clean up paths, for debugging only

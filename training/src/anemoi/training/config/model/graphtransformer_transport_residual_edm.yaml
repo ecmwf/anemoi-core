@@ -3,7 +3,7 @@
 #
 # The encoder below fuses the inputs onto the in_lres node set (the first source dataset is
 # the anchor): in_lres is remapped onto the target grid by data.datasets.in_lres.spatial_processor
-# and in_hres is native. out_hres is not an encoder source: training.transport.residual_reference
+# and in_hres is native. out_hres is not an encoder source: residual_reference below
 # attaches it to its reference in_lres, so the noised target is encoded on the in_lres node set
 # and decoded from there. Only the anchor (in_lres) owns encoder edges.
 
@@ -12,6 +12,11 @@ cpu_offload: False
 recompile_limit: 32
 
 keep_batch_sharded: True
+
+# Residual baseline of each target, as {target: reference}. The model learns target - reference
+# for prognostic variables, and the target is encoded on its reference's encoder node set.
+residual_reference:
+  out_hres: in_lres
 
 model:
   _target_: anemoi.models.models.AnemoiTransportSpatialDownscalerModelEncProcDec

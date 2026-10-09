@@ -9,6 +9,7 @@
 
 import datetime
 
+import pytest
 import torch
 
 from anemoi.training.tasks.spatial_downscaler import SpatialDownscaler
@@ -73,6 +74,32 @@ def test_batch_indices_are_zero_indexed_positions() -> None:
     )
     # All offsets go into a single shared _offsets list, so positions are 0, 1, 2.
     assert task.get_batch_input_indices() == [0, 1, 2]
+
+
+# ---------------------------------------------------------------------------
+# Dataset roles must agree with the model
+# ---------------------------------------------------------------------------
+
+
+def _roles_task() -> SpatialDownscaler:
+    return SpatialDownscaler(input_datasets=["in_lres", "in_hres"], target_datasets=["out_hres"])
+
+
+def test_validate_dataset_roles_accepts_the_model_roles_in_any_order() -> None:
+    _roles_task().validate_dataset_roles(input_datasets=["in_hres", "in_lres"], target_datasets=["out_hres"])
+
+
+def test_validate_dataset_roles_rejects_inputs_the_model_does_not_read() -> None:
+    with pytest.raises(ValueError, match=r"input_datasets.*\['in_hres', 'in_lres'\].*\['in_lres'\]"):
+        _roles_task().validate_dataset_roles(input_datasets=["in_lres"], target_datasets=["out_hres"])
+
+
+def test_validate_dataset_roles_rejects_targets_the_model_does_not_predict() -> None:
+    with pytest.raises(ValueError, match=r"target_datasets.*\['out_hres'\].*\['out_hres', 'out_lres'\]"):
+        _roles_task().validate_dataset_roles(
+            input_datasets=["in_lres", "in_hres"],
+            target_datasets=["out_hres", "out_lres"],
+        )
 
 
 # ---------------------------------------------------------------------------

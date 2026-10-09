@@ -48,6 +48,20 @@ class SpatialDownscaler(BaseSingleStepTask):
         # No-op placeholder; a proper adapter will be added with downscaling diagnostics.
         self._plot_adapter = SpatialDownscalerPlotAdapter(self)
 
+    def validate_dataset_roles(self, input_datasets: list[str], target_datasets: list[str]) -> None:
+        """Require the task's input and target datasets to be exactly the model's."""
+        errors = [
+            f"task.{role} {sorted(declared)} != {sorted(model_datasets)} in the model ({source})"
+            for role, declared, model_datasets, source in (
+                ("input_datasets", self.input_datasets, input_datasets, "model.encoders.*.source_datasets"),
+                ("target_datasets", self.target_datasets, target_datasets, "model.decoders.*.target_datasets"),
+            )
+            if set(declared) != set(model_datasets)
+        ]
+        if errors:
+            msg = "Dataset roles of the task and the model disagree: " + "; ".join(errors) + "."
+            raise ValueError(msg)
+
     def _get_timestep_for_metadata(self) -> str:
         """Get the timestep string for metadata.
 

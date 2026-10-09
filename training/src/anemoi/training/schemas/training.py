@@ -862,42 +862,11 @@ class TransportTrainingConfigSchema(BaseModel):
     "Endpoint semantics for the transport objective."
     objective: Literal["edm_diffusion", "stochastic_interpolant"] = "edm_diffusion"
     "Transport objective used to perturb targets and train the model."
-    residual_reference: dict[str, str] = Field(default_factory=dict)
-    """Residual baseline for each target dataset, as ``{target: reference}``.
-
-    Required when ``prediction_mode: residual`` and forbidden otherwise.  The
-    reference is the low-resolution input projected onto the target's grid; the
-    model learns ``target - reference`` for prognostic variables.  Which datasets
-    are *encoded* is a separate concern, decided by ``model.encoders.*.source_datasets``::
-
-        residual_reference:
-          out_hres: in_lres
-    """
 
     @model_validator(mode="after")
-    def validate_residual_reference(self) -> "TransportTrainingConfigSchema":
-        if self.prediction_mode != "residual":
-            if self.residual_reference:
-                msg = (
-                    f"residual_reference is set but prediction_mode is '{self.prediction_mode}', "
-                    f"so it would be ignored."
-                )
-                raise ValueError(msg)
-            return self
-
-        if not self.residual_reference:
-            msg = (
-                "prediction_mode='residual' requires residual_reference to pair each target "
-                "dataset with the reference dataset used as its residual baseline."
-            )
-            raise ValueError(msg)
-        if self.objective != "edm_diffusion":
+    def validate_residual_objective(self) -> "TransportTrainingConfigSchema":
+        if self.prediction_mode == "residual" and self.objective != "edm_diffusion":
             msg = f"prediction_mode='residual' only supports objective='edm_diffusion', got '{self.objective}'."
-            raise ValueError(msg)
-
-        self_referencing = sorted(t for t, r in self.residual_reference.items() if t == r)
-        if self_referencing:
-            msg = f"residual_reference: {self_referencing} use themselves as their own residual baseline."
             raise ValueError(msg)
         return self
 

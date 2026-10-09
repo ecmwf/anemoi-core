@@ -54,7 +54,7 @@ def _make_index_collection(
 def _make_downscaler_indices() -> dict[str, IndexCollection]:
     """Three datasets: in_lres (reference), in_hres (conditioning), out_hres (target).
     The target's prognostic variables (``t2m``, ``u10``) must also be
-    prognostic in the reference dataset for ``_resolve_residual_references`` to accept the
+    prognostic in the reference dataset for ``_validate_residual_reference`` to accept the
     configuration (see ``_validate_prognostics_match``).
     """
     # in_lres: reference dataset — must expose the same variables as prognostic.
@@ -179,7 +179,6 @@ def _make_bare_model(
         grid=grid,
     )
     _wire_fused_encoder_routing(model, sources=["in_lres", "in_hres"])
-    model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
 
@@ -334,17 +333,17 @@ def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the
 # ── residual references ─────────────────────────────────────────────────────
 
 
-def test_resolve_residual_references_uses_the_target_anchors() -> None:
-    """Each target's residual baseline is the dataset it is attached to."""
+def test_residual_reference_attaches_each_target_to_its_reference() -> None:
+    """The residual reference doubles as the target's anchor attachment."""
     model = _make_bare_model()
-    model._reference_by_target = {}
 
-    model._resolve_residual_references()
+    model._validate_residual_reference()
 
-    assert model._reference_by_target == {"out_hres": "in_lres"}
+    assert model.residual_reference == {"out_hres": "in_lres"}
+    assert model.residual_reference is model.target_anchors
 
 
-def test_resolve_residual_references_allows_multiple_targets() -> None:
+def test_validate_residual_reference_allows_multiple_targets() -> None:
     """Several targets may share one reference; each gets its own decoder."""
     model = _make_bare_model()
     # Both target datasets must have prognostic variable sets matching the reference.
@@ -355,25 +354,17 @@ def test_resolve_residual_references_allows_multiple_targets() -> None:
     model.target_datasets = ["out_hres", "out_hres_2"]
     model.target_anchors = {"out_hres": "in_lres", "out_hres_2": "in_lres"}
 
-    model._resolve_residual_references()
+    model._validate_residual_reference()
 
-    assert model._reference_by_target == {"out_hres": "in_lres", "out_hres_2": "in_lres"}
+    assert model.residual_reference == {"out_hres": "in_lres", "out_hres_2": "in_lres"}
 
 
-def test_resolve_residual_references_requires_target_anchors() -> None:
+def test_validate_residual_reference_requires_a_residual_reference() -> None:
     model = _make_bare_model()
     model.target_anchors = {}
 
-    with pytest.raises(ValueError, match="target_anchors"):
-        model._resolve_residual_references()
-
-
-def test_resolve_residual_references_requires_a_reference_for_every_target() -> None:
-    model = _make_bare_model()
-    model.target_datasets = ["out_hres", "other"]
-
-    with pytest.raises(ValueError, match=r"\['other'\] have no residual reference"):
-        model._resolve_residual_references()
+    with pytest.raises(ValueError, match="residual_reference"):
+        model._validate_residual_reference()
 
 
 # ── dimension arithmetic ─────────────────────────────────────────────────────
@@ -758,7 +749,6 @@ def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
         grid=4,
     )
     _wire_fused_encoder_routing(model, sources=["in_lres", "in_hres"])
-    model._reference_by_target = {"out_hres": "in_lres"}
     return model
 
 
@@ -1143,7 +1133,7 @@ def _make_reference_model(data_indices: dict[str, IndexCollection]) -> AnemoiTra
     return model
 
 
-def test_resolve_residual_references_accepts_a_diagnostic_without_a_reference_counterpart() -> None:
+def test_validate_residual_reference_accepts_a_diagnostic_without_a_reference_counterpart() -> None:
     model = _make_reference_model(
         {
             "in_lres": _make_index_collection({"t2m": 0}),
@@ -1151,12 +1141,10 @@ def test_resolve_residual_references_accepts_a_diagnostic_without_a_reference_co
         },
     )
 
-    model._resolve_residual_references()
-
-    assert model._reference_by_target == {"out_hres": "in_lres"}
+    model._validate_residual_reference()
 
 
-def test_resolve_residual_references_rejects_target_prognostic_absent_from_reference() -> None:
+def test_validate_residual_reference_rejects_target_prognostic_absent_from_reference() -> None:
     """A target prognostic that does not exist at all in the reference is a config error."""
     model = _make_reference_model(
         {
@@ -1165,10 +1153,10 @@ def test_resolve_residual_references_rejects_target_prognostic_absent_from_refer
         },
     )
     with pytest.raises(ValueError, match=r"only in target: \['t2m'\]"):
-        model._resolve_residual_references()
+        model._validate_residual_reference()
 
 
-def test_resolve_residual_references_rejects_reference_prognostic_absent_from_target() -> None:
+def test_validate_residual_reference_rejects_reference_prognostic_absent_from_target() -> None:
     """A prognostic in the reference that the target does not predict prognostically is also a config error."""
     model = _make_reference_model(
         {
@@ -1177,7 +1165,7 @@ def test_resolve_residual_references_rejects_reference_prognostic_absent_from_ta
         },
     )
     with pytest.raises(ValueError, match=r"only in reference: \['u10'\]"):
-        model._resolve_residual_references()
+        model._validate_residual_reference()
 
 
 # ── end-to-end construction ─────────────────────────────────────────────────
@@ -1282,6 +1270,7 @@ def _make_downscaler_config(num_channels: int = 8) -> DictConfig:
                 },
             },
             "bounding": {"datasets": {name: [] for name in ("out_hres", "in_lres", "in_hres")}},
+            "residual_reference": {"out_hres": "in_lres"},
         },
     )
 
@@ -1290,7 +1279,6 @@ def _build_real_downscaler(
     *,
     config: DictConfig | None = None,
     graph: HeteroData | None = None,
-    target_anchors: dict[str, str] | None = None,
 ) -> AnemoiTransportSpatialDownscalerModelEncProcDec:
     return AnemoiTransportSpatialDownscalerModelEncProcDec(
         model_config=config if config is not None else _make_downscaler_config(),
@@ -1299,7 +1287,6 @@ def _build_real_downscaler(
         n_step_input=1,
         n_step_output=1,
         graph_data=graph if graph is not None else _make_downscaler_graph(),
-        target_anchors=target_anchors if target_anchors is not None else {"out_hres": "in_lres"},
     )
 
 
@@ -1312,6 +1299,7 @@ def test_real_construction_builds_one_encoder_decoder_pair_anchored_at_the_refer
     # in_hres shares the anchor's encoder and node set but owns no mapper.
     assert model.input_datasets == ["in_lres"]
     assert model.target_datasets == ["out_hres"]
+    assert model.residual_reference == {"out_hres": "in_lres"}
     assert model.target2anchor == {"out_hres": "in_lres"}
     assert set(model.encoder.keys()) == {"enc0"}
     assert set(model.decoder.keys()) == {"dec0"}
@@ -1323,9 +1311,12 @@ def test_real_construction_builds_one_encoder_decoder_pair_anchored_at_the_refer
     assert model.target_dim["out_hres"] == model.input_dim["in_lres"]
 
 
-def test_real_construction_requires_target_anchors() -> None:
-    with pytest.raises(ValueError, match="target_anchors"):
-        _build_real_downscaler(target_anchors={})
+def test_real_construction_requires_a_residual_reference() -> None:
+    config = _make_downscaler_config()
+    del config.residual_reference
+
+    with pytest.raises(ValueError, match="residual_reference"):
+        _build_real_downscaler(config=config)
 
 
 def test_real_construction_without_fusion_encodes_each_input_on_its_own_node_set() -> None:

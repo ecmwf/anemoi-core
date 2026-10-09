@@ -60,13 +60,12 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         n_step_input: int,
         n_step_output: int,
         graph_data: HeteroData,
-        target_anchors: dict[str, str] | None = None,
     ) -> None:
 
         model_config = DotDict(model_config)
 
         transport_params = model_config.model.transport
-        self.target_anchors: dict[str, str] = dict(target_anchors or {})
+        self.target_anchors: dict[str, str] = self._target_anchors_from_config(model_config)
         self.noise_conditioning = NoiseConditioningSettings.from_config(transport_params)
         self.edm = EdmSettings.from_config(transport_params)
         self.stochastic_interpolant = StochasticInterpolantSettings.from_config(transport_params)
@@ -89,13 +88,21 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         self.noise_embedder = instantiate(transport_params.noise_embedder)
         self.noise_cond_mlp = self._create_noise_conditioning_mlp()
 
+    def _target_anchors_from_config(self, model_config: DotDict) -> dict[str, str]:
+        """Return ``{target: source}`` for targets encoded on another source's node set.
+
+        Called before the network is built. By default every target is encoded on its own node set.
+        """
+        del model_config
+        return {}
+
     def _build_target_routing(self) -> None:
         """Resolve ``target_anchors`` to the anchor node set each target is encoded and decoded on."""
         undecoded = sorted(set(self.target_anchors) - set(self.target_datasets))
         if undecoded:
             raise ValueError(
-                f"target_anchors attaches {undecoded}, but no decoder produces them "
-                f"(decoded targets: {self.target_datasets})."
+                f"{undecoded} are attached to an encoder source (e.g. by model.residual_reference), but no "
+                f"decoder produces them (decoded targets: {self.target_datasets})."
             )
 
         self.target2anchor = {}
@@ -1143,7 +1150,7 @@ class AnemoiTransportTendModelEncProcDec(AnemoiTransportModelEncProcDec):
 class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncProcDec):
     """Transport model for spatial downscaling that predicts residuals relative to a low res dataset.
 
-    ``target_anchors`` pairs each target with its residual reference. The target is
+    ``model.residual_reference`` pairs each target with its residual reference. The target is
     not an encoder source: its noised state is encoded on the reference's anchor.
     """
 
@@ -1151,56 +1158,45 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     #: encoder owns several source datasets.
     supports_encoder_fusion: bool = True
 
-    def __init__(
-        self,
-        *,
-        model_config: DictConfig,
-        data_indices: dict,
-        statistics: dict,
-        n_step_input: int,
-        n_step_output: int,
-        graph_data: HeteroData,
-        target_anchors: dict[str, str] | None = None,
-    ) -> None:
-        super().__init__(
-            model_config=model_config,
-            data_indices=data_indices,
-            statistics=statistics,
-            n_step_input=n_step_input,
-            n_step_output=n_step_output,
-            graph_data=graph_data,
-            target_anchors=target_anchors,
-        )
+    @property
+    def residual_reference(self) -> dict[str, str]:
+        """``{target: reference}``: the dataset each target is predicted as a residual against."""
+        return self.target_anchors
+
+    def _target_anchors_from_config(self, model_config: DotDict) -> dict[str, str]:
+        """Attach each target to its residual reference."""
+        return dict(model_config.get("residual_reference") or {})
 
     def _build_target_routing(self) -> None:
-        self._resolve_residual_references()
+        self._validate_residual_reference()
         super()._build_target_routing()
 
-    def _resolve_residual_references(self) -> None:
-        """Take each target's residual reference from ``target_anchors``."""
-        if not self.target_anchors:
+    def _validate_residual_reference(self) -> None:
+        """Require a distinct residual reference with matching prognostic variables for every target."""
+        if not self.residual_reference:
             msg = (
-                "AnemoiTransportSpatialDownscalerModelEncProcDec requires target_anchors to pair each "
-                "target dataset with its residual reference, e.g. {out_hres: in_lres}. In training it "
-                "is set from training.transport.residual_reference."
+                "AnemoiTransportSpatialDownscalerModelEncProcDec requires model.residual_reference to pair "
+                "each target dataset with its residual reference, e.g. {out_hres: in_lres}."
             )
             raise ValueError(msg)
 
-        missing = [name for name in self.target_datasets if name not in self.target_anchors]
+        missing = [name for name in self.target_datasets if name not in self.residual_reference]
         if missing:
-            msg = f"Targets {missing} have no residual reference in target_anchors {self.target_anchors}."
+            msg = f"Targets {missing} have no residual reference in residual_reference {self.residual_reference}."
             raise ValueError(msg)
 
-        self._reference_by_target: dict[str, str] = {name: self.target_anchors[name] for name in self.target_datasets}
+        self_referencing = sorted(name for name, reference in self.residual_reference.items() if name == reference)
+        if self_referencing:
+            msg = f"residual_reference: {self_referencing} use themselves as their own residual baseline."
+            raise ValueError(msg)
 
-        # Fail fast on residual-baseline misconfiguration: every target prognostic
-        # variable must also be prognostic in its reference dataset.
         self._validate_prognostics_match()
 
     def _validate_prognostics_match(self) -> None:
         """Require the set of prognostic variables in the target and its reference to match exactly."""
         errors: list[str] = []
-        for target_name, reference_name in self._reference_by_target.items():
+        for target_name in self.target_datasets:
+            reference_name = self.residual_reference[target_name]
             target_prognostic_names = set(self.data_indices[target_name].prognostic)
             reference_prognostic_names = set(self.data_indices[reference_name].prognostic)
             if target_prognostic_names == reference_prognostic_names:
@@ -1395,7 +1391,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         references: dict[str, torch.Tensor] = {}
         columns: dict[str, dict[str, int]] = {}
         for target_name in self.target_datasets:
-            reference_name = self._reference_by_target[target_name]
+            reference_name = self.residual_reference[target_name]
             reference_indices = self.data_indices[reference_name]
             # Imputed values are kept: re-inserting NaNs would poison the residual.
             references[target_name] = post_processors[reference_name](
@@ -1586,7 +1582,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         """
         specs: dict[str, TransportSourceSpec] = {}
         for target_name in self.target_datasets:
-            reference = x[self._reference_by_target[target_name]]
+            reference = x[self.residual_reference[target_name]]
             num_nodes = self.node_attributes.num_nodes[target_name]
             target_shard_sizes = grid_shard_sizes.get(target_name) if grid_shard_sizes is not None else None
             if target_shard_sizes is None:
@@ -1684,7 +1680,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             )
             for target_name in self.target_datasets:
                 # The target is not in the batch; its reference input carries the input dtype.
-                out[target_name] = out[target_name].to(batch[self._reference_by_target[target_name]].dtype)
+                out[target_name] = out[target_name].to(batch[self.residual_reference[target_name]].dtype)
 
             out = self._after_sampling(
                 out,

@@ -218,7 +218,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             supporting_arrays=combined_supporting_arrays,
             graph_data=graph_data,
             config=config,
-            target_anchors=self._model_target_anchors(config),
+        )
+        self.task.validate_dataset_roles(
+            input_datasets=self.model.model.inference_input_datasets,
+            target_datasets=self.model.model.target_datasets,
         )
         self.config = config
 
@@ -376,14 +379,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
         return self.task._plot_adapter
-
-    def _model_target_anchors(self, config: BaseSchema) -> dict[str, str] | None:
-        """Return the ``{target: dataset}`` pairs the model attaches targets by, or ``None``.
-
-        Called before the model is built, so it may only read ``config``.
-        """
-        del config
-        return None
 
     def _get_loss_name(self) -> str:
         """Get the loss name for multi-dataset cases."""
