@@ -103,8 +103,8 @@ class DummyTrainingModule(BaseTrainingModule):
         raise NotImplementedError
 
 
-def _make_update_cfg(states: bool, tendencies: bool) -> SimpleNamespace:
-    return SimpleNamespace(states=states, tendencies=tendencies)
+def _make_update_cfg(states: bool, tendencies: bool, residuals: bool = False) -> SimpleNamespace:
+    return SimpleNamespace(states=states, tendencies=tendencies, residuals=residuals)
 
 
 def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tendencies: bool) -> DummyTrainingModule:
@@ -184,6 +184,72 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
             ),
         ):
             assert torch.equal(state_dict[full_key], value)
+
+
+class DummyResidualModel(torch.nn.Module):
+    def __init__(self, offset: float) -> None:
+        super().__init__()
+        self.pre_processors = torch.nn.ModuleDict({"out": Processors([["dummy", DummyProcessor(offset)]])})
+        self.post_processors = torch.nn.ModuleDict(
+            {"out": Processors([["dummy", DummyProcessor(offset)]], inverse=True)},
+        )
+        self.pre_processors_residual = torch.nn.ModuleDict({"out": Processors([["dummy", DummyProcessor(offset)]])})
+        self.post_processors_residual = torch.nn.ModuleDict(
+            {"out": Processors([["dummy", DummyProcessor(offset)]], inverse=True)},
+        )
+
+
+_RESIDUAL_PREFIXES = ("model.pre_processors_residual.", "model.post_processors_residual.")
+
+
+@pytest.mark.parametrize(
+    ("update_cfg", "expect_refreshed"),
+    [
+        (SimpleNamespace(states=False, tendencies=False, residuals=True), True),
+        (SimpleNamespace(states=False, tendencies=False, residuals=False), False),
+        # Configs written before the flag existed follow the schema default.
+        (SimpleNamespace(states=False, tendencies=False), True),
+    ],
+    ids=["enabled", "disabled", "absent"],
+)
+def test_on_load_checkpoint_refreshes_residual_processors(update_cfg: SimpleNamespace, expect_refreshed: bool) -> None:
+    old_model = DummyResidualModel(offset=10.0)
+    new_model = DummyResidualModel(offset=1.0)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"out": DummyIndex()}},
+    }
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+    module.config.training.update_ds_stats_on_ckpt_load = update_cfg
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    state_dict = checkpoint["state_dict"]
+    new_state = new_model.state_dict()
+    old_state = old_model.state_dict()
+    for key in old_state:
+        full_key = f"model.{key}"
+        refreshed = expect_refreshed and full_key.startswith(_RESIDUAL_PREFIXES)
+        assert torch.equal(state_dict[full_key], new_state[key] if refreshed else old_state[key])
+
+
+def test_on_load_checkpoint_residual_default_leaves_models_without_residual_processors_alone() -> None:
+    """The ``residuals`` default must not pull non-residual models past the early return."""
+    old_model = DummyModel(["6h"], offset=10.0)
+    new_model = DummyModel(["6h"], offset=1.0)
+    checkpoint = {
+        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
+    module.config.training.update_ds_stats_on_ckpt_load = SimpleNamespace(states=False, tendencies=False)
+    before = {key: value.clone() for key, value in checkpoint["state_dict"].items()}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert checkpoint["state_dict"].keys() == before.keys()
+    for key, value in before.items():
+        assert torch.equal(checkpoint["state_dict"][key], value)
 
 
 def test_transfer_learning_loading_updates_processors_when_enabled(

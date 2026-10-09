@@ -462,7 +462,11 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         update_states = update_cfg.states
         update_tendencies = update_cfg.tendencies
         state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
+
+        update_residuals = getattr(update_cfg, "residuals", True) and bool(
+            getattr(self.model, "pre_processors_residual", None),
+        )
+        if not isinstance(state_dict, dict) or not (update_states or update_tendencies or update_residuals):
             return
 
         processor_prefixes: tuple[str, ...] = ()
@@ -473,6 +477,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 "model.pre_processors_tendencies.",
                 "model.post_processors_tendencies.",
             )
+        if update_residuals:
+            processor_prefixes += ("model.pre_processors_residual.", "model.post_processors_residual.")
 
         if not processor_prefixes:
             return

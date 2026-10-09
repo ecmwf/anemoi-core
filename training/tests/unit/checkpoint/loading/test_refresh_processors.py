@@ -11,7 +11,7 @@
 
 Mirrors anemoi.training.train.tasks.base.AnemoiLightningModule
 ._update_checkpoint_state_dict_for_load so that pipeline-based loading
-honours config.training.update_ds_stats_on_ckpt_load.{states,tendencies}.
+honours config.training.update_ds_stats_on_ckpt_load.{states,tendencies,residuals}.
 """
 
 from __future__ import annotations
@@ -34,6 +34,8 @@ class _ModelWithProcessors(nn.Module):
         self.post_processors = nn.Linear(4, 4)
         self.pre_processors_tendencies = nn.Linear(4, 4)
         self.post_processors_tendencies = nn.Linear(4, 4)
+        self.pre_processors_residual = nn.Linear(4, 4)
+        self.post_processors_residual = nn.Linear(4, 4)
         self.body = nn.Linear(4, 4)
 
 
@@ -45,6 +47,8 @@ def _ckpt_with_stale_processors(stale_value: float) -> dict:
         "model.post_processors",
         "model.pre_processors_tendencies",
         "model.post_processors_tendencies",
+        "model.pre_processors_residual",
+        "model.post_processors_residual",
     ):
         state_dict[f"{prefix}.weight"] = torch.full((4, 4), stale_value)
         state_dict[f"{prefix}.bias"] = torch.full((4,), stale_value)
@@ -53,23 +57,32 @@ def _ckpt_with_stale_processors(stale_value: float) -> dict:
     return {"state_dict": state_dict}
 
 
-def _config(*, states: bool, tendencies: bool) -> OmegaConf:
+def _config(*, states: bool, tendencies: bool, residuals: bool = False) -> OmegaConf:
     return OmegaConf.create(
-        {"training": {"update_ds_stats_on_ckpt_load": {"states": states, "tendencies": tendencies}}},
+        {
+            "training": {
+                "update_ds_stats_on_ckpt_load": {"states": states, "tendencies": tendencies, "residuals": residuals},
+            },
+        },
     )
 
 
-def _build_context(*, states: bool, tendencies: bool, stale_value: float = 99.0) -> CheckpointContext:
+def _build_context(
+    *,
+    states: bool,
+    tendencies: bool,
+    residuals: bool = False,
+    stale_value: float = 99.0,
+) -> CheckpointContext:
     return CheckpointContext(
         model=_ModelWithProcessors(),
         checkpoint_data=_ckpt_with_stale_processors(stale_value),
-        config=_config(states=states, tendencies=tendencies),
+        config=_config(states=states, tendencies=tendencies, residuals=residuals),
     )
 
 
-def test_no_op_when_both_flags_false() -> None:
-    """Default config (states=False, tendencies=False) does not touch the state dict."""
-    context = _build_context(states=False, tendencies=False)
+def test_no_op_when_all_flags_false() -> None:
+    context = _build_context(states=False, tendencies=False, residuals=False)
     before = {k: v.clone() for k, v in context.checkpoint_data["state_dict"].items()}
 
     WeightsOnlyLoader()._refresh_checkpoint_processors(context)
@@ -106,6 +119,36 @@ def test_tendencies_flag_replaces_tendency_processor_weights() -> None:
     )
     # State processors untouched because states=False
     assert torch.all(state_dict["model.pre_processors.weight"] == 99.0)
+
+
+def test_residuals_flag_replaces_residual_processor_weights() -> None:
+    context = _build_context(states=False, tendencies=False, residuals=True)
+
+    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+
+    state_dict = context.checkpoint_data["state_dict"]
+    model_state = context.model.state_dict()
+    for short_prefix in ("pre_processors_residual", "post_processors_residual"):
+        assert torch.equal(state_dict[f"model.{short_prefix}.weight"], model_state[f"{short_prefix}.weight"])
+    assert torch.all(state_dict["model.pre_processors.weight"] == 99.0)
+    assert torch.all(state_dict["model.pre_processors_tendencies.weight"] == 99.0)
+
+
+def test_residuals_flag_defaults_to_true_when_absent_from_the_config() -> None:
+    """Configs written before the flag existed refresh residual statistics, matching the schema default."""
+    context = CheckpointContext(
+        model=_ModelWithProcessors(),
+        checkpoint_data=_ckpt_with_stale_processors(99.0),
+        config=OmegaConf.create(
+            {"training": {"update_ds_stats_on_ckpt_load": {"states": False, "tendencies": False}}},
+        ),
+    )
+
+    WeightsOnlyLoader()._refresh_checkpoint_processors(context)
+
+    state_dict = context.checkpoint_data["state_dict"]
+    assert not torch.all(state_dict["model.pre_processors_residual.weight"] == 99.0)
+    assert torch.all(state_dict["model.pre_processors_tendencies.weight"] == 99.0)
 
 
 def test_both_flags_replaces_all_four_processor_groups() -> None:

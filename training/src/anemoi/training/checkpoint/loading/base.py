@@ -253,8 +253,9 @@ class LoadingStrategy(PipelineStage):
     def _processor_prefixes_from_config(context: CheckpointContext) -> tuple[str, ...]:
         """Return the processor key prefixes to refresh, based on context.config.
 
-        Reads ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``
-        defensively (any missing layer yields an empty tuple, i.e. no refresh).
+        Reads ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies,residuals}``
+        defensively (any missing layer yields an empty tuple, i.e. no refresh; a
+        missing ``residuals`` flag defaults to ``True`` as in the schema).
         """
         update_cfg = getattr(
             getattr(getattr(context, "config", None), "training", None),
@@ -269,6 +270,8 @@ class LoadingStrategy(PipelineStage):
             prefixes += ("model.pre_processors.", "model.post_processors.")
         if bool(getattr(update_cfg, "tendencies", False)):
             prefixes += ("model.pre_processors_tendencies.", "model.post_processors_tendencies.")
+        if bool(getattr(update_cfg, "residuals", True)):
+            prefixes += ("model.pre_processors_residual.", "model.post_processors_residual.")
         return prefixes
 
     def _refresh_checkpoint_processors(self, context: CheckpointContext) -> None:
@@ -277,7 +280,7 @@ class LoadingStrategy(PipelineStage):
         Mirrors
         ``anemoi.training.train.tasks.base.AnemoiLightningModule._update_checkpoint_state_dict_for_load``
         so pipeline-based loading honours
-        ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies}``.
+        ``config.training.update_ds_stats_on_ckpt_load.{states,tendencies,residuals}``.
         Without this, users with the default ``tendencies: True`` config
         would load stale processor stats from the checkpoint instead of
         rebuilding them from the current dataset.

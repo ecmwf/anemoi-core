@@ -766,6 +766,8 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
     "Rebuild state pre/post-processing statistics from the current dataset."
     tendencies: bool = Field(default=True, example=True)
     "Rebuild tendency pre/post-processing statistics from the current dataset."
+    residuals: bool = Field(default=True, example=True)
+    "Rebuild residual pre/post-processing statistics from the current ``data.datasets.<target>.residual_statistics``."
 
 
 class BaseTrainingSchema(BaseModel):

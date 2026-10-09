@@ -18,6 +18,7 @@ from anemoi.training.schemas.training import MultiScaleLossSchema
 from anemoi.training.schemas.training import OptimizerSchema
 from anemoi.training.schemas.training import TimeAggregateLossWrapperSchema
 from anemoi.training.schemas.training import TransportTrainingConfigSchema
+from anemoi.training.schemas.training import UpdateDsStatsOnCkptLoadSchema
 
 _TIME_AGG_CFG = {
     "_target_": "anemoi.training.losses.aggregate.TimeAggregateLossWrapper",
@@ -48,6 +49,11 @@ def test_ddp_strategy_schema_defaults_to_local_synchronization() -> None:
     )
 
     assert schema.use_local_synchronization is True
+
+
+def test_update_ds_stats_on_ckpt_load_refreshes_residual_statistics_by_default() -> None:
+    """Like tendencies, the residual statistics configured for the current run win over the checkpoint's."""
+    assert UpdateDsStatsOnCkptLoadSchema().residuals is True
 
 
 def test_time_aggregate_loss_config_valid() -> None:

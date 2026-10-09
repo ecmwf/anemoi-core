@@ -49,6 +49,7 @@ load_weights_only: False
 update_ds_stats_on_ckpt_load:
   states: False
   tendencies: True
+  residuals: True
 
 deterministic: False
 precision: bf16-mixed
