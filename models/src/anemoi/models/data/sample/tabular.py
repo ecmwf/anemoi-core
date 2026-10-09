@@ -9,6 +9,7 @@
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import replace
 from typing import Any
 from typing import ClassVar
 from typing import Self
@@ -34,7 +35,7 @@ class TabularSample(BaseSample):
     Parameters
     ----------
     timedeltas : torch.Tensor
-        ``(N,)`` time offset of each point.
+        ``(N,)`` time offset of each point, in seconds.
     boundaries : tuple[slice, ...]
         One slice per time window along the grid axis. This is the only record of
         the sample's time axis.
@@ -58,6 +59,22 @@ class TabularSample(BaseSample):
                 f"given by 'boundaries' and the batch is a list. Got {self.layout!r}."
             )
             raise ValueError(msg)
+
+    def with_time_offsets(self, window_offsets: Sequence[float]) -> Self:
+        """Return the sample with each window's timedeltas shifted by that window's offset, in seconds.
+
+        Moves timedeltas measured from each window's own date onto a common reference time.
+        """
+        if len(window_offsets) != len(self.boundaries):
+            msg = (
+                f"{self.__class__.__name__} has {len(self.boundaries)} time windows, "
+                f"but {len(window_offsets)} window offsets were given."
+            )
+            raise ValueError(msg)
+        shift = torch.zeros_like(self.timedeltas)
+        for window, offset in zip(self.boundaries, window_offsets, strict=True):
+            shift[window] = offset
+        return replace(self, timedeltas=self.timedeltas + shift)
 
     @classmethod
     def _collate_layout(cls, layout: TensorLayout) -> TensorLayout:

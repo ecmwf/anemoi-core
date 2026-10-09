@@ -106,6 +106,27 @@ def _make_obs_sample(n: int = 5, v: int = 3, n_times: int = 2) -> TabularSample:
     return _make_obs_reader(_make_obs_payload(n=n, v=v, n_times=n_times)).get_sample(0, slice(0, n_times))
 
 
+def test_tabular_reader_measures_timedeltas_from_the_reference_time() -> None:
+    """Each window's timedeltas move from the window's own date onto the sample's reference time."""
+    payload = _make_obs_payload(n=4, v=1, n_times=2)
+    reader = _make_obs_reader(payload)
+    reader.data.dates = np.arange("2024-01-01T00", "2024-01-02T00", np.timedelta64(6, "h"), dtype="datetime64[s]")
+    sample = reader.get_sample(0, [1, 2])
+
+    measured = reader.measure_from_reference(sample, reference=2, positions=[1, 2])
+
+    # Window 0 is read at 06h and window 1 at 12h; the reference time is 12h.
+    expected = torch.as_tensor(payload.timedeltas, dtype=torch.float32) + torch.tensor([-21600.0] * 2 + [0.0] * 2)
+    torch.testing.assert_close(measured.timedeltas, expected)
+
+
+def test_tabular_sample_rejects_offsets_for_a_different_number_of_windows() -> None:
+    sample = _make_obs_sample(n=4, v=1, n_times=2)
+
+    with pytest.raises(ValueError, match="has 2 time windows, but 3 window offsets"):
+        sample.with_time_offsets([0.0, 1.0, 2.0])
+
+
 def _make_grid_sample(grid: int = 4, vars_: int = 2, t: int = 1, e: int = 1) -> GriddedSample:
     coords = torch.stack(
         [torch.linspace(-1.0, 1.0, grid), torch.linspace(0.0, 6.0, grid)],

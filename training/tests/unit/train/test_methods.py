@@ -25,9 +25,9 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data import Source
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import TabularSource
-from anemoi.models.data.sources import Template
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -1569,7 +1569,7 @@ def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) 
 def _make_target_pair(
     data: torch.Tensor,
     variables: list[str] | None = None,
-) -> tuple[Batch, dict[str, Template], Batch]:
+) -> tuple[Batch, dict[str, BaseTemplate], Batch]:
     target = _make_gridded_batch(data, variables=variables)
     return target, target.template(), target.select(variables=[])
 
@@ -1985,12 +1985,13 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
         statistics={"data": {}},
     )
     x = batch.select(time=[0])
-    target_template = batch.select(time=[1]).with_data({"data": torch.empty(1, 1, 1, 3, 0)})
     target_values = batch.select(time=[1])
+    target_template = {"data": target_values["data"].template()}
+    target_forcing = target_values.select(variables={"data": [1]})
 
     task = MagicMock()
     task.get_inputs.return_value = x
-    task.get_targets.return_value = (target_values, {}, target_template)
+    task.get_targets.return_value = (target_values, target_template, target_forcing)
     forecaster.task = task
 
     class _CoreModel:
@@ -2017,9 +2018,8 @@ def test_transport_training_sample_builds_target_template_like_deterministic_tra
     task.get_targets.assert_called_once_with(batch, data_indices=forecaster.data_indices, rollout_step=0)
     assert core_model.call["args"] == (x,)
     assert core_model.call["kwargs"]["target_template"] is target_template
+    assert core_model.call["kwargs"]["target_forcing"] is target_forcing
     assert core_model.call["kwargs"]["model_comm_group"] is forecaster.model_comm_group
-    # Shard sizes are read off the input Sources (replicated here -> None per dataset)
-    assert core_model.call["kwargs"]["grid_shard_sizes"] == {"data": None}
     assert core_model.call["kwargs"]["schedule_params"] == {"num_steps": 2}
     assert core_model.call["kwargs"]["sampler_params"] == {"sampler": "heun"}
     assert core_model.call["kwargs"]["marker"] == "value"
@@ -2222,7 +2222,7 @@ def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
     captured_kwargs: list[dict] = []
     dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
-    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, dict[str, Template], Batch]:
+    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, dict[str, BaseTemplate], Batch]:
         captured_kwargs.append(kwargs.copy())
         return dummy_target
 
@@ -2972,56 +2972,6 @@ def test_edm_transport_tendency_training_compute_dataset_loss_metrics_uses_metri
     torch.testing.assert_close(captured["metric_target"].data, metric_target["data"].data)
 
 
-def test_tendency_prediction_mode_prepare_metric_target_applies_imputer_inverse() -> None:
-    """TendencyPredictionMode prepares DATA_FULL metric targets through the model imputer inverse."""
-    captured: dict[str, Any] = {}
-
-    class _DummyInner:
-        def _apply_imputer_inverse(
-            self,
-            post_processors: dict[str, Any],
-            dataset_name: str,
-            x: torch.Tensor,
-        ) -> torch.Tensor:
-            captured["post_processors"] = post_processors
-            captured["dataset_name"] = dataset_name
-            return x + 7.0
-
-    class _DummyOuter:
-        def __init__(self) -> None:
-            self.model = _DummyInner()
-            self.post_processors = {"data": object()}
-
-    class _DummyModule:
-        def __init__(self) -> None:
-            self.model = _DummyOuter()
-
-    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
-    mode.module = _DummyModule()
-
-    metric_target = build_batch(
-        data={"data": torch.randn(2, 1, 1, 4, 3, dtype=torch.float32)},
-        coordinates={"data": torch.zeros(4, 2)},
-        metadata={"static_coords": frozenset({"data"})},
-        layouts={"data": TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)},
-        variables={"data": ["a", "b", "c"]},
-        statistics={"data": {}},
-    )
-    prepared = PreparedPredictionTarget(
-        model_target=metric_target,
-        loss_target=metric_target,
-        loss_target_layout=IndexSpace.DATA_OUTPUT,
-        metric_target=metric_target,
-        aux={},
-    )
-
-    prepared_metric_target = mode.prepare_metric_target(prepared)
-
-    assert captured["dataset_name"] == "data"
-    assert captured["post_processors"] == mode.module.model.post_processors
-    torch.testing.assert_close(prepared_metric_target["data"].data, metric_target["data"].data + 7.0)
-
-
 def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace()
@@ -3037,6 +2987,46 @@ def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
 
     with pytest.raises(NotImplementedError, match=r"Tendency prediction mode.*sparse"):
         mode.prepare_target(sparse_batch, sparse_batch)
+
+
+def test_tendency_prediction_mode_only_the_network_target_is_imputed() -> None:
+    """The tendency fed through the network comes from imputed states; loss, metric and re-masking targets keep NaNs."""
+    raw_target = _gridded_tendency_batch(torch.tensor([1.0, float("nan"), 3.0]).reshape(1, 1, 1, 3, 1))
+    imputed = raw_target.with_data({"data": torch.nan_to_num(raw_target["data"].data, nan=0.0)})
+
+    class _TendencyModel:
+        def reference_state(self, x: Batch, *_args: Any) -> Batch:
+            return x
+
+        def compute_tendency(self, _dataset_name: str, state: Source, *_args: Any) -> Source:
+            return state.map_data(lambda data: data - 1.0)
+
+    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
+    mode._tendency_statistics = {"data": [{"mean": 1.0}]}
+    mode.module = SimpleNamespace(
+        model=SimpleNamespace(
+            model=_TendencyModel(),
+            pre_processors={"data": object()},
+            post_processors={"data": object()},
+        ),
+        task=SimpleNamespace(get_targets=lambda _batch, **_kwargs: (raw_target, None, raw_target)),
+        data_indices={},
+        preprocess_inputs=lambda _batch: imputed,
+        preprocess_targets=lambda batch: batch,
+        get_data_output_target=lambda batch: batch,
+        reduce_data_output_target_to_model_output=lambda batch: batch,
+        _grid_shard_sizes=lambda _source: None,
+        model_comm_group=None,
+        n_step_output={"data": 1},
+    )
+
+    prepared = mode.prepare_target(raw_target, raw_target)
+
+    torch.testing.assert_close(prepared.model_target["data"].data, imputed["data"].data - 1.0)
+    expected_full = raw_target["data"].data - 1.0
+    torch.testing.assert_close(prepared.loss_target["data"].data, expected_full, equal_nan=True)
+    torch.testing.assert_close(prepared.aux["model_target_missing"]["data"].data, expected_full, equal_nan=True)
+    torch.testing.assert_close(prepared.metric_target["data"].data, raw_target["data"].data, equal_nan=True)
 
 
 def _tendency_mode_with_spy_model() -> tuple[TendencyPredictionMode, list[dict[str, Any]], SimpleNamespace]:
@@ -3064,10 +3054,6 @@ def _tendency_mode_with_spy_model() -> tuple[TendencyPredictionMode, list[dict[s
             )
             return tendency.map_data(lambda data: data + 100.0)
 
-        def _apply_imputer_inverse(self, post_processors: object, dataset_name: str, x: torch.Tensor) -> torch.Tensor:
-            del post_processors, dataset_name
-            return x + 1.0
-
     processors = SimpleNamespace(pre={"data": object()}, post={"data": object()})
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
     mode.module = SimpleNamespace(
@@ -3092,8 +3078,8 @@ def _gridded_tendency_batch(data: torch.Tensor) -> Batch:
     )
 
 
-def test_tendency_prediction_mode_reconstruct_prediction_uses_step_statistics_and_imputer_inverse() -> None:
-    """Predicted tendencies become normalised states with the per-step statistics, then the imputer inverse."""
+def test_tendency_prediction_mode_reconstruct_prediction_uses_step_statistics() -> None:
+    """Predicted tendencies become normalised states with the per-step statistics."""
     mode, calls, processors = _tendency_mode_with_spy_model()
     reference = _gridded_tendency_batch(torch.zeros(1, 1, 1, 2, 3))
     prediction = _gridded_tendency_batch(torch.ones(1, 2, 1, 2, 3))
@@ -3107,7 +3093,7 @@ def test_tendency_prediction_mode_reconstruct_prediction_uses_step_statistics_an
 
     state = mode.reconstruct_prediction(prediction, prepared)
 
-    torch.testing.assert_close(state["data"].data, prediction["data"].data + 101.0)
+    torch.testing.assert_close(state["data"].data, prediction["data"].data + 100.0)
     assert state["data"].variables == prediction["data"].variables
     (call,) = calls
     assert call["dataset_name"] == "data"

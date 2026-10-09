@@ -179,6 +179,7 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     torch.nn.Module.__init__(model)
     model._graph_name_hidden = "hidden"
     model._graph_data = {"hidden": SimpleNamespace(num_nodes=hidden_nodes)}
+    model.dynamic_node_attributes = {}
     model.noise_embedder = torch.nn.Identity()
     model.noise_cond_mlp = torch.nn.Linear(1, 2, bias=False).to(device)
     with torch.no_grad():
@@ -203,8 +204,9 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     )
     for source in (gridded, tabular):
         model.zero_grad()
+        # Without inputs the encoder takes the target's conditioning, which is what this test splits.
         fwd, proc, bwd = model._build_conditioning_kwargs(
-            Batch({"data": source}), {"data": torch.ones(1, 1, 1, 1, 1, device=device)}, group
+            Batch({}), Batch({"data": source}), {"data": torch.ones(1, 1, 1, 1, 1, device=device)}, group
         )
         data_cond, hidden_cond = fwd["data"]["cond"]
         assert bwd["data"]["cond"][1] is data_cond
@@ -223,7 +225,7 @@ def _check_transport_conditioning(*, rank, world_size, device, group) -> None:
     graph = HeteroData()
     graph["data"].x = torch.zeros(total_nodes, 2, device=device)
     model.node_attributes = NodeTrainableParameters({"data": 2}, graph).to(device)
-    coords, latent, _, sizes, _, _ = model._assemble_input(
+    coords, latent, _, sizes, _, _ = model._assemble_transport_input(
         gridded, gridded, 1, model_comm_group=group, dataset_name="data"
     )
     assert coords.shape == (total_nodes, 2)

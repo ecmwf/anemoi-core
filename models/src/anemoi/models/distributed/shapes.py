@@ -149,11 +149,15 @@ def check_shard_sizes_match_group(
 
     Raises
     ------
+    TypeError
+        If ``shard_sizes`` is not a list or tuple.
     ValueError
         If ``shard_sizes`` does not have exactly one entry per rank of ``group``.
     """
     if shard_sizes is None:
         return
+    if not isinstance(shard_sizes, (list, tuple)):
+        raise TypeError(f"Shard sizes must be a list or tuple of integers, but got {type(shard_sizes).__name__}")
 
     world_size = group_world_size(group)
     if len(shard_sizes) != world_size:

@@ -28,8 +28,6 @@ from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.distributed.shapes import DatasetShardSizes
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
 from anemoi.models.layers.graph import NodeTrainableParameters
@@ -542,42 +540,82 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
-    @staticmethod
-    def _apply_spatial_preprocessor(
-        tensors: tuple[Tensor, ...],
-        dataset_name: str,
-        spatial_pre_processors: Optional[nn.ModuleDict],
-        model_comm_group: Optional[ProcessGroup],
-        grid_shard_sizes: DatasetShardSizes | None,
-    ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
-        """Apply one dataset's spatial preprocessor to tensors sharing a source grid.
+    def _prepare_prediction_inputs(
+        self,
+        x: Batch,
+        target_forcing: Optional[Batch],
+        pre_processors: nn.ModuleDict,
+        model_comm_group: Optional[ProcessGroup] = None,
+        spatial_pre_processors: Optional[nn.ModuleDict] = None,
+        **kwargs,
+    ) -> tuple[Batch, Batch]:
+        """Shard, project and normalise the inputs and the decoder conditioning of a prediction step.
 
-        Used by the transport models, whose sampling still runs on raw tensors with the
-        grid shard sizes passed alongside; :meth:`predict_step` projects the sources instead.
+        Parameters
+        ----------
+        x : Batch
+            Input batched data (before pre-processing).
+        target_forcing : Optional[Batch]
+            Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
+            ``None`` means there are no forcings.
+        pre_processors : nn.ModuleDict
+            Pre-processing module.
+        model_comm_group : Optional[ProcessGroup]
+            Process group for distributed training.
+        spatial_pre_processors : Optional[nn.ModuleDict]
+            Spatial preprocessors keyed by dataset name (e.g. CrossGridProjector).
+            Applied after grid sharding and before normalisation, as in training.
+        **kwargs
+            Additional arguments for the pre-processors.
+
+        Returns
+        -------
+        tuple[Batch, Batch]
+            The normalised inputs and the normalised decoder conditioning, split across
+            ``model_comm_group`` when the model is distributed.
         """
-        if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
-            return tensors, grid_shard_sizes
+        dataset_names = list(x.keys())
+        if target_forcing is None:
+            target_forcing = Batch({})
 
-        source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-        projected_tensors = []
-        output_grid_shard_sizes: ShardSizes = None
-        for index, tensor in enumerate(tensors):
-            projected_tensor, tensor_grid_shard_sizes = spatial_pre_processors[dataset_name](
-                tensor,
-                model_comm_group=model_comm_group,
-                grid_shard_sizes=source_grid_shard_sizes,
-            )
-            if index == 0:
-                output_grid_shard_sizes = tensor_grid_shard_sizes
-            elif tensor_grid_shard_sizes != output_grid_shard_sizes:
-                raise RuntimeError(
-                    f"Spatial preprocessor for {dataset_name!r} returned inconsistent target-grid shard sizes."
+        if model_is_distributed(model_comm_group):
+            for dataset_name in dataset_names:
+                x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
+            for dataset_name in target_forcing.dataset_names:
+                target_forcing = target_forcing.replace(
+                    dataset_name, target_forcing[dataset_name].shard(model_comm_group)
                 )
-            projected_tensors.append(projected_tensor)
 
-        if grid_shard_sizes is not None:
-            grid_shard_sizes[dataset_name] = output_grid_shard_sizes
-        return tuple(projected_tensors), grid_shard_sizes
+        # Spatial preprocessing: applied after grid sharding and, as in training, before
+        # normalisation, so projectors see raw values. The projected source is on the
+        # dataset's graph node set.
+        for dataset_name in dataset_names:
+            if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
+                projected = spatial_pre_processors[dataset_name].project_source(
+                    x[dataset_name],
+                    self._graph_data[dataset_name].x,
+                    model_comm_group=model_comm_group,
+                )
+                x = x.replace(dataset_name, projected)
+
+        processed_batch = x
+        for dataset_name in dataset_names:
+            processed_batch = processed_batch.replace(
+                dataset_name,
+                pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
+            )
+
+        # The target forcings condition the decoder, and need to go through the input processors
+        processed_forcing = target_forcing
+        for dataset_name in target_forcing.dataset_names:
+            if dataset_name not in pre_processors:
+                continue
+            processed_forcing = processed_forcing.replace(
+                dataset_name,
+                pre_processors[dataset_name](target_forcing[dataset_name], in_place=False, **kwargs),
+            )
+
+        return processed_batch, processed_forcing
 
     def predict_step(
         self,
@@ -626,45 +664,14 @@ class BaseGraphModel(nn.Module):
         ```
         """
         with torch.no_grad():
-            dataset_names = list(x.keys())
-
-            if model_is_distributed(model_comm_group):
-                for dataset_name in dataset_names:
-                    x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
-
-                for dataset_name in target_forcing.keys():
-                    target_forcing = target_forcing.replace(
-                        dataset_name, target_forcing[dataset_name].shard(model_comm_group)
-                    )
-
-            # Spatial preprocessing: applied after grid sharding and, as in training, before
-            # normalisation, so projectors see raw values. The projected source is on the
-            # dataset's graph node set.
-            for dataset_name in dataset_names:
-                if spatial_pre_processors is not None and dataset_name in spatial_pre_processors:
-                    projected = spatial_pre_processors[dataset_name].project_source(
-                        x[dataset_name],
-                        self._graph_data[dataset_name].x,
-                        model_comm_group=model_comm_group,
-                    )
-                    x = x.replace(dataset_name, projected)
-
-            processed_batch = x
-            for dataset_name in dataset_names:
-                processed_batch = processed_batch.replace(
-                    dataset_name,
-                    pre_processors[dataset_name](x[dataset_name], in_place=False, **kwargs),
-                )
-
-            # The target forcings condition the decoder, and need to go through the input processors
-            processed_target = target_forcing
-            for dataset_name in target_forcing.keys():
-                if dataset_name not in pre_processors:
-                    continue
-                processed_target = processed_target.replace(
-                    dataset_name,
-                    pre_processors[dataset_name](target_forcing[dataset_name], in_place=False, **kwargs),
-                )
+            processed_batch, processed_target = self._prepare_prediction_inputs(
+                x,
+                target_forcing,
+                pre_processors,
+                model_comm_group=model_comm_group,
+                spatial_pre_processors=spatial_pre_processors,
+                **kwargs,
+            )
 
             # Perform forward pass
             y_hat = self.forward(

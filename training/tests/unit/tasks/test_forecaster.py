@@ -528,6 +528,7 @@ def test_rollout_shifts_true_state_into_input_only_grid(
 # ── Forecaster: rollout of tabular (observation) datasets ─────────────────────
 
 _OBS_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
+SIX_HOURS = 6 * 3600.0
 
 
 def _obs_data_indices() -> dict[str, IndexCollection]:
@@ -582,7 +583,8 @@ def test_advance_input_feeds_output_obs_window_back_as_input(decoded: bool, expe
     torch.testing.assert_close(advanced.data[0][..., 0], torch.full((1, 5), expected_p))
     torch.testing.assert_close(advanced.data[0][..., 1], torch.full((1, 5), 8.0))
     torch.testing.assert_close(advanced.coordinates[0], torch.full((5, 2), 6.0))
-    torch.testing.assert_close(advanced.timedeltas[0], torch.full((5,), 6.0))
+    # The forecast time moves on by one rollout shift.
+    torch.testing.assert_close(advanced.timedeltas[0], torch.full((5,), 6.0 - SIX_HOURS))
 
 
 def test_advance_input_cycles_each_ensemble_member_obs_window() -> None:
@@ -612,7 +614,41 @@ def test_advance_input_decoded_obs_window_becomes_most_recent_input() -> None:
     assert advanced.boundaries == [(slice(0, 4), slice(4, 9))]
     expected = torch.cat([_obs_window(4, p=[0.0], f=0.0), _obs_window(5, p=[1.0], f=8.0)], dim=1)
     torch.testing.assert_close(advanced.data[0], expected)
-    torch.testing.assert_close(advanced.timedeltas[0], torch.tensor([0.0] * 4 + [6.0] * 5))
+    torch.testing.assert_close(advanced.timedeltas[0], torch.tensor([0.0] * 4 + [6.0] * 5) - SIX_HOURS)
+
+
+def test_advance_input_measures_obs_times_from_the_new_forecast_time() -> None:
+    """After advancing, the kept history and the new input window are measured from the next forecast time."""
+    task = Forecaster(multistep_input=2, multistep_output=1, timestep="6h")
+    # Times in seconds from the current forecast time: history at -6h and 0h, the output window at +6h.
+    x = _obs_batch([(_obs_window(3, p=[0.0], f=0.0), -SIX_HOURS), (_obs_window(4, p=[0.0], f=0.0), 0.0)])
+    truth = _obs_batch([(_obs_window(5, p=[7.0], f=8.0), SIX_HOURS)])
+
+    advanced = task.advance_input(x, Batch({}), truth, data_indices=_obs_data_indices())["obs"]
+
+    torch.testing.assert_close(advanced.timedeltas[0], torch.tensor([-SIX_HOURS] * 4 + [0.0] * 5))
+
+
+def test_get_targets_measures_rollout_targets_from_the_step_forecast_time() -> None:
+    """Targets of a later rollout step are measured from that step's forecast time."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout={"start": 2, "maximum": 2})
+    # One window per offset of the sample: 0h, +6h, +12h, measured from the sample's forecast time.
+    batch = _obs_batch(
+        [
+            (_obs_window(2, p=[0.0], f=0.0), 0.0),
+            (_obs_window(3, p=[1.0], f=0.0), SIX_HOURS),
+            (_obs_window(4, p=[2.0], f=0.0), 2 * SIX_HOURS),
+        ],
+    )
+
+    first, _, first_forcing = task.get_targets(batch, data_indices=_obs_data_indices(), rollout_step=0)
+    second, second_template, second_forcing = task.get_targets(batch, data_indices=_obs_data_indices(), rollout_step=1)
+
+    torch.testing.assert_close(first["obs"].timedeltas[0], torch.full((3,), SIX_HOURS))
+    torch.testing.assert_close(first_forcing["obs"].timedeltas[0], torch.full((3,), SIX_HOURS))
+    torch.testing.assert_close(second["obs"].timedeltas[0], torch.full((4,), SIX_HOURS))
+    torch.testing.assert_close(second_forcing["obs"].timedeltas[0], torch.full((4,), SIX_HOURS))
+    torch.testing.assert_close(second_template["obs"].timedeltas[0], torch.full((4,), SIX_HOURS))
 
 
 def test_advance_input_advances_gridded_and_tabular_datasets_together() -> None:

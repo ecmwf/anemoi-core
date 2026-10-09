@@ -144,6 +144,13 @@ class BaseForecaster(BaseTask):
         shift = self._rollout_shift * rollout_step
         return sorted(o + shift for o in self._output_offsets)
 
+    def measure_targets_from_step(self, targets: "Batch", rollout_step: int = 0, **_kwargs) -> "Batch":
+        """Measure the targets' point times from the forecast time of ``rollout_step``.
+
+        Each rollout step moves the forecast time on by one rollout shift.
+        """
+        return _shift_point_times(targets, -self._rollout_shift * rollout_step)
+
     def _advance_gridded_input(
         self,
         x: torch.Tensor,
@@ -316,8 +323,8 @@ class BaseForecaster(BaseTask):
         Input windows that remain inputs move to their new position. Each new input window is
         the output window at the same time: a dataset the model decodes takes its predicted
         values there for its prognostic variables, with the observed forcings; a dataset it does
-        not decode takes the observations. Timedeltas are relative to each window's own date,
-        so windows keep theirs when they move.
+        not decode takes the observations. Timedeltas are measured from the current forecast
+        time, which moves on by one rollout shift, so every window's timedeltas drop by that shift.
 
         Parameters
         ----------
@@ -354,7 +361,9 @@ class BaseForecaster(BaseTask):
             )
             raise ValueError(msg)
         ordered = [windows[i] for i in range(x.time_size)]
-        return ordered[0].concat_time(*ordered[1:])
+        advanced = ordered[0].concat_time(*ordered[1:])
+        shift = self._rollout_shift.total_seconds()
+        return advanced.clone(timedeltas=[timedeltas - shift for timedeltas in advanced.timedeltas])
 
     def log_extra(self, logger: Callable, logger_enabled: bool, batch_size: int | None = None) -> None:
         """Log any task-specific information."""
@@ -560,6 +569,23 @@ class OffsetForecaster(BaseForecaster):
                 )
                 raise ValueError(msg)
         return input_offsets, output_offsets, rollout_shift
+
+
+def _shift_point_times(batch: "Batch", shift: datetime.timedelta) -> "Batch":
+    """Return ``batch`` with the timedeltas of its tabular sources moved by ``shift``."""
+    if not shift:
+        return batch
+    seconds = shift.total_seconds()
+    return batch.with_sources(
+        {
+            name: (
+                source.clone(timedeltas=[timedeltas + seconds for timedeltas in source.timedeltas])
+                if source.is_tabular
+                else source
+            )
+            for name, source in batch.items()
+        },
+    )
 
 
 def _match_ensemble_size(source: "TabularSource", ensemble_size: int) -> "TabularSource":

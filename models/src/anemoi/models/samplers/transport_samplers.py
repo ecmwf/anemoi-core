@@ -15,7 +15,6 @@ import torch
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
-from anemoi.models.distributed.shapes import DatasetShardSizes
 
 TransportModelFunction = Callable[
     [
@@ -23,7 +22,6 @@ TransportModelFunction = Callable[
         Batch,
         dict[str, torch.Tensor],
         Optional[ProcessGroup],
-        DatasetShardSizes | None,
     ],
     Batch,
 ]
@@ -67,7 +65,6 @@ class EDMDiffusionSampler(ABC):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         """Run EDM diffusion sampling from the initial noisy field to a clean prediction.
@@ -85,9 +82,6 @@ class EDMDiffusionSampler(ABC):
             Function that performs denoising.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
-        grid_shard_sizes : DatasetShardSizes, optional
-            Per-dataset shard sizes for the grid dimension. ``None`` means the
-            corresponding dataset is replicated, not sharded.
         **kwargs
             Additional sampler-specific parameters.
 
@@ -125,7 +119,6 @@ class EDMHeunSampler(EDMDiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         # Override instance defaults with any kwargs
@@ -172,7 +165,6 @@ class EDMHeunSampler(EDMDiffusionSampler):
                 y_model,
                 sigma_effective_expanded,
                 model_comm_group,
-                grid_shard_sizes,
             )
             D1_solver = _in_dtype(D1, dtype)
 
@@ -192,7 +184,6 @@ class EDMHeunSampler(EDMDiffusionSampler):
                     y_next_model,
                     sigma_next_expanded,
                     model_comm_group,
-                    grid_shard_sizes,
                 )
                 D2_solver = _in_dtype(D2, dtype)
 
@@ -228,7 +219,6 @@ class DPMpp2MSampler(EDMDiffusionSampler):
         sigmas: torch.Tensor,
         denoising_fn: DenoisingFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         dtype = kwargs.get("dtype", self.dtype)
@@ -248,7 +238,7 @@ class DPMpp2MSampler(EDMDiffusionSampler):
             sigma_next = sigmas[i + 1]
 
             sigma_expanded = _expand_scalar_condition(sigma, y_model)
-            denoised = denoising_fn(x, y_model, sigma_expanded, model_comm_group, grid_shard_sizes)
+            denoised = denoising_fn(x, y_model, sigma_expanded, model_comm_group)
             denoised_solver = _in_dtype(denoised, dtype)
 
             if sigma_next == 0:
@@ -308,7 +298,6 @@ class VectorFieldSampler(ABC):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         """Move the field along the provided time grid."""
@@ -331,7 +320,6 @@ class VectorFieldEulerSampler(VectorFieldSampler):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         if vector_field_fn is None:
@@ -352,7 +340,6 @@ class VectorFieldEulerSampler(VectorFieldSampler):
                 y_model,
                 time_expanded,
                 model_comm_group,
-                grid_shard_sizes,
             )
 
             y_solver = _axpy(y_solver, _in_dtype(vector_field, dtype), dt)
@@ -378,7 +365,6 @@ class VectorFieldHeunSampler(VectorFieldSampler):
         times: torch.Tensor,
         vector_field_fn: VectorFieldFunction = None,
         model_comm_group: Optional[ProcessGroup] = None,
-        grid_shard_sizes: DatasetShardSizes | None = None,
         **kwargs,
     ) -> Batch:
         if vector_field_fn is None:
@@ -400,7 +386,6 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 y_model,
                 time_i_expanded,
                 model_comm_group,
-                grid_shard_sizes,
             )
 
             vector_field_1_solver = _in_dtype(vector_field_1, dtype)
@@ -416,7 +401,6 @@ class VectorFieldHeunSampler(VectorFieldSampler):
                 y_next_model,
                 time_next_expanded,
                 model_comm_group,
-                grid_shard_sizes,
             )
 
             combined_field = vector_field_1_solver.zip_map_data(

@@ -24,8 +24,11 @@ weekly Fourier features:
            periods: [24, 168]
 
 This attribute is runtime-only. Configure it only on dynamic observation
-nodes consumed by ``AnemoiModelEncProcDec``; it cannot be materialised
-in a static graph. An empty ``periods`` list produces only the scaled
+nodes consumed by ``AnemoiModelEncProcDec`` or the transport models
+(``AnemoiTransportModelEncProcDec``); it cannot be materialised in a
+static graph. Transport models add it to both the history rows and the
+noisy-target rows of an observation dataset, whose timedeltas are
+negative and positive respectively. An empty ``periods`` list produces only the scaled
 scalar.
 
 Changing the configured periods changes the model input width and is

@@ -112,6 +112,8 @@ def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
         positions,
     )
     reader.sampling = None
+    # Gridded samples carry no point times, so measuring them from the reference changes nothing.
+    reader.measure_from_reference.side_effect = lambda sample, *_args: sample
     reader.get_sample.return_value = GriddedSample(
         data=torch.zeros(2, 1, grid, 2),
         variables=["x", "y"],
