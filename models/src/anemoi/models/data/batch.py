@@ -17,6 +17,7 @@ from collections.abc import Iterator
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Any
+from typing import Self
 
 import torch
 from rich.console import Console
@@ -303,7 +304,7 @@ class Batch:
         return Batch(sources=new_sources)
 
     @staticmethod
-    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> "Batch":
+    def collate(samples: list[dict[str, BaseSample]] | dict[str, BaseSample]) -> Self:
         """Collate per-sample :class:`BaseSample` payloads into a :class:`Batch`.
 
         Each sample is a mapping ``{dataset_name: BaseSample}``. The class of each
@@ -327,7 +328,7 @@ class Batch:
             sample_cls = type(head)
             if not isinstance(head, BaseSample) or any(type(s) is not sample_cls for s in per_sample):
                 kinds = sorted({type(s).__name__ for s in per_sample})
-                msg = f"Dataset {name!r} must be collated from samples of a single BaseSample subclass; got {kinds}."
+                msg = f"Dataset {name!r} must be collated from a single BaseSample subclass; got {kinds}."
                 raise TypeError(msg)
 
             sources[name] = sample_cls.collate(name, per_sample)

@@ -444,7 +444,12 @@ class GriddedTemplate(BaseTemplate):
             )
             raise ValueError(msg)
 
-        target_pattern = self.layout.normalized(self.layout.ndim).pattern
+        metadata_kwargs = self._metadata_kwargs()
+        if self.layout.batch is None:
+            LOGGER.debug(f"{self.__class__.__name__}: Adding batch dimension to target layout.")
+            metadata_kwargs["layout"] = self.layout.with_batch_dim()
+
+        target_pattern = metadata_kwargs["layout"].normalized(metadata_kwargs["layout"].ndim).pattern
         data = einops.rearrange(
             data,
             f"{GriddedSource.FLATTEN_PATTERN} -> {target_pattern}",
@@ -452,9 +457,10 @@ class GriddedTemplate(BaseTemplate):
             ensemble=self.ensemble_size,
             time=self.time_size,
         )
+
         return GriddedSource(
-            **self._metadata_kwargs(),
             data=data,
             coordinates=self.coordinates,
             shard_sizes=self.shard_sizes,
+            **metadata_kwargs,
         )

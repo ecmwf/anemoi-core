@@ -199,19 +199,17 @@ class AnemoiModelInterface(torch.nn.Module):
 
     def _get_template(self, x: dict[str, dict], ensemble_size: int = 1, batch_size: int = 1) -> Batch:
         """Build a template batch with the given ensemble size, batch size, and number of target timesteps."""
-        return Batch.collate(
-            {
-                name: create_batched_struct(
-                    name=name,
-                    statistics=self._statistics_for(name, payload["variables"]),
-                    **payload,
-                    ensemble_size=ensemble_size,
-                    batch_size=batch_size,
-                    time_size=self.n_step_output[name],
-                )
-                for name, payload in x.items()
-            }
-        )
+        return {
+            name: create_batched_struct(
+                name=name,
+                statistics=self._statistics_for(name, payload["variables"]),
+                **payload,
+                ensemble_size=ensemble_size,
+                batch_size=batch_size,
+                time_size=self.n_step_output[name],
+            )
+            for name, payload in x.items()
+        }
 
     def unwrap_batch(self, batch: Batch) -> dict[str, dict]:
         """Convert a model output Batch back to plain per-dataset payload dicts.
@@ -292,10 +290,11 @@ class AnemoiModelInterface(torch.nn.Module):
         if target_forcing is None:
             target_forcing = {}
 
-        # Convert to batch
+        # Convert input data to batch
         x = self._get_batch(x)
         target_forcing = self._get_batch(target_forcing)
-        target = self._get_template(target_template, ensemble_size=x.ensemble_size)
+        
+        target = self._get_template(target_template, ensemble_size=x.ensemble_size, batch_size=x.batch_size)
 
         # Prepare kwargs for model's predict_step
         predict_kwargs = {
