@@ -11,6 +11,7 @@ import uuid
 from typing import Optional
 
 import torch
+from hydra.utils import get_class
 from hydra.utils import instantiate
 from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -18,6 +19,9 @@ from torch_geometric.data import HeteroData
 
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.models.preprocessing.imputer import BaseImputer
+from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.preprocessing.postprocessor import Postprocessor
 from anemoi.models.preprocessing.spatial import SpatialPreprocessor
 from anemoi.models.utils.config import get_multiple_datasets_config
 
@@ -95,6 +99,7 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics_tendencies: dict | None = None,
         *,
         residual_statistics: dict | None = None,
+        dataset_name: str,
     ) -> tuple[
         Processors,
         Processors,
@@ -117,6 +122,8 @@ class AnemoiModelInterface(torch.nn.Module):
             Tendencies statistics for the dataset.
         residual_statistics : dict, optional
             Residual statistics for the dataset.
+        dataset_name : str
+            Name of the dataset, used in error messages.
 
         Returns
         -------
@@ -141,6 +148,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 processors_configs,
                 data_indices,
                 residual_statistics,
+                dataset_name=dataset_name,
             )
         else:
             pre_processors_tendencies, post_processors_tendencies = self._build_tendency_processors(
@@ -203,10 +211,38 @@ class AnemoiModelInterface(torch.nn.Module):
         processors_configs: dict,
         data_indices: dict,
         residual_statistics: dict,
+        *,
+        dataset_name: str,
     ) -> tuple[Processors, Processors]:
-        """Build the residual pre/post-processor pair from precomputed statistics."""
+        """Build the residual pre/post-processor pair from the dataset's normaliser alone.
 
-        return self._build_processor_pair(processors_configs, data_indices, residual_statistics)
+        Imputers are left out: residuals are always computed with imputation skipped,
+        and the state processors still impute the batch. Post-processors (e.g. clamping)
+        are left out too: they act on the rebuilt state through the state processors.
+        Any other processor (e.g. a remapper) would act on the residual itself, which
+        can be negative, so it is rejected.
+        """
+        residual_configs = {}
+        for name, processor_config in processors_configs.items():
+            processor_class = get_class(processor_config["_target_"])
+            if issubclass(processor_class, (BaseImputer, Postprocessor)):
+                continue
+            if not issubclass(processor_class, InputNormalizer):
+                raise ValueError(
+                    f"Residual target '{dataset_name}' configures processor '{name}' "
+                    f"({processor_config['_target_']}). Residual processors support only the normaliser "
+                    "(imputers and post-processors apply to the state only); any other processor would be "
+                    f"applied to the residual itself. Remove it from data.datasets.{dataset_name}.processors."
+                )
+            residual_configs[name] = processor_config
+
+        if not residual_configs:
+            raise ValueError(
+                f"Residual target '{dataset_name}' has residual statistics but no normaliser in "
+                f"data.datasets.{dataset_name}.processors."
+            )
+
+        return self._build_processor_pair(residual_configs, data_indices, residual_statistics)
 
     def _build_model(self) -> None:
         """Builds the model and pre- and post-processors."""
@@ -236,6 +272,7 @@ class AnemoiModelInterface(torch.nn.Module):
                 residual_statistics=(
                     self.residual_statistics.get(dataset_name) if self.residual_statistics is not None else None
                 ),
+                dataset_name=dataset_name,
             )
             self.pre_processors[dataset_name] = pre
             self.post_processors[dataset_name] = post

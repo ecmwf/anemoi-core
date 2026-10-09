@@ -27,6 +27,9 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
+from anemoi.models.preprocessing import Processors
+from anemoi.models.preprocessing.normalizer import InputNormalizer
+from anemoi.models.preprocessing.postprocessor import Postprocessor
 from anemoi.models.transport import TransportSourceBuilder
 
 # ── helpers ────────────────────────────────────────────────────────────────────
@@ -445,11 +448,13 @@ def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnos
     indices = model.data_indices["out_hres"]
 
     residual_post = _AdditiveProcessor(offset=-10.0)
+    state_pre = _AdditiveProcessor(offset=100.0)
     state_post = _AdditiveProcessor(offset=-100.0)
 
     state = model.add_residual_to_state(
         x_reference_denorm={"out_hres": _REORDERED_REFERENCE},
         residual={"out_hres": torch.tensor([[[[[17.0, 26.0, 130.0]]]]])},
+        pre_processors_state={"out_hres": state_pre},
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
         reference_variable_name_to_column_index_by_target={"out_hres": _REORDERED_REFERENCE_COLUMNS},
@@ -459,7 +464,100 @@ def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnos
 
     # t2m: (17 - 10) + 3 = 10, u10: (26 - 10) + 4 = 20, precip: 130 - 100 = 30
     torch.testing.assert_close(state["out_hres"], torch.tensor([[[[[10.0, 20.0, 30.0]]]]]))
-    assert any(call["data_index"] == indices.data.output.diagnostic.tolist() for call in state_post.calls)
+    assert residual_post.calls[0]["data_index"] == indices.data.output.prognostic.tolist()
+    assert state_pre.calls[0]["data_index"] == indices.data.output.prognostic.tolist()
+    # The state post-processors run once, on the full state, as for a state model.
+    (state_post_call,) = state_post.calls
+    assert state_post_call["data_index"] is None
+    assert state_post_call["kwargs"]["skip_imputation"] is True
+
+
+def _real_state_and_residual_processors(indices: IndexCollection) -> tuple[Processors, Processors, Processors]:
+    """State processors with a ReLU post-processor on t2m and precip, and a normaliser-only residual pair.
+
+    The post-processor is listed before the normaliser, so it clamps in physical space.
+    """
+    state_statistics = {
+        "mean": torch.tensor([280.0, 1.0, 2.0]).numpy(),
+        "stdev": torch.tensor([10.0, 3.0, 4.0]).numpy(),
+        "minimum": torch.tensor([250.0, -20.0, 0.0]).numpy(),
+        "maximum": torch.tensor([310.0, 20.0, 50.0]).numpy(),
+    }
+    residual_statistics = {
+        "mean": torch.tensor([0.5, -0.5, 0.0]).numpy(),
+        "stdev": torch.tensor([2.0, 1.5, 1.0]).numpy(),
+        "minimum": torch.tensor([-5.0, -5.0, 0.0]).numpy(),
+        "maximum": torch.tensor([5.0, 5.0, 1.0]).numpy(),
+    }
+    normalizer_config = DictConfig({"default": "mean-std"})
+    state_processors = [
+        ["relu", Postprocessor(DictConfig({"default": "none", "relu": ["t2m", "precip"]}), indices, state_statistics)],
+        ["normalizer", InputNormalizer(normalizer_config, indices, state_statistics)],
+    ]
+    residual_processors = [["normalizer", InputNormalizer(normalizer_config, indices, residual_statistics)]]
+    return (
+        Processors(state_processors),
+        Processors(state_processors, inverse=True),
+        Processors(residual_processors, inverse=True),
+    )
+
+
+def test_add_residual_to_state_applies_state_post_processors_to_the_rebuilt_prognostics() -> None:
+    """A clamp configured on the target acts on reference + residual, not on the residual alone."""
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
+    indices = model.data_indices["out_hres"]
+    state_pre, state_post, residual_post = _real_state_and_residual_processors(indices)
+
+    # Normalized residuals: t2m -> -2 * 2 + 0.5 = -3.5, u10 -> -2 * 1.5 - 0.5 = -3.5; precip state -> -1 * 4 + 2 = -2.
+    residual = torch.tensor([[[[[-2.0, -2.0, -1.0]]]]])
+    reference = torch.tensor([[[[[1.0, 999.0, 2.0]]]]])  # u10 = 1, t2m = 2
+
+    state = model.add_residual_to_state(
+        x_reference_denorm={"out_hres": reference},
+        residual={"out_hres": residual},
+        pre_processors_state={"out_hres": state_pre},
+        post_processors_state={"out_hres": state_post},
+        post_processors_residual={"out_hres": residual_post},
+        reference_variable_name_to_column_index_by_target={"out_hres": _REORDERED_REFERENCE_COLUMNS},
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    # t2m: 2 - 3.5 = -1.5 -> clamped to 0; u10: 1 - 3.5 = -2.5 (not clamped); precip: -2 -> clamped to 0.
+    torch.testing.assert_close(state["out_hres"], torch.tensor([[[[[0.0, -2.5, 0.0]]]]]))
+
+
+def test_compute_residual_and_add_residual_to_state_round_trip_with_a_state_post_processor() -> None:
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
+    indices = model.data_indices["out_hres"]
+    state_pre, state_post, residual_post = _real_state_and_residual_processors(indices)
+    residual_pre = Processors(list(residual_post.processors.items()))
+
+    y = torch.tensor([[[[[285.0, -3.0, 4.0]]]]])  # t2m, u10, precip
+    reference = torch.tensor([[[[[-1.0, 999.0, 283.0]]]]])  # u10 = -1, t2m = 283
+    columns = {"out_hres": _REORDERED_REFERENCE_COLUMNS}
+
+    residual = model.compute_residual(
+        y={"out_hres": state_pre(y, in_place=False)},
+        x_reference_denorm={"out_hres": reference},
+        pre_processors_state={"out_hres": state_pre},
+        pre_processors_residual={"out_hres": residual_pre},
+        reference_variable_name_to_column_index_by_target=columns,
+        input_post_processor={"out_hres": state_post},
+        skip_imputation=True,
+    )
+    state = model.add_residual_to_state(
+        x_reference_denorm={"out_hres": reference},
+        residual=residual,
+        pre_processors_state={"out_hres": state_pre},
+        post_processors_state={"out_hres": state_post},
+        post_processors_residual={"out_hres": residual_post},
+        reference_variable_name_to_column_index_by_target=columns,
+        output_pre_processor=None,
+        skip_imputation=True,
+    )
+
+    torch.testing.assert_close(state["out_hres"], y)
 
 
 def test_compute_residual_raises_when_target_prognostic_missing_from_reference() -> None:
@@ -485,6 +583,7 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
     model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
 
     residual_post = _AdditiveProcessor(offset=-5.0)
+    state_pre = _AdditiveProcessor(offset=50.0)
     state_post = _AdditiveProcessor(offset=-50.0)
 
     # (batch, time, ensemble, grid, vars=3)
@@ -502,6 +601,7 @@ def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual
         model_comm_group=None,
         grid_shard_sizes=None,
         gather_out=False,
+        pre_processors={"out_hres": state_pre},
         post_processors_residual={"out_hres": residual_post},
     )
 

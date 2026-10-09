@@ -329,7 +329,11 @@ class ResidualPredictionMode(PredictionMode):
     The reference dataset of each target is the model's ``residual_reference``, a
     ``{target: reference}`` mapping set in ``model.residual_reference``.
     Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
-    normalization.
+    normalization. These hold only the target's normaliser; imputation is skipped
+    throughout, as the batch was already imputed by the state pre-processors.
+    Validation sets masked points back to NaN with the mask the target's imputer
+    recorded from the batch; inference has no such mask, see
+    :class:`~anemoi.models.models.transport_encoder_processor_decoder.AnemoiTransportSpatialDownscalerModelEncProcDec`.
     Stochastic interpolant objective is not yet supported — raises ``NotImplementedError``.
     """
 
@@ -459,6 +463,7 @@ class ResidualPredictionMode(PredictionMode):
         states = self.module.model.model.add_residual_to_state(
             x_reference_denorm=x_ref_on_target_grid,
             residual=prediction,
+            pre_processors_state=self.module.model.pre_processors,
             post_processors_state=self.module.model.post_processors,
             post_processors_residual=self.module.model.post_processors_residual,
             reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,

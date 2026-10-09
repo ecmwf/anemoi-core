@@ -1154,6 +1154,22 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
 
     ``model.residual_reference`` pairs each target with its residual reference. The target is
     not an encoder source: its noised state is encoded on the reference's anchor.
+
+    The residual processors hold only the target's normaliser, with the residual statistics;
+    imputers and post-processors are left out (post-processors act on the rebuilt state) and
+    any other processor is rejected when the interface is built.
+
+    Known limitations with missing data (imputers):
+
+    - The target's NaN mask is recorded by its imputer during training only and is not
+      stored in the checkpoint. At inference the target is never pre-processed, so the
+      output is not set back to NaN at masked points; it keeps the generated values.
+    - Diagnostic variables are never set back to NaN at inference either.
+    - The reference is projected before it is normalised and imputed, and the projector
+      has no NaN handling: a NaN on the source grid spreads to every target point that
+      draws on it. The reference's imputer then records this widened mask, not the true
+      mask of the target grid.
+    - The imputer keeps one mask per sample, taken from the first time step.
     """
 
     #: Inputs are concatenated onto the target grid and encoded together, so one
@@ -1288,7 +1304,6 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 y_denorm = input_post_proc(
                     y_denorm,
                     in_place=False,
-                    data_index=indices.data.output.full,
                     skip_imputation=skip_imputation,
                 )
 
@@ -1324,6 +1339,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         self,
         x_reference_denorm: dict[str, torch.Tensor],
         residual: dict[str, torch.Tensor],
+        pre_processors_state: dict[str, Callable],
         post_processors_state: dict[str, Callable],
         post_processors_residual: dict[str, Callable],
         reference_variable_name_to_column_index_by_target: dict[str, dict[str, int]],
@@ -1332,44 +1348,39 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     ) -> dict[str, torch.Tensor]:
         """Convert a predicted residual back to a state field.
 
-        Mirrors :meth:`AnemoiTransportTendModelEncProcDec.add_tendency_to_state`
-        but adds the projected low-resolution field to the prognostic channels
-        instead of the previous state.  Diagnostic channels are recovered via
-        the state post-processor.
+        Prognostic channels are denormalized with the residual post-processor and the
+        projected reference is added back; diagnostic channels are kept as normalized
+        state. The target's state post-processors, including any clamping
+        post-processors, then run once on the full rebuilt state.
         """
         state_outp: dict[str, torch.Tensor] = {}
         for dataset_name in residual.keys():
             indices = self.data_indices[dataset_name]
             prog_model_idx = indices.model.output.prognostic
-            diag_model_idx = indices.model.output.diagnostic
 
-            # De-normalize the whole tensor with the residual post-processor,
-            # then overwrite diagnostic channels with the state post-processed
-            # values (they were normalized as state, not as residual).
-            outp = post_processors_residual[dataset_name](
-                residual[dataset_name],
-                in_place=False,
-                data_index=indices.data.output.full,
-                skip_imputation=skip_imputation,
-            )
-            outp[..., diag_model_idx] = post_processors_state[dataset_name](
-                residual[dataset_name][..., diag_model_idx],
-                in_place=False,
-                data_index=indices.data.output.diagnostic,
-                skip_imputation=skip_imputation,
-            )
-            # Add the reference source back into the prognostic channels only,
-            # matching each target prognostic to its corresponding reference column
-            # by variable name (reference layout may differ from target).
+            # Match each target prognostic to its reference column by name (layouts may differ).
             reference_prog_col_idx = self._reference_prognostic_column_indices(
                 dataset_name,
                 reference_variable_name_to_column_index_by_target,
-                device=outp.device,
+                device=residual[dataset_name].device,
             )
-            outp[..., prog_model_idx] = outp[..., prog_model_idx] + x_reference_denorm[dataset_name].index_select(
-                -1,
-                reference_prog_col_idx,
+            prognostic_state = post_processors_residual[dataset_name](
+                residual[dataset_name][..., prog_model_idx],
+                in_place=False,
+                data_index=indices.data.output.prognostic,
+                skip_imputation=skip_imputation,
+            ) + x_reference_denorm[dataset_name].index_select(-1, reference_prog_col_idx)
+
+            # The prognostics are normalised again (they were just denormalised) so that the state
+            # post-processors, e.g. clamping, act once on the full rebuilt state and not on the residual.
+            outp = residual[dataset_name].clone()
+            outp[..., prog_model_idx] = pre_processors_state[dataset_name](
+                prognostic_state,
+                in_place=False,
+                data_index=indices.data.output.prognostic,
+                skip_imputation=skip_imputation,
             )
+            outp = post_processors_state[dataset_name](outp, in_place=False, skip_imputation=skip_imputation)
 
             output_pre_proc = output_pre_processor[dataset_name] if output_pre_processor is not None else None
             if output_pre_proc is not None:
@@ -1391,6 +1402,8 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         """Denormalize the residual reference of each target from the model input.
 
         Shared by training and inference so both build the reference identically.
+        Imputed values are kept (``skip_imputation=True``), so the reference carries the
+        imputer's fill values at masked points, never NaN.
 
         Parameters
         ----------
@@ -1526,13 +1539,15 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
         gather_out: bool = True,
+        pre_processors: Optional[dict[str, nn.Module]] = None,
         post_processors_residual: Optional[dict[str, nn.Module]] = None,
         **kwargs,
     ) -> dict[str, torch.Tensor]:
         """Turn the sampled normalized residual into a denormalized state prediction.
 
-        Prognostic channels receive the low-res source added back; diagnostic channels are
-        recovered via the state post-processor.
+        Prognostic channels receive the low-res source added back; the target's state
+        post-processors then run on the full state. Masked points are not set back to NaN:
+        the target's imputer has no mask at inference.
         """
         del kwargs
 
@@ -1547,10 +1562,12 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
             "Residual downscaler _after_sampling requires post_processors_residual "
             "(built from data.datasets.<target>.residual_statistics)."
         )
+        assert pre_processors is not None, "Residual downscaler _after_sampling requires the state pre_processors."
 
         state = self.add_residual_to_state(
             x_reference_denorm=x_ref_on_target_grid_by_target,
             residual=out,
+            pre_processors_state=pre_processors,
             post_processors_state=post_processors,
             post_processors_residual=post_processors_residual,
             reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
@@ -1706,6 +1723,7 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
                 model_comm_group,
                 grid_shard_sizes,
                 gather_out,
+                pre_processors=pre_processors,
                 post_processors_residual=post_processors_residual,
                 **kwargs,
             )
