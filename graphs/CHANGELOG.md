@@ -8,6 +8,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.9.9](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.7...graphs-0.9.9) (2026-10-09)
+
+
+### Features
+
+* **graphs:** HEALPix Node Ordering Schema Option and kwarg ([#1381](https://github.com/ecmwf/anemoi-core/issues/1381)) ([a4ba37d](https://github.com/ecmwf/anemoi-core/commit/a4ba37d58522e8528ece2658b0cf5a6d562804c8))
+
+
+### Bug Fixes
+
+* **graphs:** Pin xarray ([#1436](https://github.com/ecmwf/anemoi-core/issues/1436)) ([47c2f3e](https://github.com/ecmwf/anemoi-core/commit/47c2f3eb7843fc6641e32e1c6889c746ae253951))
+* **graphs:** Pyg-lib support ([#1407](https://github.com/ecmwf/anemoi-core/issues/1407)) ([6ae7780](https://github.com/ecmwf/anemoi-core/commit/6ae7780d33de3a2e96ec5b22e9af51a6d425b9ec))
+* **tests:** Make tests discoverable ([#1359](https://github.com/ecmwf/anemoi-core/issues/1359)) ([54db8ce](https://github.com/ecmwf/anemoi-core/commit/54db8ce706d08f1f6ce814ca40bfc2dc7dba02e1))
+* Torch2.6 compatibility ([#1383](https://github.com/ecmwf/anemoi-core/issues/1383)) ([a48ce21](https://github.com/ecmwf/anemoi-core/commit/a48ce2107ba0d14a5983344b71aab3c3653d4bfc))
+* **training, graphs:** Small fixes ([#1424](https://github.com/ecmwf/anemoi-core/issues/1424)) ([6a6f042](https://github.com/ecmwf/anemoi-core/commit/6a6f0421ccae4854ea88abe52e51c3724dd08d1b))
+* **training,models,graphs:** Bump torch version 2.11 ([#1455](https://github.com/ecmwf/anemoi-core/issues/1455)) ([e21aefd](https://github.com/ecmwf/anemoi-core/commit/e21aefd1bef8aeffaff9b19653f12315a69baf1c))
+
+
+### Miscellaneous Chores
+
+* Bump graphs 0.9.9 ([#1439](https://github.com/ecmwf/anemoi-core/issues/1439)) ([772c798](https://github.com/ecmwf/anemoi-core/commit/772c798f3909a48b13425cd38e7c3483a2ae01f4))
+
 ## [0.9.7](https://github.com/ecmwf/anemoi-core/compare/graphs-0.9.6...graphs-0.9.7) (2026-09-07)
 
 
