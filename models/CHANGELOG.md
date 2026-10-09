@@ -8,6 +8,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Please add your functional changes to the appropriate section in the PR.
 Keep it human-readable, your future self will thank you!
 
+## [0.20.0](https://github.com/ecmwf/anemoi-core/compare/models-0.19.0...models-0.20.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **models:** remove unused layer norms from TransformerMapperBlock ([#1443](https://github.com/ecmwf/anemoi-core/issues/1443))
+
+### Features
+
+* **models:** Add cross-attention aggregator for dataset latents ([#1309](https://github.com/ecmwf/anemoi-core/issues/1309)) ([f390eef](https://github.com/ecmwf/anemoi-core/commit/f390eefc743a6ff02f237ad8987a749bc027b62c))
+* **models:** Grouped ffts and explicitly backward for gaussian grids ([#1414](https://github.com/ecmwf/anemoi-core/issues/1414)) ([0bdabce](https://github.com/ecmwf/anemoi-core/commit/0bdabce5237c7debd7aef0c605c0cc51785c3467))
+* **models:** Tests for the autograd-aware communication functions in ``anemoi.models.distributed.graph`` ([#1299](https://github.com/ecmwf/anemoi-core/issues/1299)) ([868fea5](https://github.com/ecmwf/anemoi-core/commit/868fea5b30fe3360f5593edca1ce19b39023819f))
+* Spatial preprocessor ([#1305](https://github.com/ecmwf/anemoi-core/issues/1305)) ([89f26fa](https://github.com/ecmwf/anemoi-core/commit/89f26fadd5d0daa9054776b538569da80e713a20))
+
+
+### Bug Fixes
+
+* Add error when passing multiple datasets for one encoder ([#1394](https://github.com/ecmwf/anemoi-core/issues/1394)) ([a01e517](https://github.com/ecmwf/anemoi-core/commit/a01e51785811904e7e61f1152791308f87c08220))
+* Docstrings SkipConnection ([#1431](https://github.com/ecmwf/anemoi-core/issues/1431)) ([02ca484](https://github.com/ecmwf/anemoi-core/commit/02ca48436b37ccc8a60644fb3fcccc7a526553f2))
+* **models:** Decoder-only multi-dataset training for ensemble models ([#1401](https://github.com/ecmwf/anemoi-core/issues/1401)) ([6a98583](https://github.com/ecmwf/anemoi-core/commit/6a9858304a7062c2892e544d18e41948e405f42b))
+* **models:** Extend halo exchange to non-symmetric case ([#1418](https://github.com/ecmwf/anemoi-core/issues/1418)) ([2037e6f](https://github.com/ecmwf/anemoi-core/commit/2037e6f22df36f52adee9117d8dac11fc5c7d1c9))
+* **models:** Remove unused layer norms from TransformerMapperBlock ([#1443](https://github.com/ecmwf/anemoi-core/issues/1443)) ([8c3ab41](https://github.com/ecmwf/anemoi-core/commit/8c3ab419918d1935e647e9dcece2497ae704da46))
+* **models:** Skip input-only datasets in predict_step post-processing ([#1453](https://github.com/ecmwf/anemoi-core/issues/1453)) ([dd9c266](https://github.com/ecmwf/anemoi-core/commit/dd9c266ac0f67267fe19bc0c3d39372955a95bdd))
+* **models:** Spatial_pre_processors attribute access ([#1410](https://github.com/ecmwf/anemoi-core/issues/1410)) ([b52b034](https://github.com/ecmwf/anemoi-core/commit/b52b034bb562dc42a4662fbadad9b5ee2f27e81a))
+* **models:** Subset forcings using regular indexing instead of torch.index_select to fix device mismatch ([#1429](https://github.com/ecmwf/anemoi-core/issues/1429)) ([d09c61d](https://github.com/ecmwf/anemoi-core/commit/d09c61dd15995237349061eaf3630e03e20aca14))
+* **tests:** Make tests discoverable ([#1359](https://github.com/ecmwf/anemoi-core/issues/1359)) ([54db8ce](https://github.com/ecmwf/anemoi-core/commit/54db8ce706d08f1f6ce814ca40bfc2dc7dba02e1))
+* Torch2.6 compatibility ([#1383](https://github.com/ecmwf/anemoi-core/issues/1383)) ([a48ce21](https://github.com/ecmwf/anemoi-core/commit/a48ce2107ba0d14a5983344b71aab3c3653d4bfc))
+* **training,models,graphs:** Bump torch version 2.11 ([#1455](https://github.com/ecmwf/anemoi-core/issues/1455)) ([e21aefd](https://github.com/ecmwf/anemoi-core/commit/e21aefd1bef8aeffaff9b19653f12315a69baf1c))
+
+
+### Performance Improvements
+
+* **models,training:** Triton-transformer-backend ([#1444](https://github.com/ecmwf/anemoi-core/issues/1444)) ([6636d69](https://github.com/ecmwf/anemoi-core/commit/6636d6933e6252065e68bfb937e042a8761d25d7))
+
 ## [0.19.0](https://github.com/ecmwf/anemoi-core/compare/models-0.18.0...models-0.19.0) (2026-09-07)
 
 
