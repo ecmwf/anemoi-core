@@ -38,7 +38,7 @@ def test_filter_state_dict_removes_shape_mismatches() -> None:
 
 
 def test_filter_state_dict_does_not_mutate_input() -> None:
-    """Critical: PR #458 uses non-mutating filter. Legacy code mutated. We do NOT mutate."""
+    """``filter_state_dict`` returns new dicts and leaves its input unchanged."""
     source = {"a": torch.randn(3), "b": torch.randn(5)}
     target = {"a": torch.randn(3), "b": torch.randn(10)}
     original_keys = set(source.keys())

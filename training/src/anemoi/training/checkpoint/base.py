@@ -45,12 +45,10 @@ from typing import Any
 from typing import Literal
 
 if TYPE_CHECKING:
-    import logging
     from pathlib import Path
 
     import torch.nn as nn
     from omegaconf import DictConfig
-    from torch.optim import Optimizer
 
 
 @dataclass
@@ -64,24 +62,22 @@ class CheckpointContext:
 
     The context supports:
     - Checkpoint data management (path and loaded data)
-    - Model and optimizer state tracking
+    - Model tracking
     - Metadata accumulation for debugging and logging
     - Configuration passing for stage behavior
 
     Parameters
     ----------
     checkpoint_path : Path, optional
-        Local path to checkpoint file (if fetched from remote source)
+        Local path to the checkpoint file. A source's ``resolve`` step publishes
+        it (a canonical local path, or a kept download); the trainer hands it to
+        ``Trainer.fit(ckpt_path=)`` on a resume.
     checkpoint_data : dict, optional
         Loaded checkpoint data dictionary containing model weights,
         optimizer state, training metadata, etc.
     model : nn.Module, optional
         PyTorch model being modified by the pipeline. Can be either
         AnemoiModelInterface (pure PyTorch) or extracted from Task (Lightning).
-    optimizer : Optimizer, optional
-        Optional optimizer to restore state to (for warm starts)
-    scheduler : Any, optional
-        Optional learning rate scheduler to restore state to
     metadata : dict
         Dictionary of accumulated metadata from pipeline stages.
         Each stage can add information here for tracking.
@@ -92,6 +88,9 @@ class CheckpointContext:
     pl_module : pl.LightningModule, optional
         Lightning module (Task) if loading from Lightning checkpoint.
         This preserves the full Lightning context for training resumption
+    temporary_files : list of Path
+        Downloads a source kept on disk so ``Trainer.fit(ckpt_path=)`` can read
+        them. The trainer deletes them once training has finished.
 
     Examples
     --------
@@ -114,22 +113,23 @@ class CheckpointContext:
     checkpoint_path: Path | None = None
     checkpoint_data: dict[str, Any] | None = None
     model: nn.Module | None = None
-    optimizer: Optimizer | None = None
-    scheduler: Any | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
     config: DictConfig | None = None
     checkpoint_format: Literal["lightning", "pytorch", "state_dict"] | None = None
     pl_module: Any | None = None  # Type hint as Any to avoid circular imports
+    temporary_files: list[Path] = field(default_factory=list)
 
     def __post_init__(self):
-        """Validate context after initialization."""
+        """Coerce ``checkpoint_path`` to a ``Path`` after initialization.
+
+        Structural-coherence checks (format/pl_module) live in
+        :func:`anemoi.training.checkpoint.validation.validate_pipeline_health`,
+        the single post-run validation home — they are not duplicated here.
+        """
         from pathlib import Path
 
         if self.checkpoint_path is not None and not isinstance(self.checkpoint_path, Path):
             self.checkpoint_path = Path(self.checkpoint_path)
-
-        # Smart context validation
-        self._validate_context_consistency()
 
     def update_metadata(self, **kwargs) -> None:
         """Update metadata dictionary with new values.
@@ -212,73 +212,6 @@ class CheckpointContext:
         if self.metadata:
             parts.append(f"metadata_keys={list(self.metadata.keys())}")
         return f"CheckpointContext({', '.join(parts)})"
-
-    def _validate_context_consistency(self) -> None:
-        """Validate context consistency and provide smart warnings."""
-        import logging
-
-        logger = logging.getLogger(__name__)
-
-        # Split validation into smaller methods to reduce complexity
-        self._check_path_data_consistency(logger)
-        self._check_model_optimizer_consistency(logger)
-        self._check_format_consistency(logger)
-        self._check_missing_essentials(logger)
-
-    def _check_path_data_consistency(self, logger: logging.Logger) -> None:
-        """Check consistency between checkpoint path and data."""
-        if self.checkpoint_path and not self.has_checkpoint_data():
-            logger.debug(
-                "Checkpoint path provided (%s) but no checkpoint data loaded yet. "
-                "This is normal if the pipeline will load the data later.",
-                self.checkpoint_path,
-            )
-        elif not self.checkpoint_path and self.has_checkpoint_data():
-            logger.debug(
-                "Checkpoint data is loaded but no path is recorded. "
-                "This is normal for in-memory or generated checkpoints.",
-            )
-
-    def _check_model_optimizer_consistency(self, logger: logging.Logger) -> None:
-        """Check consistency between model and optimizer/scheduler."""
-        if self.optimizer is not None and self.model is None:
-            logger.warning(
-                "Optimizer provided without a model. "
-                "This may cause issues in loading stages that expect both. "
-                "Consider providing the model or removing the optimizer.",
-            )
-
-        if self.scheduler is not None and self.optimizer is None:
-            logger.warning(
-                "Learning rate scheduler provided without an optimizer. "
-                "Schedulers typically require an optimizer to be meaningful. "
-                "Consider providing the optimizer or removing the scheduler.",
-            )
-
-    def _check_format_consistency(self, logger: logging.Logger) -> None:
-        """Check format consistency with other context fields."""
-        if self.checkpoint_format == "lightning" and not self.pl_module:
-            logger.info(
-                "Lightning checkpoint format specified but no Lightning module provided. "
-                "Consider setting pl_module if you need full Lightning context restoration.",
-            )
-
-        if self.pl_module and self.checkpoint_format != "lightning":
-            logger.warning(
-                "Lightning module provided but checkpoint format is '%s', not 'lightning'. "
-                "This may cause issues with state restoration. "
-                "Consider setting checkpoint_format='lightning' or removing pl_module.",
-                self.checkpoint_format or "unspecified",
-            )
-
-    def _check_missing_essentials(self, logger: logging.Logger) -> None:
-        """Warn about potentially missing essential fields."""
-        if self.model is None and self.pl_module is None:
-            logger.info(
-                "No model or Lightning module provided in context. "
-                "Most checkpoint operations require at least a model. "
-                "Consider setting the model field before pipeline execution.",
-            )
 
     def validate_for_stage(self, stage_name: str, required_fields: list[str]) -> None:
         """Validate context for a specific pipeline stage.

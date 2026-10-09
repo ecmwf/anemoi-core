@@ -88,11 +88,11 @@ class LogsMonitor:
         artifact_save_dir : str | Path
             Directory for artifact saves.
         experiment : MLFlowLogger.experiment
-            Experiment from MLFlow
+            Experiment from MLFlow.
         run_id : str
-            Run ID
+            Run ID.
         log_time_interval : float, optional
-            Logging time interval in seconds, by default 30.0
+            Logging time interval in seconds, by default 30.0.
 
         """
         # active run
@@ -475,18 +475,11 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
                 self._check_dry_run(run)
                 mlflow_client.update_run(run_id=run_id, status="RUNNING")
                 tags["resumedRun"] = "True"
-            # This block is used when a run is forked and an existing run ID is specified
-            # Child run option is activated
-            elif config_run_id and fork_run_id:
-                parent_run_id = config_run_id  # parent_run_id which is the main run ID
-                parent_run = mlflow_client.get_run(parent_run_id)
-                run_name = parent_run.info.run_name
-                self._check_server2server_lineage(parent_run)
-                self._check_dry_run(parent_run)
-                tags["mlflow.parentRunId"] = config_run_id  # We want to be linked to the main run ID
-                tags["resumedRun"] = "True"  # We want to be linked to the main run ID
-                tags["forkedRun"] = "True"  # This is a forked run
-                tags["forkedRunId"] = fork_run_id  # This is a forked run
+            # A "fork run A into already-prepared run B" branch used to sit here, keyed
+            # on config_run_id and fork_run_id both being set. Run lineage now comes from
+            # a single ``training.checkpoint.source`` RunIdSource, which yields a resume
+            # id or a fork id but never both, so the branch became unreachable. Removed
+            # rather than left as dead code; see docs/user-guide/tracking.rst.
             # This block is used when a run is forked without no child runs
             else:
                 parent_run_id = fork_run_id
@@ -606,7 +599,7 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         Parameters
         ----------
         params : dict[str, Any] | Namespace
-            params to log
+            The hyperparameters to log.
         """
         if self._flag_log_hparams:
             params = _convert_params(params)
@@ -665,13 +658,18 @@ class BaseAnemoiMLflowLogger(MLFlowLogger, ABC):
         run_id : str
             Run ID.
         params : dict[str, Any] | Namespace
-            params to log.
+            The hyperparameters to log.
         expand_keys : list[str] | None, optional
             keys to expand within params. Any key being expanded will
             have lists converted according to `expand_iterables`,
             by default None.
-        max_params_length: int | None, optional
-            Maximum number of params to be logged to Mlflow
+        clean_params : bool, optional
+            Whether to drop redundant and irrelevant fields via
+            ``clean_config_params`` before logging, by default True. Set False to
+            log the parameters verbatim.
+        max_params_length : int | None, optional
+            Maximum number of params to be logged to MLflow. Exceeding it raises
+            ``ValueError`` rather than silently truncating.
         """
         import mlflow
         from mlflow.entities import Param

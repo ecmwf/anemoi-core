@@ -8,22 +8,26 @@
 # nor does it submit to any jurisdiction.
 
 import logging
+import warnings
+from functools import cached_property
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Never
 
 import pytest
 import torch
+from omegaconf import DictConfig
 from omegaconf import OmegaConf
-from torch_geometric.data import HeteroData
 
-from anemoi.models.layers.graph_provider import StaticGraphProvider
 from anemoi.models.preprocessing import Processors
 from anemoi.models.preprocessing import StepwiseProcessors
+from anemoi.training.checkpoint.base import CheckpointContext
+from anemoi.training.checkpoint.builder import reject_unsupported_warm_start
+from anemoi.training.checkpoint.exceptions import CheckpointConfigError
+from anemoi.training.checkpoint.sources.base import CheckpointSource
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
-from anemoi.training.utils.checkpoint import transfer_learning_loading
 
 
 class DummyIndex:
@@ -37,10 +41,12 @@ class DummyIndexWithCompare(DummyIndex):
     def __init__(self) -> None:
         super().__init__()
         self.compare_called_with: list[tuple] = []
+        self.compare_allow_subset: list[bool] = []
 
-    def compare_variables(self, ckpt_index: dict, data_index: dict) -> None:
-        """Track that compare was called."""
+    def compare_variables(self, ckpt_index: dict, data_index: dict, *, allow_subset: bool = False) -> None:
+        """Track that compare was called (and with which allow_subset)."""
         self.compare_called_with.append((ckpt_index, data_index))
+        self.compare_allow_subset.append(allow_subset)
 
 
 class DummyProcessor(torch.nn.Module):
@@ -74,28 +80,7 @@ class DummyModel(torch.nn.Module):
         self.post_processors_tendencies = torch.nn.ModuleDict({"data": post_tend})
 
 
-def _make_static_graph_provider(trainable_size: int = 2) -> StaticGraphProvider:
-    graph = HeteroData()
-    graph.edge_index = torch.tensor([[0, 1, 2, 0], [1, 0, 1, 0]], dtype=torch.long)
-    graph.edge_attr = torch.tensor([[0.0], [1.0], [2.0], [3.0]], dtype=torch.float32)
-
-    return StaticGraphProvider(
-        graph=graph,
-        edge_attributes=["edge_attr"],
-        src_size=3,
-        dst_size=2,
-        trainable_size=trainable_size,
-    )
-
-
-class DummyGraphModel(torch.nn.Module):
-    def __init__(self, trainable_size: int = 2) -> None:
-        super().__init__()
-        self.graph_provider = _make_static_graph_provider(trainable_size)
-
-
 class DummyTrainingModule(BaseTrainingModule):
-
     def __init__(self) -> None:
         pass
 
@@ -114,16 +99,9 @@ def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tende
     module.model = model
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
-        training=SimpleNamespace(
-            load_weights_only=False,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies),
-        ),
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies)),
     )
     return module
-
-
-def _make_minimal_ckpt_config() -> SimpleNamespace:
-    return SimpleNamespace(model=SimpleNamespace(processor=SimpleNamespace(num_layers=1, num_chunks=1)))
 
 
 def test_on_load_checkpoint_rebuilds_tendency_processors_for_fewer_steps() -> None:
@@ -186,144 +164,36 @@ def test_on_load_checkpoint_keeps_checkpoint_processors_when_disabled() -> None:
             assert torch.equal(state_dict[full_key], value)
 
 
-def test_transfer_learning_loading_updates_processors_when_enabled(
-    tmp_path: Path,
-) -> None:
+def test_on_load_checkpoint_applies_corrections_regardless_of_weights_initialized() -> None:
+    """The Lightning hook corrects the dict it is handed, whatever ``weights_initialized`` says.
+
+    A resume is loaded once, by ``Trainer.fit(ckpt_path=)``, which re-reads the file and
+    hands this hook the fresh dict it is about to load. Skipping the corrections on a flag
+    set by some earlier load applied them to a copy Lightning discarded, so a resume of a
+    tendency model silently reloaded the checkpoint's stale statistics. The flag must not
+    matter here: tendency processors come from the live model, metadata is restored.
+    """
     old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
     new_model = DummyModel(["6h", "12h"], offset=1.0)
 
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=True, update_tendencies=True)
-    new_state_before = new_module.state_dict()
-
     checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {"data": SimpleNamespace(name_to_index={})},
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    state_dict = new_module.state_dict()
-    assert torch.equal(
-        state_dict["model.pre_processors.data.processors.dummy.value"],
-        new_state_before["model.pre_processors.data.processors.dummy.value"],
-    )
-    assert torch.equal(
-        state_dict["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-        new_state_before["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-    )
-
-
-def test_transfer_learning_loading_preserves_checkpoint_processors_when_disabled(
-    tmp_path: Path,
-) -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {"data": SimpleNamespace(name_to_index={})},
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    state_dict = new_module.state_dict()
-    assert torch.equal(
-        state_dict["model.pre_processors.data.processors.dummy.value"],
-        old_module.state_dict()["model.pre_processors.data.processors.dummy.value"],
-    )
-    assert torch.equal(
-        state_dict["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-        old_module.state_dict()["model.pre_processors_tendencies.data._processors.6h.processors.dummy.value"],
-    )
-
-
-def test_transfer_learning_loading_populates_ckpt_indices_from_dict(tmp_path: Path) -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {
-                "era5": SimpleNamespace(name_to_index={"t2m": 0, "u10": 1}),
-                "cerra": SimpleNamespace(name_to_index={"t2m": 0, "tp": 1}),
-            },
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    assert new_module._ckpt_model_name_to_index == {
-        "era5": {"t2m": 0, "u10": 1},
-        "cerra": {"t2m": 0, "tp": 1},
+        "state_dict": {f"model.{key}": value.clone() for key, value in old_model.state_dict().items()},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
     }
 
+    module = _make_dummy_module(new_model, update_states=False, update_tendencies=True)
+    module.weights_initialized = True
 
-def test_transfer_learning_loading_filters_trainable_edge_mismatch_before_migration(tmp_path: Path) -> None:
-    new_module = _make_dummy_module(DummyGraphModel(trainable_size=2), update_states=False, update_tendencies=False)
-    trainable_key = "model.graph_provider.trainable.trainable"
-    layout_version_key = "model.graph_provider.trainable_layout_version"
-    trainable_before = new_module.state_dict()[trainable_key].clone()
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
 
-    state_dict = new_module.state_dict()
-    state_dict[trainable_key] = torch.ones(2, 2)
-    del state_dict[layout_version_key]
-
-    checkpoint = {
-        "state_dict": state_dict,
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": {"data": SimpleNamespace(name_to_index={})},
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    transfer_learning_loading(new_module, ckpt_path)
-
-    assert torch.equal(new_module.state_dict()[trainable_key], trainable_before)
-    assert new_module.state_dict()[layout_version_key].item() == 1
-
-
-def test_transfer_learning_loading_raises_on_old_checkpoint_data_indices_format(tmp_path: Path) -> None:
-    old_model = DummyModel(["6h", "12h", "18h"], offset=10.0)
-    new_model = DummyModel(["6h", "12h"], offset=1.0)
-
-    old_module = _make_dummy_module(old_model, update_states=False, update_tendencies=False)
-    new_module = _make_dummy_module(new_model, update_states=False, update_tendencies=False)
-
-    checkpoint = {
-        "state_dict": old_module.state_dict(),
-        "hyper_parameters": {
-            "config": _make_minimal_ckpt_config(),
-            "data_indices": SimpleNamespace(name_to_index={"t2m": 0, "u10": 1}),
-        },
-    }
-    ckpt_path = tmp_path / "checkpoint.pt"
-    torch.save(checkpoint, ckpt_path)
-
-    with pytest.raises(TypeError, match="older version of anemoi-core"):
-        transfer_learning_loading(new_module, ckpt_path)
+    state_dict = checkpoint["state_dict"]
+    assert not any(
+        "18h" in key for key in state_dict if key.startswith("model.pre_processors_tendencies.")
+    ), "Stale tendency processors from the checkpoint must be dropped, not preserved by the flag."
+    for key, value in new_model.state_dict().items():
+        if key.startswith(("pre_processors_tendencies.", "post_processors_tendencies.")):
+            assert torch.equal(state_dict[f"model.{key}"], value)
+    assert module._ckpt_model_name_to_index == {"data": DummyIndex().name_to_index}
 
 
 def test_validate_transfer_learning_add_dataset() -> None:
@@ -335,7 +205,10 @@ def test_validate_transfer_learning_add_dataset() -> None:
     cerra_index = DummyIndexWithCompare()
     cerra_index.name_to_index = {"t2m": 0, "tp": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index, "cerra": cerra_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index, "cerra": cerra_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(_ckpt_model_name_to_index={"era5": {"t2m": 0, "u10": 1}})
 
     # Call validation method
@@ -355,7 +228,10 @@ def test_validate_transfer_learning_swap_datasets() -> None:
     icon_index = DummyIndexWithCompare()
     icon_index.name_to_index = {"t2m": 0, "msl": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index, "icon": icon_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index, "icon": icon_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(
         _ckpt_model_name_to_index={
             "era5": {"t2m": 0, "u10": 1},
@@ -375,12 +251,37 @@ def test_validate_transfer_learning_non_dict_checkpoint_format_returns_early() -
     era5_index = DummyIndexWithCompare()
     era5_index.name_to_index = {"t2m": 0, "u10": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(_ckpt_model_name_to_index={"t2m": 0, "u10": 1})
 
     AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
 
     assert len(era5_index.compare_called_with) == 0
+
+
+def test_validate_transfer_learning_skips_a_checkpoint_without_dataset_metadata() -> None:
+    """A checkpoint that carried no ``data_indices`` leaves nothing to compare, not an AttributeError.
+
+    ``preserve_anemoi_metadata`` sets ``_ckpt_model_name_to_index`` only when the
+    checkpoint carries ``hyper_parameters.data_indices``; an inference checkpoint or a
+    raw state_dict save (the documented S3 + weights-only recipe) does not. The
+    validator runs for every loader, so it has to read the attribute defensively, as
+    the units check already does.
+    """
+    era5_index = DummyIndexWithCompare()
+    era5_index.name_to_index = {"t2m": 0}
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
+    model = torch.nn.Linear(2, 2)  # a real module: no attribute, and nn.Module raises AttributeError on access
+
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer, model)
+
+    assert era5_index.compare_called_with == []
 
 
 def test_validate_transfer_learning_remove_dataset() -> None:
@@ -389,7 +290,10 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     era5_index = DummyIndexWithCompare()
     era5_index.name_to_index = {"t2m": 0, "u10": 1}
 
-    trainer = SimpleNamespace(data_indices={"era5": era5_index})
+    trainer = SimpleNamespace(
+        data_indices={"era5": era5_index},
+        config=OmegaConf.create({"training": {}}),
+    )
     model = SimpleNamespace(
         _ckpt_model_name_to_index={
             "era5": {"t2m": 0, "u10": 1},
@@ -405,24 +309,47 @@ def test_validate_transfer_learning_remove_dataset() -> None:
     # Method completes without error (CERRA is silently ignored)
 
 
+def test_validate_transfer_learning_forwards_allow_variable_subset_flag() -> None:
+    """training.allow_variable_subset flows through to compare_variables (issue #838).
+
+    Fine-tuning into a model with FEWER variables must be opt-in: the trainer reads the
+    config flag and forwards it so compare_variables tolerates a strict variable subset.
+    """
+    ckpt_index = {"t2m": 0, "u10": 1, "v10": 2}
+    model = SimpleNamespace(_ckpt_model_name_to_index={"era5": ckpt_index})
+
+    # Gate ON: the flag is forwarded as allow_subset=True.
+    era5_on = DummyIndexWithCompare()
+    era5_on.name_to_index = {"t2m": 0, "u10": 1}
+    trainer_on = SimpleNamespace(
+        data_indices={"era5": era5_on},
+        config=OmegaConf.create({"training": {"allow_variable_subset": True}}),
+    )
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer_on, model)
+    assert era5_on.compare_allow_subset == [True]
+
+    # Default (flag absent): strict, allow_subset=False.
+    era5_off = DummyIndexWithCompare()
+    era5_off.name_to_index = {"t2m": 0, "u10": 1}
+    trainer_off = SimpleNamespace(
+        data_indices={"era5": era5_off},
+        config=OmegaConf.create({"training": {}}),
+    )
+    AnemoiTrainer._validate_transfer_learning_datasets(trainer_off, model)
+    assert era5_off.compare_allow_subset == [False]
+
+
 # ── Rollout state persistence across checkpoint save / load ───────────────────
 
 
-def _make_module_with_forecaster_task(
-    rollout_cfg: dict,
-    *,
-    load_weights_only: bool = False,
-) -> tuple[DummyTrainingModule, Forecaster]:
+def _make_module_with_forecaster_task(rollout_cfg: dict) -> tuple[DummyTrainingModule, Forecaster]:
     """Build a minimal DummyTrainingModule whose task is a Forecaster."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
     torch.nn.Module.__init__(module)
     task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout_cfg)
     module.task = task
     module.config = SimpleNamespace(  # type: ignore[assignment]
-        training=SimpleNamespace(
-            load_weights_only=load_weights_only,
-            update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
-        ),
+        training=SimpleNamespace(update_ds_stats_on_ckpt_load=_make_update_cfg(False, False)),
     )
     return module, task
 
@@ -468,19 +395,27 @@ def test_on_train_start_logs_effective_rollout_step(caplog: pytest.LogCaptureFix
     assert caplog.messages == ["Effective task rollout step: 2."]
 
 
-def test_on_load_checkpoint_load_weights_only_starts_rollout_schedule_from_config() -> None:
-    """Loading only weights starts the rollout schedule at rollout.start."""
-    module, task = _make_module_with_forecaster_task(
-        {"start": 2, "epoch_increment": 2, "maximum": 5},
-        load_weights_only=True,
-    )
+@pytest.mark.asyncio
+async def test_weights_only_pipeline_load_starts_rollout_schedule_from_config() -> None:
+    """Loading only weights starts the rollout schedule at rollout.start.
 
+    A weights-only load goes through the checkpoint pipeline at model build and never
+    calls ``on_load_checkpoint`` (the trainer withholds ``ckpt_path``), so the task's
+    runtime state in the checkpoint is never applied: the rollout schedule starts
+    where the config says, not where the checkpoint stopped.
+    """
+    from anemoi.training.checkpoint.base import CheckpointContext
+    from anemoi.training.checkpoint.loading.strategies import WeightsOnlyLoader
+
+    module, task = _make_module_with_forecaster_task({"start": 2, "epoch_increment": 2, "maximum": 5})
+    module.model = torch.nn.Linear(2, 2)
     checkpoint = {
         "task_state": {"rollout": {"step": 4, "last_increased_epoch": 3}},
         "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
-        "state_dict": {},
+        "state_dict": {f"model.{key}": value.clone() for key, value in module.model.state_dict().items()},
     }
-    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    await WeightsOnlyLoader(strict=True).process(CheckpointContext(model=module, checkpoint_data=checkpoint))
 
     assert task.rollout.step == 2
     assert task.rollout._last_increased_epoch == -1
@@ -748,6 +683,152 @@ def test_validate_transfer_learning_units_dataset_not_in_checkpoint() -> None:
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 
+# --- Tests for the opt-in checkpoint pipeline path (training.checkpoint) ---
+
+
+def test_checkpoint_pipeline_configured_detects_training_checkpoint() -> None:
+    """``_checkpoint_pipeline_configured`` is True only when training.checkpoint is set."""
+    configured = SimpleNamespace(
+        config=OmegaConf.create({"training": {"checkpoint": {"loading": {"_target_": "x"}}}}),
+    )
+    assert AnemoiTrainer._checkpoint_pipeline_configured(configured) is True
+
+    absent = SimpleNamespace(config=OmegaConf.create({"training": {}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(absent) is False
+
+
+def test_load_via_checkpoint_pipeline_fills_model_weights(tmp_path: Path) -> None:
+    """The opt-in pipeline path resolves the run checkpoint and fills the model in place.
+
+    Exercises the trainer-side wiring end to end: the RunIdSource resolves ``run_id``
+    into ``<root.parent>/<run_id>/last.ckpt`` and loads it, and the WeightsOnlyLoader
+    fills the existing model's parameter slots (fill-model semantics — same object,
+    no re-instantiation).
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
+
+    run_id = "run_A"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                        "run_id": run_id,
+                    },
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+            "system": {
+                "output": {"checkpoints": {"root": str(ckpt_dir)}},
+            },
+        },
+    )
+
+    data_indices = {"data": DummyIndex()}
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices=data_indices,
+        # A configured source means the trainer is starting from a checkpoint; the
+        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        start_from_checkpoint=True,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert result is model
+    for key, value in new_state.items():
+        assert torch.equal(result.state_dict()[key], value)
+    assert result.data_indices is data_indices
+
+
+def test_load_via_checkpoint_pipeline_keeps_current_data_indices_over_checkpoint(tmp_path: Path) -> None:
+    """``data_indices`` after a load is the CURRENT config's, never the checkpoint's.
+
+    ``data_indices`` decides which physical variable each model channel maps to, so a
+    silent swap to the checkpoint's mapping would corrupt every downstream forecast
+    without any error. This guards the trainer-side assignment
+    (``loaded_model.data_indices = self.data_indices``): even when the checkpoint
+    carries a *different* ``data_indices``, the live run's indices must win, and the
+    checkpoint's are retained only as ``_ckpt_model_name_to_index`` for the
+    transfer-learning compatibility validators.
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+
+    run_id = "run_indices"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+
+    # The checkpoint carries a DIFFERENT variable -> index mapping than the live run.
+    checkpoint_index = DummyIndex()
+    checkpoint_index.name_to_index = {"t2m": 0, "u10": 1}
+    torch.save(
+        {
+            "state_dict": {key: torch.randn_like(value) for key, value in model.state_dict().items()},
+            "hyper_parameters": {"data_indices": {"data": checkpoint_index}},
+        },
+        ckpt_dir / "last.ckpt",
+    )
+
+    # The live run uses a different mapping; it must be the one that survives.
+    current_index = DummyIndex()
+    current_index.name_to_index = {"z500": 0, "msl": 1}
+    current_data_indices = {"data": current_index}
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {
+                        "_target_": "anemoi.training.checkpoint.sources.run.RunIdSource",
+                        "run_id": run_id,
+                    },
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+            "system": {"output": {"checkpoints": {"root": str(ckpt_dir)}}},
+        },
+    )
+
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices=current_data_indices,
+        # A configured source means the trainer is starting from a checkpoint; the
+        # MLflow dry-run gate is what clears this, and that is exercised separately.
+        start_from_checkpoint=True,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    # The current config's indices win — not the checkpoint's.
+    assert result.data_indices is current_data_indices
+    assert result.data_indices["data"].name_to_index == {"z500": 0, "msl": 1}
+    # The checkpoint's mapping is quarantined for compatibility checks, never promoted
+    # to model.data_indices.
+    assert result._ckpt_model_name_to_index == {"data": {"t2m": 0, "u10": 1}}
+
+
 def test_validate_transfer_learning_units_ignore_units_option() -> None:
     """Test that ignore_units=True suppresses an otherwise-failing unit check."""
     ckpt_variables_metadata = {
@@ -772,3 +853,630 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
 
     # Should not raise because ignore_units=True
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
+
+
+# --- Keyless neutrality: the default-surface flip must not change keyless runs ---
+
+
+def test_checkpoint_pipeline_configured_false_when_keyless() -> None:
+    """No ``training.checkpoint`` key (or an explicit null) is not pipeline-configured."""
+    empty = SimpleNamespace(config=OmegaConf.create({"training": {}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(empty) is False
+
+    explicit_none = SimpleNamespace(config=OmegaConf.create({"training": {"checkpoint": None}}))
+    assert AnemoiTrainer._checkpoint_pipeline_configured(explicit_none) is False
+
+
+def test_model_property_keyless_returns_plain_model_no_warning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ``.model`` property returns the freshly instantiated module unchanged when keyless.
+
+    With no ``training.checkpoint`` block the declarative pipeline does not run and no
+    warning fires — a keyless run is a plain fresh run.
+    """
+    import anemoi.training.train.train as train_module
+
+    sentinel = torch.nn.Linear(2, 2)
+    monkeypatch.setattr(train_module, "instantiate_with_runtime_kwargs", lambda *_args, **_kwargs: sentinel)
+
+    cfg = OmegaConf.create({"training": {"method": {"_target_": "unused"}}})
+    trainer = SimpleNamespace(
+        config=cfg,
+        task=object(),
+        data_indices={"data": DummyIndex()},
+        graph_data=object(),
+        metadata={},
+        datamodule=SimpleNamespace(statistics={}, statistics_tendencies={}),
+        supporting_arrays=object(),
+    )
+    trainer._checkpoint_pipeline_configured = AnemoiTrainer._checkpoint_pipeline_configured.__get__(trainer)
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        result = AnemoiTrainer.model.func(trainer)
+
+    # Same object the instantiation returned: the pipeline branch did not run (a
+    # SimpleNamespace has no real ``_load_via_checkpoint_pipeline``, so taking it
+    # would raise), and ``simplefilter("error")`` proves silence.
+    assert result is sentinel
+
+
+_LOADERS = "anemoi.training.checkpoint.loading.strategies"
+
+
+@pytest.mark.parametrize(
+    ("checkpoint", "expected"),
+    [
+        (None, False),  # keyless: Lightning resume keeps ckpt_path
+        ({"loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.TransferLearningLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.ColdStartLoader"}}, True),
+        ({"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}, False),  # full restore keeps ckpt_path
+        ({"modifiers": [{"_target_": "x"}]}, False),  # freeze-only, no loader: resume
+    ],
+)
+def test_skip_lightning_restore_matches_loading_strategy(
+    checkpoint: dict | None,
+    expected: bool,
+) -> None:
+    """ckpt_path is suppressed for weights-style pipeline loads, kept for warm start/resume."""
+    training = {"checkpoint": checkpoint} if checkpoint is not None else {}
+    trainer = SimpleNamespace(config=OmegaConf.create({"training": training}))
+    assert AnemoiTrainer._skip_lightning_restore(trainer) is expected
+
+
+# --- Run-lineage source: training.checkpoint.source -> internal run identity ---
+
+_RUNSOURCE = "anemoi.training.checkpoint.sources.run.RunIdSource"
+_LOCALSOURCE = "anemoi.training.checkpoint.sources.local.LocalSource"
+
+
+@pytest.mark.parametrize(
+    ("source", "expected_run_id", "expected_fork_run_id"),
+    [
+        # resume -> run_id only (same MLflow run continues)
+        ({"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}, "abc", None),
+        # fork -> fork_run_id only, run_id None (fresh MLflow id via fork-solo branch)
+        ({"_target_": _RUNSOURCE, "run_id": "base999", "fork": True}, None, "base999"),
+        # RunIdSource with no run id -> no-op
+        ({"_target_": _RUNSOURCE, "run_id": None, "fork": False}, None, None),
+        # explicit path carries no run identity (fresh run loading an explicit ckpt)
+        ({"_target_": _LOCALSOURCE, "path": "/scratch/run/last.ckpt"}, None, None),
+    ],
+)
+def test_run_identity_from_config_maps_source(
+    source: dict,
+    expected_run_id: str | None,
+    expected_fork_run_id: str | None,
+) -> None:
+    """The RunIdSource surface resolves to the (run_id, fork_run_id) run identity."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    config = OmegaConf.create({"training": {"checkpoint": {"source": source}}})
+    assert run_identity_from_config(config) == (expected_run_id, expected_fork_run_id)
+
+
+def test_run_identity_from_config_noop_without_checkpoint_source() -> None:
+    """With no training.checkpoint.source, there is no run identity."""
+    from anemoi.training.checkpoint.sources.run import run_identity_from_config
+
+    assert run_identity_from_config(OmegaConf.create({"training": {}})) == (None, None)
+
+
+class _PipelineTrainer(SimpleNamespace):
+    """A trainer stub whose ``model`` builds through the real pipeline path.
+
+    ``last_checkpoint`` reads the path the source stage resolved, so it needs the model
+    built first; the stub mirrors ``AnemoiTrainer.model`` by running
+    ``_load_via_checkpoint_pipeline`` lazily, which also proves ``last_checkpoint``
+    triggers the build when it is read first (as ``AnemoiEvaluator`` does).
+    """
+
+    def __init__(self, config: DictConfig, base_model: torch.nn.Module) -> None:
+        super().__init__(
+            config=config,
+            start_from_checkpoint=True,
+            data_indices={"data": DummyIndex()},
+            parent_run_server2server=None,
+            fork_run_server2server=None,
+            _validate_transfer_learning_datasets=lambda _model: None,
+            _validate_transfer_learning_units=lambda _model: None,
+        )
+        self._base_model = base_model
+        self.pipeline_runs = 0
+
+    @cached_property
+    def model(self) -> torch.nn.Module:
+        self.pipeline_runs += 1
+        return AnemoiTrainer._load_via_checkpoint_pipeline(self, self._base_model)
+
+
+def _spy_torch_load(monkeypatch: pytest.MonkeyPatch) -> list[object]:
+    calls: list[object] = []
+    real_load = torch.load
+
+    def _spy(*args: object, **kwargs: object) -> object:
+        calls.append(args[0])
+        return real_load(*args, **kwargs)
+
+    monkeypatch.setattr(torch, "load", _spy)
+    return calls
+
+
+def test_last_checkpoint_is_the_path_the_run_source_resolved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A RunIdSource resume hands Lightning the ``last.ckpt`` the source stage found, unloaded."""
+    root = tmp_path / "ckpts" / "abc"
+    ckpt = tmp_path / "ckpts" / "abc" / "last.ckpt"
+    ckpt.parent.mkdir(parents=True)
+    torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, ckpt)
+    loads = _spy_torch_load(monkeypatch)
+    trainer = _PipelineTrainer(
+        OmegaConf.create(
+            {
+                "training": {"checkpoint": {"source": {"_target_": _RUNSOURCE, "run_id": "abc", "fork": False}}},
+                "system": {"output": {"checkpoints": {"root": str(root)}}},
+            },
+        ),
+        torch.nn.Linear(2, 2),
+    )
+
+    assert AnemoiTrainer.last_checkpoint.func(trainer) == ckpt.resolve()
+    assert trainer.pipeline_runs == 1
+    assert loads == []
+
+
+def test_last_checkpoint_expands_and_resolves_a_tilde_local_source(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``~/...`` reaches Lightning expanded and canonical, exactly as the source checked it.
+
+    ``Trainer.fit(ckpt_path=PosixPath('~/runs/last.ckpt'))`` cannot find the file; the path
+    the source resolved is the one that is handed over.
+    """
+    monkeypatch.setenv("HOME", str(tmp_path))
+    ckpt = tmp_path / "runs" / "last.ckpt"
+    ckpt.parent.mkdir()
+    torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, ckpt)
+    trainer = _PipelineTrainer(
+        OmegaConf.create(
+            {"training": {"checkpoint": {"source": {"_target_": _LOCALSOURCE, "path": "~/runs/last.ckpt"}}}},
+        ),
+        torch.nn.Linear(2, 2),
+    )
+
+    resolved = AnemoiTrainer.last_checkpoint.func(trainer)
+
+    assert resolved == ckpt.resolve()
+    assert "~" not in str(resolved)
+    assert resolved.exists()
+
+
+def test_last_checkpoint_none_when_not_starting() -> None:
+    """No source configured (start_from_checkpoint False) short-circuits to None."""
+    trainer = SimpleNamespace(start_from_checkpoint=False)
+    assert AnemoiTrainer.last_checkpoint.func(trainer) is None
+
+
+def test_resume_from_s3_keeps_the_download_for_lightning(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A remote resume: the download survives the pipeline and is what Lightning reads.
+
+    ``S3Source.resolve`` downloads to a node-local file and keeps it; ``last_checkpoint``
+    is that file; nothing is loaded in the pipeline; the trainer deletes the file after
+    training through ``_remove_temporary_checkpoints``.
+    """
+    import sys
+    from types import ModuleType
+
+    def fake_download(_url: str, target: str, *_args: object, **_kwargs: object) -> None:
+        torch.save({"state_dict": torch.nn.Linear(2, 2).state_dict()}, target)
+
+    fake_s3 = ModuleType("anemoi.utils.remote.s3")
+    fake_s3.download_file = fake_download
+    monkeypatch.setitem(sys.modules, "anemoi.utils.remote.s3", fake_s3)
+    loads = _spy_torch_load(monkeypatch)
+    trainer = _PipelineTrainer(
+        OmegaConf.create(
+            {
+                "training": {
+                    "checkpoint": {
+                        "source": {
+                            "_target_": "anemoi.training.checkpoint.sources.s3.S3Source",
+                            "url": "s3://b/k.ckpt",
+                        },
+                        "loading": {"_target_": f"{_LOADERS}.WarmStartLoader"},
+                    },
+                },
+            },
+        ),
+        torch.nn.Linear(2, 2),
+    )
+
+    resolved = AnemoiTrainer.last_checkpoint.func(trainer)
+    try:
+        assert resolved is not None
+        assert resolved.exists(), "the download must survive the pipeline for Trainer.fit(ckpt_path=)"
+        assert resolved == trainer._resolved_checkpoint_path
+        assert trainer._temporary_checkpoint_files == [resolved]
+        assert loads == []
+        assert not getattr(trainer.model, "weights_initialized", False)
+    finally:
+        AnemoiTrainer._remove_temporary_checkpoints(trainer)
+    assert not resolved.exists()
+
+
+# --- Warm-start guard: a resume needs a source; any source will do ---
+
+_REMOTE_SOURCES = [
+    "anemoi.training.checkpoint.sources.s3.S3Source",
+    "anemoi.training.checkpoint.sources.http.HTTPSource",
+]
+
+
+def _warm_start_cfg(source: dict | None) -> DictConfig:
+    """Build a ``training.checkpoint`` config with WarmStartLoader and an optional source."""
+    checkpoint: dict = {"loading": {"_target_": f"{_LOADERS}.WarmStartLoader"}}
+    if source is not None:
+        checkpoint["source"] = source
+    return OmegaConf.create({"training": {"checkpoint": checkpoint}})
+
+
+@pytest.mark.parametrize("source_target", [_LOCALSOURCE, _RUNSOURCE, *_REMOTE_SOURCES])
+def test_warm_start_accepts_any_source(source_target: str) -> None:
+    """Every source resolves to a local file for Lightning; a remote one is downloaded and kept."""
+    reject_unsupported_warm_start(_warm_start_cfg({"_target_": source_target}))  # must not raise
+
+
+def test_warm_start_rejects_missing_source() -> None:
+    """Warm start with no source has nothing to resume from and must raise."""
+    with pytest.raises(CheckpointConfigError, match=r"no training\.checkpoint\.source"):
+        reject_unsupported_warm_start(_warm_start_cfg(None))
+
+
+@pytest.mark.parametrize("source_target", _REMOTE_SOURCES)
+def test_non_warm_start_allows_remote_source(source_target: str) -> None:
+    """Weights-only loading from a remote source is fine; the guard only gates warm start."""
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": source_target},
+                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader"},
+                },
+            },
+        },
+    )
+    reject_unsupported_warm_start(cfg)  # must not raise
+
+
+# --- Downloads a source kept for Trainer.fit(ckpt_path=) are deleted after training ---
+
+
+class _KeepingSource(CheckpointSource):
+    """A source that keeps a download at ``_KeepingSource.kept`` (set per test via monkeypatch)."""
+
+    kept: Path
+
+    async def resolve(self, context: CheckpointContext) -> Path:
+        self._keep_download(context, self.kept)
+        context.checkpoint_path = self.kept
+        return self.kept
+
+    async def process(self, context: CheckpointContext) -> CheckpointContext:
+        await self._load_from_path(context, await self.resolve(context))
+        return context
+
+
+def test_load_via_checkpoint_pipeline_records_temporary_files(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The trainer keeps the list of downloads the source stage left on disk."""
+    kept = tmp_path / "download.ckpt"
+    torch.save({"state_dict": {}}, kept)
+    monkeypatch.setattr(_KeepingSource, "kept", kept, raising=False)
+
+    model = torch.nn.Linear(2, 2)
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": f"{__name__}._KeepingSource"},
+                    "loading": {
+                        "_target_": "anemoi.training.checkpoint.loading.strategies.WeightsOnlyLoader",
+                        "strict": False,
+                    },
+                },
+            },
+        },
+    )
+    trainer = SimpleNamespace(
+        config=cfg,
+        start_from_checkpoint=True,
+        data_indices={"data": DummyIndex()},
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert trainer._temporary_checkpoint_files == [kept]
+    assert kept.exists(), "the download must survive the pipeline for Trainer.fit(ckpt_path=)"
+
+
+def test_remove_temporary_checkpoints_deletes_the_recorded_downloads(tmp_path: Path) -> None:
+    """After training the kept downloads are removed; a missing one is not an error."""
+    present = tmp_path / "present.ckpt"
+    present.write_bytes(b"x")
+    gone = tmp_path / "gone.ckpt"
+
+    trainer = SimpleNamespace(_temporary_checkpoint_files=[present, gone])
+    AnemoiTrainer._remove_temporary_checkpoints(trainer)
+
+    assert not present.exists()
+    assert trainer._temporary_checkpoint_files == []
+
+
+def test_remove_temporary_checkpoints_without_a_pipeline_run_is_a_noop() -> None:
+    """A keyless run never recorded downloads; cleanup must still be safe to call."""
+    trainer = SimpleNamespace()
+    AnemoiTrainer._remove_temporary_checkpoints(trainer)
+    assert trainer._temporary_checkpoint_files == []
+
+
+def test_keep_download_registers_the_atexit_backstop(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A kept download is registered with atexit so a job that never reaches fit() still cleans up."""
+    import atexit
+
+    from anemoi.training.checkpoint.sources.base import remove_temporary_file
+
+    registered: list[tuple[object, tuple]] = []
+    monkeypatch.setattr(atexit, "register", lambda func, *args: registered.append((func, args)))
+    kept = tmp_path / "download.ckpt"
+    kept.write_bytes(b"x")
+    monkeypatch.setattr(_KeepingSource, "kept", kept, raising=False)
+
+    context = CheckpointContext()
+    _KeepingSource()._keep_download(context, kept)
+
+    assert registered == [(remove_temporary_file, (kept,))]
+    assert context.temporary_files == [kept]
+
+
+def _training_config_for_train() -> DictConfig:
+    """The config keys ``AnemoiTrainer.train`` reads before and after ``trainer.fit``."""
+    return OmegaConf.create(
+        {
+            "training": {
+                "deterministic": False,
+                "precision": "32",
+                "max_epochs": 1,
+                "max_steps": None,
+                "num_sanity_val_steps": 0,
+                "accum_grad_batches": 1,
+                "gradient_clip": {"val": 0.0, "algorithm": "value"},
+            },
+            "diagnostics": {
+                "debug": {"anomaly_detection": False},
+                "log": {"interval": 1},
+                "enable_checkpointing": True,
+                "enable_progress_bar": False,
+                "print_memory_summary": False,
+            },
+            "system": {"hardware": {"num_gpus_per_node": 1, "num_nodes": 1}},
+            "dataloader": {"limit_batches": {"training": 1, "validation": 1}},
+            "model": {},
+        },
+    )
+
+
+@pytest.mark.parametrize("fit_raises", [False, True])
+def test_train_removes_kept_downloads_after_fit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    fit_raises: bool,
+) -> None:
+    """``train()`` deletes the kept downloads once ``fit`` returns, and also when it raises."""
+    import anemoi.training.train.train as train_module
+
+    kept = tmp_path / "download.ckpt"
+    kept.write_bytes(b"x")
+    fit_calls: list[dict] = []
+
+    class _FakeTrainer:
+        def __init__(self, **_kwargs: object) -> None:
+            pass
+
+        def fit(self, **kwargs: object) -> None:
+            fit_calls.append(kwargs)
+            if fit_raises:
+                msg = "boom"
+                raise RuntimeError(msg)
+
+    monkeypatch.setattr(train_module.pl, "Trainer", _FakeTrainer)
+    monkeypatch.setattr(train_module, "prepare_compilation", lambda model, *_args: model)
+    trainer = SimpleNamespace(
+        config=_training_config_for_train(),
+        accelerator="cpu",
+        callbacks=[],
+        strategy=None,
+        profiler=None,
+        logger=False,
+        model=torch.nn.Linear(2, 2),
+        fit_parameters={"ckpt_path": kept},
+        _temporary_checkpoint_files=[kept],
+    )
+    trainer._remove_temporary_checkpoints = AnemoiTrainer._remove_temporary_checkpoints.__get__(trainer)
+
+    if fit_raises:
+        with pytest.raises(RuntimeError, match="boom"):
+            AnemoiTrainer.train(trainer)
+    else:
+        AnemoiTrainer.train(trainer)
+
+    assert fit_calls == [{"ckpt_path": kept}]
+    assert not kept.exists()
+    assert trainer._temporary_checkpoint_files == []
+
+
+@pytest.mark.parametrize(
+    ("loading", "expect_ckpt_path"),
+    [
+        (None, True),
+        (f"{_LOADERS}.WarmStartLoader", True),
+        (f"{_LOADERS}.WeightsOnlyLoader", False),
+    ],
+)
+def test_fit_parameters_hands_the_resolved_path_to_lightning_only_on_resume(
+    tmp_path: Path,
+    loading: str | None,
+    expect_ckpt_path: bool,
+) -> None:
+    """``Trainer.fit(ckpt_path=)`` receives ``last_checkpoint`` on a resume and ``None`` after a pipeline load."""
+    resolved = tmp_path / "last.ckpt"
+    checkpoint: dict = {"source": {"_target_": _LOCALSOURCE, "path": str(resolved)}}
+    if loading is not None:
+        checkpoint["loading"] = {"_target_": loading}
+    trainer = SimpleNamespace(
+        config=OmegaConf.create({"training": {"checkpoint": checkpoint}}),
+        model=torch.nn.Linear(2, 2),
+        datamodule=object(),
+        last_checkpoint=resolved,
+    )
+    trainer._skip_lightning_restore = AnemoiTrainer._skip_lightning_restore.__get__(trainer)
+
+    params = AnemoiTrainer.fit_parameters.func(trainer)
+
+    assert params["ckpt_path"] == (resolved if expect_ckpt_path else None)
+    assert params["model"] is trainer.model
+
+
+def test_on_load_checkpoint_writes_a_replaced_dict_back_in_place(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Lightning holds the dict it passed in; a replacement from the corrections must land in that object."""
+    import anemoi.training.train.methods.base as methods_base
+
+    replacement = {
+        "state_dict": {"replaced": torch.ones(1)},
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+    monkeypatch.setattr(methods_base, "apply_checkpoint_corrections", lambda *_args, **_kwargs: replacement)
+    module = _make_dummy_module(DummyModel(["6h"], offset=1.0), update_states=False, update_tendencies=False)
+    checkpoint = {"state_dict": {"stale": torch.zeros(1)}, "hyper_parameters": {"data_indices": {"data": DummyIndex()}}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "stale" not in checkpoint["state_dict"]
+    assert torch.equal(checkpoint["state_dict"]["replaced"], torch.ones(1))
+
+
+# --- The resume hook reports an incomplete migration ledger (finding 3 on the Lightning path) ---
+
+
+def _shipped_migration_names() -> list[str]:
+    from anemoi.models.migrations import Migrator
+
+    return [migration.name for migration in Migrator()._grouped_migrations[-1]]
+
+
+def _ledger(*names: str) -> list[dict]:
+    from anemoi.models.migrations.migrator import MigrationMetadata
+
+    return [
+        {
+            "name": name,
+            "metadata": MigrationMetadata(versions={"migration": "1.0.0", "anemoi-models": "0.11.0"}),
+            "signature": f"signature-of-{name}",
+        }
+        for name in names
+    ]
+
+
+def _resume_checkpoint(names: list[str]) -> dict:
+    return {
+        "state_dict": {},
+        "pytorch-lightning_version": "2.6.5",
+        "migrations": _ledger(*names),
+        "hyper_parameters": {"data_indices": {"data": DummyIndex()}},
+    }
+
+
+def test_on_load_checkpoint_warns_about_an_incomplete_ledger_and_names_the_resume_file(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """On a resume the hook is the only correction pass, so the ledger check lives there too.
+
+    The warning names the outstanding migrations and the file Lightning is resuming
+    from (``trainer.ckpt_path``), and the load proceeds: metadata is still restored.
+    """
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    module._trainer = SimpleNamespace(ckpt_path="/runs/abc/last.ckpt", datamodule=None)
+    checkpoint = _resume_checkpoint(_shipped_migration_names()[:3])
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "behind the installed anemoi-models" in caplog.text
+    for name in _shipped_migration_names()[3:]:
+        assert name in caplog.text
+    assert "anemoi-models migration sync /runs/abc/last.ckpt" in caplog.text
+    assert module._ckpt_model_name_to_index == {"data": {}}
+
+
+def test_on_load_checkpoint_is_quiet_for_an_up_to_date_ledger(caplog: pytest.LogCaptureFixture) -> None:
+    """The common case, a checkpoint written by the installed anemoi-models, produces no warning."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    checkpoint = _resume_checkpoint(_shipped_migration_names())
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert "behind the installed anemoi-models" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_load_via_checkpoint_pipeline_works_inside_a_running_event_loop(tmp_path: Path) -> None:
+    """Building the model from an already-async context must not raise.
+
+    The pipeline runs inside a ``cached_property``, so ``asyncio.run`` there raised
+    ``RuntimeError: asyncio.run() cannot be called from a running event loop`` for
+    anyone constructing the trainer from a Jupyter kernel, an asyncio job launcher,
+    or an ``async def test_`` (which this repo's ``asyncio_mode = auto`` makes a
+    one-line trap). ``CheckpointPipeline.execute_sync`` exists precisely to detect a
+    running loop and offload to a thread; it had no caller.
+
+    Being an ``async def`` test IS the reproduction: pytest-asyncio runs it in a live
+    loop, so the old call raises here and the new one does not.
+    """
+    torch.manual_seed(0)
+    model = torch.nn.Linear(4, 2)
+    new_state = {key: torch.randn_like(value) for key, value in model.state_dict().items()}
+
+    run_id = "run_async"
+    ckpt_dir = tmp_path / run_id
+    ckpt_dir.mkdir(parents=True)
+    torch.save({"state_dict": new_state}, ckpt_dir / "last.ckpt")
+
+    cfg = OmegaConf.create(
+        {
+            "training": {
+                "checkpoint": {
+                    "source": {"_target_": _RUNSOURCE, "run_id": run_id},
+                    "loading": {"_target_": f"{_LOADERS}.WeightsOnlyLoader", "strict": False},
+                },
+            },
+            "system": {"output": {"checkpoints": {"root": str(ckpt_dir)}}},
+        },
+    )
+    trainer = SimpleNamespace(
+        config=cfg,
+        data_indices={"data": DummyIndex()},
+        start_from_checkpoint=True,
+        parent_run_server2server=None,
+        fork_run_server2server=None,
+        _validate_transfer_learning_datasets=lambda _model: None,
+        _validate_transfer_learning_units=lambda _model: None,
+    )
+
+    result = AnemoiTrainer._load_via_checkpoint_pipeline(trainer, model)
+
+    assert result is model
+    for key, value in new_state.items():
+        assert torch.equal(result.state_dict()[key], value)

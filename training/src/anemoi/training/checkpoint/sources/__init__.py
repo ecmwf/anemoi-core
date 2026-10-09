@@ -12,11 +12,13 @@
 from .base import CheckpointSource
 from .http import HTTPSource
 from .local import LocalSource
+from .run import RunIdSource
 from .s3 import S3Source
 
 __all__ = [
     "CheckpointSource",
     "HTTPSource",
     "LocalSource",
+    "RunIdSource",
     "S3Source",
 ]
