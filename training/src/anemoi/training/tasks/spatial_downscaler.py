@@ -45,7 +45,7 @@ class SpatialDownscaler(BaseSingleStepTask):
         )
         self.input_datasets = input_datasets
         self.target_datasets = target_datasets
-        # No-op placeholder; a proper adapter will be added with downscaling diagnostics.
+        # Rejects plot callbacks until downscaling diagnostics exist.
         self._plot_adapter = SpatialDownscalerPlotAdapter(self)
 
     def validate_dataset_roles(self, input_datasets: list[str], target_datasets: list[str]) -> None:

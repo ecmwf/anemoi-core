@@ -32,6 +32,8 @@ if TYPE_CHECKING:
 class BasePlotAdapter(ABC):
     """Abstract plotting contract. Subclasses define output_times, get_init_step, iter_plot_samples."""
 
+    supports_plotting: bool = True
+
     def __init__(self, task: BaseTask) -> None:
         self._task = task
 
@@ -134,17 +136,19 @@ class TemporalDownscalerPlotAdapter(BasePlotAdapter):
 class SpatialDownscalerPlotAdapter(BasePlotAdapter):
     """Plot Adapter placeholder for SpatialDownscaler Task.
 
-    The downscaler predicts a single hres snapshot per sample; a proper adapter
-    will be added with downscaling-specific diagnostics.
+    Plotting is not supported yet: inputs and targets live on different grids, which
+    the plot callbacks cannot handle. Plot callbacks are rejected at fit start.
     """
+
+    supports_plotting = False
 
     def get_init_step(self) -> int:
         return 0
 
     def iter_plot_samples(self, data: Any, output_tensor: Any) -> Iterator[tuple[Any, Any, Any, str]]:
-        sample = data[0, ...].squeeze()
-        pred = output_tensor[0, ...].squeeze() if hasattr(output_tensor, "squeeze") else output_tensor
-        yield sample, sample, pred, "downscale"
+        del data, output_tensor
+        msg = f"Plotting is not supported yet for the '{self._task.name}' task."
+        raise NotImplementedError(msg)
 
 
 class AutoencoderPlotAdapter(BasePlotAdapter):
@@ -171,6 +175,10 @@ class EnsemblePlotAdapterWrapper(BasePlotAdapter):
     @property
     def is_ensemble(self) -> bool:
         return True
+
+    @property
+    def supports_plotting(self) -> bool:
+        return self._inner.supports_plotting
 
     @property
     def default_plot_members(self) -> int | list[int] | None:

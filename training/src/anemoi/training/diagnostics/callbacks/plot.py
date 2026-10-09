@@ -249,8 +249,14 @@ class BasePlotCallback(Callback, ABC):
             self._executor = SyncPlotExecutor()
 
     def on_fit_start(self, trainer: pl.Trainer, pl_module: pl.LightningModule) -> None:
-        """Check for NCCL timeout risk with asynchronous plotting."""
-        del pl_module
+        """Reject tasks without plotting support and check for NCCL timeout risk with asynchronous plotting."""
+        plot_adapter = getattr(pl_module, "plot_adapter", None)
+        if plot_adapter is not None and not plot_adapter.supports_plotting:
+            msg = (
+                f"Plotting is not supported yet for the '{plot_adapter._task.name}' task, but "
+                f"{type(self).__name__} is configured. Set diagnostics.plot.callbacks to []."
+            )
+            raise NotImplementedError(msg)
         if self.asynchronous:
             read_group_size = trainer.strategy.read_group_size
             if read_group_size > 1:

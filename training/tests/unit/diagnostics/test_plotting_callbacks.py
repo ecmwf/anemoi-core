@@ -20,6 +20,7 @@ import pytest
 import torch
 
 from anemoi.training.diagnostics.callbacks.plot import BatchOutputPlot
+from anemoi.training.diagnostics.callbacks.plot import GraphFeaturePlot
 from anemoi.training.diagnostics.callbacks.plot import LossCurvePlot
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
 from anemoi.training.diagnostics.callbacks.plot_adapter import ForecasterPlotAdapter
@@ -31,6 +32,7 @@ from anemoi.training.diagnostics.evaluation.plotting.graph import get_edge_train
 from anemoi.training.diagnostics.evaluation.plotting.loss import loss_plot_fn
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
+from anemoi.training.tasks.spatial_downscaler import SpatialDownscaler
 from anemoi.training.train.step_output import TrainingStepOutput
 from anemoi.training.utils.masks import NoOutputMask
 
@@ -1200,6 +1202,30 @@ def test_base_adapter_prepare_loss_batch_is_noop():
 
     result = inner.prepare_loss_batch(batch)
     assert torch.equal(result["data"], batch["data"])
+
+
+def _spatial_downscaler_task() -> SpatialDownscaler:
+    return SpatialDownscaler(input_datasets=["in_lres"], target_datasets=["out_hres"])
+
+
+@pytest.mark.parametrize(
+    "make_callback",
+    [
+        partial(PlotSample, sample_idx=0, parameters=["a"], accumulation_levels_plot=[0.5]),
+        partial(LossCurvePlot, parameter_groups={}),
+        GraphFeaturePlot,
+    ],
+    ids=["batch_output", "loss_curve", "graph_feature"],
+)
+@pytest.mark.parametrize("ensemble", [False, True], ids=["deterministic", "ensemble"])
+def test_plot_callbacks_fail_at_fit_start_for_tasks_without_plotting_support(make_callback, ensemble):
+    """Fail before training starts rather than at the first plotting step."""
+    adapter = _spatial_downscaler_task()._plot_adapter
+    pl_module = MagicMock()
+    pl_module.plot_adapter = EnsemblePlotAdapterWrapper(adapter) if ensemble else adapter
+
+    with pytest.raises(NotImplementedError, match=r"spatial_downscaler.*diagnostics\.plot\.callbacks"):
+        make_callback().on_fit_start(MagicMock(), pl_module)
 
 
 def test_ensemble_plot_ens_sample_instantiation():
