@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 import datetime
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -53,27 +54,15 @@ def test_multiple_offsets_parsed_correctly() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_batch_input_indices_match_batch_output_indices() -> None:
-    """For identical multiple offsets, input and output batch positions are identical."""
-    task = SpatialDownscaler(
-        input_datasets=["in_lres"],
-        target_datasets=["out_hres"],
-        input_offsets=["0H", "6H"],
-        output_offsets=["0H", "6H"],
-    )
-    assert task.get_batch_input_indices() == task.get_batch_output_indices()
-
-
-def test_batch_indices_are_zero_indexed_positions() -> None:
-    """Batch indices map each offset to its position in the sorted offset list."""
+def test_batch_indices_are_the_positions_of_the_shared_offsets() -> None:
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
         target_datasets=["out_hres"],
         input_offsets=["0H", "6H", "12H"],
         output_offsets=["0H", "6H", "12H"],
     )
-    # All offsets go into a single shared _offsets list, so positions are 0, 1, 2.
     assert task.get_batch_input_indices() == [0, 1, 2]
+    assert task.get_batch_output_indices() == [0, 1, 2]
 
 
 # ---------------------------------------------------------------------------
@@ -107,79 +96,24 @@ def test_validate_dataset_roles_rejects_targets_the_model_does_not_predict() -> 
 # ---------------------------------------------------------------------------
 
 
-def _make_batch(dataset_names: list[str], num_times: int, grid: int, nvar: int) -> dict[str, torch.Tensor]:
-    """Create a minimal fake batch with shape (bs=1, num_times, ensemble=1, grid, nvar)."""
-    return {name: torch.randn(1, num_times, 1, grid, nvar) for name in dataset_names}
-
-
-class _FakeIndices:
-    """Minimal stand-in for IndexCollection that exposes data.input.full."""
-
-    def __init__(self, nvar: int) -> None:
-        self.data = _FakeData(nvar)
-
-
-class _FakeData:
-    def __init__(self, nvar: int) -> None:
-        self.input = _FakeInput(nvar)
-
-
-class _FakeInput:
-    def __init__(self, nvar: int) -> None:
-        self.full = torch.arange(nvar)
-
-
-def test_get_inputs_filters_to_input_datasets_only() -> None:
-    """get_inputs returns only input_datasets and skips target_datasets."""
+def test_get_inputs_and_get_targets_split_the_batch_by_role_and_keep_every_offset() -> None:
+    n_offsets, nvar = 3, 4
     task = SpatialDownscaler(
         input_datasets=["in_lres", "in_hres"],
-        target_datasets=["out_hres"],
-    )
-    batch = _make_batch(["in_lres", "in_hres", "out_hres"], num_times=1, grid=10, nvar=4)
-    data_indices = {name: _FakeIndices(4) for name in batch}
-    x = task.get_inputs(batch, data_indices=data_indices)
-    assert set(x.keys()) == {"in_lres", "in_hres"}
-    assert "out_hres" not in x
-
-
-def test_get_targets_filters_to_target_datasets_only() -> None:
-    """get_targets returns only target_datasets and skips input-only datasets."""
-    task = SpatialDownscaler(
-        input_datasets=["in_lres", "in_hres"],
-        target_datasets=["out_hres"],
-    )
-    batch = _make_batch(["in_lres", "in_hres", "out_hres"], num_times=1, grid=10, nvar=4)
-    y = task.get_targets(batch)
-    assert set(y.keys()) == {"out_hres"}
-    assert "in_lres" not in y
-
-
-def test_get_inputs_multi_offset_time_dimension() -> None:
-    """With N offsets, the time dimension of extracted inputs has length N."""
-    n_offsets = 3
-    task = SpatialDownscaler(
-        input_datasets=["in_lres"],
         target_datasets=["out_hres"],
         input_offsets=["0H", "6H", "12H"],
         output_offsets=["0H", "6H", "12H"],
     )
-    batch = _make_batch(["in_lres", "out_hres"], num_times=n_offsets, grid=8, nvar=5)
-    data_indices = {"in_lres": _FakeIndices(5), "out_hres": _FakeIndices(5)}
+    batch = {name: torch.randn(1, n_offsets, 1, 10, nvar) for name in ("in_lres", "in_hres", "out_hres")}
+    indices = SimpleNamespace(data=SimpleNamespace(input=SimpleNamespace(full=torch.arange(nvar))))
+    data_indices = dict.fromkeys(batch, indices)
+
     x = task.get_inputs(batch, data_indices=data_indices)
+    y = task.get_targets(batch)
+
+    assert set(x) == {"in_lres", "in_hres"}
+    assert set(y) == {"out_hres"}
     assert x["in_lres"].shape[1] == n_offsets
-
-
-def test_get_targets_multi_offset_time_dimension() -> None:
-    """With N offsets, the time dimension of extracted targets has length N."""
-    n_offsets = 3
-    task = SpatialDownscaler(
-        input_datasets=["in_lres"],
-        target_datasets=["out_hres"],
-        input_offsets=["0H", "6H", "12H"],
-        output_offsets=["0H", "6H", "12H"],
-    )
-    batch = _make_batch(["in_lres", "out_hres"], num_times=n_offsets, grid=8, nvar=5)
-    y = task.get_targets(batch)
     assert y["out_hres"].shape[1] == n_offsets
 
 
@@ -200,11 +134,11 @@ def _make_metadata_dict(dataset_names: list[str]) -> dict:
     }
 
 
-def test_fill_metadata_records_the_offsets_explicitly() -> None:
-    """Inference derives every offset from ``timestep`` unless they are explicit.
+def test_fill_metadata_records_explicit_offsets_no_feedback_and_no_rollout_shift() -> None:
+    """With ``timestep: 0H`` inference would derive all offsets as zero, so they must be explicit.
 
-    ``timestep`` is ``"0H"`` because the model does not advance time, so the
-    derived offsets would all collapse to zero and no input could be retrieved.
+    Downscaling is not autoregressive (empty advance map), and the stride between
+    windows is an inference choice, so no ``rollout_shift`` is written.
     """
     task = SpatialDownscaler(
         input_datasets=["in_lres"],
@@ -220,32 +154,5 @@ def test_fill_metadata_records_the_offsets_explicitly() -> None:
     assert timesteps["timestep"] == "0H"
     assert timesteps["input_offsets"] == ["0h", "6h"]
     assert timesteps["output_offsets"] == ["6h"]
-
-
-def test_fill_metadata_states_that_there_is_no_feedback() -> None:
-    """Downscaling is not autoregressive; the derived advance map would invent one."""
-    task = SpatialDownscaler(input_datasets=["in_lres"], target_datasets=["out_hres"])
-    md_dict = _make_metadata_dict(["in_lres", "out_hres"])
-
-    task.fill_metadata(md_dict)
-
+    assert "rollout_shift" not in timesteps
     assert md_dict["metadata_inference"]["in_lres"]["timesteps"]["advance_map"] == {"inin": [], "outin": []}
-
-
-def test_fill_metadata_writes_no_rollout_shift() -> None:
-    """The stride between windows is an inference choice, not a training fact.
-
-    Training draws overlapping windows at the dataset frequency, so nothing
-    here determines how far inference should jump to the next window.
-    """
-    task = SpatialDownscaler(
-        input_datasets=["in_lres"],
-        target_datasets=["out_hres"],
-        input_offsets=["0H", "6H"],
-        output_offsets=["0H", "6H"],
-    )
-    md_dict = _make_metadata_dict(["in_lres", "out_hres"])
-
-    task.fill_metadata(md_dict)
-
-    assert "rollout_shift" not in md_dict["metadata_inference"]["out_hres"]["timesteps"]

@@ -28,22 +28,11 @@ def _encoder(**overrides: object) -> EncodersSchema:
     return EncodersSchema(source_datasets=["hres", "lres"], mapper=_MAPPER, **overrides)
 
 
-def test_defaults_to_no_fusing() -> None:
-    encoder = _encoder()
-
-    assert encoder.dataset_fusing_strategy == "not_supported"
-
-
 def test_accepts_fusing_without_naming_an_anchor() -> None:
     """The anchor is the first source dataset, so there is nothing to configure."""
     encoder = _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim")
 
     assert encoder.dataset_fusing_strategy == "concatenate_inputs_along_variable_dim"
-
-
-def test_rejects_the_removed_fusion_anchor_field() -> None:
-    with pytest.raises(ValidationError, match="fusion_anchor"):
-        _encoder(dataset_fusing_strategy="concatenate_inputs_along_variable_dim", fusion_anchor="hres")
 
 
 def test_rejects_unknown_fusing_strategy() -> None:

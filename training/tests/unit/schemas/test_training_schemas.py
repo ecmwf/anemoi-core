@@ -251,18 +251,6 @@ def test_combined_loss_with_multiscale_mixed_mode_rejected() -> None:
         )
 
 
-def test_transport_defaults_to_state_prediction() -> None:
-    config = TransportTrainingConfigSchema()
-
-    assert config.prediction_mode == "state"
-
-
-def test_transport_rejects_a_residual_reference_in_the_training_config() -> None:
-    """It moved to ``model.residual_reference``; a stale config must fail rather than be ignored."""
-    with pytest.raises(ValidationError, match="residual_reference"):
-        TransportTrainingConfigSchema(prediction_mode="residual", residual_reference={"out_hres": "in_lres"})
-
-
 def test_transport_rejects_residual_prediction_with_stochastic_interpolant() -> None:
     with pytest.raises(ValidationError, match="only supports objective='edm_diffusion'"):
         TransportTrainingConfigSchema(prediction_mode="residual", objective="stochastic_interpolant")

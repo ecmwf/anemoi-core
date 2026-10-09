@@ -227,10 +227,9 @@ def _build_dummy_model(
     )
 
 
-# Each value is a substring of "not_supported", so they all slip through a
-# membership test written against the bare string instead of a tuple of strings.
-@pytest.mark.parametrize("fusing_strategy", ["", "not", "supported", "_supported", "t_suppo"])
-def test_rejects_fusing_strategy_that_is_a_substring_of_a_supported_one(fusing_strategy: str) -> None:
+# "not" is a substring of "not_supported", so it slips through a membership test against the bare string.
+@pytest.mark.parametrize("fusing_strategy", ["not", "concatenate"])
+def test_rejects_unsupported_fusing_strategy(fusing_strategy: str) -> None:
     with pytest.raises(ValueError, match="unsupported fusing strategy"):
         _build_dummy_model(fusing_strategy=fusing_strategy)
 

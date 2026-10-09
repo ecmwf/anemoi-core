@@ -2707,20 +2707,11 @@ def test_single_compute_metrics_produces_per_step_key_suffix(
 
 # ── ResidualPredictionMode ────────────────────────────────────────────────────
 #
-# ResidualPredictionMode expects the batch to be already normalized (like every
-# other prediction mode).  It denormalizes the projected lres and the target,
-# subtracts them to obtain the raw residual, and then renormalizes the residual
-# with the residual (tendency-space) pre-processor.  Reconstruction is the
-# inverse of that flow.  The tests below use additive processors so the
-# round-trip can be verified numerically.
+# Additive processors make the residual arithmetic easy to verify numerically.
 
 
 class _AdditiveProcessor:
-    """Toy processor: forward adds ``offset``; called with ``in_place=False``.
-
-    Ignores extra kwargs (``data_index``, ``skip_imputation``, ...) so the same
-    stub can stand in for either state or tendency pre/post-processors.
-    """
+    """Toy processor that adds ``offset`` and records the kwargs of each call."""
 
     def __init__(self, offset: float) -> None:
         self.offset = offset
@@ -2728,195 +2719,111 @@ class _AdditiveProcessor:
 
     def __call__(self, x: torch.Tensor, in_place: bool = True, **kwargs: Any) -> torch.Tensor:
         assert in_place is False, "ResidualPredictionMode must call processors with in_place=False."
-        self.calls.append({"x_shape": tuple(x.shape), "kwargs": kwargs})
+        self.calls.append({"kwargs": kwargs})
         return x + self.offset
 
 
 def _make_residual_module(
     *,
-    pre_offset: float,
-    post_offset: float,
-    tend_pre_offset: float,
-    tend_post_offset: float,
-    lres_name: str = "in_lres",
-    target_name: str = "out",
-    name_to_index: dict[str, int] | None = None,
-    diagnostic: list[str] | None = None,
-) -> tuple[SimpleNamespace, dict[str, _AdditiveProcessor]]:
-    """Build a minimal fake module exposing the surface used by ResidualPredictionMode.
+    state_offset: float = 0.0,
+    residual_offset: float = 0.0,
+) -> SimpleNamespace:
+    """Minimal training module for ResidualPredictionMode with target ``out`` and reference ``in_lres``.
 
-    - ``spatial_pre_processors`` is keyed by ``lres_name`` (the presence of the
-      key is what identifies the lres dataset).
-    - ``pre_processors`` / ``post_processors`` are keyed per dataset (state).
-    - ``pre_processors_residual`` / ``post_processors_residual`` provide the
-      residual normalization statistics (zero lead-time).  The historical
-      ``tend_pre`` / ``tend_post`` keys in the returned processor dict alias
-      the residual pair — kept for readability in the test bodies.
-    - ``model.model`` is a real ``AnemoiTransportSpatialDownscalerModelEncProcDec``
-      built via ``__new__`` — only ``data_indices`` is wired, because that is
-      all ``compute_residual`` / ``add_residual_to_state`` need.
+    Pre-processors add the offset and post-processors subtract it. ``model.model`` is a
+    real downscaler shell so ``compute_residual`` / ``add_residual_to_state`` are exercised.
     """
     from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 
-    processors = {
-        "state_pre": {name: _AdditiveProcessor(pre_offset) for name in (lres_name, target_name)},
-        "state_post": {name: _AdditiveProcessor(post_offset) for name in (lres_name, target_name)},
-        "residual_pre": {target_name: _AdditiveProcessor(tend_pre_offset)},
-        "residual_post": {target_name: _AdditiveProcessor(tend_post_offset)},
-    }
-
-    name_to_index = name_to_index or {"v0": 0, "v1": 1}
-    data_indices = {
-        lres_name: _make_minimal_index_collection(name_to_index),
-        target_name: _make_minimal_index_collection(name_to_index, diagnostic=diagnostic),
-    }
+    lres_name, target_name = "in_lres", "out"
+    name_to_index = {"v0": 0, "v1": 1}
+    data_indices = {name: _make_minimal_index_collection(name_to_index) for name in (lres_name, target_name)}
 
     task = SimpleNamespace(
         target_datasets=[target_name],
         input_datasets=[lres_name],
-        get_targets=lambda batch, **_kw: {n: batch[n] for n in [target_name]},
+        get_targets=lambda batch, **_kw: {target_name: batch[target_name]},
         get_input_offsets=lambda **_kw: [datetime.timedelta(0)],
         get_output_offsets=lambda **_kw: [datetime.timedelta(0)],
     )
 
     def _get_data_output_target(target_full: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        out = {}
-        for name, tensor in target_full.items():
-            idx = data_indices[name].data.output.full.to(device=tensor.device)
-            out[name] = tensor.index_select(-1, idx)
-        return out
+        return {
+            name: tensor.index_select(-1, data_indices[name].data.output.full.to(device=tensor.device))
+            for name, tensor in target_full.items()
+        }
 
-    def _reduce(y: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        # In these tests, model output = data output, so this is an identity map.
-        return dict(y)
-
-    # Build a real ``AnemoiTransportSpatialDownscalerModelEncProcDec`` shell so
-    # ``ResidualPredictionMode`` can delegate ``compute_residual`` /
-    # ``add_residual_to_state`` to the actual implementation.
     downscaler_model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
     downscaler_model.data_indices = data_indices
     downscaler_model.target_datasets = [target_name]
     downscaler_model.target_anchors = {target_name: lres_name}
-    # Default transport source is Gaussian noise — residual mode requires a
-    # non-``reference_state`` kind (see ``_validate_source_kind``).
     downscaler_model.transport_source = SimpleNamespace(kind="default")
 
-    module = SimpleNamespace(
+    return SimpleNamespace(
         model=SimpleNamespace(
             model=downscaler_model,
             spatial_pre_processors={lres_name: object()},
-            pre_processors=processors["state_pre"],
-            post_processors=processors["state_post"],
-            pre_processors_residual=processors["residual_pre"],
-            post_processors_residual=processors["residual_post"],
+            pre_processors={name: _AdditiveProcessor(state_offset) for name in (lres_name, target_name)},
+            post_processors={name: _AdditiveProcessor(-state_offset) for name in (lres_name, target_name)},
+            pre_processors_residual={target_name: _AdditiveProcessor(residual_offset)},
+            post_processors_residual={target_name: _AdditiveProcessor(-residual_offset)},
         ),
         data_indices=data_indices,
         task=task,
         n_step_input=1,
         n_step_output=1,
         get_data_output_target=_get_data_output_target,
-        reduce_data_output_target_to_model_output=_reduce,
+        reduce_data_output_target_to_model_output=dict,
         config=SimpleNamespace(
             training=SimpleNamespace(transport={"objective": "edm_diffusion"}),
         ),
     )
-    return module, {
-        "pre": processors["state_pre"][target_name],
-        "post": processors["state_post"][target_name],
-        "pre_lres": processors["state_pre"][lres_name],
-        "post_lres": processors["state_post"][lres_name],
-        "tend_pre": processors["residual_pre"][target_name],
-        "tend_post": processors["residual_post"][target_name],
-    }
 
 
-def test_residual_prediction_mode_prepare_target_denormalizes_then_renormalizes() -> None:
-    """prepare_target denormalizes lres and target, computes residual, then normalizes with tendency stats."""
-    module, _procs = _make_residual_module(
-        pre_offset=100.0,
-        post_offset=-100.0,
-        tend_pre_offset=10.0,
-        tend_post_offset=-10.0,
-    )
+def _bare_residual_mode(module: SimpleNamespace) -> ResidualPredictionMode:
     mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
     mode.module = module
+    return mode
 
-    # Normalized batch — a fully normalized tensor for lres and target on the same grid.
+
+def test_residual_prediction_mode_prepare_target_builds_the_normalized_residual_against_the_model_input() -> None:
+    """The reference comes from ``x``, as at inference, not from the full batch, and skips imputation."""
+    module = _make_residual_module(state_offset=100.0, residual_offset=10.0)
+    mode = _bare_residual_mode(module)
+
     b, t, e, g = 2, 1, 1, 4
-    lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
+    x_lres = torch.full((b, t, e, g, 2), fill_value=5.0)
     target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
-    batch = {"in_lres": lres_tensor, "out": target_tensor}
+    batch = {"in_lres": torch.full((b, t, e, g, 2), 99.0), "out": target_tensor}
 
-    prepared = mode.prepare_target(batch, x={"in_lres": lres_tensor})
+    prepared = mode.prepare_target(batch, x={"in_lres": x_lres})
 
-    # Denormalized reference cached for reconstruction: 5.0 + (-100.0) = -95.0
-    assert set(prepared.aux) >= {"x_ref_on_target_grid"}
-    # ``transport_reference_source`` is intentionally *not* populated: residual
-    # mode currently does not support the ``reference_state`` sampling-source
-    # kind, and populating a state-space reference here would be misleading —
-    # see ``test_residual_prediction_mode_rejects_reference_state_source_kind``.
+    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], x_lres - 100.0)
+    (reference_call,) = module.model.post_processors["in_lres"].calls
+    assert reference_call["kwargs"]["skip_imputation"] is True
     assert "transport_reference_source" not in prepared.aux
-    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], lres_tensor - 100.0)
 
-    # loss_target is the normalized residual in DATA_OUTPUT space.
-    # denorm(target) - denorm(lres) = (8 - 100) - (5 - 100) = -92 - (-95) = 3
-    # normalized with tendency pre (+10) = 13
+    # (8 - 100) - (5 - 100) = 3, normalized with the residual pre-processor: 3 + 10 = 13
     expected_residual = torch.full_like(target_tensor, 13.0)
     assert prepared.loss_target_layout == IndexSpace.DATA_OUTPUT
     torch.testing.assert_close(prepared.loss_target["out"], expected_residual)
-    # model_target is loss_target reduced to model output (identity here).
     torch.testing.assert_close(prepared.model_target["out"], expected_residual)
-
-    # metric_target is the state target as returned by task.get_targets (normalized).
     torch.testing.assert_close(prepared.metric_target["out"], target_tensor)
 
 
 def test_residual_prediction_mode_reconstruct_prediction_inverts_prepare_target() -> None:
-    """Feeding model_target back through reconstruct_prediction recovers the normalized target."""
-    module, _ = _make_residual_module(
-        pre_offset=100.0,
-        post_offset=-100.0,
-        tend_pre_offset=10.0,
-        tend_post_offset=-10.0,
-    )
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
+    mode = _bare_residual_mode(_make_residual_module(state_offset=100.0, residual_offset=10.0))
 
     b, t, e, g = 2, 1, 1, 4
     lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
     target_tensor = torch.full((b, t, e, g, 2), fill_value=8.0)
-    batch = {"in_lres": lres_tensor, "out": target_tensor}
 
-    prepared = mode.prepare_target(batch, x={"in_lres": lres_tensor})
-    # Feed the model_target back as a perfect prediction.
+    prepared = mode.prepare_target({"in_lres": lres_tensor, "out": target_tensor}, x={"in_lres": lres_tensor})
     reconstructed = mode.reconstruct_prediction(prepared.model_target, prepared)
 
-    # Round-trip should return the original normalized target.
     torch.testing.assert_close(reconstructed["out"], target_tensor)
-
-
-def test_residual_prediction_mode_builds_the_reference_from_the_model_input() -> None:
-    """The reference comes from ``x``, as at inference, not from the full batch, and skips imputation."""
-    module, procs = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=-1.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
-
-    b, t, e, g = 1, 1, 1, 4
-    x_lres = torch.full((b, t, e, g, 2), 5.0)
-    batch = {"in_lres": torch.full((b, t, e, g, 2), 99.0), "out": torch.zeros(b, t, e, g, 2)}
-
-    prepared = mode.prepare_target(batch, x={"in_lres": x_lres})
-
-    torch.testing.assert_close(prepared.aux["x_ref_on_target_grid"]["out"], x_lres - 1.0)
-    (reference_call,) = procs["post_lres"].calls
-    assert reference_call["kwargs"]["skip_imputation"] is True
 
 
 def _spy_on_imputer_inverse(module: SimpleNamespace) -> list[dict[str, Any]]:
@@ -2933,15 +2840,9 @@ def _spy_on_imputer_inverse(module: SimpleNamespace) -> list[dict[str, Any]]:
 
 def test_residual_prediction_mode_prepare_metric_target_applies_imputer_inverse() -> None:
     """Masked points of the target become NaN again, as for the tendency mode."""
-    module, _ = _make_residual_module(
-        pre_offset=1.0,
-        post_offset=-1.0,
-        tend_pre_offset=1.0,
-        tend_post_offset=-1.0,
-    )
+    module = _make_residual_module(state_offset=1.0, residual_offset=1.0)
     calls = _spy_on_imputer_inverse(module)
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
+    mode = _bare_residual_mode(module)
 
     target_tensor = torch.randn(1, 1, 1, 2, 2)
     prepared = PreparedPredictionTarget(
@@ -2962,14 +2863,8 @@ def test_residual_prediction_mode_prepare_metric_target_applies_imputer_inverse(
 
 def test_residual_prediction_mode_reconstruct_prediction_applies_imputer_inverse_to_the_state() -> None:
     """The imputer inverse runs on the reconstructed normalized state, not on the residual."""
-    module, _ = _make_residual_module(
-        pre_offset=100.0,
-        post_offset=-100.0,
-        tend_pre_offset=10.0,
-        tend_post_offset=-10.0,
-    )
-    mode = ResidualPredictionMode.__new__(ResidualPredictionMode)
-    mode.module = module
+    module = _make_residual_module(state_offset=100.0, residual_offset=10.0)
+    mode = _bare_residual_mode(module)
 
     b, t, e, g = 2, 1, 1, 4
     lres_tensor = torch.full((b, t, e, g, 2), fill_value=5.0)
@@ -2987,13 +2882,7 @@ def test_residual_prediction_mode_reconstruct_prediction_applies_imputer_inverse
 
 
 def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> None:
-    """ResidualPredictionMode must refuse the stochastic_interpolant objective for now."""
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
     module.config = SimpleNamespace(
         training=SimpleNamespace(transport={"objective": "stochastic_interpolant"}),
     )
@@ -3002,12 +2891,7 @@ def test_residual_prediction_mode_rejects_stochastic_interpolant_objective() -> 
 
 
 def test_residual_prediction_mode_requires_a_model_with_a_residual_reference() -> None:
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
     module.model.model = SimpleNamespace(transport_source=SimpleNamespace(kind="default"))
 
     with pytest.raises(ValueError, match="residual_reference"):
@@ -3019,25 +2903,14 @@ def test_non_residual_prediction_modes_reject_a_model_with_a_residual_reference(
     mode_cls: type[PredictionMode],
 ) -> None:
     """Otherwise the model would add the reference back at inference to a state it never learned as a residual."""
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
 
     with pytest.raises(ValueError, match="prediction_mode 'residual'"):
         mode_cls(module)
 
 
 def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:
-
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
     module.model.model.transport_source = SimpleNamespace(kind="reference_state")
     with pytest.raises(NotImplementedError, match=r"reference_state"):
         ResidualPredictionMode(module)
@@ -3050,25 +2923,14 @@ def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missin
     missing: dict | None,
 ) -> None:
     """Missing residual processors for a target must fail at construction time, not on first use."""
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
     setattr(module.model, attribute, missing)
     with pytest.raises(ValueError, match=rf"{attribute}.*'out'.*data\.datasets\.out\.residual_statistics"):
         ResidualPredictionMode(module)
 
 
 def test_residual_prediction_mode_accepts_residual_processors_for_every_target() -> None:
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
-    ResidualPredictionMode(module)
+    ResidualPredictionMode(_make_residual_module())
 
 
 @pytest.mark.parametrize(
@@ -3081,12 +2943,7 @@ def test_residual_prediction_mode_rejects_different_input_and_output_offsets(
     output_hours: list[int],
 ) -> None:
     """The residual pairs output snapshot *i* with input snapshot *i*, so the offsets must match."""
-    module, _ = _make_residual_module(
-        pre_offset=0.0,
-        post_offset=0.0,
-        tend_pre_offset=0.0,
-        tend_post_offset=0.0,
-    )
+    module = _make_residual_module()
     module.task.get_input_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in input_hours]
     module.task.get_output_offsets = lambda **_kw: [datetime.timedelta(hours=h) for h in output_hours]
 

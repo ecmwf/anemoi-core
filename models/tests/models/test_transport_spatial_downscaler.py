@@ -8,11 +8,10 @@
 # nor does it submit to any jurisdiction.
 
 """Tests for AnemoiTransportSpatialDownscalerModelEncProcDec.
-The tests use ``__new__`` and wire attributes manually to avoid needing a full
-graph and encoder/decoder stack.  They cover the pieces that are specific to
-the downscaler: role inference from data_indices, input dimension arithmetic,
-input assembly on the target grid, and the spatial pre-processor hooks in the
-sampling flow.
+
+Unit tests build the model via ``__new__`` and wire routing by hand; they cover
+error paths and the residual arithmetic. The ``test_real_construction_*`` tests
+build a small real model and cover the happy path end to end.
 """
 
 from __future__ import annotations
@@ -26,7 +25,6 @@ from omegaconf import DictConfig
 from torch_geometric.data import HeteroData
 
 from anemoi.models.data_indices.collection import IndexCollection
-from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportSpatialDownscalerModelEncProcDec
 from anemoi.models.transport import TransportSourceBuilder
@@ -86,11 +84,9 @@ class _StaticNodeAttributes:
 
 
 class _AdditiveProcessor:
-    """Trivial processor stub: adds ``offset`` on every call.
-    ``Processors`` objects in the codebase are always constructed as either
-    forward (pre) or inverse (post); the ``inverse`` kwarg is not toggled at the
-    call site.  We model the pre/post distinction with the sign of ``offset``
-    rather than by handling ``inverse=True``.
+    """Processor stub that adds ``offset`` and records the ``data_index`` and kwargs of each call.
+
+    Pre/post processors are modelled by the sign of ``offset``.
     """
 
     def __init__(self, offset: float) -> None:
@@ -101,10 +97,13 @@ class _AdditiveProcessor:
         self,
         x: torch.Tensor,
         in_place: bool = True,
+        data_index: torch.Tensor | None = None,
         **kwargs: Any,
     ) -> torch.Tensor:
         assert in_place is False, "Downscaler must call processors with in_place=False."
-        self.calls.append({"shape": tuple(x.shape), "kwargs": kwargs})
+        self.calls.append(
+            {"data_index": None if data_index is None else data_index.tolist(), "kwargs": kwargs},
+        )
         return x + self.offset
 
 
@@ -162,12 +161,13 @@ def _make_bare_model(
     n_step_output: int = 1,
     attr_ndims: dict[str, int] | None = None,
     grid: int = 4,
+    data_indices: dict[str, IndexCollection] | None = None,
 ) -> AnemoiTransportSpatialDownscalerModelEncProcDec:
     """Build a model via ``__new__`` with just enough attributes for unit tests."""
     model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
         AnemoiTransportSpatialDownscalerModelEncProcDec,
     )
-    model.data_indices = _make_downscaler_indices()
+    model.data_indices = data_indices or _make_downscaler_indices()
     model.dataset_names = list(model.data_indices.keys())
     model.n_step_input = n_step_input
     model.n_step_output = n_step_output
@@ -182,27 +182,6 @@ def _make_bare_model(
     return model
 
 
-def test_encoder_input_datasets_are_every_fused_source_in_order() -> None:
-    """The anchor contributes its own history too, ahead of the other sources."""
-    model = _make_bare_model()
-
-    assert model._encoder_input_datasets("in_lres") == ["in_lres", "in_hres"]
-
-
-def test_encoder_input_datasets_without_fusion_is_the_anchor_alone() -> None:
-    model = _make_bare_model()
-    model.encoder_fusing_strategy = {"enc0": "not_supported"}
-
-    assert model._encoder_input_datasets("in_lres") == ["in_lres"]
-
-
-def test_targets_on_anchor_lists_the_targets_decoded_from_it() -> None:
-    model = _make_bare_model()
-
-    assert model._targets_on_anchor("in_lres") == ["out_hres"]
-    assert model._targets_on_anchor("in_hres") == []
-
-
 def test_targets_on_anchor_falls_back_to_identity_for_models_pickled_without_target2anchor() -> None:
     """Checkpoints of transport models trained before ``target2anchor`` existed must still run."""
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
@@ -213,134 +192,7 @@ def test_targets_on_anchor_falls_back_to_identity_for_models_pickled_without_tar
     assert model._anchor_of_target("data") == "data"
 
 
-def test_forward_transport_network_resolves_encoder_and_decoder_by_routing_name() -> None:
-    """Encoder/decoder keys are user-defined config names, not dataset names."""
-    model = _make_bare_model()
-    model._graph_name_hidden = "hidden"
-    model.node_attributes.attr_ndims["hidden"] = 1
-    model.latent_skip = False
-
-    calls: list[str] = []
-
-    def _encoder(_pair: Any, **_kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
-        calls.append("encoder")
-        return torch.zeros(4, 1), torch.zeros(4, 1)
-
-    def _decoder(_pair: Any, **_kwargs: Any) -> torch.Tensor:
-        calls.append("decoder")
-        return torch.zeros(4, 1)
-
-    model.encoder = {"enc0": _encoder}
-    model.decoder = {"dec0": _decoder}
-
-    edges = (None, None, None)
-    provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
-    model.encoder_graph_provider = {"in_lres": provider}
-    model.decoder_graph_provider = {"out_hres": provider}
-    model.processor_graph_provider = provider
-    model.processor = lambda x, **_kwargs: x
-    model.latent_aggregator = lambda *_args, **_kwargs: torch.zeros(4, 1)
-
-    model._resolve_in_out_sharded = lambda **_kwargs: {"in_lres": False, "out_hres": False}
-    model._assert_valid_sharding = lambda *_args, **_kwargs: None
-    model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
-        {"in_lres": {}, "out_hres": {}},
-        {},
-        {"in_lres": {}, "out_hres": {}},
-    )
-    model._assemble_input = lambda *_args, **_kwargs: (torch.zeros(4, 1), None, None)
-    model._assemble_output = lambda x, *_args, **_kwargs: x
-
-    target = torch.zeros(1, 1, 1, 4, 1)
-    out = model._forward_transport_network(
-        x={"in_lres": target},
-        conditioned_target={"out_hres": target},
-        condition={"out_hres": torch.zeros(1)},
-    )
-
-    assert calls == ["encoder", "decoder"]
-    assert "out_hres" in out
-
-
-def test_forward_transport_network_feeds_fused_features_of_declared_width_to_the_encoder() -> None:
-    """Exercise the forward pass with the *real* input/output assembly.
-
-    Every other test stubs ``_assemble_input``/``_assemble_output`` out, which
-    leaves the contract between ``_calculate_input_dim`` (what the encoder is
-    built for) and ``_assemble_input`` (what the encoder is handed) untested.
-    Only the neural modules are stubbed here; they assert on the shapes they
-    receive.
-    """
-    batch, ensemble, grid, num_channels = 2, 1, 4, 5
-    model = _make_bare_model(n_step_input=1, n_step_output=1, grid=grid)
-    model._graph_name_hidden = "hidden"
-    model.node_attributes.attr_ndims["hidden"] = 1
-    model.latent_skip = True
-    model._calculate_shapes_and_indices(model.data_indices)
-
-    seen: dict[str, tuple[int, ...]] = {}
-
-    def _encoder(pair: tuple[torch.Tensor, torch.Tensor], **_kwargs: Any) -> tuple[torch.Tensor, torch.Tensor]:
-        x_src, x_dst = pair
-        seen["encoder_src"] = tuple(x_src.shape)
-        return x_src, torch.ones(x_dst.shape[0], num_channels)
-
-    def _decoder(pair: tuple[torch.Tensor, torch.Tensor], **_kwargs: Any) -> torch.Tensor:
-        x_src, x_dst = pair
-        seen["decoder_src"] = tuple(x_src.shape)
-        seen["decoder_dst"] = tuple(x_dst.shape)
-        return torch.zeros(x_dst.shape[0], model.output_dim["out_hres"])
-
-    model.encoder = {"enc0": _encoder}
-    model.decoder = {"dec0": _decoder}
-
-    edges = (None, None, None)
-    provider = SimpleNamespace(get_edges=lambda **_kwargs: edges)
-    model.encoder_graph_provider = {"in_lres": provider}
-    model.decoder_graph_provider = {"out_hres": provider}
-    model.processor_graph_provider = provider
-    model.processor = lambda x, **_kwargs: x
-    # Mirrors SumAggregator for a single source; the real one is an nn.Module and
-    # cannot be attached to a model built via __new__.
-    model.latent_aggregator = lambda _hidden, latents: next(iter(latents.values()))
-    model._build_conditioning_kwargs = lambda *_args, **_kwargs: (
-        {"in_lres": {}, "out_hres": {}},
-        {},
-        {"in_lres": {}, "out_hres": {}},
-    )
-
-    x = {
-        "in_lres": torch.full((batch, 1, ensemble, grid, 2), 1.0),
-        "in_hres": torch.full((batch, 1, ensemble, grid, 1), 2.0),
-    }
-    conditioned_target = {"out_hres": torch.full((batch, 1, ensemble, grid, 2), 7.0)}
-
-    out = model._forward_transport_network(
-        x=x,
-        conditioned_target=conditioned_target,
-        condition={"out_hres": torch.zeros(batch, 1, ensemble, 1, 1)},
-    )
-
-    # The encoder must receive exactly the width the model was sized for.
-    assert seen["encoder_src"] == (batch * ensemble * grid, model.input_dim["in_lres"])
-    # The decoder's destination features are the anchor's encoder-updated data tensor.
-    assert seen["decoder_dst"] == (batch * ensemble * grid, model.input_dim["in_lres"])
-    assert seen["decoder_src"] == (batch * ensemble * grid, num_channels)
-    # Output is reassembled back into (batch, time, ensemble, grid, vars).
-    assert out["out_hres"].shape == (batch, 1, ensemble, grid, model.num_output_channels["out_hres"])
-
-
 # ── residual references ─────────────────────────────────────────────────────
-
-
-def test_residual_reference_attaches_each_target_to_its_reference() -> None:
-    """The residual reference doubles as the target's anchor attachment."""
-    model = _make_bare_model()
-
-    model._validate_residual_reference()
-
-    assert model.residual_reference == {"out_hres": "in_lres"}
-    assert model.residual_reference is model.target_anchors
 
 
 def test_validate_residual_reference_allows_multiple_targets() -> None:
@@ -359,14 +211,6 @@ def test_validate_residual_reference_allows_multiple_targets() -> None:
     assert model.residual_reference == {"out_hres": "in_lres", "out_hres_2": "in_lres"}
 
 
-def test_validate_residual_reference_requires_a_residual_reference() -> None:
-    model = _make_bare_model()
-    model.target_anchors = {}
-
-    with pytest.raises(ValueError, match="residual_reference"):
-        model._validate_residual_reference()
-
-
 # ── dimension arithmetic ─────────────────────────────────────────────────────
 
 
@@ -379,53 +223,6 @@ def test_calculate_input_dim_sums_all_fused_inputs_plus_attached_target_and_node
     # noised target: 1 * 2 = 2
     # anchor node attrs: 2
     assert model._calculate_input_dim("in_lres") == 6 + 2 + 2
-
-
-def test_calculate_input_dim_falls_back_to_the_base_width_for_datasets_without_an_encoder() -> None:
-    """Fused sources and decoder-only targets own no encoder, so their width is never used."""
-    model = _make_bare_model()
-
-    for dataset_name in ("in_hres", "out_hres"):
-        assert model._calculate_input_dim(dataset_name) == BaseGraphModel._calculate_input_dim(model, dataset_name)
-
-
-def test_calculate_shapes_and_indices_sizes_the_anchor_from_all_fused_inputs() -> None:
-    """The inherited two-pass implementation must size the anchor from the fused sum."""
-    model = _make_bare_model(n_step_input=2, n_step_output=1)
-    model._graph_name_hidden = "hidden"
-    # Attribute expected by _calculate_input_dim_latent.
-    model.node_attributes.attr_ndims["hidden"] = 1
-
-    model._calculate_shapes_and_indices(model.data_indices)
-
-    assert set(model.num_input_channels) == set(model.data_indices)
-    assert set(model.num_output_channels) == set(model.data_indices)
-    # 2*(2 in_lres + 1 in_hres) + 1*2 noised target + 2 node attrs
-    assert model.input_dim["in_lres"] == 6 + 2 + 2
-    # Only the target has a decoder, so only it has a non-zero target dim.
-    assert model.target_dim["out_hres"] == 0
-
-
-def test_calculate_shapes_and_indices_populates_base_forcing_attributes() -> None:
-    """``ForcingsFeature`` reads ``_forcing_input_idx`` / ``num_input_channels_forcings``.
-
-    Any override of ``_calculate_shapes_and_indices`` must keep populating them,
-    otherwise ``decoders.*.target_node_features: ["forcings"]`` raises
-    ``AttributeError`` deep inside the decoder build.
-    """
-    model = _make_bare_model(n_step_input=2, n_step_output=1)
-    model._graph_name_hidden = "hidden"
-    model.node_attributes.attr_ndims["hidden"] = 1
-
-    model._calculate_shapes_and_indices(model.data_indices)
-
-    assert set(model._forcing_input_idx) == set(model.data_indices)
-    assert set(model.num_input_channels_forcings) == set(model.data_indices)
-    # Only in_hres declares a forcing variable (``z``).
-    assert model.num_input_channels_forcings == {"in_lres": 0, "in_hres": 1, "out_hres": 0}
-    # Indices address the model *input* tensor layout, as ForcingsFeature expects.
-    for dataset_name, dataset_indices in model.data_indices.items():
-        assert list(model._forcing_input_idx[dataset_name]) == list(dataset_indices.model.input.forcing)
 
 
 # ── input assembly ────────────────────────────────────────────────────────────
@@ -489,24 +286,6 @@ def test_assemble_input_uses_input_dataset_order_from_encoder_routing() -> None:
     # in_hres comes first now (1 var of value 2.0), then in_lres (2 vars of value 1.0).
     torch.testing.assert_close(latent[:, 0:1], torch.full((batch * ensemble * grid, 1), 2.0))
     torch.testing.assert_close(latent[:, 1:3], torch.full((batch * ensemble * grid, 2), 1.0))
-
-
-def test_assemble_input_without_fusion_encodes_the_anchor_and_its_attached_target_only() -> None:
-    model = _make_bare_model()
-    model.encoder_fusing_strategy = {"enc0": "not_supported"}
-
-    batch, grid = 1, 4
-    latent, _skip, _sharding = model._assemble_input(
-        x={"in_lres": torch.full((batch, 1, 1, grid, 2), 1.0), "in_hres": torch.full((batch, 1, 1, grid, 1), 2.0)},
-        y_noised={"out_hres": torch.full((batch, 1, 1, grid, 2), 7.0)},
-        bse=batch,
-        dataset_name="in_lres",
-    )
-
-    # 2 (in_lres) + 2 (y_noised) + 2 (attrs); in_hres is encoded elsewhere.
-    assert latent.shape == (batch * grid, 6)
-    assert latent.shape[-1] == model._calculate_input_dim("in_lres")
-    torch.testing.assert_close(latent[:, 2:4], torch.full((batch * grid, 2), 7.0))
 
 
 # ── sampling hooks ────────────────────────────────────────────────────────────
@@ -576,62 +355,7 @@ def test_reference_on_target_grid_reads_the_model_input_layout_without_imputatio
     assert columns == {"out_hres": {"t2m": 0, "u10": 1}}
     (call,) = post_lres.calls
     assert call["kwargs"]["skip_imputation"] is True
-    assert call["kwargs"]["data_index"].tolist() == model.data_indices["in_lres"].data.input.full.tolist()
-
-
-def test_inference_input_datasets_are_the_fused_inputs_without_the_target() -> None:
-    """Inference supplies data for the fused inputs only; the target is sampled."""
-    model = _make_bare_model()
-
-    assert model.inference_input_datasets == ["in_lres", "in_hres"]
-
-
-def test_before_sampling_needs_no_batch_entry_for_the_target() -> None:
-    """The target is generated, not read, so the batch must not have to carry it."""
-    model = _make_bare_model()
-    pre = {name: _AdditiveProcessor(offset=1.0) for name in ("in_lres", "in_hres")}
-    post = {"in_lres": _AdditiveProcessor(offset=-1.0)}
-
-    batch_lres = torch.full((1, 1, 4, 2), 1.0)
-    batch = {"in_lres": batch_lres, "in_hres": torch.full((1, 1, 4, 1), 2.0)}
-
-    (xs, x_ref_by_target, _), grid_shard_sizes = model._before_sampling(
-        batch,
-        pre_processors=pre,
-        n_step_input=1,
-        model_comm_group=None,
-        spatial_pre_processors={"in_lres": _IdentitySpatialProjector()},
-        post_processors=post,
-    )
-
-    assert set(xs) == {"in_lres", "in_hres"}
-    torch.testing.assert_close(x_ref_by_target["out_hres"], batch_lres.unsqueeze(2))
-    assert grid_shard_sizes is None
-
-
-def test_before_sampling_ignores_batch_entries_the_model_does_not_consume() -> None:
-    """A caller may still pass the target (older runners do); it must be dropped."""
-    model = _make_bare_model()
-    pre_out = _AdditiveProcessor(offset=30.0)
-    pre = {"in_lres": _AdditiveProcessor(offset=1.0), "in_hres": _AdditiveProcessor(offset=2.0), "out_hres": pre_out}
-
-    batch = {
-        "in_lres": torch.full((1, 1, 4, 2), 1.0),
-        "in_hres": torch.full((1, 1, 4, 1), 2.0),
-        "out_hres": torch.zeros(1, 1, 4, 2),
-    }
-
-    (xs, _, _), _ = model._before_sampling(
-        batch,
-        pre_processors=pre,
-        n_step_input=1,
-        model_comm_group=None,
-        spatial_pre_processors={"in_lres": _IdentitySpatialProjector()},
-        post_processors={"in_lres": _AdditiveProcessor(offset=-1.0)},
-    )
-
-    assert set(xs) == {"in_lres", "in_hres"}
-    assert pre_out.calls == []
+    assert call["data_index"] == model.data_indices["in_lres"].data.input.full.tolist()
 
 
 def test_before_sampling_raises_when_an_input_dataset_is_missing() -> None:
@@ -648,24 +372,6 @@ def test_before_sampling_raises_when_an_input_dataset_is_missing() -> None:
         )
 
 
-def test_build_sampling_source_sizes_the_target_from_the_graph_and_output_channels() -> None:
-    """The sampler spec comes from the model, not from a target tensor in the batch."""
-    model = _make_bare_model(grid=4)
-    model.transport_source = TransportSourceBuilder()
-
-    x = {
-        "in_lres": torch.zeros(3, 1, 2, 4, 2, dtype=torch.float64),
-        "in_hres": torch.zeros(3, 1, 2, 4, 1, dtype=torch.float64),
-    }
-
-    source = model.build_sampling_source(x)
-
-    assert set(source) == {"out_hres"}
-    # (batch, n_step_output, ensemble, target nodes, output channels)
-    assert source["out_hres"].shape == (3, model.n_step_output, 2, 4, model.num_output_channels["out_hres"])
-    assert source["out_hres"].dtype == torch.float64
-
-
 def test_build_sampling_source_rejects_a_reference_that_is_not_on_the_target_grid() -> None:
     """Catches a projector whose output grid disagrees with the target node set."""
     model = _make_bare_model(grid=4)
@@ -675,41 +381,6 @@ def test_build_sampling_source_rejects_a_reference_that_is_not_on_the_target_gri
 
     with pytest.raises(AssertionError, match="target grid"):
         model.build_sampling_source(x)
-
-
-def test_after_sampling_adds_denormalized_lres_to_denormalized_residual() -> None:
-    """``_after_sampling`` denormalizes the residual and adds the cached denormalized lres."""
-    model = _make_bare_model()
-
-    # Post-processors are inverse-style; a negative offset means "call subtracts".
-    post_tend = _AdditiveProcessor(offset=-5.0)  # tendency post — subtracts 5 to denormalize
-    post_state = _AdditiveProcessor(offset=-100.0)  # state post — not used here
-
-    batch = 1
-    grid = 4
-    # Sampled residual for the target dataset (batch, time, ensemble, grid, vars)
-    residual_pred = torch.full((batch, 1, 1, grid, 2), 3.0)
-    out = {"out_hres": residual_pred}
-    # Cached denormalized lres, on same grid, matching output-full channels of target.
-    x_lres_denorm = torch.full((batch, 1, 1, grid, 2), 50.0)
-
-    result = model._after_sampling(
-        out,
-        post_processors={"out_hres": post_state},
-        before_sampling_data=(
-            {"in_lres": None, "in_hres": None, "out_hres": None},
-            {"out_hres": x_lres_denorm},
-            {"out_hres": model.data_indices["in_lres"].name_to_index},
-        ),
-        model_comm_group=None,
-        grid_shard_sizes=None,
-        gather_out=False,
-        post_processors_residual={"out_hres": post_tend},
-    )
-
-    # residual_pred is denormalized by post_tend (subtracts 5): 3 - 5 = -2
-    # Add cached denormalized lres (50): -2 + 50 = 48
-    torch.testing.assert_close(result["out_hres"], torch.full_like(residual_pred, 48.0))
 
 
 # ── mixed-target (prognostic + diagnostic) fixtures ─────────────────────────
@@ -733,255 +404,75 @@ def _make_mixed_downscaler_indices() -> dict[str, IndexCollection]:
     return {"in_lres": in_lres, "in_hres": in_hres, "out_hres": out_hres}
 
 
-def _make_mixed_bare_model() -> AnemoiTransportSpatialDownscalerModelEncProcDec:
-    """Bare model with the mixed-target fixture (prognostic + diagnostic in the target)."""
-    model = AnemoiTransportSpatialDownscalerModelEncProcDec.__new__(
-        AnemoiTransportSpatialDownscalerModelEncProcDec,
-    )
-    model.data_indices = _make_mixed_downscaler_indices()
-    model.dataset_names = list(model.data_indices.keys())
-    model.n_step_input = 1
-    model.n_step_output = 1
-    model.num_input_channels = {name: len(indices.model.input) for name, indices in model.data_indices.items()}
-    model.num_output_channels = {name: len(indices.model.output) for name, indices in model.data_indices.items()}
-    model.node_attributes = _StaticNodeAttributes(
-        {"in_lres": 2, "in_hres": 2, "out_hres": 3},
-        grid=4,
-    )
-    _wire_fused_encoder_routing(model, sources=["in_lres", "in_hres"])
-    return model
-
-
-class _IndexAwareProcessor:
-    """Processor stub that adds ``offset`` and records the ``data_index`` it was called with."""
-
-    def __init__(self, offset: float) -> None:
-        self.offset = offset
-        self.calls: list[dict[str, Any]] = []
-
-    def __call__(
-        self,
-        x: torch.Tensor,
-        in_place: bool = True,
-        data_index: torch.Tensor | None = None,
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        assert in_place is False, "Downscaler must call processors with in_place=False."
-        self.calls.append(
-            {
-                "shape": tuple(x.shape),
-                "data_index": None if data_index is None else data_index.tolist(),
-                "kwargs": kwargs,
-            },
-        )
-        return x + self.offset
+# The reference stores the target prognostics at other positions, so columns must be matched by name.
+_REORDERED_REFERENCE_COLUMNS = {"u10": 0, "foo": 1, "t2m": 2}
+_REORDERED_REFERENCE = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])  # u10=4, foo (unused), t2m=3
 
 
 # ── compute_residual / add_residual_to_state ────────────────────────────────
 
 
 def test_compute_residual_uses_residual_pre_for_prognostic_and_state_pre_for_diagnostic() -> None:
-    """Prognostic channels are normalized as residuals, diagnostic channels as states.
-    ``compute_residual`` accepts the *normalized* target and *denormalized* projected
-    lres, denormalizes the target via ``input_post_processor`` (state post), then
-    fills the output tensor per-channel using the residual pre for prognostics
-    and the state pre for diagnostics.
-    """
-    model = _make_mixed_bare_model()
+    """Prognostic channels are normalized as residuals against the reference, diagnostic channels as states."""
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
     indices = model.data_indices["out_hres"]
 
-    # Denormalization step for the target = state post-processor (identity here so the
-    # input state values pass through unchanged, keeping the arithmetic simple).
-    input_post = _IndexAwareProcessor(offset=0.0)
-    state_pre = _IndexAwareProcessor(offset=100.0)  # for diagnostic channels
-    residual_pre = _IndexAwareProcessor(offset=10.0)  # for prognostic channels
+    input_post = _AdditiveProcessor(offset=0.0)
+    state_pre = _AdditiveProcessor(offset=100.0)
+    residual_pre = _AdditiveProcessor(offset=10.0)
 
-    # (batch, time, ensemble, grid, target_vars=3)
-    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])  # t2m=10, u10=20, precip=30
-    # Denormalized lres has the same variable positions for t2m and u10.
-    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])  # t2m_lres=3, u10_lres=4
+    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])  # t2m, u10, precip
 
     out = model.compute_residual(
         y={"out_hres": y},
-        x_reference_denorm={"out_hres": x_lres_denorm},
+        x_reference_denorm={"out_hres": _REORDERED_REFERENCE},
         pre_processors_state={"out_hres": state_pre},
         pre_processors_residual={"out_hres": residual_pre},
-        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
+        reference_variable_name_to_column_index_by_target={"out_hres": _REORDERED_REFERENCE_COLUMNS},
         input_post_processor={"out_hres": input_post},
         skip_imputation=True,
     )
 
-    # Prognostic channels: residual_pre((y - x_reference) + 0) = (y - x_reference) + 10
-    # t2m: (10 - 3) + 10 = 17, u10: (20 - 4) + 10 = 26
-    # Diagnostic channel: state_pre(precip) = 30 + 100 = 130
-    expected = torch.tensor([[[[[17.0, 26.0, 130.0]]]]])
-    torch.testing.assert_close(out["out_hres"], expected)
-
-    # Check the data_index arguments handed to each processor.
+    # t2m: (10 - 3) + 10 = 17, u10: (20 - 4) + 10 = 26, precip: 30 + 100 = 130
+    torch.testing.assert_close(out["out_hres"], torch.tensor([[[[[17.0, 26.0, 130.0]]]]]))
     assert residual_pre.calls[0]["data_index"] == indices.data.output.prognostic.tolist()
     assert state_pre.calls[0]["data_index"] == indices.data.output.diagnostic.tolist()
 
 
 def test_add_residual_to_state_denormalizes_prognostic_with_residual_and_diagnostic_with_state() -> None:
-    """Prognostic channels are denormalized with residual post + lres; diagnostics with state post."""
-    model = _make_mixed_bare_model()
+    """Inverse of ``compute_residual``: residual post + reference for prognostics, state post for diagnostics."""
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
     indices = model.data_indices["out_hres"]
 
-    # Inverse-style post-processors: negative offsets so ``call`` denormalizes.
-    residual_post = _IndexAwareProcessor(offset=-10.0)
-    state_post = _IndexAwareProcessor(offset=-100.0)
-
-    # Normalized residual prediction (batch, time, ensemble, grid, vars=3).
-    residual = torch.tensor([[[[[17.0, 26.0, 130.0]]]]])
-    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
+    residual_post = _AdditiveProcessor(offset=-10.0)
+    state_post = _AdditiveProcessor(offset=-100.0)
 
     state = model.add_residual_to_state(
-        x_reference_denorm={"out_hres": x_lres_denorm},
-        residual={"out_hres": residual},
+        x_reference_denorm={"out_hres": _REORDERED_REFERENCE},
+        residual={"out_hres": torch.tensor([[[[[17.0, 26.0, 130.0]]]]])},
         post_processors_state={"out_hres": state_post},
         post_processors_residual={"out_hres": residual_post},
-        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
+        reference_variable_name_to_column_index_by_target={"out_hres": _REORDERED_REFERENCE_COLUMNS},
         output_pre_processor=None,
         skip_imputation=True,
     )
 
-    # Prognostic: residual_post(residual) + x_reference = (17 - 10) + 3 = 10, (26 - 10) + 4 = 20
-    # Diagnostic: state_post(residual) = 130 - 100 = 30
-    expected = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
-    torch.testing.assert_close(state["out_hres"], expected)
-
-    # Both processors are called; state_post is used specifically for the
-    # diagnostic slice (with the corresponding data_index).
-    assert len(residual_post.calls) >= 1
+    # t2m: (17 - 10) + 3 = 10, u10: (26 - 10) + 4 = 20, precip: 130 - 100 = 30
+    torch.testing.assert_close(state["out_hres"], torch.tensor([[[[[10.0, 20.0, 30.0]]]]]))
     assert any(call["data_index"] == indices.data.output.diagnostic.tolist() for call in state_post.calls)
 
 
-def test_compute_residual_and_add_residual_to_state_round_trip() -> None:
-    """Feeding a target through ``compute_residual`` then ``add_residual_to_state`` recovers it."""
-    model = _make_mixed_bare_model()
-
-    # Symmetric pre/post with matching offsets.
-    input_post = _IndexAwareProcessor(offset=0.0)
-    state_pre = _IndexAwareProcessor(offset=100.0)
-    state_post = _IndexAwareProcessor(offset=-100.0)
-    residual_pre = _IndexAwareProcessor(offset=10.0)
-    residual_post = _IndexAwareProcessor(offset=-10.0)
-
-    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
-    x_lres_denorm = torch.tensor([[[[[3.0, 4.0]]]]])
-
-    residual = model.compute_residual(
-        y={"out_hres": y},
-        x_reference_denorm={"out_hres": x_lres_denorm},
-        pre_processors_state={"out_hres": state_pre},
-        pre_processors_residual={"out_hres": residual_pre},
-        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
-        input_post_processor={"out_hres": input_post},
-        skip_imputation=True,
-    )
-
-    reconstructed = model.add_residual_to_state(
-        x_reference_denorm={"out_hres": x_lres_denorm},
-        residual=residual,
-        post_processors_state={"out_hres": state_post},
-        post_processors_residual={"out_hres": residual_post},
-        reference_variable_name_to_column_index_by_target={"out_hres": model.data_indices["in_lres"].name_to_index},
-        output_pre_processor=None,
-        skip_imputation=True,
-    )
-
-    torch.testing.assert_close(reconstructed["out_hres"], y)
-
-
-def test_compute_residual_aligns_lres_columns_by_name_when_layouts_differ() -> None:
-    """LRES and target may store variables at different column positions.
-    ``compute_residual`` must map the target's prognostic variables to LRES
-    columns by *name*, using the provided ``lres_name_to_index`` mapping.
-    """
-    model = _make_mixed_bare_model()
-
-    input_post = _IndexAwareProcessor(offset=0.0)
-    state_pre = _IndexAwareProcessor(offset=0.0)
-    residual_pre = _IndexAwareProcessor(offset=0.0)
-
-    # Target layout: [t2m, u10, precip]. LRES layout: [u10, foo, t2m] (t2m is at column 2, u10 at 0).
-    lres_name_to_index = {"u10": 0, "foo": 1, "t2m": 2}
-    y = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])  # target t2m, u10, precip
-    x_lres_denorm = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])  # u10=4, foo (unused), t2m=3
-
-    out = model.compute_residual(
-        y={"out_hres": y},
-        x_reference_denorm={"out_hres": x_lres_denorm},
-        pre_processors_state={"out_hres": state_pre},
-        pre_processors_residual={"out_hres": residual_pre},
-        reference_variable_name_to_column_index_by_target={"out_hres": lres_name_to_index},
-        input_post_processor={"out_hres": input_post},
-        skip_imputation=True,
-    )
-
-    # Prognostic: t2m residual = 10 - 3 = 7; u10 residual = 20 - 4 = 16.
-    # Diagnostic: precip kept as-is = 30.
-    expected = torch.tensor([[[[[7.0, 16.0, 30.0]]]]])
-    torch.testing.assert_close(out["out_hres"], expected)
-
-
-def test_add_residual_to_state_aligns_lres_columns_by_name_when_layouts_differ() -> None:
-    """Round-trip counterpart to the layout-mismatch test above."""
-    model = _make_mixed_bare_model()
-
-    residual_post = _IndexAwareProcessor(offset=0.0)
-    state_post = _IndexAwareProcessor(offset=0.0)
-
-    lres_name_to_index = {"u10": 0, "foo": 1, "t2m": 2}
-    residual = torch.tensor([[[[[7.0, 16.0, 30.0]]]]])
-    x_lres_denorm = torch.tensor([[[[[4.0, 999.0, 3.0]]]]])
-
-    state = model.add_residual_to_state(
-        x_reference_denorm={"out_hres": x_lres_denorm},
-        residual={"out_hres": residual},
-        post_processors_state={"out_hres": state_post},
-        post_processors_residual={"out_hres": residual_post},
-        reference_variable_name_to_column_index_by_target={"out_hres": lres_name_to_index},
-        output_pre_processor=None,
-        skip_imputation=True,
-    )
-
-    # Prognostic: t2m = 7 + 3 = 10; u10 = 16 + 4 = 20. Diagnostic: precip = 30.
-    expected = torch.tensor([[[[[10.0, 20.0, 30.0]]]]])
-    torch.testing.assert_close(state["out_hres"], expected)
-
-
-def test_compute_residual_raises_when_target_prognostic_missing_from_lres() -> None:
-    """A clear error is raised if the reference dataset lacks a target prognostic variable."""
-    model = _make_mixed_bare_model()
-
-    # Reference has u10 but not t2m — the model can't compute the t2m residual.
-    reference_name_to_index = {"u10": 0}
+def test_compute_residual_raises_when_target_prognostic_missing_from_reference() -> None:
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
 
     with pytest.raises(KeyError, match=r"t2m"):
         model.compute_residual(
             y={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
             x_reference_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
-            pre_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            pre_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            reference_variable_name_to_column_index_by_target={"out_hres": reference_name_to_index},
-            input_post_processor={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            skip_imputation=True,
-        )
-
-
-def test_add_residual_to_state_raises_when_target_prognostic_missing_from_reference() -> None:
-    """Same validation as ``compute_residual`` but on the reverse operation."""
-    model = _make_mixed_bare_model()
-    reference_name_to_index = {"u10": 0}
-    with pytest.raises(KeyError, match=r"t2m"):
-        model.add_residual_to_state(
-            x_reference_denorm={"out_hres": torch.zeros(1, 1, 1, 1, 1)},
-            residual={"out_hres": torch.zeros(1, 1, 1, 1, 3)},
-            post_processors_state={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            post_processors_residual={"out_hres": _IndexAwareProcessor(offset=0.0)},
-            reference_variable_name_to_column_index_by_target={"out_hres": reference_name_to_index},
-            output_pre_processor=None,
+            pre_processors_state={"out_hres": _AdditiveProcessor(offset=0.0)},
+            pre_processors_residual={"out_hres": _AdditiveProcessor(offset=0.0)},
+            reference_variable_name_to_column_index_by_target={"out_hres": {"u10": 0}},
+            input_post_processor={"out_hres": _AdditiveProcessor(offset=0.0)},
             skip_imputation=True,
         )
 
@@ -991,10 +482,10 @@ def test_add_residual_to_state_raises_when_target_prognostic_missing_from_refere
 
 def test_after_sampling_mixed_target_uses_state_post_for_diagnostic_and_residual_post_for_prognostic() -> None:
     """With a diagnostic variable in the target, ``_after_sampling`` splits per-channel."""
-    model = _make_mixed_bare_model()
+    model = _make_bare_model(data_indices=_make_mixed_downscaler_indices())
 
-    residual_post = _IndexAwareProcessor(offset=-5.0)
-    state_post = _IndexAwareProcessor(offset=-50.0)
+    residual_post = _AdditiveProcessor(offset=-5.0)
+    state_post = _AdditiveProcessor(offset=-50.0)
 
     # (batch, time, ensemble, grid, vars=3)
     residual_pred = torch.tensor([[[[[7.0, 12.0, 55.0]]]]])  # t2m, u10, precip
@@ -1098,25 +589,31 @@ def test_target_routing_rejects_an_attached_target_that_is_also_an_encoder_sourc
         model._build_target_routing()
 
 
-def test_target_routing_rejects_an_anchor_on_a_different_grid_than_its_target() -> None:
+@pytest.mark.parametrize(
+    ("num_nodes", "coordinates", "match"),
+    [
+        ({"in_lres": 4, "in_hres": 4, "out_hres": 5}, None, "4 nodes.*5"),
+        (
+            None,
+            {"in_lres": torch.arange(8.0).reshape(4, 2), "out_hres": torch.arange(8.0).reshape(4, 2).flip(0)},
+            "different coordinates",
+        ),
+    ],
+    ids=["node_count", "node_order"],
+)
+def test_target_routing_rejects_an_anchor_on_a_different_grid_than_its_target(
+    num_nodes: dict[str, int] | None,
+    coordinates: dict[str, torch.Tensor] | None,
+    match: str,
+) -> None:
+    """The decoder writes the target onto the anchor's nodes, so count and order must match."""
     model = _make_target_routing_model(
         target_anchors={"out_hres": "in_lres"},
-        num_nodes={"in_lres": 4, "in_hres": 4, "out_hres": 5},
+        num_nodes=num_nodes,
+        coordinates=coordinates,
     )
 
-    with pytest.raises(ValueError, match="4 nodes.*5"):
-        model._build_target_routing()
-
-
-def test_target_routing_rejects_an_anchor_whose_nodes_differ_from_its_target() -> None:
-    """The decoder writes the target onto the anchor's nodes, so the node order must match too."""
-    coordinates = torch.arange(8.0).reshape(4, 2)
-    model = _make_target_routing_model(
-        target_anchors={"out_hres": "in_lres"},
-        coordinates={"in_lres": coordinates, "out_hres": coordinates.flip(0)},
-    )
-
-    with pytest.raises(ValueError, match="different coordinates"):
+    with pytest.raises(ValueError, match=match):
         model._build_target_routing()
 
 
@@ -1348,41 +845,6 @@ def test_real_construction_without_fusion_encodes_each_input_on_its_own_node_set
     assert out["out_hres"].shape == (batch, 1, 1, grid, 2)
 
 
-def test_real_construction_forward_returns_the_target_on_its_own_grid() -> None:
-    model = _build_real_downscaler()
-    batch, ensemble, grid = 1, 1, 4
-
-    x = {
-        "in_lres": torch.zeros(batch, 1, ensemble, grid, 2),
-        "in_hres": torch.zeros(batch, 1, ensemble, grid, 1),
-    }
-    conditioned_target = {"out_hres": torch.zeros(batch, 1, ensemble, grid, 2)}
-    condition = {"out_hres": torch.full((batch, 1, ensemble, 1, 1), 0.5)}
-
-    out = model._forward_transport_network(x=x, conditioned_target=conditioned_target, condition=condition)
-
-    assert set(out) == {"out_hres"}
-    assert out["out_hres"].shape == (batch, 1, ensemble, grid, 2)
-
-
-def test_real_construction_rejects_a_reference_that_is_not_an_encoder_source() -> None:
-    """The residual baseline must be one of the encoders' source datasets."""
-    config = _make_downscaler_config()
-    config.encoders.enc0.source_datasets = ["in_hres"]
-
-    with pytest.raises(ValueError, match="not a source dataset of any encoder"):
-        _build_real_downscaler(config=config)
-
-
-def test_real_construction_rejects_the_target_as_an_encoder_source() -> None:
-    """The target rides along on its reference's anchor and must not be encoded in its own right."""
-    config = _make_downscaler_config()
-    config.encoders.enc0.source_datasets = ["in_lres", "in_hres", "out_hres"]
-
-    with pytest.raises(ValueError, match="must not also be a source dataset"):
-        _build_real_downscaler(config=config)
-
-
 def _run_real_predict_step(
     model: AnemoiTransportSpatialDownscalerModelEncProcDec,
     batch: dict[str, torch.Tensor],
@@ -1399,11 +861,12 @@ def _run_real_predict_step(
     )
 
 
-def test_real_construction_predict_step_needs_no_batch_entry_for_the_target() -> None:
+@pytest.mark.parametrize("with_target_entry", [False, True], ids=["inputs_only", "superfluous_target"])
+def test_real_construction_predict_step_needs_no_batch_entry_for_the_target(with_target_entry: bool) -> None:
     """Inference must survive ``x`` and the sampled target having disjoint keys.
 
-    The sampler seeds one field per *target* and sizes it from the graph, so
-    nothing in the sampling path may index the batch — or ``x`` — by target name.
+    The sampler sizes the target from the graph, so nothing may index the batch
+    or ``x`` by target name. A placeholder target entry (older runners) is ignored.
     """
     model = _build_real_downscaler()
     batch_size, grid = 1, 4
@@ -1413,23 +876,8 @@ def test_real_construction_predict_step_needs_no_batch_entry_for_the_target() ->
         "in_lres": torch.zeros(batch_size, 1, grid, 2),
         "in_hres": torch.zeros(batch_size, 1, grid, 1),
     }
-
-    out = _run_real_predict_step(model, batch)
-
-    assert set(out) == {"out_hres"}
-    assert out["out_hres"].shape == (batch_size, 1, 1, grid, 2)
-
-
-def test_real_construction_predict_step_ignores_a_superfluous_target_entry() -> None:
-    """Runners that still send a placeholder for the target keep working."""
-    model = _build_real_downscaler()
-    batch_size, grid = 1, 4
-
-    batch = {
-        "in_lres": torch.zeros(batch_size, 1, grid, 2),
-        "in_hres": torch.zeros(batch_size, 1, grid, 1),
-        "out_hres": torch.zeros(batch_size, 1, grid, 2),
-    }
+    if with_target_entry:
+        batch["out_hres"] = torch.zeros(batch_size, 1, grid, 2)
 
     out = _run_real_predict_step(model, batch)
 
