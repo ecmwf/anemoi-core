@@ -1446,3 +1446,34 @@ def test_real_construction_fill_metadata_records_input_and_output_roles() -> Non
 
     roles = {name: md_dict["metadata_inference"][name]["role"] for name in ("in_lres", "in_hres", "out_hres")}
     assert roles == {"in_lres": "input", "in_hres": "input", "out_hres": "output"}
+
+
+@pytest.mark.parametrize("fused", [True, False], ids=["fused", "not_fused"])
+def test_real_construction_fill_metadata_records_input_shapes_per_input_dataset(fused: bool) -> None:
+    """Each input records its own width, as a forecaster would, not the fused encoder width."""
+    config = _make_downscaler_config()
+    graph = None
+    if not fused:
+        config.encoders = {
+            name: {
+                "source_datasets": [dataset_name],
+                "dataset_fusing_strategy": "not_supported",
+                "mapper": _gnn_mapper(_FORWARD_MAPPER),
+            }
+            for name, dataset_name in (("lres", "in_lres"), ("hres", "in_hres"))
+        }
+        graph = _make_downscaler_graph(encoded=("in_lres", "in_hres"))
+    model = _build_real_downscaler(config=config, graph=graph)
+    md_dict = {"metadata_inference": {name: {} for name in ("in_lres", "in_hres", "out_hres")}}
+
+    model.fill_metadata(md_dict)
+
+    attr_ndims = model.node_attributes.attr_ndims
+    for name, num_variables in (("in_lres", 2), ("in_hres", 1)):
+        assert md_dict["metadata_inference"][name]["shapes"] == {
+            "variables": num_variables + attr_ndims[name],
+            "input_timesteps": 1,
+            "ensemble": 1,
+            "grid": None,
+        }
+    assert "shapes" not in md_dict["metadata_inference"]["out_hres"]

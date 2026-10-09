@@ -30,6 +30,7 @@ from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models.base import NO_ENCODER_FUSION
+from anemoi.models.models.base import BaseGraphModel
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.models.transport import EdmSettings
@@ -1166,6 +1167,21 @@ class AnemoiTransportSpatialDownscalerModelEncProcDec(AnemoiTransportModelEncPro
     def _target_anchors_from_config(self, model_config: DotDict) -> dict[str, str]:
         """Attach each target to its residual reference."""
         return dict(model_config.get("residual_reference") or {})
+
+    def fill_metadata(self, md_dict) -> None:
+        """Record the input shapes of each input dataset on its own, and none for output-only datasets.
+
+        The inherited ``input_dim`` is the encoder width: for a fused anchor it also counts the
+        other sources and the noised targets, for every other dataset no encoder uses it.
+        """
+        super().fill_metadata(md_dict)
+        inference_inputs = set(self.inference_input_datasets)
+        for dataset_name in self.input_dim:
+            dataset_md = md_dict["metadata_inference"][dataset_name]
+            if dataset_name in inference_inputs:
+                dataset_md["shapes"]["variables"] = BaseGraphModel._calculate_input_dim(self, dataset_name)
+            else:
+                dataset_md.pop("shapes", None)
 
     def _build_target_routing(self) -> None:
         self._validate_residual_reference()
