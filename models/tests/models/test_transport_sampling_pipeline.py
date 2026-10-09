@@ -17,6 +17,7 @@ import anemoi.models.models.transport_encoder_processor_decoder as transport_mod
 from anemoi.models.data import Batch
 from anemoi.models.data.layout import TensorLayout
 from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import GriddedTemplate
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.layers.aggregator import SumAggregator
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
@@ -759,14 +760,18 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
     model = _transport_model_stub()
     _configure_sampling_model(model, {"ds_a": (2, 3, 4), "ds_b": (2, 3, 4)})
     model.n_step_output = {"ds_a": 2, "ds_b": 2}
+    model.target_datasets = ["ds_a", "ds_b"]
 
+    # The inputs as predict_step receives them: one gridded source per dataset, one member.
+    inputs = _sampling_batch(model, {name: tensor[:, :, None] for name, tensor in batch.items()})
     x_for_sampling_batch = _sampling_batch(model, x_for_sampling)
-    target_template = _target_template(model, x_for_sampling)
+    output_batch = _target_template(model, x_for_sampling)
+    target_template = {name: source.template() for name, source in output_batch.items()}
     model._before_sampling = lambda *_args, **_kwargs: ((x_for_sampling_batch,), None)
     # Sampling produces *output*-space data (3 variables), so the sampled batch is
     # built on the output-space target template rather than on the 2-variable input
     # batch, whose variable names would not describe it.
-    model.sample = lambda *_args, **_kwargs: target_template.with_data(
+    model.sample = lambda *_args, **_kwargs: output_batch.with_data(
         {
             "ds_a": torch.randn(1, 2, 1, 4, 3, dtype=torch.float64),
             "ds_b": torch.randn(1, 2, 1, 4, 3, dtype=torch.float64),
@@ -789,10 +794,9 @@ def test_predict_step_iterates_items_and_casts_each_dataset_dtype() -> None:
     model._after_sampling = _after_sampling_spy
 
     out = model.predict_step(
-        batch=batch,
+        inputs,
         pre_processors={"ds_a": IdentityProcessor(), "ds_b": IdentityProcessor()},
         post_processors={"ds_a": IdentityProcessor(), "ds_b": IdentityProcessor()},
-        n_step_input={"ds_a": 2, "ds_b": 2},
         target_template=target_template,
     )
 
@@ -1407,3 +1411,51 @@ def test_sampling_batch_preserves_sparse_ensemble_template_layout() -> None:
     assert [coords.shape[0] for coords in batch["obs"].coordinates] == [3, 2]
     for actual, expected in zip(batch["obs"].data, samples, strict=True):
         torch.testing.assert_close(actual, expected)
+
+
+def test_input_tensors_drop_the_single_member_axis() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    data = torch.arange(1 * 3 * 1 * 4 * 2, dtype=torch.float32).reshape(1, 3, 1, 4, 2)
+    tensors = model._input_tensors(_sampling_batch(model, {"ds": data}))
+    torch.testing.assert_close(tensors["ds"], data[:, :, 0])
+
+
+def test_input_tensors_reject_several_members() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    inputs = _sampling_batch(model, {"ds": torch.zeros(1, 3, 2, 4, 2)})
+    with pytest.raises(NotImplementedError, match="single input ensemble member"):
+        model._input_tensors(inputs)
+
+
+def test_output_template_batch_describes_the_template_in_output_variables() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    model.target_datasets = ["ds"]
+    # As the inference interface builds it: per-sample layout, no data, input-side variables.
+    template = GriddedTemplate(
+        name="ds",
+        variables=["in_0"],
+        layout=TensorLayout(time=0, ensemble=1, grid=2, variables=3),
+        coordinates=torch.zeros(4, 2),
+        batch_size=1,
+        ensemble_size=1,
+        time_size=2,
+    )
+    source = model._output_template_batch({"ds": template, "input_only": template}, torch.device("cpu"))["ds"]
+    assert source.variables == ["out_0", "out_1", "out_2"]
+    assert source.layout == TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+    assert source.data.shape == (1, 2, 1, 4, 3)
+    assert set(source.data.stride()) == {0}  # zero-stride view: nothing allocated
+
+
+def test_wrap_output_puts_payloads_in_the_template_sources() -> None:
+    model = _transport_model_stub()
+    _configure_sampling_model(model, {"ds": (2, 3, 4)})
+    model.n_step_output = {"ds": 2}
+    templates = _target_template(model, {"ds": torch.zeros(1, 2, 1, 4, 2)})
+    data = torch.ones(1, 2, 1, 4, 3)
+    out = model._wrap_output({"ds": data}, templates, model_comm_group=None, grid_shard_sizes=None, gather_out=True)
+    assert out["ds"].data is data
+    assert out["ds"].variables == templates["ds"].variables

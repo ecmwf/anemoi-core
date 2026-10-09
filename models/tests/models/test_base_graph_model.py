@@ -311,6 +311,7 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
     out = model.predict_step(
         _gridded_batch(grid=8, variables=["var"]),
         target_template=_target_template(grid=2),
+        target_forcing=Batch({}),
         pre_processors={"data": _identity_pre_processor()},
         post_processors={"data": _identity_pre_processor()},
         model_comm_group=comm_group,
@@ -345,6 +346,7 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
     out = model.predict_step(
         batch,
         target_template=_target_template(grid=4),
+        target_forcing=Batch({}),
         pre_processors={"data": _identity_pre_processor(), "forcing": _identity_pre_processor()},
         post_processors={"data": _identity_pre_processor(), "forcing": _NotCalled()},
     )

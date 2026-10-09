@@ -10,6 +10,7 @@
 
 import logging
 from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING
 from typing import Optional
 
@@ -23,9 +24,10 @@ from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
-from anemoi.models.data.sources import GriddedSource
-from anemoi.models.data.sources import TabularSource
 from anemoi.models.data.sources import BaseTemplate
+from anemoi.models.data.sources import GriddedSource
+from anemoi.models.data.sources import GriddedTemplate
+from anemoi.models.data.sources import TabularSource
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -52,6 +54,18 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 SamplingData = tuple[Batch, ...]
+
+
+def _template_to(template: BaseTemplate, device: torch.device) -> BaseTemplate:
+    """Return ``template`` with its node tensors (coordinates, timedeltas) on ``device``."""
+
+    def move(value):
+        if isinstance(value, list):
+            return [item.to(device) for item in value]
+        return value.to(device)
+
+    fields = {name: move(getattr(template, name)) for name in ("coordinates", "timedeltas") if hasattr(template, name)}
+    return replace(template, **fields)
 
 
 class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
@@ -902,6 +916,85 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         )
         return self.transport_source.build(request)
 
+    @staticmethod
+    def _input_tensors(x: Batch) -> dict[str, torch.Tensor]:
+        """Return each input source as the raw ``(batch, time, grid, variables)`` tensor sampling runs on.
+
+        Transport sampling reads gridded inputs with a single ensemble member, which
+        :meth:`_before_sampling` expands back to an ensemble axis.
+        """
+        tensors = {}
+        for dataset_name, source in x.items():
+            if source.is_tabular:
+                msg = f"Transport sampling does not support tabular inputs; dataset {dataset_name!r} is tabular."
+                raise NotImplementedError(msg)
+            pattern = source.layout.normalized(source.data.ndim).pattern
+            if source.layout.ensemble is None:
+                data = einops.rearrange(source.data, f"{pattern} -> batch time grid variables")
+            else:
+                data = einops.rearrange(source.data, f"{pattern} -> batch time ensemble grid variables")
+                if data.shape[2] != 1:
+                    msg = (
+                        f"Transport sampling takes a single input ensemble member; dataset {dataset_name!r} "
+                        f"has {data.shape[2]}."
+                    )
+                    raise NotImplementedError(msg)
+                data = data[:, :, 0]
+            tensors[dataset_name] = data
+        return tensors
+
+    def _output_template_batch(
+        self,
+        target_template: dict[str, BaseTemplate],
+        device: torch.device,
+    ) -> Batch:
+        """Describe what to sample: each decoded dataset's template geometry in model-output variables.
+
+        Built as sources whose payloads are zero-stride views on ``device`` (nothing is
+        allocated): sampling reads only their shape, dtype, device and geometry.
+        """
+        sources = {}
+        for dataset_name, template in target_template.items():
+            if dataset_name not in self.target_datasets:
+                continue
+            template = _template_to(
+                template.with_variables(
+                    self._sampling_variables(dataset_name, "output"),
+                    self._sampling_statistics(dataset_name, "output"),
+                ),
+                device,
+            )
+            if isinstance(template, GriddedTemplate):
+                rows = template.batch_size * template.ensemble_size * template.grid_size
+                columns = template.time_size * template.n_variables
+            else:
+                rows = template.ensemble_size * sum(template.node_counts)
+                columns = template.n_variables
+            sources[dataset_name] = template.unflatten(torch.zeros((), device=device).expand(rows, columns))
+        return Batch(sources)
+
+    @staticmethod
+    def _wrap_output(
+        out: dict[str, torch.Tensor | list[torch.Tensor]],
+        templates: Batch,
+        *,
+        model_comm_group: Optional[ProcessGroup],
+        grid_shard_sizes: DatasetShardSizes | None,
+        gather_out: bool,
+    ) -> Batch:
+        """Put the sampled payloads back into sources that describe them."""
+        sources = {}
+        for dataset_name, data in out.items():
+            template = templates[dataset_name]
+            shard_sizes = None if grid_shard_sizes is None else grid_shard_sizes.get(dataset_name)
+            if gather_out or shard_sizes is None or template.is_tabular:
+                sources[dataset_name] = template.clone(data=data)
+            else:
+                # Not gathered: this rank holds its shard of the grid, so the source does too.
+                coordinates = shard_tensor(template.coordinates, 0, shard_sizes, model_comm_group)
+                sources[dataset_name] = template.clone(data=data, coordinates=coordinates, shard_sizes=shard_sizes)
+        return Batch(sources)
+
     def predict_step(
         self,
         x: Batch,
@@ -922,10 +1015,10 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         Parameters
         ----------
         x : Batch
-            Input batched data (before pre-processing).
+            Input batched data (before pre-processing). Gridded, one ensemble member.
         target_template : dict[str, BaseTemplate]
-            Decoder conditioning (before pre-processing): the forcing variables at the
-            output valid times.
+            What to predict for each decoded dataset: its geometry (coordinates, sizes).
+            The sampled variables are the model's output variables.
         pre_processors : dict[str, nn.Module]
             Pre-processing module.
         post_processors : dict[str, nn.Module]
@@ -956,20 +1049,18 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Sampled output (after post-processing).
+        Batch
+            Sampled output (after post-processing), one source per decoded dataset.
         """
         with torch.no_grad():
-
-            assert isinstance(x, dict), "Input batch must be a dictionary!"
-            for dataset_name, dataset_tensor in x.items():
-                assert (
-                    len(dataset_tensor.shape) == 4
-                ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
+            inputs = self._input_tensors(x)
+            # Every input step is used: the input batch carries exactly the model's input window.
+            n_step_input = {dataset_name: source.time_size for dataset_name, source in x.items()}
+            templates = self._output_template_batch(target_template, x.device)
 
             # Before sampling hook
             before_sampling_data, grid_shard_sizes = self._before_sampling(
-                x,
+                inputs,
                 pre_processors,
                 n_step_input,
                 model_comm_group,
@@ -990,7 +1081,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
             out = self.sample(
                 x,
-                target_template=target_template,
+                target_template=templates,
                 model_comm_group=model_comm_group,
                 grid_shard_sizes=grid_shard_sizes,
                 schedule_params=schedule_params,
@@ -1017,7 +1108,13 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
                 **kwargs,
             )
 
-        return out
+        return self._wrap_output(
+            out,
+            templates,
+            model_comm_group=model_comm_group,
+            grid_shard_sizes=grid_shard_sizes,
+            gather_out=gather_out,
+        )
 
     def sample(
         self,
