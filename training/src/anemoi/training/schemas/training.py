@@ -247,6 +247,26 @@ class SpectralDimensionScalerSchema(BaseModel):
     "Normalisation method applied to the scaler values."
 
 
+class ObsDensityScalerSchema(BaseModel):
+    target_: Literal["anemoi.training.losses.scalers.ObsDensityScaler"] = Field(..., alias="_target_")
+    weights_path: str = Field(example="/path/obs_density/weights_bands_alpha0.5_cap10.npz")
+    "Weights file written by obs_density.py weights, built on the training period of the dataset."
+    variables: list[str] | None = Field(default=None, example=["z_*", "t_*", "u_*", "v_*"])
+    "Variables (fnmatch patterns allowed) to weight. Default: every variable in the file."
+    default_weight: NonNegativeFloat = Field(default=1.0)
+    "Weight for loss variables not in the file or not selected."
+    rename: dict[str, str] | None = Field(default=None)
+    "Extra mapping from file variable names to training variable names."
+    check_coordinates: bool = Field(default=True)
+    "Check that the file's grid matches the graph nodes."
+    coordinate_tolerance_deg: NonNegativeFloat = Field(default=1e-3)
+    "Largest allowed coordinate difference in degrees."
+    node_weights_attribute: str | None = Field(default="area_weight")
+    "Graph node attribute used as the loss node weights (logging and area-method check only)."
+    norm: None = Field(default=None)
+    "Must be None: the weights file already keeps each variable's expected loss magnitude."
+
+
 ScalerSchema = (
     GeneralVariableLossScalerSchema
     | VariableLevelScalerSchema
@@ -259,6 +279,7 @@ ScalerSchema = (
     | LeadTimeDecayScalerSchema
     | ReweightedGraphNodeAttributeScalerSchema
     | SpectralDimensionScalerSchema
+    | ObsDensityScalerSchema
 )
 
 
