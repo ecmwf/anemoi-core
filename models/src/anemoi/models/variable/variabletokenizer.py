@@ -97,36 +97,79 @@ class MultiHeadAttentionTransform(BaseVariableTokenizer):
 
         return self.output_projection(attn)
 
-    def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
+    # def forward(self, x: torch.Tensor, variables: str | list[str]) -> torch.Tensor:
+    #     if isinstance(variables, str):
+    #         variables = [variables]
+
+    #     emb_variables = self.emb_variables_metadata(variables)
+    #     # maybe some einops ops here for getting the correct shape before mha
+    #     outputs = []
+    #     batch, time, ensemble, grid, num_vars = x.shape
+
+    #     for x_chunk in x.split(self.chunk_size, dim=-2):
+    #         if self.training:
+    #             out = checkpoint(self._forward_chunk, x_chunk, emb_variables, use_reentrant=False)
+    #         else:
+    #             out = self._forward_chunk(
+    #                 x_chunk,
+    #                 emb_variables,
+    #             )
+    #         outputs.append(out)
+    #     outputs = torch.cat(outputs, dim=0)
+
+    #     outputs = einops.rearrange(
+    #         outputs,
+    #         "(batch time ensemble grid) embedding_dim " "-> (batch ensemble grid) (time embedding_dim)",
+    #         batch=batch,
+    #         time=time,
+    #         ensemble=ensemble,
+    #         grid=grid,
+    #     )
+
+    #     return outputs
+    def forward(
+        self,
+        x: torch.Tensor,
+        variables: str | list[str],
+    ) -> torch.Tensor:
         if isinstance(variables, str):
             variables = [variables]
 
         emb_variables = self.emb_variables_metadata(variables)
-        # maybe some einops ops here for getting the correct shape before mha
-        outputs = []
+
         batch, time, ensemble, grid, num_vars = x.shape
+
+        outputs = []
 
         for x_chunk in x.split(self.chunk_size, dim=-2):
             if self.training:
-                out = checkpoint(self._forward_chunk, x_chunk, emb_variables, use_reentrant=False)
-            else:
-                out = self._forward_chunk(
+                out = checkpoint(
+                    self._forward_chunk,
                     x_chunk,
                     emb_variables,
+                    use_reentrant=False,
                 )
+            else:
+                out = self._forward_chunk(x_chunk, emb_variables)
+
+            # Restore the grid dimension before concatenating chunks.
+            out = einops.rearrange(
+                out,
+                "(batch time ensemble grid) embedding -> batch time ensemble grid embedding",
+                batch=batch,
+                time=time,
+                ensemble=ensemble,
+                grid=x_chunk.shape[-2],
+            )
+
             outputs.append(out)
-        outputs = torch.cat(outputs, dim=0)
 
-        outputs = einops.rearrange(
+        outputs = torch.cat(outputs, dim=-2)
+
+        return einops.rearrange(
             outputs,
-            "(batch time ensemble grid) embedding_dim " "-> (batch ensemble grid) (time embedding_dim)",
-            batch=batch,
-            time=time,
-            ensemble=ensemble,
-            grid=grid,
+            "batch time ensemble grid embedding -> (batch ensemble grid) (time embedding)",
         )
-
-        return outputs
 
 
 class MeanPoolingTransform(BaseVariableTokenizer):
@@ -196,4 +239,4 @@ class Detokenizer(BaseVariableTokenizer):
         # hadamard product between queries and x, then sum over the embedding dimension
         x = torch.einsum("ge,ve->gv", x, queries)
         x = x / queries.shape[-1] ** 0.5
-        return x + self.variable_bias(variables).squeeze(-1)
+        return x + self.variable_bias(emb_variables).squeeze(-1)
