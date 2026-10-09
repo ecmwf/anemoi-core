@@ -629,12 +629,24 @@ class GraphSmoothnessLossSchema(BaseLossSchema):
     "Optional path to a file containing an edge_index tensor."
 
 
+class BandNaNAwareMSELossSchema(BaseLossSchema):
+    """Schema for BandNaNAwareMSELoss (validation metric restricted to a latitude band)."""
+
+    target_: Literal["anemoi.training.losses.BandNaNAwareMSELoss"] = Field(..., alias="_target_")
+    "Latitude-band NaN-aware MSE target."
+    lat_min: float = Field(ge=-90.0, le=90.0, example=-90.0)
+    "Southern band edge in degrees (inclusive)."
+    lat_max: float = Field(ge=-90.0, le=90.0, example=-20.0)
+    "Northern band edge in degrees (exclusive, except at 90)."
+
+
 _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.combined.CombinedLoss": "combined",
     "anemoi.training.losses.MultiscaleLossWrapper": "multiscale",
     "anemoi.training.losses.CRPS": "crps",
     "anemoi.training.losses.GraphEnergyScoreLoss": "graph_energy_score",
     "anemoi.training.losses.EnergyScoreLoss": "energy_score",
+    "anemoi.training.losses.BandNaNAwareMSELoss": "band_nan_aware_mse",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -680,6 +692,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
             | Annotated[SpectralLossSchema, Tag("spectral")]
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+            | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -741,6 +754,7 @@ LossSchemas = Annotated[
     | Annotated[GraphEdgeEnergyScoreLossSchema, Tag("graph_edge_energy_score")]
     | Annotated[SpectralLossSchema, Tag("spectral")]
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
+    | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

@@ -42,6 +42,14 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+# Latitude bands for the optional band scores: [lat_min, lat_max) in degrees, the pole included.
+BANDS = {"nh": (20.0, 90.0), "tropics": (-20.0, 20.0), "sh": (-90.0, -20.0)}
+
+
+def band_masks(lat: np.ndarray) -> dict[str, np.ndarray]:
+    """Boolean mask per latitude band (see ``BANDS``)."""
+    return {name: (lat >= lo) & ((lat < hi) | (hi >= 90.0)) for name, (lo, hi) in BANDS.items()}
+
 
 class SpectralGrid:
     """Linear interpolation from scattered nodes onto one regular lat-lon grid, triangulated once.
@@ -126,6 +134,13 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
     - logs ``val_ref_rmse``, ``val_ref_bias`` and ``val_ref_highk_ratio`` (mean ratio of
       predicted to reference power above ``high_k``) averaged over the dates.
 
+    ``score_dates`` adds dates that are scored but not plotted (and get no spectra), so the
+    RMSE and bias can be averaged over many more cases than are worth a figure. With
+    ``bands: true`` the RMSE and bias are also logged per latitude band as
+    ``val_ref_rmse/{nh,tropics,sh}/{var}/{step}`` (hard edges at +-20 deg). All means are
+    unweighted over grid points, which on an O96 grid is close to area weighting and equals the
+    loss weighting when the graph ``area_weight`` is ``UniformWeights``.
+
     The model forward runs synchronously; only figure rendering goes through the (possibly
     asynchronous) plot executor. The forward runs on rank 0 alone, so the callback is skipped
     when the model is sharded (``num_gpus_per_model > 1``).
@@ -138,6 +153,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
       variables: {z_500: z_500, t_850: t_850, q_700: q_700, u_250: u_250}
       dates: ["2025-01-15T00:00", "2025-03-01T12:00"]
       steps: [dacycle3, rstep0]                         # labels from task.get_metric_name
+      score_dates: ["2025-01-02T06:00", ...]            # optional: scored, not plotted
+      bands: true                                       # optional: NH / Tropics / SH scores
       every_n_epochs: 1
     ```
     """
@@ -153,6 +170,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         high_k: int = 60,
         grid_tolerance_deg: float = 1e-3,
         plotting_settings: PlottingSettings | None = None,
+        score_dates: list[str] | None = None,
+        bands: bool = False,
     ) -> None:
         super().__init__(
             every_n_epochs=every_n_epochs,
@@ -162,6 +181,9 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         self.reference_config = reference_dataset
         self.variables = dict(variables) if isinstance(variables, dict) else {v: v for v in variables}
         self.dates = [np.datetime64(d, "s") for d in dates]
+        plotted = set(self.dates)
+        self.score_dates = [d for d in (np.datetime64(d, "s") for d in score_dates or []) if d not in plotted]
+        self.bands = bands
         self.steps = [s.lstrip("_") for s in steps] if steps is not None else None
         self.dataset_name = dataset_name
         self.high_k = high_k
@@ -255,7 +277,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
 
         post_processors = pl_module.model.post_processors[name]
         cases = []
-        for date in self.dates:
+        plotted = set(self.dates)
+        for date in self.dates + self.score_dates:
             index = self._anchor_index(dataset, reader, date)
             sample = dataset.get_sample(index)
             batch = {key: value.unsqueeze(0) for key, value in sample.items()}
@@ -276,7 +299,15 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                     var: (pred[:, out_index[var]].astype(np.float64), self._reference_field(valid_time, ref_var))
                     for var, ref_var in self.variables.items()
                 }
-                cases.append({"date": date, "step": label, "valid_time": valid_time, "fields": fields})
+                cases.append(
+                    {
+                        "date": date,
+                        "step": label,
+                        "valid_time": valid_time,
+                        "fields": fields,
+                        "plot": date in plotted,
+                    },
+                )
 
         # All numerics stay here, on the training thread, done once: the plot executor thread only
         # draws. SHTOOLS/FFTW planning and the shared BLAS pools are not safe to run concurrently on
@@ -285,26 +316,39 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         if self._spectral_grid is None:
             self._spectral_grid = SpectralGrid(lat, lon)
         for case in cases:
+            if not case["plot"]:
+                continue
             case["spectra"] = {
                 var: self._spectral_grid.spectra([pred, ref, pred - ref]) for var, (pred, ref) in case["fields"].items()
             }
         return {"lat": lat, "lon": lon, "cases": cases}
 
     def scores(self, result: dict) -> dict[str, float]:
-        """Return date-averaged RMSE, bias and high-k spectral ratio per variable and step."""
+        """Return date-averaged RMSE, bias and high-k spectral ratio per variable and step.
+
+        The high-k ratio uses the plotted dates only; RMSE and bias use all dates, and per band
+        when ``bands`` is set.
+        """
+        masks = band_masks(np.asarray(result["lat"])) if self.bands else {}
         sums: dict[str, list[float]] = {}
+
+        def add(key: str, value: float) -> None:
+            sums.setdefault(key, []).append(value)
+
         for case in result["cases"]:
+            step = case["step"]
             for var, (pred, ref) in case["fields"].items():
                 diff = pred - ref
-                p_pred, p_ref, _ = case["spectra"][var]
-                k = slice(min(self.high_k, len(p_ref) - 1), None)
-                ratio = float(np.mean(p_pred[k] / np.maximum(p_ref[k], np.finfo(float).tiny)))
-                for metric, value in (
-                    ("rmse", float(np.sqrt(np.mean(diff**2)))),
-                    ("bias", float(np.mean(diff))),
-                    ("highk_ratio", ratio),
-                ):
-                    sums.setdefault(f"val_ref_{metric}/{var}/{case['step']}", []).append(value)
+                add(f"val_ref_rmse/{var}/{step}", float(np.sqrt(np.mean(diff**2))))
+                add(f"val_ref_bias/{var}/{step}", float(np.mean(diff)))
+                for band, mask in masks.items():
+                    add(f"val_ref_rmse/{band}/{var}/{step}", float(np.sqrt(np.mean(diff[mask] ** 2))))
+                    add(f"val_ref_bias/{band}/{var}/{step}", float(np.mean(diff[mask])))
+                if "spectra" in case:
+                    p_pred, p_ref, _ = case["spectra"][var]
+                    k = slice(min(self.high_k, len(p_ref) - 1), None)
+                    ratio = float(np.mean(p_pred[k] / np.maximum(p_ref[k], np.finfo(float).tiny)))
+                    add(f"val_ref_highk_ratio/{var}/{step}", ratio)
         return {key: float(np.mean(values)) for key, values in sums.items()}
 
     @rank_zero_only

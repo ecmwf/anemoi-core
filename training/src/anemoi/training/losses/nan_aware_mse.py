@@ -12,6 +12,7 @@ import logging
 
 import torch
 from torch.distributed.distributed_c10d import ProcessGroup
+from torch_geometric.data import HeteroData
 
 from anemoi.training.losses.base import FunctionalLoss
 from anemoi.training.losses.base import Squash_mode
@@ -135,3 +136,74 @@ class NaNAwareMSELoss(FunctionalLoss):
 
         out = self.scale(out, scaler_indices, without_scalers=without_scalers, grid_shard_slice=grid_shard_slice)
         return self.reduce(out, squash, group=group if is_sharded else None, squash_mode=squash_mode)
+
+
+class BandNaNAwareMSELoss(NaNAwareMSELoss):
+    """NaNAwareMSELoss restricted to a latitude band.
+
+    Targets outside ``lat_min <= latitude < lat_max`` are treated as missing, so the per-variable
+    valid-count normalisation of :class:`NaNAwareMSELoss` runs over the band only and the result is
+    the mean squared error over the band's valid observations (times the node weights). Use it as
+    extra ``validation_metrics`` entries to follow NH / Tropics / SH skill separately.
+
+    A sample with no valid observation of a variable in the band contributes 0 for that variable
+    (e.g. SH radiosonde variables at 06/18 UTC). The logged epoch mean is then lower than the mean
+    over observed samples, but the same samples are empty in every run, so runs remain comparable.
+    """
+
+    name: str = "band_nan_aware_mse"
+    needs_graph_data = True
+    needs_data_node_name = True
+
+    def __init__(
+        self,
+        lat_min: float,
+        lat_max: float,
+        graph_data: HeteroData | None = None,
+        data_node_name: str | None = None,
+        ignore_nans: bool = False,
+        **kwargs,
+    ) -> None:
+        """Initialise BandNaNAwareMSELoss.
+
+        Parameters
+        ----------
+        lat_min, lat_max : float
+            Band edges in degrees; ``lat_max >= 90`` includes the pole.
+        graph_data : HeteroData
+            Graph whose ``data_node_name`` nodes hold [lat, lon] in radians, injected by the loss
+            factory.
+        data_node_name : str
+            Name of the data nodes, injected by the loss factory.
+        ignore_nans : bool, optional
+            Passed to :class:`NaNAwareMSELoss`, by default False.
+        """
+        super().__init__(ignore_nans=ignore_nans)
+        del kwargs
+        if graph_data is None or data_node_name is None:
+            msg = f"{self.__class__.__name__} needs graph_data and data_node_name (injected by the loss factory)."
+            raise ValueError(msg)
+        if lat_min >= lat_max:
+            msg = f"{self.__class__.__name__}: lat_min={lat_min} must be below lat_max={lat_max}."
+            raise ValueError(msg)
+        latitudes = torch.rad2deg(graph_data[data_node_name].x[:, 0].double())
+        in_band = (latitudes >= lat_min) & ((latitudes < lat_max) | (lat_max >= 90.0))
+        if not in_band.any():
+            msg = f"{self.__class__.__name__}: no grid point between {lat_min} and {lat_max} degrees."
+            raise ValueError(msg)
+        self.register_buffer("in_band", in_band, persistent=False)
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        squash: bool = True,
+        *,
+        grid_shard_slice: slice | None = None,
+        **kwargs,
+    ) -> torch.Tensor:
+        in_band = self.in_band if grid_shard_slice is None else self.in_band[grid_shard_slice]
+        shape = [1] * target.ndim
+        shape[TensorDim.GRID] = -1
+        target = target.masked_fill(~in_band.view(shape), torch.nan)
+        return super().forward(pred, target, squash, grid_shard_slice=grid_shard_slice, **kwargs)
