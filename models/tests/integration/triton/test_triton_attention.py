@@ -17,11 +17,12 @@ import math
 import einops
 import pytest
 import torch
-import triton
 
 from anemoi.models.triton.utils import is_triton_available
 
 if is_triton_available():
+    import triton
+
     from anemoi.models.triton.attention import TritonAttention
     from anemoi.models.triton.attention import _attn_bwd_dkdv
     from anemoi.models.triton.attention import _attn_bwd_dq
@@ -35,6 +36,8 @@ try:
     HAS_FLASH = True
 except BaseException:
     HAS_FLASH = False
+
+pytestmark = pytest.mark.skipif(not is_triton_available(), reason="CUDA and Triton needed")
 
 
 def attention_ref(
@@ -77,8 +80,6 @@ def test_triton_attention_sharp_softmax_dv(dtype, causal, window):
     forward's saved row max, causing large dV errors even when O is correct.
     A loss on one query isolates this from cancellation in the dQ/dK formula.
     """
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
 
     torch.manual_seed(42)
     shape = (1, 1, 97, 64)
@@ -141,8 +142,6 @@ def test_triton_attention_low_precision_gradients_with_offset_keys(dtype, causal
     The exact gradients do not depend on such an offset; rounding the score gradient to 16 bits before the
     products with the keys and queries would leak it into dQ (https://arxiv.org/abs/2609.34272).
     """
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
 
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (1, 2, 512, 64)
@@ -164,8 +163,6 @@ def test_triton_attention_low_precision_gradients_with_offset_keys(dtype, causal
 @pytest.mark.parametrize("causal,window", MASKINGS)
 def test_triton_attention_dq_ignores_a_key_coordinate_the_queries_do_not_see(dtype, causal, window):
     """With every query 0 in one coordinate and every key sharing a large value there, dQ is 0 in it."""
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
 
     generator = torch.Generator(device="cuda").manual_seed(0)
     shape = (1, 2, 512, 64)
@@ -183,8 +180,6 @@ def test_triton_attention_dq_ignores_a_key_coordinate_the_queries_do_not_see(dty
 @pytest.mark.parametrize("causal,window", MASKINGS)
 def test_triton_attention_dk_with_nearly_one_hot_attention(dtype, causal, window):
     """The winning key retains its gradient when the saved output rounds to its value."""
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
 
     shape, row = (1, 1, 97, 64), 48
     q = torch.zeros(shape, device="cuda", dtype=dtype)
@@ -211,8 +206,6 @@ BLOCK_SIZES = [(16, 16), (16, 128), (128, 16), (64, 32), (128, 128)]
 @pytest.fixture
 def block_sizes(request):
     """Runs the forward and both backward kernels with the given (BLOCK_FIXED, BLOCK_ITER) pair."""
-    if not is_triton_available() or not torch.cuda.is_available():
-        pytest.skip("Triton and CUDA required")
 
     block_fixed, block_iter = request.param
     config = triton.Config(
@@ -266,13 +259,7 @@ def test_triton_attention_block_sizes(block_sizes, n_ctx, window):
 def test_triton_attention_deterministic():
     """Computes the same test case 50 times in a row and checks that the output matches to ensure that the implementation is deterministic."""
 
-    if not is_triton_available():
-        pytest.skip("Triton not available")
-
-    try:
-        DEVICE = triton.runtime.driver.active.get_active_torch_device()
-    except RuntimeError:
-        pytest.skip("No GPU detected")
+    DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
     attention = TritonAttention.apply
 
@@ -361,15 +348,9 @@ def test_triton_attention(Z, H, N_CTX, HEAD_DIM, causal, window, mode, dtype):
             "N_CTX > 2048 will cause OOM for naive pytorch reference implementation, so we skip these tests when flash attention is not available."
         )
 
-    if not is_triton_available():
-        pytest.skip("Triton not available")
-
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
-    try:
-        DEVICE = triton.runtime.driver.active.get_active_torch_device()
-    except RuntimeError:
-        pytest.skip("No GPU detected")
+    DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
     q = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
     k = torch.rand((Z, H, N_CTX, HEAD_DIM), dtype=dtype, device=DEVICE).requires_grad_()
@@ -544,16 +525,10 @@ def test_triton_attention_cumulative_loss_vs_flash(Z, H, N_CTX, HEAD_DIM, causal
     if not HAS_FLASH:
         pytest.skip("Flash Attention 2 is required for this comparison test")
 
-    if not is_triton_available():
-        pytest.skip("Triton not available")
-
     if window and causal:
         pytest.skip("Causal and sliding window together not supported")
 
-    try:
-        DEVICE = triton.runtime.driver.active.get_active_torch_device()
-    except RuntimeError:
-        pytest.skip("No GPU detected")
+    DEVICE = triton.runtime.driver.active.get_active_torch_device()
 
     num_steps = 100
     lr = 1e-2

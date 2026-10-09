@@ -100,7 +100,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_training_cycle' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      pytest_cmd: python3 -m pytest -v training/tests/integration/ --ignore=training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL; python3 -m pytest -v models/tests/integration/ --slow
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_training_cycle
