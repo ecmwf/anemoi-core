@@ -18,6 +18,7 @@ from torch.utils.data import DataLoader
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.iteration import CrossDatasetIteration
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -131,19 +132,16 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
     ) -> MultiDataset:
         data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
-        dataset_options = {}
-        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
-        if dataloader_config.get("fake_dataloading", False):
-            dataset_options["fake_dataloading"] = True
 
         return MultiDataset(
             data_readers=data_readers,
             relative_date_indices=relative_date_indices,
+            iteration=self.config.dataloader.iteration,
             shuffle=shuffle,
             label=label,
             epoch=self.epoch,
             rollout=len(tuple(self.task.steps(label))),
-            **dataset_options,
+            fake_dataloading=self.config.dataloader.fake_dataloading,
         )
 
     def set_epoch(self, epoch: int) -> None:
@@ -195,6 +193,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         """Create DataLoader for multi-dataset."""
         assert stage in {"training", "validation", "test"}
 
+        batch_size = self.config.dataloader.batch_size[stage]
+        if isinstance(ds.iteration, CrossDatasetIteration) and batch_size != 1:
+            msg = "Multi-domain sampling currently requires a batch size of one."
+            raise ValueError(msg)
+
         extra = {}
 
         if self.config.dataloader.get("multiprocessing_context", None) is not None:
@@ -207,7 +210,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return DataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
+            batch_size=batch_size,
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
             worker_init_fn=worker_init_func,

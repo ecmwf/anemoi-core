@@ -1,0 +1,56 @@
+prefetch_factor: 2
+pin_memory: True
+# Automatically set to False when the rollout changes between epochs.
+persistent_workers: True
+fake_dataloading: False
+
+iteration:
+  _target_: anemoi.training.data.iteration.CrossDatasetIteration
+
+read_group_size: ${system.hardware.num_gpus_per_model}
+
+num_workers:
+  training: 8
+  validation: 8
+  test: 8
+batch_size:
+  training: 1
+  validation: 1
+  test: 1
+
+limit_batches:
+  training: null
+  validation: null
+  test: 20
+
+dataset: ${system.input.dataset}
+
+training:
+  datasets:
+    sg_1:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+      start: null
+      end: 2020
+    sg_2: ${dataloader.training.datasets.sg_1}
+
+validation:
+  datasets:
+    sg_1:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+      start: 2021
+      end: 2021
+    sg_2: ${dataloader.validation.datasets.sg_1}
+
+test:
+  datasets:
+    sg_1:
+      dataset_config:
+        dataset: ${dataloader.dataset}
+        frequency: ${data.frequency}
+      start: 2022
+      end: null
+    sg_2: ${dataloader.test.datasets.sg_1}

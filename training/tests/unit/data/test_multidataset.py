@@ -19,6 +19,10 @@ from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
+ITERATION_CONFIG = {
+    "_target_": "anemoi.training.data.iteration.BaseIteration",
+}
+
 
 class TestMultiDataset:
     """Test MultiDataset instantiation and properties."""
@@ -49,7 +53,11 @@ class TestMultiDataset:
         data_readers = {"dataset_a": mock_dataset_a, "dataset_b": mock_dataset_b}
         relative_date_indices = {"dataset_a": [0, 2, 6], "dataset_b": [0, 2, 6]}  # e.g. f([t, t-6h]) = t+12h
 
-        return MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+        return MultiDataset(
+            data_readers=data_readers,
+            relative_date_indices=relative_date_indices,
+            iteration=ITERATION_CONFIG,
+        )
 
     def test_valid_date_indices(self, multi_dataset: MultiDataset) -> None:
         """Test that valid_date_indices returns a flat range over the valid (sequence, position) anchors."""
@@ -104,7 +112,11 @@ class TestMultiDataset:
     def test_worker_shuffle_repeats_for_same_epoch(self, multi_dataset: MultiDataset, mocker: MockFixture) -> None:
         """New workers reproduce the shuffle when the base seed and epoch match."""
         mocker.patch("anemoi.training.data.multidataset.get_base_seed", return_value=1000)
-        mocker.patch.object(multi_dataset, "get_sample", side_effect=lambda index: int(index))
+        sample = mocker.patch.object(
+            multi_dataset.iteration,
+            "sample",
+            side_effect=lambda _dataset, index: int(index),
+        )
 
         multi_dataset.set_epoch(5)
         multi_dataset.per_worker_init(n_workers=2, worker_id=1)
@@ -114,6 +126,7 @@ class TestMultiDataset:
         resumed_order = list(multi_dataset)
 
         assert resumed_order == uninterrupted_order
+        assert sample.call_count == 2 * len(uninterrupted_order)
 
     def test_fake_dataloading_reuses_first_batch(
         self,
@@ -122,16 +135,16 @@ class TestMultiDataset:
     ) -> None:
         """Fake dataloading reads one valid batch and reuses its tensors."""
         multi_dataset.fake_dataloading = True
-        get_sample = mocker.patch.object(
-            multi_dataset,
-            "get_sample",
-            side_effect=lambda index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
+        sample = mocker.patch.object(
+            multi_dataset.iteration,
+            "sample",
+            side_effect=lambda _dataset, index: {"dataset_a": torch.tensor([index], dtype=torch.int64)},
         )
         multi_dataset.per_worker_init(n_workers=1, worker_id=0)
 
         batches = list(multi_dataset)
 
-        assert get_sample.call_count == 1
+        assert sample.call_count == 1
         assert len(batches) == len(multi_dataset.valid_date_indices)
         assert all(batch is batches[0] for batch in batches)
         assert all(torch.equal(batch["dataset_a"], batches[0]["dataset_a"]) for batch in batches)
@@ -148,7 +161,11 @@ class TestMultiDataset:
         empty_dataset = data_readers["dataset_b"]
         err_msg = f"No valid anchors found for data reader 'dataset_b': {empty_dataset}"
         with pytest.raises(ValueError, match=re.escape(err_msg)):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=relative_date_indices,
+                iteration=ITERATION_CONFIG,
+            )
 
     def test_valid_date_indices_empty_intersection(self, multi_dataset: MultiDataset) -> None:
         """Test that MultiDataset raises ValueError when intersection of valid anchors is empty."""
@@ -160,4 +177,8 @@ class TestMultiDataset:
         data_readers["dataset_b"].compute_anchors.return_value = np.array([[0, 5], [0, 6], [0, 7]], dtype=np.int64)
 
         with pytest.raises(ValueError, match="No valid anchors found after intersection across all datasets"):
-            MultiDataset(data_readers=data_readers, relative_date_indices=relative_date_indices)
+            MultiDataset(
+                data_readers=data_readers,
+                relative_date_indices=relative_date_indices,
+                iteration=ITERATION_CONFIG,
+            )
