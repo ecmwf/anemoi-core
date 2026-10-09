@@ -502,15 +502,16 @@ class VariableVocabulary:
             ),
             vertical_type_ids=torch.tensor(
                 [
-                    self.vertical_type_to_id[spec.vertical_coordinate.type]
-                    if spec.kind == "physical"
-                    else -1
+                    self.vertical_type_to_id[spec.vertical_coordinate.type] if spec.kind == "physical" else -1
                     for spec in specs
                 ],
                 dtype=torch.long,
             ),
             temporal_operator_ids=torch.tensor(
-                [self.temporal_operator_to_id[spec.temporal_operator] if spec.kind == "physical" else -1 for spec in specs],
+                [
+                    self.temporal_operator_to_id[spec.temporal_operator] if spec.kind == "physical" else -1
+                    for spec in specs
+                ],
                 dtype=torch.long,
             ),
             # ----------------------------------------------------------
@@ -518,12 +519,11 @@ class VariableVocabulary:
             # ----------------------------------------------------------
             vertical_levels=torch.tensor(
                 [
-                    float(spec.vertical_coordinate.level)
-                    if (
-                        spec.vertical_coordinate is not None
-                        and spec.vertical_coordinate.level is not None
+                    (
+                        float(spec.vertical_coordinate.level)
+                        if (spec.vertical_coordinate is not None and spec.vertical_coordinate.level is not None)
+                        else 0.0
                     )
-                    else 0.0
                     for spec in specs
                 ],
                 dtype=torch.float32,
@@ -536,11 +536,7 @@ class VariableVocabulary:
             # Missing-value masks
             # ----------------------------------------------------------
             has_vertical_level=torch.tensor(
-                [
-                    spec.vertical_coordinate is not None
-                    and spec.vertical_coordinate.level is not None
-                    for spec in specs
-                ],
+                [spec.vertical_coordinate is not None and spec.vertical_coordinate.level is not None for spec in specs],
                 dtype=torch.bool,
             ),
             has_temporal_window=torch.tensor(
@@ -550,7 +546,7 @@ class VariableVocabulary:
             is_forcing=torch.tensor(
                 [spec.kind == "forcing" for spec in specs],
                 dtype=torch.bool,
-            )
+            ),
         )
 
     # ------------------------------------------------------------------
@@ -574,11 +570,15 @@ class VariableVocabulary:
                 name: {
                     "name": spec.name,
                     "param": spec.param,
-                    "vertical_coordinate": {
-                        "type": (spec.vertical_coordinate.type),
-                        "level": (spec.vertical_coordinate.level),
-                        "unit": (spec.vertical_coordinate.unit),
-                    } if spec.vertical_coordinate is not None else None,
+                    "vertical_coordinate": (
+                        {
+                            "type": (spec.vertical_coordinate.type),
+                            "level": (spec.vertical_coordinate.level),
+                            "unit": (spec.vertical_coordinate.unit),
+                        }
+                        if spec.vertical_coordinate is not None
+                        else None
+                    ),
                     "temporal_operator": (spec.temporal_operator),
                     "temporal_window": (spec.temporal_window),
                     "kind": (spec.kind),
