@@ -37,6 +37,7 @@ dependencies = [
   "matplotlib>=3.6",
   "networkx>=3.1",
   "numpy>=1.26",
+  "packaging>=20",
   "plotly>=5.19",
   "scikit-learn>=1.5",
   "scipy>=1.6",

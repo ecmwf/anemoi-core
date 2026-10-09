@@ -504,7 +504,7 @@ def test_training_cycle_offset_forecaster_tendency_transport(
 
     assert trainer.task.name == "offset-forecaster"
     assert trainer.datamodule.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
-    assert trainer.model.model.pre_processors_tendencies["data"].lead_times == ["6h", "12h"]
+    assert trainer.model.model.statistics_tendencies["data"]["lead_times"] == ["6h", "12h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["input_offsets"] == ["-12h", "0h"]
     assert trainer.metadata["metadata_inference"]["data"]["timesteps"]["output_offsets"] == ["6h", "12h"]
     assert_keys_exist(trainer.metadata, partial_metadata_schema)

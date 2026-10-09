@@ -21,6 +21,9 @@ from anemoi.training.utils.index_space import IndexSpace
 if TYPE_CHECKING:
     import torch
 
+    from anemoi.models.data import Batch
+    from anemoi.models.data.sources.base import Source
+
 
 class EDMDiffusionTransportObjective(TransportObjective):
     """EDM diffusion objective."""
@@ -29,14 +32,14 @@ class EDMDiffusionTransportObjective(TransportObjective):
         self,
         prepared: PreparedPredictionTarget,
     ) -> PreparedTransportObjective:
-        shapes = {dataset_name: target.shape for dataset_name, target in prepared.model_target.items()}
+        model_target = prepared.model_target
         sigma = self._sample_training_sigma(
-            shape=shapes,
-            device=next(iter(prepared.model_target.values())).device,
+            shape={name: source.condition_shape for name, source in model_target.items()},
+            device=model_target.device,
         )
-        noise_weights = self._loss_weights(sigma)
+        noise_weights = self._loss_weights(sigma, model_target)
         source = self.build_transport_source(prepared)
-        target_noised = self._noise_target(prepared.model_target, sigma, source)
+        target_noised = self._noise_target(model_target, sigma, source)
         # EDM diffusion predicts the clean target. The prediction mode decides
         # whether that clean target is a full state or a tendency field.
         # state uses DATA_FULL, tendency uses DATA_OUTPUT.
@@ -52,27 +55,28 @@ class EDMDiffusionTransportObjective(TransportObjective):
 
     def forward(
         self,
-        x: dict[str, torch.Tensor],
-        conditioned_target: dict[str, torch.Tensor],
+        x: Batch,
+        conditioned_target: Batch,
         condition: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+        target_forcing: Batch | None = None,
+    ) -> Batch:
         return self.module.model.model(
             x,
             conditioned_target,
             condition,
             model_comm_group=self.module.model_comm_group,
-            grid_shard_sizes=self.module.grid_shard_sizes,
+            target_forcing=target_forcing,
         )
 
     def compute_loss(
         self,
-        y_pred: torch.Tensor,
-        y: torch.Tensor,
+        y_pred: Source,
+        y: Source,
         grid_shard_slice: slice | None = None,
         dataset_name: str | None = None,
         pred_layout: IndexSpace | str | None = None,
         target_layout: IndexSpace | str | None = None,
-        weights: dict[str, torch.Tensor] | None = None,
+        weights: dict[str, torch.Tensor | list[torch.Tensor]] | None = None,
         **_kwargs,
     ) -> torch.Tensor:
         """Compute EDM diffusion loss with noise weighting."""
@@ -80,10 +84,13 @@ class EDMDiffusionTransportObjective(TransportObjective):
 
         loss = self.module.loss[dataset_name]
         loss_kwargs = {
-            "weights": weights[dataset_name],
             "grid_shard_slice": grid_shard_slice,
             "group": self.module.model_comm_group,
         }
+        if y_pred.is_tabular:
+            loss_kwargs["per_sample_kwargs"] = {"weights": weights[dataset_name]}
+        else:
+            loss_kwargs["weights"] = weights[dataset_name]
         if pred_layout is not None:
             loss_kwargs["pred_layout"] = pred_layout
         if target_layout is not None:
@@ -91,19 +98,34 @@ class EDMDiffusionTransportObjective(TransportObjective):
         if getattr(loss, "needs_shard_layout_info", False):
             loss_kwargs.update(
                 grid_dim=self.module.grid_dim,
-                grid_shard_sizes=(self.module.grid_shard_sizes[dataset_name] if grid_shard_slice is not None else None),
+                grid_shard_sizes=self.module._grid_shard_sizes(y),
             )
 
-        return loss(y_pred, y, **loss_kwargs)
+        return self.module._evaluate_loss(
+            loss,
+            y_pred,
+            y,
+            gradient_scaling=self.module.loss_gradient_scaling,
+            **loss_kwargs,
+        )
 
     def _noise_target(
         self,
-        x: dict[str, torch.Tensor],
+        x: Batch,
         sigma: dict[str, torch.Tensor],
-        source: dict[str, torch.Tensor],
-    ) -> dict[str, torch.Tensor]:
+        source: Batch,
+    ) -> Batch:
         """Create the corrupted target by adding scaled source noise to the clean target."""
-        return {name: x[name] + source[name] * sigma[name] for name in x}
+        return x.with_sources(
+            {
+                name: target.map_with_condition(
+                    lambda clean, noise, sigma_sample: clean + noise * sigma_sample,
+                    sigma[name],
+                    source[name],
+                )
+                for name, target in x.items()
+            },
+        )
 
     def _sample_training_sigma(
         self,
@@ -124,9 +146,14 @@ class EDMDiffusionTransportObjective(TransportObjective):
         distribution = distribution_cls(**training_condition_config)
         return distribution.sample(shape, device=device)
 
-    def _loss_weights(self, sigma: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        """Return EDM loss weights for sampled sigma values."""
+    def _loss_weights(
+        self,
+        sigma: dict[str, torch.Tensor],
+        target: Batch,
+    ) -> dict[str, torch.Tensor | list[torch.Tensor]]:
+        """Return EDM loss weights for sampled sigma values, laid out like each target's payload."""
         sigma_data = self.module.model.model.edm.sigma_data
         return {
-            dataset_name: edm_loss_weight(sigma_dataset, sigma_data) for dataset_name, sigma_dataset in sigma.items()
+            dataset_name: target[dataset_name].condition_per_sample(edm_loss_weight(sigma_dataset, sigma_data))
+            for dataset_name, sigma_dataset in sigma.items()
         }

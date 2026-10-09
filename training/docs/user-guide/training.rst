@@ -482,7 +482,7 @@ The loss is also scaled by assigning a weight to each node on the output
 grid. These weights are calculated during graph-creation and stored as
 an attribute in the graph object. Node weighting is applied via the
 ``node_weights`` scaler defined under
-``config.training.scalers.<dataset_name>.node_weights``; set
+``config.training.scalers.datasets.<dataset_name>.node_weights``; set
 ``nodes_attribute_name`` to the graph attribute to use as weights, and
 reference the scaler from a loss by including ``node_weights`` in its
 ``scalers:`` list. By default anemoi-training uses area weighting
@@ -813,8 +813,8 @@ directly will crash or silently mis-pair tensors when used with:
 
 -  **Imputers** (e.g. ``ConstantImputer``), which register scratch
    buffers whose shapes change on the first forward pass.
--  **Updating loss scalers** (e.g. ``NaNMaskScaler``), which re-register
-   scaler buffers every batch via ``ScaleTensor.update_scaler`` —
+-  **Custom updating loss scalers**, which can re-register scaler buffers
+   via ``ScaleTensor.update_scaler`` —
    shuffling the buffer order in the live model relative to the averaged
    model's snapshot.
 

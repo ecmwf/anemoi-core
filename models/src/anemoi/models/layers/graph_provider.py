@@ -16,8 +16,10 @@ from pathlib import Path
 from typing import Optional
 from typing import Union
 
+import einops
 import numpy as np
 import torch
+from hydra.utils import instantiate
 from scipy.sparse import coo_matrix
 from scipy.sparse import load_npz
 from scipy.sparse import spmatrix
@@ -26,8 +28,10 @@ from torch import nn
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch.utils.checkpoint import checkpoint
 from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import NodeStorage
 from torch_geometric.typing import Adj
 
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian
 from anemoi.models.distributed.khop_edges import shard_edges_1hop
 from anemoi.models.distributed.khop_edges import sort_edge_index_by_dst
 from anemoi.models.distributed.shapes import ShardSizes
@@ -38,38 +42,55 @@ LOGGER = logging.getLogger(__name__)
 
 def create_graph_provider(
     graph: Optional[HeteroData] = None,
-    edge_attributes: Optional[list[str]] = None,
+    edge_builders: Optional[list[dict[str, dict]]] = None,
+    attributes: Optional[dict[str, dict]] = None,
+    edge_attribute_names: Optional[list[str]] = None,
     src_size: Optional[int] = None,
     dst_size: Optional[int] = None,
     trainable_size: int = 0,
 ) -> "BaseGraphProvider":
     """Factory function to create appropriate graph provider.
 
-    Returns StaticGraphProvider if graph has edges,
+    Returns DynamicGraphProvider if no graph is given but edge builders are,
+    StaticGraphProvider if graph has edges,
     otherwise returns NoOpGraphProvider for edge-less architectures.
 
     Parameters
     ----------
     graph : HeteroData, optional
-        Graph containing edges (for static mode)
-    edge_attributes : list[str], optional
-        Edge attributes to use (for static mode)
+        Graph containing edges (for static mode).
+    edge_builders : list[dict[str, dict]], optional
+        Edge builder configs (for dynamic mode).
+    attributes : dict[str, dict], optional
+        Edge attribute configs (for dynamic mode).
+    edge_attribute_names : list[str], optional
+        Edge attributes to use (for static mode).
     src_size : int, optional
-        Source grid size (for static mode)
+        Source grid size (for static mode).
     dst_size : int, optional
-        Destination grid size (for static mode)
+        Destination grid size (for static mode).
     trainable_size : int, optional
-        Trainable tensor size, by default 0
+        Trainable tensor size, by default 0.
 
     Returns
     -------
     BaseGraphProvider
-        Appropriate graph provider instance
+        Appropriate graph provider instance.
     """
-    if graph:
+    if (graph == {} or graph is None) and edge_builders is not None:
+        if trainable_size > 0:
+            LOGGER.warning(
+                "DynamicGraphProvider does not support trainable edge parameters but trainable_size=%d was provided.",
+                trainable_size,
+            )
+        return DynamicGraphProvider(
+            edge_builder_config=edge_builders,
+            edge_attributes_configs=attributes,
+        )
+    elif graph:
         return StaticGraphProvider(
             graph=graph,
-            edge_attributes=edge_attributes,
+            edge_attributes=edge_attribute_names,
             src_size=src_size,
             dst_size=dst_size,
             trainable_size=trainable_size,
@@ -104,29 +125,41 @@ class BaseGraphProvider(nn.Module, ABC):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
     ) -> Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]:
         """Get edge information.
 
         Parameters
         ----------
         batch_size : int, optional
-            Number of times to expand the edge index (used by static mode)
+            Number of times to expand the edge index (used by static mode).
         src_coords : Tensor, optional
-            Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+            Source node coordinates (used by dynamic mode for k-NN, radius graphs, etc.).
         dst_coords : Tensor, optional
-            Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.)
+            Destination node coordinates (used by dynamic mode for k-NN, radius graphs, etc.).
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
-            Whether to shard edges, by default True
+            Whether to shard edges, by default True.
+        src_timedeltas : Tensor, optional
+            Per-source-node signed time offsets in seconds.
+        dst_timedeltas : Tensor, optional
+            Per-destination-node signed time offsets in seconds.
 
         Returns
         -------
         Union[tuple[Tensor, Adj, Optional[ShardSizes]], Tensor]
             For standard providers: (edge_attr, edge_index, edge_shard_sizes) tuple
-            For sparse providers: sparse projection matrix
+            For sparse providers: sparse projection matrix.
         """
         pass
 
@@ -213,16 +246,16 @@ class StaticGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         edge_index : Adj
-            Edge index to start
+            Edge index to start.
         edge_inc : Tensor
-            Edge increment to use
+            Edge increment to use.
         batch_size : int
-            Number of times to expand the edge index
+            Number of times to expand the edge index.
 
         Returns
         -------
         Adj
-            Expanded edge index
+            Expanded edge index.
         """
         edge_index = torch.cat(
             [edge_index + i * edge_inc for i in range(batch_size)],
@@ -237,7 +270,13 @@ class StaticGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges."""
-        edge_attr = self.trainable(self.edge_attr, batch_size)
+        edge_trainable_params = self.trainable(batch_size)
+        if edge_trainable_params is not None:
+            edge_attr = einops.repeat(self.edge_attr, "e f -> (repeat e) f", repeat=batch_size)
+            edge_attr = torch.cat([edge_attr, edge_trainable_params], dim=1)
+        else:
+            edge_attr = self.edge_attr
+
         edge_index = self._expand_edges(self.edge_index_base, self.edge_inc, batch_size)
 
         if shard_edges:
@@ -258,26 +297,38 @@ class StaticGraphProvider(BaseGraphProvider):
         batch_size: int,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get edge attributes and expanded edge index for static graph.
 
         Parameters
         ----------
         batch_size : int
-            Number of times to expand the edge index
+            Number of times to expand the edge index.
         src_coords : Tensor, optional
-            Source node coordinates (ignored for static graphs)
+            Source node coordinates (ignored for static graphs).
         dst_coords : Tensor, optional
-            Destination node coordinates (ignored for static graphs)
+            Destination node coordinates (ignored for static graphs).
+        src_batch_sizes : tuple[int, ...], optional
+            Variable-length source sample sizes (ignored for static graphs).
+        dst_batch_sizes : tuple[int, ...], optional
+            Variable-length destination sample sizes (ignored for static graphs).
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
             Whether to shard edges, by default True.
         act_checkpoint : bool, optional
             Whether to use gradient checkpointing, by default True.
+        src_timedeltas : Tensor, optional
+            Source timedeltas (ignored for static graphs).
+        dst_timedeltas : Tensor, optional
+            Destination timedeltas (ignored for static graphs).
 
         Returns
         -------
@@ -294,7 +345,7 @@ class StaticGraphProvider(BaseGraphProvider):
 class NoOpGraphProvider(BaseGraphProvider):
     """Provider for edge-less architectures (e.g., Transformers).
 
-    Returns None for edges and has edge_dim=0. Used when the mapper/processor
+    Returns an empty edge set and has edge_dim=0. Used when the mapper/processor
     does not require graph structure (e.g., pure attention-based models).
     """
 
@@ -312,30 +363,48 @@ class NoOpGraphProvider(BaseGraphProvider):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
-    ) -> tuple[None, None, None]:
-        """Return None for edge attributes, edge index, and edge_shard_sizes.
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
+    ) -> tuple[Tensor, Tensor, None]:
+        """Return an empty edge set.
+
+        The edge tensors have no edges, so callers can move and check them like real edges.
 
         Parameters
         ----------
         batch_size : int, optional
-            Unused
+            Unused.
         src_coords : Tensor, optional
-            Unused
+            Unused.
         dst_coords : Tensor, optional
-            Unused
+            Unused.
+        src_batch_sizes : tuple[int, ...], optional
+            Unused.
+        dst_batch_sizes : tuple[int, ...], optional
+            Unused.
         model_comm_group : ProcessGroup, optional
-            Unused
+            Unused.
         shard_edges : bool, optional
-            Unused
+            Unused.
+        src_timedeltas : Tensor, optional
+            Unused.
+        dst_timedeltas : Tensor, optional
+            Unused.
 
         Returns
         -------
-        tuple[None, None, None]
-            No edges
+        tuple[Tensor, Tensor, None]
+            ``(edge_attr, edge_index, edge_shard_sizes)``: a ``(0, 0)`` float tensor, a ``(2, 0)``
+            long tensor on the device of the coordinates (if given), and ``None`` (not sharded).
         """
-        return None, None, None
+        device = next((coords.device for coords in (src_coords, dst_coords) if coords is not None), None)
+        edge_attr = torch.empty((0, self.edge_dim), device=device)
+        edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
+        return edge_attr, edge_index, None
 
 
 class DynamicGraphProvider(BaseGraphProvider):
@@ -347,23 +416,145 @@ class DynamicGraphProvider(BaseGraphProvider):
     (e.g., k-NN graphs, radius graphs, adaptive connectivity).
     """
 
-    def __init__(self, edge_dim: int) -> None:
+    def __init__(self, edge_builder_config: dict, edge_attributes_configs: dict) -> None:
         """Initialize DynamicGraphProvider.
 
         Parameters
         ----------
-        edge_dim : int
-            Expected dimension of edge attributes
+        edge_builder_config : dict
+            Configuration for the edge builder
+        edge_attributes_configs : dict
+            Configuration for edge attributes. The edge feature dimension
+            is derived from these builders by summing each builder's ndim
         """
         super().__init__()
-        self._edge_dim = edge_dim
+        self.edge_builder = instantiate(edge_builder_config[0], source_name="-", target_name="-")
+        self.attributes_config = {k: instantiate(v) for k, v in edge_attributes_configs.items()}
+        self._edge_dim = sum(attr.ndim for attr in self.attributes_config.values())
+        self._capture_request: tuple[str, str] | None = None
+        self._captured_graph: HeteroData | None = None
 
     @property
     def edge_dim(self) -> int:
         """Return the edge dimension."""
         return self._edge_dim
 
-    def build_graph(self, src_nodes: Tensor, dst_nodes: Tensor, **kwargs) -> tuple[Tensor, Adj]:
+    def capture_next_graph(self, source_name: str, target_name: str) -> None:
+        """Arm a one-shot capture of the next complete, sorted dynamic graph."""
+        if source_name == target_name:
+            raise ValueError("Captured bipartite graph node names must be distinct.")
+        if self._capture_request is not None or self._captured_graph is not None:
+            raise RuntimeError("A dynamic graph capture is already armed or waiting to be consumed.")
+        self._capture_request = (source_name, target_name)
+
+    def consume_captured_graph(self) -> HeteroData | None:
+        """Return and clear the captured graph, cancelling an unfulfilled request."""
+        graph = self._captured_graph
+        self._capture_request = None
+        self._captured_graph = None
+        return graph
+
+    def _capture_sorted_graph(
+        self,
+        src_coords: Tensor,
+        dst_coords: Tensor,
+        src_timedeltas: Optional[Tensor],
+        dst_timedeltas: Optional[Tensor],
+        edge_attr: Tensor,
+        edge_index: Adj,
+    ) -> None:
+        if self._capture_request is None:
+            return
+
+        source_name, target_name = self._capture_request
+        self._capture_request = None
+        edge_name = (source_name, "to", target_name)
+
+        graph = HeteroData()
+        graph[source_name].x = src_coords.detach().cpu()
+        graph[target_name].x = dst_coords.detach().cpu()
+        if src_timedeltas is not None:
+            graph[source_name].timedeltas = src_timedeltas.detach().cpu()
+        if dst_timedeltas is not None:
+            graph[target_name].timedeltas = dst_timedeltas.detach().cpu()
+        graph[edge_name].edge_index = edge_index.detach().cpu()
+
+        offset = 0
+        for attribute_name, attribute_builder in self.attributes_config.items():
+            width = attribute_builder.ndim
+            graph[edge_name][attribute_name] = edge_attr[:, offset : offset + width].detach().cpu()
+            offset += width
+
+        if offset != edge_attr.shape[1]:
+            raise RuntimeError(
+                f"Captured edge attribute width ({edge_attr.shape[1]}) does not match configured width ({offset}).",
+            )
+        self._captured_graph = graph
+
+    def _build_single_graph(
+        self,
+        src_coords: Tensor,
+        dst_coords: Tensor,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
+    ) -> tuple[Tensor, Adj]:
+        """Build one dynamic graph without batch offsets."""
+        device = src_coords.device
+        if src_coords.shape[0] == 0 or dst_coords.shape[0] == 0:
+            edge_attr = torch.empty((0, self._edge_dim), dtype=torch.float32, device=device)
+            edge_index = torch.empty((2, 0), dtype=torch.long, device=device)
+            return edge_attr, edge_index
+
+        # anemoi-graphs attribute builders move their inputs to the device they were built on. Here
+        # the graph follows the data instead, so a model built on CPU and moved to GPU stays on GPU.
+        for attribute in self.attributes_config.values():
+            if hasattr(attribute, "device"):
+                attribute.device = device
+
+        source_cartesian = latlon_rad_to_cartesian(src_coords).to(dtype=torch.float32)
+        target_cartesian = latlon_rad_to_cartesian(dst_coords).to(dtype=torch.float32)
+
+        edge_index = self.edge_builder.compute_edge_index_from_coords(source_cartesian, target_cartesian)
+        edge_index = edge_index.to(source_cartesian.device)
+
+        source_nodes = NodeStorage()
+        source_nodes.x = src_coords
+        source_nodes.num_nodes = src_coords.shape[0]
+        if src_timedeltas is not None:
+            source_nodes.timedeltas = src_timedeltas
+
+        target_nodes = NodeStorage()
+        target_nodes.x = dst_coords
+        target_nodes.num_nodes = dst_coords.shape[0]
+        if dst_timedeltas is not None:
+            target_nodes.timedeltas = dst_timedeltas
+
+        edge_attr = torch.cat(
+            [attr(x=(source_nodes, target_nodes), edge_index=edge_index) for attr in self.attributes_config.values()],
+            dim=1,
+        )
+        edge_index = edge_index.to(edge_attr.device)
+
+        if edge_attr.shape[1] != self._edge_dim:
+            msg = (
+                f"Dynamic edge attribute width ({edge_attr.shape[1]}) does not match the declared "
+                f"edge_dim ({self._edge_dim}) derived from the edge-attribute builders' 'ndim'. "
+                "Check that each builder's 'ndim' matches its compute() output."
+            )
+            raise RuntimeError(msg)
+
+        return edge_attr, edge_index
+
+    def build_graph(
+        self,
+        src_coords: Tensor,
+        dst_coords: Tensor,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
+        **kwargs,
+    ) -> tuple[Tensor, Adj]:
         """Build graph dynamically from source and destination nodes.
 
         This method will be implemented in the future to support on-the-fly
@@ -371,37 +562,98 @@ class DynamicGraphProvider(BaseGraphProvider):
 
         Parameters
         ----------
-        src_nodes : Tensor
-            Source node features/positions
-        dst_nodes : Tensor
-            Destination node features/positions
+        src_coords : Tensor
+            Source node features/positions.
+        dst_coords : Tensor
+            Destination node features/positions.
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
+        src_timedeltas : Tensor, optional
+            Per-source-node signed time offsets in seconds.
+        dst_timedeltas : Tensor, optional
+            Per-destination-node signed time offsets in seconds.
         **kwargs
-            Additional parameters for graph construction algorithm
+            Additional parameters for graph construction algorithm.
 
         Returns
         -------
         tuple[Tensor, Adj]
-            Edge attributes and edge index
-
-        Raises
-        ------
-        NotImplementedError
-            This functionality is not yet implemented
+            Edge attributes and edge index.
         """
-        raise NotImplementedError("Dynamic graph construction is not yet implemented. ")
+        if src_timedeltas is not None and src_timedeltas.shape[0] != src_coords.shape[0]:
+            raise ValueError("src_timedeltas must contain one value per source coordinate.")
+        if dst_timedeltas is not None and dst_timedeltas.shape[0] != dst_coords.shape[0]:
+            raise ValueError("dst_timedeltas must contain one value per destination coordinate.")
+
+        if src_batch_sizes is None and dst_batch_sizes is None:
+            return self._build_single_graph(src_coords, dst_coords, src_timedeltas, dst_timedeltas)
+        if src_batch_sizes is None or dst_batch_sizes is None:
+            raise ValueError("src_batch_sizes and dst_batch_sizes must be provided together.")
+        if len(src_batch_sizes) != len(dst_batch_sizes):
+            raise ValueError("src_batch_sizes and dst_batch_sizes must contain the same number of samples.")
+        # Under sharding the coordinates are gathered, and so are the batch sizes
+        # a block count that misses nodes would leave them without edges.
+        if sum(src_batch_sizes) != src_coords.shape[0]:
+            raise ValueError(
+                f"src_batch_sizes sum to {sum(src_batch_sizes)}, but there are {src_coords.shape[0]} source coordinates."
+            )
+        if sum(dst_batch_sizes) != dst_coords.shape[0]:
+            raise ValueError(
+                f"dst_batch_sizes sum to {sum(dst_batch_sizes)}, but there are {dst_coords.shape[0]} destination "
+                "coordinates."
+            )
+
+        edge_attrs = []
+        edge_indices = []
+        src_offset = 0
+        dst_offset = 0
+        for src_size, dst_size in zip(src_batch_sizes, dst_batch_sizes):
+            edge_attr, edge_index = self._build_single_graph(
+                src_coords[src_offset : src_offset + src_size],
+                dst_coords[dst_offset : dst_offset + dst_size],
+                None if src_timedeltas is None else src_timedeltas[src_offset : src_offset + src_size],
+                None if dst_timedeltas is None else dst_timedeltas[dst_offset : dst_offset + dst_size],
+            )
+            edge_attrs.append(edge_attr)
+            edge_indices.append(edge_index + edge_index.new_tensor([[src_offset], [dst_offset]]))
+            src_offset += src_size
+            dst_offset += dst_size
+
+        return torch.cat(edge_attrs, dim=0), torch.cat(edge_indices, dim=1)
 
     def _get_edges_impl(
         self,
         src_coords: Tensor,
         dst_coords: Tensor,
+        src_timedeltas: Optional[Tensor],
+        dst_timedeltas: Optional[Tensor],
+        src_batch_sizes: Optional[tuple[int, ...]],
+        dst_batch_sizes: Optional[tuple[int, ...]],
         shard_edges: bool,
         model_comm_group: Optional[ProcessGroup],
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Implementation of get_edges, separated for checkpointing."""
-        # Build graph from coordinates
-        edge_attr, edge_index = self.build_graph(src_coords, dst_coords)
+        # TODO(Jan): shard graph creation, gather edges, sort, shard
+        edge_attr, edge_index = self.build_graph(
+            src_coords,
+            dst_coords,
+            src_timedeltas=src_timedeltas,
+            dst_timedeltas=dst_timedeltas,
+            src_batch_sizes=src_batch_sizes,
+            dst_batch_sizes=dst_batch_sizes,
+        )
         edge_index, perm = sort_edge_index_by_dst(edge_index, max_value=dst_coords.shape[0])
         edge_attr = edge_attr.index_select(0, perm)
+        self._capture_sorted_graph(
+            src_coords,
+            dst_coords,
+            src_timedeltas,
+            dst_timedeltas,
+            edge_attr,
+            edge_index,
+        )
 
         if shard_edges:
             edge_attr, edge_index, edge_shard_sizes = shard_edges_1hop(
@@ -416,9 +668,13 @@ class DynamicGraphProvider(BaseGraphProvider):
         batch_size: Optional[int] = None,
         src_coords: Optional[Tensor] = None,
         dst_coords: Optional[Tensor] = None,
+        src_batch_sizes: Optional[tuple[int, ...]] = None,
+        dst_batch_sizes: Optional[tuple[int, ...]] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         act_checkpoint: bool = True,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
     ) -> tuple[Tensor, Adj, Optional[ShardSizes]]:
         """Get dynamic edges constructed from node coordinates.
 
@@ -427,17 +683,25 @@ class DynamicGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         batch_size : int, optional
-            Batch size (currently unused, reserved for future implementation)
+            Batch size (currently unused, reserved for future implementation).
         src_coords : Tensor, optional
-            Source node coordinates
+            Source node coordinates.
         dst_coords : Tensor, optional
-            Destination node coordinates
+            Destination node coordinates.
+        src_batch_sizes : tuple[int, ...], optional
+            Number of source nodes in each variable-length batch sample.
+        dst_batch_sizes : tuple[int, ...], optional
+            Number of destination nodes in each variable-length batch sample.
         model_comm_group : ProcessGroup, optional
-            Model communication group
+            Model communication group.
         shard_edges : bool, optional
-            Whether to shard edges, by default True
+            Whether to shard edges, by default True.
         act_checkpoint : bool, optional
             Whether to use gradient checkpointing, by default True.
+        src_timedeltas : Tensor, optional
+            Per-source-node signed time offsets in seconds.
+        dst_timedeltas : Tensor, optional
+            Per-destination-node signed time offsets in seconds.
 
         Returns
         -------
@@ -447,18 +711,36 @@ class DynamicGraphProvider(BaseGraphProvider):
         Raises
         ------
         ValueError
-            If coordinates are not provided
+            If coordinates are not provided.
         NotImplementedError
-            If build_graph() is not yet implemented
+            If build_graph() is not yet implemented.
         """
         if src_coords is None or dst_coords is None:
             raise ValueError("DynamicGraphProvider requires (src_coords, dst_coords) to construct edges.")
 
         if act_checkpoint:
             return checkpoint(
-                self._get_edges_impl, src_coords, dst_coords, shard_edges, model_comm_group, use_reentrant=False
+                self._get_edges_impl,
+                src_coords,
+                dst_coords,
+                src_timedeltas,
+                dst_timedeltas,
+                src_batch_sizes,
+                dst_batch_sizes,
+                shard_edges,
+                model_comm_group,
+                use_reentrant=False,
             )
-        return self._get_edges_impl(src_coords, dst_coords, shard_edges, model_comm_group)
+        return self._get_edges_impl(
+            src_coords,
+            dst_coords,
+            src_timedeltas,
+            dst_timedeltas,
+            src_batch_sizes,
+            dst_batch_sizes,
+            shard_edges,
+            model_comm_group,
+        )
 
 
 class ProjectionGraphProvider(BaseGraphProvider):
@@ -642,6 +924,8 @@ class ProjectionGraphProvider(BaseGraphProvider):
         model_comm_group: Optional[ProcessGroup] = None,
         shard_edges: bool = True,
         device: Optional[torch.device] = None,
+        src_timedeltas: Optional[Tensor] = None,
+        dst_timedeltas: Optional[Tensor] = None,
         dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
         """Return the sparse projection matrix.
@@ -649,24 +933,28 @@ class ProjectionGraphProvider(BaseGraphProvider):
         Parameters
         ----------
         batch_size : int, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         src_coords : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         dst_coords : Tensor, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         model_comm_group : ProcessGroup, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         shard_edges : bool, optional
-            Unused for sparse providers
+            Unused for sparse providers.
         device : torch.device, optional
-            Target device for matrix
+            Target device for matrix.
+        src_timedeltas : Tensor, optional
+            Unused for sparse providers.
+        dst_timedeltas : Tensor, optional
+            Unused for sparse providers.
         dtype : torch.dtype, optional
-            Target dtype for matrix
+            Target dtype for matrix.
 
         Returns
         -------
         Tensor
-            Sparse projection matrix
+            Sparse projection matrix.
         """
         if device is not None or dtype is not None:
             # sparse tensors can't be registered as buffers with DDP, so materialize and retain them on demand

@@ -132,7 +132,7 @@ class TransformerProcessorBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "triton_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):
@@ -208,7 +208,7 @@ class TransformerMapperBlock(BaseBlock):
         qk_norm: bool = False,
         attention_implementation: str = "scaled_dot_product_attention",
         mlp_implementation: MLPImplementation = "mlp",
-        softcap: Optional[float] = None,
+        softcap: float = 0.0,
         use_alibi_slopes: bool = False,
         use_rotary_embeddings: bool = False,
     ):

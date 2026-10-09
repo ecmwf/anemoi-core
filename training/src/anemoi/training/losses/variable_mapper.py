@@ -10,6 +10,7 @@
 
 import functools
 import logging
+from typing import TYPE_CHECKING
 from typing import Any
 
 import torch
@@ -22,6 +23,9 @@ from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Source
 
 LOGGER = logging.getLogger(__name__)
 
@@ -297,8 +301,8 @@ class LossVariableMapper(BaseLossWrapper):
 
     def forward(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
+        pred: "Source",
+        target: "Source",
         squash: bool = True,
         *,
         scaler_indices: tuple[Any, ...] | None = None,
@@ -338,8 +342,8 @@ class LossVariableMapper(BaseLossWrapper):
         pred_indices = self.predicted_indices_by_layout[pred_layout]
         target_indices = self.target_indices_by_layout[target_layout]
 
-        pred_filtered = pred[..., pred_indices]
-        target_filtered = target[..., target_indices]
+        pred_filtered = pred.select(variables=pred_indices)
+        target_filtered = target.select(variables=target_indices)
 
         # torch.compile performance change
         # Make contiguous to prevent a changing stride forcing specialisation
@@ -370,18 +374,18 @@ class LossVariableMapper(BaseLossWrapper):
         if empty_metric_selection:
             if squash:
                 return torch.zeros((), dtype=pred.dtype, device=pred.device, requires_grad=False)
-            len_model_output = pred.shape[-1]
+            len_model_output = len(pred.variables)
             return torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
 
         if squash:
             return self.loss(pred_filtered, target_filtered, squash=squash, **loss_kwargs)
-        len_model_output = pred.shape[-1]
-        loss = torch.zeros(len_model_output, dtype=pred.dtype, device=pred.device, requires_grad=False)
+        len_model_output = len(pred.variables)
         loss_per_variable = self.loss(
             pred_filtered,
             target_filtered,
             squash=squash,
             **loss_kwargs,
         )
+        loss = loss_per_variable.new_zeros(len_model_output)
         loss[pred_indices] = loss_per_variable
         return loss

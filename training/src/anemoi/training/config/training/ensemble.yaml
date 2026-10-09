@@ -76,7 +76,7 @@ validation_metrics:
       fkcrps:
         _target_: anemoi.training.losses.CRPS
         scalers: ['node_weights', 'time_steps']
-        ignore_nans: False
+        ignore_nans: True
         alpha: 1.0
 
       multiscale:
@@ -93,8 +93,8 @@ validation_metrics:
           # A selection of available scalers are listed in training/scalers.
           # '*' is a valid entry to use all `scalers` given, if a scaler is to be excluded
           # add `!scaler_name`, i.e. ['*', '!scaler_1'], and `scaler_1` will not be added.
-          # scalers: ['pressure_level', 'general_variable', 'nan_mask_weights', 'node_weights']
-          ignore_nans: False
+          # scalers: ['pressure_level', 'general_variable', 'node_weights']
+          ignore_nans: True
           no_autocast: True
           alpha: 1.0
 

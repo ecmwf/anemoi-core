@@ -126,10 +126,18 @@ def _build_wrapped_loss(
     scalers_to_include: list,
     scalers: dict[str, TENSOR_SPEC] | None,
     data_indices: "IndexCollection | None",
+    graph_data: object | None = None,
+    data_node_name: str | None = None,
 ) -> BaseLoss:
     """Instantiate a WRAPPED_LOSSES target (e.g. TimeAggregateLossWrapper)."""
     inner_loss_config = loss_config.pop("loss_fn")
-    inner_loss = get_loss_function(OmegaConf.create(inner_loss_config), scalers, data_indices)
+    inner_loss = get_loss_function(
+        OmegaConf.create(inner_loss_config),
+        scalers,
+        data_indices,
+        graph_data=graph_data,
+        data_node_name=data_node_name,
+    )
     wrapper = instantiate(loss_config, loss_fn=inner_loss)
     # Apply any scalers specified on the wrapper itself (delegated to the inner loss).
     if scalers_to_include and scalers:
@@ -217,7 +225,14 @@ def get_loss_function(
         )
 
     if target in WRAPPED_LOSSES:
-        return _build_wrapped_loss(loss_config, scalers_to_include, scalers, data_indices)
+        return _build_wrapped_loss(
+            loss_config,
+            scalers_to_include,
+            scalers,
+            data_indices,
+            graph_data=graph_data,
+            data_node_name=data_node_name,
+        )
 
     scalers = scalers or {}
 

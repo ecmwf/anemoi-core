@@ -11,11 +11,14 @@ import datetime
 import logging
 from abc import ABC
 from collections.abc import Iterable
-
-import torch
+from typing import TYPE_CHECKING
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
+
+if TYPE_CHECKING:
+    from anemoi.models.data import Batch
+    from anemoi.models.data import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -115,85 +118,112 @@ class BaseTask(ABC):
         """
         return self._offsets_to_batch_indices(self.get_output_offsets(**kwargs))
 
-    def _assert_time_indices_in_batch(
-        self,
-        time_indices: list[int],
-        batch: dict[str, torch.Tensor],
-        **_kwargs,
-    ) -> None:
-        """Raise if the batch does not contain all requested time steps."""
-        if not time_indices:
-            return
-
-        required = max(time_indices) + 1
-        for dataset_name, dataset_batch in batch.items():
-            available = dataset_batch.shape[1]
-            if available < required:
-                msg = (
-                    f"Batch for dataset '{dataset_name}' contains {available} time steps, but requires "
-                    f"index {required - 1} (indices {time_indices}). The dataloader's "
-                    "time window does not match the task rollout."
-                )
-                raise ValueError(msg)
-
     def get_inputs(
         self,
-        batch: dict[str, torch.Tensor],
+        batch: "Batch",
         data_indices: dict[str, IndexCollection],
         **_kwargs,
-    ) -> dict[str, torch.Tensor]:
-        """Extract model inputs from a batch.
+    ) -> "Batch":
+        """Extract model inputs from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
         data_indices : dict[str, IndexCollection]
             Data indices per dataset.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Input tensors per dataset with shape
-            ``(bs, num_inputs, grid, nvar)``.
+        Batch
+            New Batch with input tensors per dataset (shape ``(bs, num_inputs, grid, nvar)``),
+            sharing coords and metadata by reference.
         """
         time_indices = self.get_batch_input_indices()
+        LOGGER.debug("Input time indices before normalization: %s -- type %s", time_indices, type(time_indices))
         time_indices = normalize_time_indices(time_indices)
+        LOGGER.debug("Normalized time indices: %s -- type %s", time_indices, type(time_indices))
 
-        x = {}
-        for dataset_name, dataset_batch in batch.items():
-            dataset_batch = dataset_batch[:, time_indices]
-            x[dataset_name] = dataset_batch[..., data_indices[dataset_name].data.input.full]
-            LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, list(x[dataset_name].shape))
-        return x
+        var_indices = {dataset_name: data_indices[dataset_name].data.input.full for dataset_name in batch.dataset_names}
+        new_batch = batch.select(time=time_indices, variables=var_indices)
+        for dataset_name, selected_source in new_batch.items():
+            LOGGER.debug("Selected inputs: x[%s] = %s", dataset_name, selected_source)
+        return new_batch
 
-    def get_targets(self, batch: dict[str, torch.Tensor], **kwargs) -> dict[str, torch.Tensor]:
-        """Extract model targets from a batch.
+    def get_targets(
+        self,
+        batch: "Batch",
+        data_indices: dict[str, IndexCollection],
+        **kwargs,
+    ) -> tuple["Batch", dict[str, "Template"], "Batch"]:
+        """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
-            Full batch keyed by dataset name.
+        batch : Batch
+            Full batch object (data, coords, metadata) keyed by dataset name.
+        data_indices : dict[str, IndexCollection]
+            Data indices per dataset.
         **kwargs
-            Forwarded to ``get_batch_output_indices`` (e.g.
-            ``rollout_step``).
+            Forwarded to ``get_batch_output_indices`` (e.g. ``rollout_step``).
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Target tensors per dataset with shape
-            ``(bs, num_outputs, ensemble, grid, full_nvar)`` in DATA_FULL
-            variable space (all variables including forcings).
+        tuple[Batch, dict[str, Template], Batch]: (target, target_template, target_forcing)
+            target holds the target tensors per dataset, shape (bs, num_outputs, ensemble, grid, full_nvar)).
+            target_template describes what the model predicts at the target nodes: the model's output
+            variables, in the model's output order, with their statistics, and no data.
+            target_forcing contains the output-time forcing variables used to
+            condition the decoder, preserving coordinates, timedeltas,
+            metadata and layouts.
         """
         time_indices = self.get_batch_output_indices(**kwargs)
-        self._assert_time_indices_in_batch(time_indices, batch, **kwargs)
+        for dataset_name, view in batch.items():
+            if time_indices and max(time_indices) >= view.time_size:
+                msg = (
+                    f"Batch for dataset '{dataset_name}' contains {view.time_size} time steps, "
+                    f"but requires index {max(time_indices)} (indices {time_indices}). "
+                    "The dataloader's time window does not match the task rollout."
+                )
+                raise ValueError(msg)
+
         time_indices = normalize_time_indices(time_indices)
 
-        y = {}
-        for dataset_name, dataset_batch in batch.items():
-            y[dataset_name] = dataset_batch[:, time_indices]
-            LOGGER.debug("SHAPE: y[%s].shape = %s", dataset_name, list(y[dataset_name].shape))
-        return y
+        target_tensors = self.measure_targets_from_step(batch.select(time=time_indices), **kwargs)
+        for dataset_name, selected_source in target_tensors.items():
+            LOGGER.debug("Selected targets: x[%s] = %s", dataset_name, selected_source)
+
+        var_indices = {
+            dataset_name: data_indices[dataset_name].data.input.forcing for dataset_name in batch.dataset_names
+        }
+        target_forcing = target_tensors.select(variables=var_indices)
+
+        return target_tensors, self.get_target_template(target_tensors, data_indices), target_forcing
+
+    def measure_targets_from_step(self, targets: "Batch", **_kwargs) -> "Batch":
+        """Return ``targets`` with their point times measured from the step's own reference time.
+
+        Batches measure point times from the sample's reference time. Tasks whose steps move
+        that reference (e.g. rollout) shift the targets' times here.
+        """
+        return targets
+
+    @staticmethod
+    def get_target_template(
+        targets: "Batch",
+        data_indices: dict[str, IndexCollection],
+    ) -> dict[str, "Template"]:
+        """Return what the model predicts at the nodes of ``targets``, one template per dataset.
+
+        The targets carry every variable of a dataset; each template keeps the model's output
+        variables, in the model's output order, together with their statistics.
+        """
+        templates = {}
+        for dataset_name, source in targets.items():
+            output_names = data_indices[dataset_name].model.output.ordered_names
+            positions = [source.name_to_index[name] for name in output_names]
+            templates[dataset_name] = source.template().select_variables(positions)
+        return templates
 
     def log_extra(self, *_args, **_kwargs) -> None:  # noqa: B027
         """Hook to log any task-specific information."""
@@ -240,21 +270,23 @@ class BaseTask(ABC):
 class BaseSingleStepTask(BaseTask):
     """Base class for single-step tasks."""
 
-    def advance_input(self, *args, **_kwargs) -> dict[str, torch.Tensor]:
+    def advance_input(self, batch: "Batch", *_args, **_kwargs) -> "Batch":
         """Advance the input state for each dataset based on the task's requirements.
 
         This method can be overridden by specific tasks to implement custom logic for advancing the input state.
 
         Parameters
         ----------
-        *args
-            Positional arguments; the first item is the input state.
+        batch : Batch
+            The input state for each dataset.
+        *_args
+            Additional positional arguments, which are ignored by the default implementation.
         **_kwargs
             Additional keyword arguments, which are ignored by the default implementation.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            The advanced input state for each dataset.
+        Batch
+            The advanced input state for each dataset (default: passthrough).
         """
-        return args[0]
+        return batch

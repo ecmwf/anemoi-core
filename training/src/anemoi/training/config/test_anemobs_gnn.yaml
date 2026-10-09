@@ -1,0 +1,1260 @@
+# Anemobs test config with a GNN encoder-processor-decoder.
+# Same data, graph and training setup as test_anemobs_single.yaml; only the model block differs:
+# every GraphTransformer mapper/processor is replaced by its GNN counterpart (GNNForwardMapper,
+# GNNProcessor, GNNBackwardMapper), including the observation encoders that run on dynamic graphs.
+#   anemoi-training train --config-name=test_anemobs_gnn
+data:
+  format: zarr
+  frequency: 12h
+  datasets:
+    era:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - insolation
+      - lsm
+      - sdor
+      - slor
+      - z
+      diagnostic:
+      - tp
+      - cp
+      processors:
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: [tp]
+            min-max: null
+            max: [sdor, slor, z]
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - insolation
+            - lsm
+    combined_amsua:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - satellite_id
+      - cos_vaa
+      - cos_vza
+      - sin_vaa
+      - sin_vza
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_vaa
+            - cos_vza
+            - sin_vaa
+            - sin_vza
+            - cos_sza
+    combined_seviri:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - satid
+      - cos_vaa
+      - cos_vza
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_vaa
+            - cos_vza
+            - cos_sza
+    combined_amv:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - reportype
+      - pressure
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_sza
+    combined_surface:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - reportype
+      - stalt
+      - lsm
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - lsm
+            - cos_sza
+    combined_mhs:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - reportype
+      - cos_vaa
+      - cos_vza
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_vaa
+            - cos_vza
+            - cos_sza
+    combined_gpsro_notrop:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - satellite_id
+      - height
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_sza
+    amsr2:
+      forcing:
+      - cos_latitude
+      - cos_longitude
+      - sin_latitude
+      - sin_longitude
+      - cos_julian_day
+      - cos_local_time
+      - sin_julian_day
+      - sin_local_time
+      - cos_vaa
+      - cos_sza
+      diagnostic: []
+      processors:
+        const_imputer:
+          _target_: anemoi.models.preprocessing.imputer.InputImputer
+          config:
+            default: mean
+        normalizer:
+          _target_: anemoi.models.preprocessing.normalizer.InputNormalizer
+          config:
+            default: mean-std
+            std: null
+            min-max: null
+            max: null
+            none:
+            - cos_latitude
+            - cos_longitude
+            - sin_latitude
+            - sin_longitude
+            - cos_julian_day
+            - cos_local_time
+            - sin_julian_day
+            - sin_local_time
+            - cos_vaa
+            - cos_sza
+  num_features: null
+dataloader:
+  prefetch_factor: 2
+  pin_memory: true
+  read_group_size: ${system.hardware.num_gpus_per_model}
+  num_workers:
+    training: 4
+    validation: 4
+    test: 4
+  batch_size:
+    training: 1
+    validation: 1
+    test: 1
+  limit_batches:
+    training: 20
+    validation: 10
+    test: 20
+  training:
+    datasets:
+      era:
+        dataset_config:
+          dataset: ${system.input.era}
+          frequency: ${data.frequency}
+          drop: [cdww, 100u, 100v, h1012, h1214, h1417, h1721, h2125, h2530, hcc, lcc, mcc, wmb, sin_mwd, cos_mwd, mwp, snowc, ssrd, stl1,stl2, strd, swh, swvl1, swvl2, ro, sd]
+        start: 1979
+        end: 2023
+        trajectory: null
+      combined_seviri:
+        dataset_config:
+          dataset: ${system.input.combined_seviri}
+          frequency: ${data.frequency}
+          drop:
+          - zenith
+          - azimuth
+          - spatial_index
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_amsua:
+        dataset_config:
+          dataset: ${system.input.combined_amsua}
+          frequency: ${data.frequency}
+          drop:
+          - spatial_index
+          - zenith
+          - azimuth
+          - sensor
+          - subtype
+          - bufrtype
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_mhs:
+        dataset_config:
+          dataset: ${system.input.combined_mhs}
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          frequency: ${data.frequency}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+      amsr2:
+        dataset_config:
+          dataset: ${system.input.amsr2}
+          frequency: ${data.frequency}
+          drop:
+          - azimuth
+          window: (-12h,0]
+        start: 2008
+        end: 2023
+        trajectory: null
+  validation:
+    datasets:
+      era:
+        dataset_config:
+          dataset: ${system.input.era}
+          frequency: ${data.frequency}
+          drop: [cdww, 100u, 100v, h1012, h1214, h1417, h1721, h2125, h2530, hcc, lcc, mcc, wmb, sin_mwd, cos_mwd, mwp, snowc, ssrd, stl1,stl2, strd, swh, swvl1, swvl2, ro, sd]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_seviri:
+        dataset_config:
+          dataset: ${system.input.combined_seviri}
+          frequency: ${data.frequency}
+          drop:
+          - zenith
+          - azimuth
+          - spatial_index
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_amsua:
+        dataset_config:
+          dataset: ${system.input.combined_amsua}
+          frequency: ${data.frequency}
+          drop:
+          - spatial_index
+          - zenith
+          - azimuth
+          - sensor
+          - subtype
+          - bufrtype
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_mhs:
+        dataset_config:
+          dataset: ${system.input.combined_mhs}
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+      amsr2:
+        dataset_config:
+          dataset: ${system.input.amsr2}
+          frequency: ${data.frequency}
+          drop:
+          - azimuth
+          window: (-12h,0]
+        start: 2024
+        end: 2024
+        trajectory: null
+  test:
+    datasets:
+      combined_seviri:
+        dataset_config:
+          dataset: ${system.input.combined_seviri}
+          frequency: ${data.frequency}
+          drop:
+          - zenith
+          - azimuth
+          - spatial_index
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_amv:
+        dataset_config:
+          dataset: ${system.input.combined_amv}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - report_status.active
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_surface:
+        dataset_config:
+          dataset: ${system.input.combined_surface}
+          frequency: ${data.frequency}
+          drop:
+          - seqno
+          - obsvalue_td2m_0
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_amsua:
+        dataset_config:
+          dataset: ${system.input.combined_amsua}
+          frequency: ${data.frequency}
+          drop:
+          - spatial_index
+          - zenith
+          - azimuth
+          - sensor
+          - subtype
+          - bufrtype
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_mhs:
+        dataset_config:
+          dataset: ${system.input.combined_mhs}
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      combined_gpsro_notrop:
+        dataset_config:
+          dataset: ${system.input.combined_gpsro_notrop}
+          drop:
+          - obsvalue_bend_angle_0
+          - healpix_idx_16
+          frequency: ${data.frequency}
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+      amsr2:
+        dataset_config:
+          dataset: ${system.input.amsr2}
+          frequency: ${data.frequency}
+          drop:
+          - azimuth
+          window: (-12h,0]
+        start: 2025
+        end: 2025
+        trajectory: null
+diagnostics:
+  callbacks: []
+  plot:
+    settings:
+      asynchronous: true
+      datashader: true
+      projection_kind: equirectangular
+      precip_and_related_fields: []
+      colormaps:
+        default:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: viridis
+        error:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormap
+          name: bwr
+        precip:
+          _target_: anemoi.training.utils.custom_colormaps.MatplotlibColormapClevels
+          clevels:
+          - '#ffffff'
+          - '#04e9e7'
+          - '#019ff4'
+          - '#0300f4'
+          - '#02fd02'
+          - '#01c501'
+          - '#008e00'
+          - '#fdf802'
+          - '#e5bc00'
+          - '#fd9500'
+          - '#fd0000'
+          - '#d40000'
+          - '#bc0000'
+          - '#f800fd'
+          variables: ${diagnostics.plot.settings.precip_and_related_fields}
+    frequency:
+      batch: 5
+      epoch: 1
+    parameters: []
+    sample_idx: 0
+    datasets_to_plot: []
+    focus_areas: {}
+    callbacks:
+      - _target_: anemoi.training.diagnostics.callbacks.plot.LossCurvePlot
+        # group parameters by categories when visualizing contributions to the loss
+        dataset_names: ["era", "combined_surface", "combined_seviri"]
+        parameter_groups: {}
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.loss.loss_plot_fn
+          _partial_: true
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ["era"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters:
+          - z_500
+          - tp
+          - 2t
+          - 10u
+          - 10v
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+          per_sample: 6
+          accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ["combined_surface"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters:
+        - obsvalue_t2m_0
+        - obsvalue_u10m_0
+        - obsvalue_v10m_0
+        - obsvalue_ps_0
+        - obsvalue_pmsl_0
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+          per_sample: 6
+          accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+      - _target_: anemoi.training.diagnostics.callbacks.plot.BatchOutputPlot
+        tag_infix: sample
+        dataset_names: ["combined_seviri"]
+        sample_idx: ${diagnostics.plot.sample_idx}
+        parameters:
+        - obsvalue_rawbt_4
+        - obsvalue_rawbt_5
+        - obsvalue_rawbt_6
+        - obsvalue_rawbt_7
+        - obsvalue_rawbt_8
+        - obsvalue_rawbt_9
+        - obsvalue_rawbt_10
+        - obsvalue_rawbt_11
+        every_n_batches: ${diagnostics.plot.frequency.batch}
+        plot_fn:
+          _target_: anemoi.training.diagnostics.evaluation.plotting.batch_output.sample_plot_fn
+          _partial_: true
+          per_sample: 6
+          accumulation_levels_plot: [0, 0.05, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 4, 5, 6, 7, 100]
+  benchmark_profiler:
+    memory:
+      enabled: true
+      steps: 5
+      warmup: 20
+      extra_plots: false
+      trace_rank0_only: false
+    time:
+      enabled: false
+      verbose: false
+    speed:
+      enabled: true
+    system:
+      enabled: false
+    model_summary:
+      enabled: false
+    snapshot:
+      enabled: false
+      steps: 4
+      warmup: 0
+  log:
+    mlflow:
+      enabled: true
+      _target_: anemoi.training.diagnostics.mlflow.logger.AnemoiMLflowLogger
+      offline: true
+      authentication: true
+      tracking_uri: https://mlflow.ecmwf.int
+      experiment_name: anemobs
+      project_name: AIFS
+      system: false
+      terminal: true
+      run_name: 'test-anemobs-gnn'
+      prefix: ''
+      log_hyperparams: true
+      on_resume_create_child: true
+      expand_hyperparams:
+      - config
+      http_max_retries: 35
+      max_params_length: 3000
+      save_dir: ${system.output.logs.mlflow}
+      log_model: false
+    interval: 100
+    wandb:
+      entity: a
+  debug:
+    anomaly_detection: false
+  enable_checkpointing: true
+  checkpoint:
+    every_n_minutes:
+      save_frequency: null
+      num_models_saved: 0
+    every_n_epochs:
+      save_frequency: 5
+      num_models_saved: -1
+    every_n_train_steps:
+      save_frequency: null
+      num_models_saved: 0
+  enable_progress_bar: true
+  progress_bar:
+    _target_: pytorch_lightning.callbacks.TQDMProgressBar
+    refresh_rate: 1
+  check_val_every_n_epoch: 1
+  print_memory_summary: false
+system:
+  output:
+    root: ${oc.env:SCRATCH}/anemoi-test/fastda/
+    logs:
+      root: logs
+      wandb: wandb
+      mlflow: mlflow
+      tensorboard: tensorboard
+    checkpoints:
+      root: checkpoint
+      every_n_epochs: anemoi-by_epoch-epoch_{epoch:03d}-step_{step:06d}
+      every_n_train_steps: anemoi-by_step-epoch_{epoch:03d}-step_{step:06d}
+      every_n_minutes: anemoi-by_time-epoch_{epoch:03d}-step_{step:06d}
+    plots: plots
+    profiler: profiler
+  input:
+    era: aifs-ea-an-oper-0001-mars-o96-1979-2024-6h-v1-for-single-v2
+    combined_amv: observations-ea-ofb-0001-197901-202505-combined-amv-native-v1-from-dop-try-2
+    combined_gpsro_notrop: observations-od-ai-0001-2006-2025-combined-gpsro-notrop-v1-from-dop-try-2
+    amsr2: dop-od-ai-0001-2013-2026-v1-amsr2-o256
+    combined_seviri: observations-od-ai-0001-201311-202505-msg-combined-seviri-o96-v1-from-dop-try-2
+    combined_surface: dop-ea-ofb-0001-1979-2025-v2-combined-surface-observations
+    combined_mhs: dop-ea-ofb-0001-2009-2026-v1-combined-mhs-o256
+    combined_amsua: dop-od-ai-0001-2008-2026-v1-combined-amsua-o256
+    loss_matrices_path: null
+    truncation: null
+    truncation_inv: null
+    warm_start: null
+  hardware:
+    accelerator: auto
+    num_gpus_per_node: ${oc.decode:${oc.env:SLURM_GPUS_PER_NODE,1}}
+    num_nodes: ${oc.decode:${oc.env:SLURM_NNODES,1}}
+    num_gpus_per_model: 1
+graph:
+  overwrite: true
+  nodes:
+    era:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.era.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_seviri:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_seviri.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_amsua:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_amsua.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_amv:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_amv.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_mhs:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_mhs.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    combined_gpsro_notrop:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.combined_gpsro_notrop.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    amsr2:
+      node_builder:
+        _target_: anemoi.graphs.nodes.AnemoiDatasetNodes
+        dataset: ${dataloader.training.datasets.amsr2.dataset_config}
+      attributes: ${graph.attributes.nodes}
+    hidden:
+      node_builder:
+        _target_: anemoi.graphs.nodes.TriNodes
+        resolution: 5
+  edges:
+  - source_name: era
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.CutOffEdges
+      cutoff_factor: 0.7
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_seviri
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_amsua
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_mhs
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_gpsro_notrop
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_surface
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: combined_amv
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: amsr2
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.ReversedKNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: hidden
+    edge_builders:
+    - _target_: anemoi.graphs.edges.MultiScaleEdges
+      x_hops: 1
+      scale_resolutions: ${graph.nodes.hidden.node_builder.resolution}
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: era
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: combined_seviri
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  - source_name: hidden
+    target_name: combined_surface
+    edge_builders:
+    - _target_: anemoi.graphs.edges.KNNEdges
+      num_nearest_neighbours: 3
+      source_mask_attr_name: null
+      target_mask_attr_name: null
+    attributes: ${graph.attributes.edges}
+  attributes:
+    nodes:
+      area_weight:
+        _target_: anemoi.graphs.nodes.attributes.SphericalAreaWeights
+        norm: unit-max
+        fill_value: 0
+    edges:
+      edge_length:
+        _target_: anemoi.graphs.edges.attributes.EdgeLength
+        norm: unit-std
+      edge_dirs:
+        _target_: anemoi.graphs.edges.attributes.EdgeDirection
+        norm: unit-std
+      # add 2*order extra features, to test
+      dir_harmonics:
+        _target_: anemoi.graphs.edges.attributes.DirectionalHarmonics
+        order: 3
+  post_processors: []
+model:
+  # 256 channels and 8 edge chunks for the observation mappers keep the GNN within one GH200:
+  # GNN mappers checkpoint the whole mapper, so all per-edge activations of a dense
+  # observation graph (several million edges) are alive at once in the backward pass.
+  num_channels: 256
+  cpu_offload: false
+  keep_batch_sharded: false
+  model:
+    _target_: anemoi.models.models.AnemoiModelEncProcDec
+    hidden_nodes_name: hidden
+    latent_skip: true
+  layer_kernels:
+    # The GNN requires the autocast layer norm, otherwise its memory usage is too high.
+    LayerNorm:
+      _target_: anemoi.models.layers.normalization.AutocastLayerNorm
+    Linear:
+      _target_: torch.nn.Linear
+    Activation:
+      _target_: torch.nn.GELU
+  processor:
+    _target_: anemoi.models.layers.processor.GNNProcessor
+    num_channels: ${model.num_channels}
+    trainable_size: 8
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+    num_layers: 16
+    num_chunks: 2
+    mlp_extra_layers: 0
+    mlp_hidden_ratio: 1.0
+    mlp_implementation: mlp
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+  obs_encoder:
+    _target_: anemoi.models.layers.mapper.GNNForwardMapper
+    num_channels: ${model.num_channels}
+    trainable_size: 0
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+    num_chunks: 8
+    mlp_extra_layers: 0
+    mlp_hidden_ratio: 1.0
+    mlp_implementation: mlp
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+  obs_decoder:
+    _target_: anemoi.models.layers.mapper.GNNBackwardMapper
+    num_channels: ${model.num_channels}
+    trainable_size: 0
+    sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+    num_chunks: 8
+    mlp_extra_layers: 0
+    mlp_hidden_ratio: 1.0
+    mlp_implementation: mlp
+    cpu_offload: ${model.cpu_offload}
+    gradient_checkpointing: true
+    layer_kernels: ${model.layer_kernels}
+  encoders:
+    analysis:
+      source_datasets: [ "era" ]
+      dataset_fusing_strategy: "none"
+      mapper:
+        _target_: anemoi.models.layers.mapper.GNNForwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: 8
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+        num_chunks: 4
+        mlp_extra_layers: 0
+        mlp_hidden_ratio: 1.0
+        mlp_implementation: mlp
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+    # Encode all obs: combined_amv, combined_gpsro_notrop, amsr2, combined_seviri, combined_surface, combined_mhs, combined_amsua
+    combined_amv:
+      source_datasets: [ "combined_amv" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+    combined_gpsro_notrop:
+      source_datasets: [ "combined_gpsro_notrop" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+    amsr2:
+      source_datasets: [ "amsr2" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+    combined_seviri:
+      source_datasets: [ "combined_seviri" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+    combined_mhs:
+      source_datasets: [ "combined_mhs" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+    combined_amsua:
+      source_datasets: [ "combined_amsua" ]
+      dataset_fusing_strategy: "none"
+      mapper: ${model.obs_encoder}
+  latent_aggregator:
+    _target_: anemoi.models.layers.aggregator.SumAggregator
+  decoders:
+    analysis:
+      target_datasets: [ "era" ]
+      target_node_features: [ "encoded_data" ]
+      mapper:
+        _target_: anemoi.models.layers.mapper.GNNBackwardMapper
+        num_channels: ${model.num_channels}
+        trainable_size: 8
+        sub_graph_edge_attributes: ["edge_length", "edge_dirs", "dir_harmonics"]
+        num_chunks: 4
+        mlp_extra_layers: 0
+        mlp_hidden_ratio: 1.0
+        mlp_implementation: mlp
+        cpu_offload: ${model.cpu_offload}
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+    combined_surface:
+      target_datasets: [ "combined_surface" ]
+      target_node_features: [ "coordinates", "target_forcings" ]
+      mapper: ${model.obs_decoder}
+    combined_seviri:
+      target_datasets: [ "combined_seviri" ]
+      target_node_features: [ "coordinates", "target_forcings" ]
+      mapper: ${model.obs_decoder}
+  bounding:
+    datasets:
+      era:
+      - _target_: anemoi.models.layers.bounding.ReluBounding
+        variables: [tp]
+      combined_surface: []
+      combined_seviri: []
+  residual:
+    datasets:
+      era:
+        _target_: anemoi.models.layers.residual.SkipConnection
+        step: -1
+  output_mask:
+    datasets:
+      era:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+      combined_surface:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+      combined_seviri:
+        _target_: anemoi.training.utils.masks.NoOutputMask
+  compile: []
+  node_trainable_parameters:
+    era: 8
+    combined_surface: 0
+    combined_seviri: 0
+    combined_amv: 0
+    combined_gpsro_notrop: 0
+    combined_mhs: 0
+    amsr2: 0
+    combined_amsua: 0
+    hidden: 8
+  # - module: anemoi.models.layers.conv.GraphTransformerConv
+task:
+  _target_: anemoi.training.tasks.Forecaster
+  multistep_input: 1
+  multistep_output: 1
+  timestep: 12H
+  rollout:
+    start: 1
+    epoch_increment: 0
+    maximum: 1
+  validation_rollout: 1
+training:
+  scalers:
+    datasets:
+      era:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+            q: 0.8
+            t: 6
+            u: 0.8
+            v: 0.5
+            w: 0.001
+            z: 12
+            sp: 10
+            10u: 0.1
+            10v: 0.1
+            2d: 0.5
+            tp: 0.025
+            cp: 0.0025
+        pressure_level:
+          _target_: anemoi.training.losses.scalers.ReluVariableLevelScaler
+          group: pl
+          y_intercept: 0.2
+          slope: 0.001
+        node_weights:
+          _target_: anemoi.training.losses.scalers.GraphNodeAttributeScaler
+          nodes_attribute_name: area_weight
+          norm: unit-sum
+      combined_seviri:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+      combined_surface:
+        general_variable:
+          _target_: anemoi.training.losses.scalers.GeneralVariableLossScaler
+          weights:
+            default: 1
+  optimization:
+    optimizer:
+      _target_: torch.optim.AdamW
+      betas: [0.9, 0.95]
+      weight_decay: 0.1
+    lr_scheduler:
+      _target_: timm.scheduler.CosineLRScheduler
+      lr_min: 3.0e-07
+      t_initial: ${training.max_steps}
+      warmup_t: 1000
+      t_in_epochs: false
+    lr: 6.25e-05
+    pl_lr_scheduler:
+      interval: step
+  run_id: null
+  fork_run_id: null
+  transfer_learning: false
+  load_weights_only: false
+  update_ds_stats_on_ckpt_load:
+    states: false
+    tendencies: true
+  deterministic: false
+  precision: bf16-mixed
+  accum_grad_batches: 1
+  num_sanity_val_steps: 0
+  gradient_clip:
+    val: 1.0
+    algorithm: norm
+  method:
+    _target_: anemoi.training.train.methods.SingleTraining
+  strategy:
+    _target_: anemoi.training.distributed.strategy.DDPGroupStrategy
+    num_gpus_per_model: ${system.hardware.num_gpus_per_model}
+    read_group_size: ${dataloader.read_group_size}
+  loss_gradient_scaling: false
+  max_epochs: 100
+  max_steps: 75000
+  submodules_to_freeze: []
+  training_loss:
+    datasets:
+      era:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["general_variable", "pressure_level", "node_weights"]
+        ignore_nans: true
+      combined_seviri:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["general_variable"]
+        ignore_nans: true
+      combined_surface:
+        _target_: anemoi.training.losses.MSELoss
+        scalers: ["general_variable"]
+        ignore_nans: true
+  validation_metrics:
+    datasets:
+      era:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: ["node_weights"]
+          ignore_nans: true
+      combined_seviri:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: [ ]
+          ignore_nans: true
+      combined_surface:
+        mse:
+          _target_: anemoi.training.losses.MSELoss
+          scalers: [ ]
+          ignore_nans: true
+  variable_groups:
+    datasets:
+      era:
+        default: sfc
+        pl:
+          param:
+          - q
+          - t
+          - u
+          - v
+          - w
+        sfc:
+          param:
+          - tp
+          - cp
+          - 10u
+          - 10v
+          - 2d
+          - sp
+      combined_surface:
+        default: sfc
+      combined_seviri:
+        default: sfc
+  metrics:
+    datasets:
+      era:
+      - z_500
+      - z_1000
+      - t_500
+      - u_850
+      - v_850
+      combined_surface:
+      - obsvalue_t2m_0
+      - obsvalue_u10m_0
+      - obsvalue_v10m_0
+      - obsvalue_ps_0
+      - obsvalue_pmsl_0
+      combined_seviri:
+      - obsvalue_rawbt_4
+      - obsvalue_rawbt_5
+      - obsvalue_rawbt_6
+      - obsvalue_rawbt_7
+      - obsvalue_rawbt_8
+      - obsvalue_rawbt_9
+      - obsvalue_rawbt_10
+      - obsvalue_rawbt_11
+config_validation: false

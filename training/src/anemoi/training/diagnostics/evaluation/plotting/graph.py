@@ -131,19 +131,19 @@ def edge_plot(
     Parameters
     ----------
     fig : Figure
-        Figure object handle
+        Figure object handle.
     ax : matplotlib.axes
-        Axis object handle
+        Axis object handle.
     src_coords : np.ndarray of shape (num_edges, 2)
         Source latitudes and longitudes.
     dst_coords : np.ndarray of shape (num_edges, 2)
         Destination latitudes and longitudes.
     data : np.ndarray of shape (num_edges, 1)
-        Data to plot
+        Data to plot.
     cmap : str, optional
         Colormap string from matplotlib, by default "coolwarm".
     title : str, optional
-        Title for plot, by default None
+        Title for plot, by default None.
     """
     edge_lines = np.stack([src_coords, dst_coords], axis=1)
     lc = LineCollection(edge_lines, cmap=cmap, linewidths=1)
@@ -170,23 +170,30 @@ def plot_graph_node_features(
     node_attributes: NamedNodesAttributes,
     trainable_tensors: dict[str, Tensor],
     datashader: bool = False,
+    node_coordinates: dict[str, Tensor] | None = None,
 ) -> Figure:
     """Plot trainable graph node features.
 
     Parameters
     ----------
     node_attributes: NamedNodesAttributes
-        Node attributes object
+        Node attributes object.
     trainable_tensors: dict[str, torch.Tensor]
-        Node trainable tensors
+        Node trainable tensors.
     datashader: bool, optional
-        Scatter plot, by default False
+        Scatter plot, by default False.
+    node_coordinates: dict[str, torch.Tensor]
+        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2).
 
     Returns
     -------
     Figure
-        Figure object handle
+        Figure object handle.
     """
+    del node_attributes  # the trainable node parameters no longer carry their coordinates
+    if node_coordinates is None:
+        msg = "plot_graph_node_features needs node_coordinates for each node set."
+        raise ValueError(msg)
     nrows = len(trainable_tensors)
     ncols = max(tt.shape[1] for tt in trainable_tensors.values())
 
@@ -194,7 +201,7 @@ def plot_graph_node_features(
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, (mesh, trainable_tensor) in enumerate(trainable_tensors.items()):
-        latlons = node_attributes.get_coordinates(mesh).cpu().numpy()
+        latlons = node_coordinates[mesh].cpu().numpy()
         node_features = trainable_tensor.cpu().detach().numpy()
 
         lat, lon = latlons[:, 0], latlons[:, 1]
@@ -219,31 +226,38 @@ def plot_graph_edge_features(
     node_attributes: NamedNodesAttributes,
     trainable_modules: dict[tuple[str, str], Tensor],
     q_extreme_limit: float = 0.05,
+    node_coordinates: dict[str, Tensor] | None = None,
 ) -> Figure:
     """Plot trainable graph edge features.
 
     Parameters
     ----------
     node_attributes: NamedNodesAttributes
-        Node attributes object
+        Node attributes object.
     trainable_modules: dict[tuple[str, str], torch.Tensor]
         Edge trainable tensors.
     q_extreme_limit : float, optional
         Plot top & bottom quantile of edges trainable values, by default 0.05 (5%).
+    node_coordinates: dict[str, torch.Tensor]
+        (lat, lon) coordinates in radians per node set, from the model graph; shape (num_nodes, 2).
 
     Returns
     -------
     Figure
-        Figure object handle
+        Figure object handle.
     """
+    del node_attributes  # the trainable node parameters no longer carry their coordinates
+    if node_coordinates is None:
+        msg = "plot_graph_edge_features needs node_coordinates for each node set."
+        raise ValueError(msg)
     nrows = len(trainable_modules)
     ncols = max(tt.trainable.trainable.shape[1] for tt in trainable_modules.values())
     figsize = (ncols * 4, nrows * 3)
     fig, ax = plt.subplots(nrows, ncols, figsize=figsize, layout=LAYOUT)
 
     for row, ((src, dst), graph_mapper) in enumerate(trainable_modules.items()):
-        src_coords = node_attributes.get_coordinates(src).cpu().numpy()
-        dst_coords = node_attributes.get_coordinates(dst).cpu().numpy()
+        src_coords = node_coordinates[src].cpu().numpy()
+        dst_coords = node_coordinates[dst].cpu().numpy()
         edge_index = graph_mapper.edge_index_base.cpu().numpy()
         edge_features = graph_mapper.trainable.trainable.cpu().detach().numpy()
 
@@ -275,6 +289,7 @@ def graph_plot_fn(
     edge_trainable_modules: dict[tuple[str, str], Any],
     q_extreme_limit: float = 0.05,
     settings: PlottingSettings | None = None,
+    node_coordinates: dict[str, Tensor] | None = None,
     **_kwargs,
 ) -> Generator[tuple[Figure, str], None, None]:
     """Default plug-in function for :class:`GraphFeaturePlot`.
@@ -291,6 +306,7 @@ def graph_plot_fn(
             node_attributes,
             node_trainable_tensors,
             datashader=datashader,
+            node_coordinates=node_coordinates,
         )
         yield fig, f"node_trainable_params_{dataset_name}"
     else:
@@ -301,6 +317,7 @@ def graph_plot_fn(
             node_attributes,
             edge_trainable_modules,
             q_extreme_limit=q_extreme_limit,
+            node_coordinates=node_coordinates,
         )
         yield fig, f"edge_trainable_params_{dataset_name}"
     else:

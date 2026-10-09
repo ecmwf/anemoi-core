@@ -24,10 +24,24 @@ from anemoi.models.distributed.graph import shard_tensor
 if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
+    from anemoi.models.data.flat import FlatSource
+    from anemoi.models.data.sources.base import Source
     from anemoi.models.distributed.shapes import ShardSizes
     from anemoi.models.models.base import BaseGraphModel
 
 LOGGER = logging.getLogger(__name__)
+
+
+def time_steps_per_node(model: "BaseGraphModel", dataset_name: str, n_steps: dict[str, int]) -> int:
+    """Number of time steps carried in each node's features for ``dataset_name``.
+
+    Gridded datasets fold their time steps into the feature axis. Tabular datasets, which are
+    the datasets without a static grid (gridded grids are always static), stack their time
+    windows on the node axis instead, so each node carries a single step.
+    """
+    is_static = getattr(model, "is_dataset_static", {}).get(dataset_name, True)
+    return n_steps[dataset_name] if is_static else 1
+
 
 TARGET_FEATURE_REGISTRY: dict[str, type[DecodingTargetFeature]] = {}
 
@@ -83,14 +97,22 @@ class DecodingTargetFeature(ABC):
 
     @abstractmethod
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "FlatSource",
+        target_spec: "Source",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
         """Compute the (unsharded) feature tensor of shape ``(batch*ensemble*grid, dim)``."""
 
     def tensor(
         self,
-        x_input_data: Tensor,
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -100,9 +122,14 @@ class DecodingTargetFeature(ABC):
         assert (
             dataset_name is not None
         ), f"dataset_name must be provided to {self.__class__.__name__}.tensor() for sharding and validation."
-        out = self._compute(x_input_data, x_encoded_data, batch_size=batch_size, dataset_name=dataset_name)
+
+        out = self._compute(
+            x_input_data, x_encoded_data, x_target, target_spec, batch_size=batch_size, dataset_name=dataset_name
+        )
+
         if self.needs_sharding and grid_shard_sizes is not None:
             out = shard_tensor(out, 0, grid_shard_sizes, model_comm_group)
+
         return out
 
 
@@ -110,27 +137,22 @@ class DecodingTargetFeature(ABC):
 class CoordinatesFeature(DecodingTargetFeature):
     """Sin/cos encoded lat-lon coordinates."""
 
-    needs_sharding = True
-
-    def validate(self) -> None:
-        num_coords_dim = {}
-        for dataset_name in self.datasets_names:
-            num_coords_dim[dataset_name] = getattr(self.model.node_attributes, f"latlons_{dataset_name}").shape[1]
-
-        assert len(set(num_coords_dim.values())) == 1, (
-            f"Coordinates feature must have the same dimension across all datasets encoded with the same encoder. "
-            f"Found dimensions: {num_coords_dim}"
-        )
+    needs_sharding = False
 
     @cached_property
     def dim(self) -> int:
-        return getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
+        return 4  # getattr(self.model.node_attributes, f"latlons_{self.datasets_names[0]}").shape[1]
 
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
-        coords = getattr(self.model.node_attributes, f"latlons_{dataset_name}")
-        return einops.repeat(coords, "e f -> (repeat e) f", repeat=batch_size)
+        return torch.cat([torch.sin(target_spec.coordinates), torch.cos(target_spec.coordinates)], dim=-1)
 
 
 @register_target_feature("forcings")
@@ -151,13 +173,62 @@ class InputForcingsFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_forcings[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
 
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
-        x_forcing = x_input_data[..., self.model._forcing_input_idx[dataset_name]]
-        return einops.rearrange(x_forcing, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+        indices = self.model._forcing_input_idx[dataset_name]
+        # Layout-agnostic: for gridded views flatten folds time into the feature axis
+        # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
+        x_flat = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
+        return x_flat.flatten().data
+
+
+@register_target_feature("target_forcings")
+class TargetForcingsFeature(DecodingTargetFeature):
+    """Forcing variables over the output timestep window."""
+
+    needs_sharding = False
+
+    def validate(self) -> None:
+        num_trainable_params = {}
+        for dataset_name in self.datasets_names:
+            num_trainable_params[dataset_name] = self.model.num_input_channels_forcings[dataset_name]
+
+        assert len(set(num_trainable_params.values())) == 1, (
+            f"Forcings feature must have the same dimension across all datasets decoded with the same decoder. "
+            f"Found dimensions: {num_trainable_params}"
+        )
+
+    @cached_property
+    def dim(self) -> int:
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_output)
+        return steps * self.model.num_input_channels_forcings[dataset_name]
+
+    def _compute(
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
+    ) -> Tensor:
+        x_target_forcing = x_target.flatten()
+        assert x_target_forcing.data.shape[-1] == self.dim, (
+            f"Expected flattened target forcing width {self.dim}, " f"but got {x_target_forcing.data.shape[-1]}."
+        )
+        return x_target_forcing.data
 
 
 @register_target_feature("prognostics")
@@ -172,19 +243,30 @@ class PrognosticsFeature(DecodingTargetFeature):
             num_trainable_params[dataset_name] = self.model.num_input_channels_prognostic[dataset_name]
 
         assert len(set(num_trainable_params.values())) == 1, (
-            f"Prognostics feature must have the same dimension across all datasets encoded with the same encoder. "
+            f"Prognostics feature must have the same dimension across all datasets decoded with the same decoder. "
             f"Found dimensions: {num_trainable_params}"
         )
 
     @cached_property
     def dim(self) -> int:
-        return self.model.n_step_input * self.model.num_input_channels_prognostic[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        steps = time_steps_per_node(self.model, dataset_name, self.model.n_step_input)
+        return steps * self.model.num_input_channels_prognostic[dataset_name]
 
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
-        x_prog = x_input_data[..., self.model._internal_input_idx[dataset_name]]
-        return einops.rearrange(x_prog, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)")
+        indices = self.model._internal_input_idx[dataset_name]
+        # Layout-agnostic: for gridded views flatten folds time into the feature axis
+        # ((batch ensemble grid) (time vars)); for tabular obs time lives on the node axis.
+        prognostics = x_input_data.select(time=slice(0, self.model.n_step_input[dataset_name]), variables=indices)
+        return prognostics.flatten().data
 
 
 @register_target_feature("trainable_parameters")
@@ -216,7 +298,13 @@ class TrainableParametersFeature(DecodingTargetFeature):
         return self.model.node_attributes.num_trainable_parameters[self.datasets_names[0]]
 
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
         trainable = self.model.node_attributes.trainable_tensors[dataset_name].trainable
         return einops.repeat(trainable, "e f -> (repeat e) f", repeat=batch_size)
@@ -245,10 +333,23 @@ class EncodedDataFeature(DecodingTargetFeature):
 
     @cached_property
     def dim(self) -> int:
-        return self.model.input_dim[self.datasets_names[0]]
+        dataset_name = self.datasets_names[0]
+        # An encoder whose mapper updates its source nodes (e.g. GNNForwardMapper) returns the
+        # source latent; other mappers, and projecting encoders, hand over the assembled input.
+        encoder_name = getattr(self.model, "dataset2encoder", {}).get(dataset_name)
+        latent_dim = getattr(self.model, "encoder_src_latent_dim", {}).get(encoder_name)
+        if latent_dim is not None and not self.model._encoder_projects_sources(encoder_name):
+            return latent_dim
+        return self.model.input_dim[dataset_name]
 
     def _compute(
-        self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int, dataset_name: str
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
     ) -> Tensor:
         if x_encoded_data is None:
             raise ValueError(f"'{self.name}' requires the encoder output for dataset '{dataset_name}'.")
@@ -284,13 +385,23 @@ class CompositeTargetFeature(DecodingTargetFeature):
     def dim(self) -> int:
         return sum(feature.dim for feature in self.features)
 
-    def _compute(self, x_input_data: Tensor, x_encoded_data: Tensor | None, batch_size: int) -> Tensor:
+    def _compute(
+        self,
+        x_input_data: "Source",
+        x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
+        batch_size: int,
+        dataset_name: str,
+    ) -> Tensor:
         raise NotImplementedError(f"{self.__class__.__name__} shards per child feature, use tensor().")
 
     def tensor(
         self,
-        x_input_data: Tensor,
+        x_input_data: "Source",
         x_encoded_data: Tensor | None,
+        x_target: "Source",
+        target_spec: "FlatSource",
         batch_size: int,
         grid_shard_sizes: ShardSizes | None = None,
         model_comm_group: ProcessGroup | None = None,
@@ -298,7 +409,14 @@ class CompositeTargetFeature(DecodingTargetFeature):
     ) -> Tensor:
         parts = [
             feature.tensor(
-                x_input_data, x_encoded_data, batch_size, grid_shard_sizes, model_comm_group, dataset_name=dataset_name
+                x_input_data,
+                x_encoded_data,
+                x_target,
+                target_spec,
+                batch_size=batch_size,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                dataset_name=dataset_name,
             )
             for feature in self.features
         ]

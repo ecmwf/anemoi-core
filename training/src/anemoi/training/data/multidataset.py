@@ -11,6 +11,7 @@ import datetime
 import logging
 import os
 import random
+from collections.abc import Iterator
 from functools import cached_property
 
 import numpy as np
@@ -19,9 +20,8 @@ from rich.console import Console
 from rich.tree import Tree
 from torch.utils.data import IterableDataset
 
+from anemoi.models.data import BaseSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.models.distributed.balanced_partition import get_partition_range
-from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.training.data.data_reader import BaseAnemoiReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import SeedContext
@@ -71,37 +71,27 @@ class MultiDataset(IterableDataset):
         self.label = label
         self.shuffle = shuffle
         self.dataset_names = list(data_readers.keys())
+
         self.epoch = epoch
         self.rollout = rollout
+        self.stride = self._sampling_stride(data_readers)
+        self.set_epoch(epoch, rollout=rollout, relative_date_indices=relative_date_indices)
+
         self.fake_dataloading = fake_dataloading
         if self.fake_dataloading:
             LOGGER.info("Using fake dataloading")
 
-        # Guard against mixing single-sequence (NativeGridDataset, global time axis)
-        # with multi-sequence (TrajectoryDataset, init x step axes).  The anchor
-        # intersection would silently keep only sequence-0 samples and produce
-        # semantically meaningless alignment between the two encoders.
-        single_seq = [n for n, ds in data_readers.items() if ds.num_sequences == 1]
-        multi_seq = [n for n, ds in data_readers.items() if ds.num_sequences > 1]
-        if single_seq and multi_seq:
-            msg = (
-                "Currently mixing single-sequence datasets (global time axis) with "
-                "Trajectory datasets (init x step axes) in the same MultiDataset is unsupported. "
-                f"Single-sequence: {single_seq}. Trajectory: {multi_seq}. "
-            )
-            raise ValueError(msg)
-
-        # Compute valid (sequence, position) anchors and a flat index over them
-        # that the shuffle/shard logic operates on.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
-        self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
-
-        # Normalize the date indices to use slices where possible.
-        self.relative_date_indices = {
-            name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
-        }
-
         self._lazy_init_model_and_reader_group_info()
+
+    @staticmethod
+    def _sampling_stride(data_readers: dict[str, BaseAnemoiReader]) -> int | None:
+        """Return the anchor stride the readers agree on; stride 1 when none is configured."""
+        configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
+        strides = set(configured.values())
+        if len(strides) > 1:
+            msg = f"Data readers disagree on the sampling stride: {configured}."
+            raise ValueError(msg)
+        return strides.pop() if strides else 1
 
     def set_epoch(
         self,
@@ -114,14 +104,17 @@ class MultiDataset(IterableDataset):
         self.epoch = epoch
         if rollout is not None:
             self.rollout = rollout
+
         if relative_date_indices is None:
             return
 
-        # Recompute valid (sequence, position) anchors for the updated rollout.
-        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices)
+        # Refresh the anchors (times every reader can sample) for the required time steps.
+        # Each reader gets its own (sequence, position) per anchor, so readers need not share
+        # a frequency or date range. The flat index over anchors drives the shuffle/shard logic.
+        self.anchors = compute_valid_anchors(self.data_readers, relative_date_indices, stride=self.stride)
         self.valid_date_indices = np.arange(len(self.anchors), dtype=np.int64)
 
-        # Normalize the date indices to use slices where possible.
+        # Normalize the date indices to use slices where possible, which can improve downstream indexing performance.
         self.relative_date_indices = {
             name: normalize_time_indices(indices) for name, indices in relative_date_indices.items()
         }
@@ -133,9 +126,6 @@ class MultiDataset(IterableDataset):
         self.model_comm_num_groups = 1
         self.model_comm_group_id = 0
         self.global_rank = 0
-
-        self.reader_group_rank = 0
-        self.reader_group_size = 1
 
         self.sample_comm_num_groups = 1  # groups that work on the same sample / batch
         self.sample_comm_group_id = 0
@@ -208,26 +198,23 @@ class MultiDataset(IterableDataset):
         model_comm_num_groups: int,
         reader_group_rank: int,
         reader_group_size: int,
-        shard_sizes: dict[str, ShardSizes],
     ) -> None:
         """Set model and reader communication group information (called by DDPGroupStrategy).
 
         Parameters
         ----------
         global_rank : int
-            Global rank
+            Global rank.
         model_comm_group_id : int
-            Model communication group ID
+            Model communication group ID.
         model_comm_group_rank : int
-            Model communication group rank
+            Model communication group rank.
         model_comm_num_groups : int
-            Number of model communication groups
+            Number of model communication groups.
         reader_group_rank : int
-            Reader group rank
+            Reader group rank.
         reader_group_size : int
-            Reader group size
-        shard_sizes : dict[str, ShardSizes]
-            Shard sizes for all datasets
+            Reader group size.
         """
         self.global_rank = global_rank
         self.model_comm_group_id = model_comm_group_id
@@ -239,19 +226,19 @@ class MultiDataset(IterableDataset):
         self.sample_comm_group_id = model_comm_group_id
         self.sample_comm_num_groups = model_comm_num_groups
 
-        self.shard_sizes = shard_sizes
-
-        assert self.reader_group_size >= 1, f"reader_group_size(={self.reader_group_size}) must be positive"
+        # pass reader group info to readers:
+        for dataset in self.data_readers.values():
+            dataset.set_reader_group_info(reader_group_rank, reader_group_size)
 
         LOGGER.info(
-            "NativeGridDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
+            "MultiDataset.set_group_info(): global_rank %d, model_comm_group_id %d, "
             "model_comm_group_rank %d, model_comm_num_groups %d, reader_group_rank %d, "
             "sample_comm_group_id %d, sample_comm_num_groups %d",
             global_rank,
             model_comm_group_id,
             model_comm_group_rank,
             model_comm_num_groups,
-            reader_group_rank,
+            self.reader_group_rank,
             self.sample_comm_group_id,
             self.sample_comm_num_groups,
         )
@@ -267,11 +254,11 @@ class MultiDataset(IterableDataset):
         Parameters
         ----------
         ens_comm_group_id : int
-            Ensemble communication group ID
+            Ensemble communication group ID.
         ens_comm_group_rank : int
-            Ensemble communication group rank
+            Ensemble communication group rank.
         ens_comm_num_groups : int
-            Number of ensemble communication groups
+            Number of ensemble communication groups.
         """
         self.ens_comm_group_id = ens_comm_group_id
         self.ens_comm_group_rank = ens_comm_group_rank
@@ -281,7 +268,7 @@ class MultiDataset(IterableDataset):
         self.sample_comm_num_groups = ens_comm_num_groups
 
         LOGGER.info(
-            "NativeGridDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
+            "MultiDataset.set_ens_comm_group_info(): global_rank %d, ens_comm_group_id %d, "
             "ens_comm_group_rank %d, ens_comm_num_groups %d, reader_group_rank %d, "
             "sample_comm_group_id %d, sample_comm_num_groups %d",
             self.global_rank,
@@ -309,6 +296,17 @@ class MultiDataset(IterableDataset):
 
         self.chunk_index_range = np.arange(low, high, dtype=np.uint32)
 
+        LOGGER.info(
+            "%s sample counts: %d valid globally, %d assigned to sample rank %d/%d, %d assigned to worker %d/%d.",
+            self.label.capitalize(),
+            len(self.valid_date_indices),
+            shard_size,
+            self.sample_comm_group_id,
+            self.sample_comm_num_groups,
+            high - low,
+            worker_id,
+            n_workers,
+        )
         LOGGER.info(
             "Worker %d (pid %d, global_rank %d, model comm group %d)  has low/high range %d / %d",
             worker_id,
@@ -340,32 +338,24 @@ class MultiDataset(IterableDataset):
             sanity_rnd,
         )
 
-    def get_sample(self, index: int) -> dict[str, torch.Tensor]:
-        sequence, position = (int(v) for v in self.anchors[index])
-        x = {}
-        for name, dataset in self.data_readers.items():
+    def get_sample(self, index: int) -> dict[str, BaseSample]:
+        """Return per-dataset samples for ``index``.
+
+        Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
+        the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
+        Observation timedeltas are measured from the sample's reference time.
+        """
+        x: dict[str, BaseSample] = {}
+        for name, data_reader in self.data_readers.items():
+            sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            # self.shard_sizes is lazily initalised to None
-            # This if statement guards against the case where shard_sizes is not set
-            # (e.g. if set_comm_group_info hasn't been called yet)
-            if self.shard_sizes is not None and self.shard_sizes[name] is not None:
-                start, end = get_partition_range(self.shard_sizes[name], self.reader_group_rank)
-                grid_indices = slice(start, end)
-            else:
-                grid_indices = slice(None)
-            x[name] = dataset.get_sample(sequence, time_steps, grid_indices)
+            sample = data_reader.get_sample(sequence, time_steps)
+            x[name] = data_reader.measure_from_reference(sample, position, time_steps)
 
         return x
 
-    def __iter__(self) -> dict[str, torch.Tensor]:
-        """Return an iterator that yields dictionaries of synchronized samples.
-
-        Returns
-        -------
-        dict[str, torch.Tensor]
-            Dictionary mapping dataset names to their tensor samples
-            Format: {"dataset_a": tensor_a, "dataset_b": tensor_b, ...}
-        """
+    def __iter__(self) -> Iterator[dict[str, BaseSample]]:
+        """Yield ``{dataset_name: BaseSample}`` for each synchronized sample."""
         # Get the shuffled indices from the primary dataset
         # All data readers will use the same shuffled indices for synchronization
         if self.shuffle:

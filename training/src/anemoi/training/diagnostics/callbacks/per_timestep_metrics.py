@@ -9,14 +9,23 @@
 
 """Callback to log per-timestep validation metrics for temporal downscaling tasks."""
 
-import logging
+from __future__ import annotations
 
-import pytorch_lightning as pl
+import logging
+from typing import TYPE_CHECKING
+
 import torch
 from pytorch_lightning.callbacks import Callback
 
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
+
+if TYPE_CHECKING:
+    import pytorch_lightning as pl
+
+    from anemoi.models.data import Batch
+    from anemoi.models.data.sources import Source
+    from anemoi.training.train.step_output import TrainingStepOutput
 
 LOGGER = logging.getLogger(__name__)
 
@@ -24,14 +33,9 @@ LOGGER = logging.getLogger(__name__)
 class PerTimestepMetrics(Callback):
     """Log validation metrics broken down by output timestep.
 
-    For tasks where the model predicts multiple output timesteps at once,
-    this callback slices predictions and targets along the time dimension
-    and logs per-timestep validation metrics.
-
-    It reuses the predictions already computed by the validation step (via
-    ``outputs``) and delegates metric computation to
-    ``calculate_val_metrics``, ensuring it stays in sync with the main
-    validation logic.
+    For tasks where the model predicts multiple
+    output timesteps at once, this callback slices predictions and targets
+    along the time dimension and logs per-timestep validation metrics.
 
     Parameters
     ----------
@@ -48,50 +52,41 @@ class PerTimestepMetrics(Callback):
         self,
         trainer: pl.Trainer,  # noqa: ARG002
         pl_module: pl.LightningModule,
-        outputs: tuple,
-        batch: dict[str, torch.Tensor],
+        outputs: TrainingStepOutput | None,
+        batch: Batch,
         batch_idx: int,
     ) -> None:
         if batch_idx % self.every_n_batches != 0:
             return
 
-        # validation_step returns a TrainingStepOutput dataclass
-        # y_preds is a list of {dataset_name: tensor}, one entry per task step
-        if outputs is None:
+        # validation_step returns a TrainingStepOutput whose predictions hold one
+        # {dataset_name: Source} per task step, with ensemble members already gathered
+        if outputs is None or not outputs.predictions:
             return
-
-        y_preds_list = outputs.predictions
-        if not y_preds_list:
-            return
-
-        batch_size = next(iter(batch.values())).shape[0]
 
         with torch.no_grad():
-            self._eval_per_timestep(pl_module, y_preds_list, batch, batch_size)
+            self._eval_per_timestep(pl_module, outputs.predictions, batch)
 
     def _eval_per_timestep(
         self,
         pl_module: pl.LightningModule,
-        y_preds_list: list[dict[str, torch.Tensor]],
-        batch: dict[str, torch.Tensor],
-        batch_size: int,
+        y_preds_list: list[dict[str, Source]],
+        batch: Batch,
     ) -> None:
-        """Compute metrics per timestep using validation outputs."""
-        # Get targets from batch (cheap — just indexing)
-        y_targets = pl_module.task.get_targets(batch)
-        if hasattr(pl_module, "_collapse_ens_dim"):
-            y_targets = pl_module._collapse_ens_dim(y_targets)
-
-        # Use the first (and typically only) task step's predictions
+        """Compute metrics per timestep from the validation predictions, without another forward pass."""
+        # Use the first (and typically only) task step's predictions, and the targets of that same step
+        first_step_kwargs = next(iter(pl_module.task.steps("validation")))
+        raw_y, _, _ = pl_module.task.get_targets(batch, data_indices=pl_module.data_indices, **first_step_kwargs)
+        y_targets = pl_module.preprocess_targets(raw_y)
         y_preds = y_preds_list[0]
 
         for dataset_name, y_pred in y_preds.items():
             y = y_targets[dataset_name]
-            n_timesteps = y.shape[TensorDim.TIME]
+            # tabular sources count their time slots from the boundaries, gridded ones from the time axis
+            n_timesteps = y.time_size
 
             # Gather the grid up front when any loss/metric does not support sharding, so non-sharding
-            # metrics (e.g. spectral) get the full grid; the gather commutes with the per-timestep
-            # slicing below. When sharding is supported this is a no-op and keeps the shard slice.
+            # metrics (e.g. spectral) get the full grid
             y_pred, y, grid_shard_slice = pl_module._prepare_tensors_for_loss(
                 y_pred,
                 y,
@@ -100,34 +95,28 @@ class PerTimestepMetrics(Callback):
             )
 
             for t in range(n_timesteps):
-                # Slice single timestep, keeping the time dimension
-                pred_t = y_pred[:, t : t + 1]
-                target_t = y[:, t : t + 1]
-
                 # Delegate to calculate_val_metrics which handles:
-                # - post-processing
+                # - post-processing (aligned to each view's index space)
                 # - metric loop and metric ranges
                 # - metric kwargs (scaler_indices, shard info, layouts)
                 metrics = pl_module.calculate_val_metrics(
-                    pred_t,
-                    target_t,
+                    y_pred.select(time=slice(t, t + 1)),
+                    y.select(time=slice(t, t + 1)),
                     grid_shard_slice=grid_shard_slice,
                     dataset_name=dataset_name,
                     pred_layout=IndexSpace.MODEL_OUTPUT,
                     target_layout=IndexSpace.DATA_FULL,
-                    without_scalers=[TensorDim.TIME.value],
+                    without_scalers=[TensorDim.TIME],
                 )
 
                 for metric_name, value in metrics.items():
-                    step_name = f"val_{metric_name}/t_{t + 1}"
-
                     pl_module.log(
-                        step_name,
+                        f"val_{metric_name}/t_{t + 1}",
                         value,
                         on_epoch=True,
                         on_step=False,
                         prog_bar=False,
                         logger=pl_module.logger_enabled,
-                        batch_size=batch_size,
+                        batch_size=batch.batch_size,
                         sync_dist=True,
                     )
