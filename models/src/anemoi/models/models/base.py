@@ -250,10 +250,6 @@ class BaseGraphModel(nn.Module):
                     len(datasets) == 1
                 ), f"Encoder '{encoder_name}' must be associated with exactly one dataset for now. New dataset fusing strategies will be implemented soon."
 
-            for encoder_name, fusing_strategy in self.encoder_fusing_strategy.items():
-                if fusing_strategy not in ("not_supported"):
-                    raise ValueError(f"Encoder '{encoder_name}' has unsupported fusing strategy '{fusing_strategy}'.")
-
         # Validated here. The target dimension may depend on the shapes computed in _calculate_shapes_and_indices
         for target_features in self.decoders_target_input.values():
             target_features.validate()

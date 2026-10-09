@@ -323,8 +323,9 @@ class ResidualPredictionMode(PredictionMode):
 
     The batch enters this mode already normalized (like every other prediction mode).
     ``prepare_target`` denormalizes the projected lres source and the target so the
-    residual can be computed in physical space, then renormalizes it with residual
-    (tendency-space) statistics. ``reconstruct_prediction`` is the inverse of that flow.
+    residual can be computed in physical space, then renormalizes it with the residual
+    statistics from ``data.datasets.<target>.residual_statistics``. ``reconstruct_prediction``
+    is the inverse of that flow.
     The reference dataset of each target is the model's ``residual_reference``, a
     ``{target: reference}`` mapping set in ``model.residual_reference``.
     Uses ``pre_processors_residual`` / ``post_processors_residual`` for residual
@@ -380,40 +381,17 @@ class ResidualPredictionMode(PredictionMode):
             raise ValueError(msg)
 
     def _validate_residual_processors(self) -> None:
-        """Assert residual processors exist for every target at construction time."""
-        pre_processors_residual = getattr(self.module.model, "pre_processors_residual", None)
-        post_processors_residual = getattr(self.module.model, "post_processors_residual", None)
-        for target_dataset_name in self.module.model.model.residual_reference:
-            assert pre_processors_residual is not None and target_dataset_name in pre_processors_residual, (
-                f"pre_processors_residual for target dataset '{target_dataset_name}' is required for "
-                "residual-based transport models. Set data.datasets."
-                f"{target_dataset_name}.residual_statistics to a .npz file of precomputed statistics."
-            )
-            assert post_processors_residual is not None and target_dataset_name in post_processors_residual, (
-                f"post_processors_residual for target dataset '{target_dataset_name}' is required for "
-                "residual-based transport models. Set data.datasets."
-                f"{target_dataset_name}.residual_statistics to a .npz file of precomputed statistics."
-            )
-
-    def _residual_pre_processors(self) -> dict:
-        residual_proc = getattr(self.module.model, "pre_processors_residual", None)
-        if not residual_proc or len(residual_proc) == 0:
-            msg = (
-                "ResidualPredictionMode: pre_processors_residual is not configured. "
-                "Set data.datasets.<target>.residual_statistics to normalize the residuals with dedicated statistics."
-            )
-            raise ValueError(msg)
-        return residual_proc
-
-    def _residual_post_processors(self) -> dict:
-        residual_proc = getattr(self.module.model, "post_processors_residual", None)
-        if not residual_proc or len(residual_proc) == 0:
-            msg = (
-                "ResidualPredictionMode: post_processors_residual is not configured. "
-                "Set data.datasets.<target>.residual_statistics to normalize the residuals with dedicated statistics."
-            )
-            raise ValueError(msg)
-        return residual_proc
+        """Require residual pre- and post-processors for every target at construction time."""
+        for attribute in ("pre_processors_residual", "post_processors_residual"):
+            processors = getattr(self.module.model, attribute, None) or {}
+            for target_dataset_name in self.module.model.model.residual_reference:
+                if target_dataset_name not in processors:
+                    msg = (
+                        f"{attribute} for target dataset '{target_dataset_name}' is required for "
+                        f"residual-based transport models. Set data.datasets.{target_dataset_name}.residual_statistics "
+                        "to a .npz file of precomputed statistics."
+                    )
+                    raise ValueError(msg)
 
     def prepare_target(
         self,
@@ -437,12 +415,11 @@ class ResidualPredictionMode(PredictionMode):
         )
 
         # Delegate the residual / diagnostic split to the model.
-        residual_pre = self._residual_pre_processors()
         model_residual_data_output = self.module.model.model.compute_residual(
             y=target_data_output,
             x_reference_denorm=x_ref_on_target_grid,
             pre_processors_state=self.module.model.pre_processors,
-            pre_processors_residual=residual_pre,
+            pre_processors_residual=self.module.model.pre_processors_residual,
             reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
             input_post_processor=self.module.model.post_processors,
             skip_imputation=True,
@@ -477,12 +454,11 @@ class ResidualPredictionMode(PredictionMode):
         reference_variable_name_to_column_index_by_target = prepared.aux[
             "reference_variable_name_to_column_index_by_target"
         ]
-        residual_post = self._residual_post_processors()
         return self.module.model.model.add_residual_to_state(
             x_reference_denorm=x_ref_on_target_grid,
             residual=prediction,
             post_processors_state=self.module.model.post_processors,
-            post_processors_residual=residual_post,
+            post_processors_residual=self.module.model.post_processors_residual,
             reference_variable_name_to_column_index_by_target=reference_variable_name_to_column_index_by_target,
             output_pre_processor=self.module.model.pre_processors,
             skip_imputation=True,

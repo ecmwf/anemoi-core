@@ -62,13 +62,6 @@ class BaseTask(ABC):
         """Check the task's dataset roles against those of the model.
 
         Tasks that do not declare dataset roles accept any model.
-
-        Parameters
-        ----------
-        input_datasets : list[str]
-            Datasets the model reads as inputs.
-        target_datasets : list[str]
-            Datasets the model predicts.
         """
         del input_datasets, target_datasets
 

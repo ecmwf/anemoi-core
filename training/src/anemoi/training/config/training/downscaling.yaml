@@ -5,8 +5,10 @@
 #   - prediction_mode: residual — the model learns normalized residuals
 #     ``y - interp(x_lres)``.  ``ResidualPredictionMode`` denormalizes lres and
 #     target internally so the residual is computed in physical space, then
-#     renormalized with tendency-space statistics.
-#   - training_condition: log_normal — EDM-style log-normal noise schedule.
+#     renormalized with the residual statistics from
+#     ``data.datasets.<target>.residual_statistics``.
+#   - The noise schedule is set in the model config
+#     (``model.model.transport.training_condition``).
 #   - Losses and metrics are scoped to out_hres only; in_lres and in_hres are
 #     conditioning inputs and do not contribute to the loss.
 defaults:

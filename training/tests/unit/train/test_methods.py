@@ -3000,20 +3000,32 @@ def test_residual_prediction_mode_rejects_reference_state_source_kind() -> None:
         ResidualPredictionMode(module)
 
 
-def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missing() -> None:
-    """Missing residual processors for a target must fail at construction time, not on first use.
-
-    Mirrors ``TendencyPredictionMode``'s eager validation of tendency processors.
-    """
+@pytest.mark.parametrize("attribute", ["pre_processors_residual", "post_processors_residual"])
+@pytest.mark.parametrize("missing", [{}, None], ids=["no_entry_for_target", "attribute_unset"])
+def test_residual_prediction_mode_raises_eagerly_when_residual_processors_missing(
+    attribute: str,
+    missing: dict | None,
+) -> None:
+    """Missing residual processors for a target must fail at construction time, not on first use."""
     module, _ = _make_residual_module(
         pre_offset=0.0,
         post_offset=0.0,
         tend_pre_offset=0.0,
         tend_post_offset=0.0,
     )
-    module.model.pre_processors_residual = {}
-    with pytest.raises(AssertionError, match="pre_processors_residual"):
+    setattr(module.model, attribute, missing)
+    with pytest.raises(ValueError, match=rf"{attribute}.*'out'.*data\.datasets\.out\.residual_statistics"):
         ResidualPredictionMode(module)
+
+
+def test_residual_prediction_mode_accepts_residual_processors_for_every_target() -> None:
+    module, _ = _make_residual_module(
+        pre_offset=0.0,
+        post_offset=0.0,
+        tend_pre_offset=0.0,
+        tend_post_offset=0.0,
+    )
+    ResidualPredictionMode(module)
 
 
 @pytest.mark.parametrize(
