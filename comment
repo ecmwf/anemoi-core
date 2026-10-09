@@ -1,0 +1,422 @@
+Published on 14 September 2026 1 of 12
+Technical Advisory Committee
+58th session, 8 - 9 October 2026 ECMWF/TAC/58(26)11
+Agenda item
+5.3 Anemoi update and sustainability
+Summary
+This paper provides an update on Anemoi, the European-anchored, openly
+developed software infrastructure for data-driven weather forecasting, its
+governance, development and future direction. Anemoi is co-developed by ECMWF
+and national meteorological services across Europe, which contribute jointly to its
+codebase, testing, implementation and evolution. It has rapidly evolved from an
+emerging framework into an increasing mature and robust infrastructure
+supporting research, pre-operational and operational activities across ECMWF and
+its Member and Cooperating States.
+Anemoi’s development is coordinated within the European meteorological
+community with technical governance provided through the Anemoi Technical
+Subgroup (ATS) established within EUMETNET’s E-AI programme, while the
+broader strategic direction and long-term sustainability of Anemoi continue to be
+shaped jointly by ECMWF and the participating national meteorological services.
+This collaborative approach is intended to ensure that Anemoi develops as a shared
+European capability, aligned with the evolving needs and priorities of the
+community, while remaining open to wider international use and contribution.
+Major developments over the past year include substantial improvements in
+computational efficiency especially for high-resolution training and inference, an
+expanded testing framework spanning a hierarchy of tests, and increased flexibility
+to support tasks such as temporal and spatial downscaling, multi-dataset training,
+an ensemble of probabilistic techniques and the incorporation of observations.
+The paper also reviews progress in Anemoi governance through ATS, identifies
+emerging needs for higher-level strategic coordination and sustainability planning,
+and summarises findings from the first Anemoi user and developer survey. It also
+identifies questions that the evolving governance arrangements will need to clarify,
+including responsibilities for strategic priorities, operational release policy,
+technical stewardship and long-term resourcing.
+Looking ahead, the paper highlights the importance of balancing agility with
+operational resilience as Anemoi moves towards version 1 release and continues to
+integrate advances from the wider machine-learning community.
+2 of 12 ECMWF/TAC/58(26)11
+Action required
+The Committee is invited to comment on the work described in this paper
+ECMWF/TAC/58(26)11 3 of 12
+Table of Contents
+1. Introduction...........................................................................................................................................................4
+2. Governance and sustainability.......................................................................................................................4
+3. Highlights of Anemoi activities from the last year.................................................................................6
+3.1. Computational performance enhancements.......................................................................................6
+3.2. Testing.................................................................................................................................................................7
+3.3. Expanding use-cases including use of observations ........................................................................9
+3.4. Compatibility across an evolving Anemoi.........................................................................................10
+4. Anemoi user/developer survey..................................................................................................................10
+5. Outlook.................................................................................................................................................................. 11
+6. Acknowledgements ......................................................................................................................................... 12
+7. Action required..................................................................................................................................................12
+4 of 12 ECMWF/TAC/58(26)11
+1. Introduction
+Over just a few years, Anemoi has evolved from concept to a key component of the
+European Meteorological software infrastructure, co-developed by ECMWF and many
+national meteorological services across Europe and open to use and contributions by
+the wider international community.
+Anemoi provides a software ecosystem covering the key steps needed to develop datadriven forecasting systems, including dataset creation, model training, inference,
+testing and workflow integration. Anemoi has enabled multiple organisations to
+operationalise data-driven forecasting and is currently used by over 15 of ECMWF’s
+Member and Cooperating States to build, test and mature data-driven weather
+forecasting modelling systems, as well as a range of other earth-system applications. In
+the ECMWF Machine Learning Project (MLP, formerly known as the Machine Learning
+Pilot Project, MLPP), Anemoi serves as key shared software infrastructure for exploring
+and operationalising the science and technology of AI. Anemoi and the MLP also form a
+practical backbone of the wider EUMETNET E-AI activity, enabling European national
+meteorological services (NMS) to move jointly from ML experimentation towards
+operational capability.
+This rapid evolution and wider use make governance, robustness and long-term
+sustainability increasingly important. Key here is maintaining the balance between
+rapid adoption, to enable Anemoi to stay relevant in a fast-moving world, and
+operational resilience, to ensure the reliability of the operational data-driven systems
+that will provide Europe with trustworthy weather information. Sustainability in this
+context includes not only governance, but also continued organisational commitments,
+maintainable architecture, robust release and compatibility practices, documentation
+and a sufficiently broad contributor community.
+This paper reports on the current governance structures in place and the next steps for
+Anemoi governance and oversight. It also provides an update on the major
+developments in Anemoi over the past year, and an outlook for the coming period.
+Finally, it highlights key results from the first Anemoi user and developer survey,
+before providing an outlook for the coming years.
+2. Governance and sustainability
+Governance is important to Anemoi’s success. It needs to provide sufficient oversight to
+support coordination, quality and trust, while keeping processes light enough for
+Anemoi to remain agile and easy to contribute to.
+The Anemoi Technical Subgroup (ATS), established in 2024, continues to meet weekly.
+The group, attended by up to two representatives from each contributing organisation,
+steers the technical evolution of Anemoi. Organisations currently attending ATS are
+those actively supporting Anemoi through activities such as development, review,
+testing, operational implementation or other sustained technical contributions;
+namely: AEMET, DWD, DMI, FMI, MET Norway, GeoSphere, KNMI, Meteo France,
+MeteoSwiss, RMI, UK Met Office, and ECMWF.
+ECMWF/TAC/58(26)11 5 of 12
+Governance arrangements for Anemoi are still evolving, and the respective decisionmaking, advisory and implementation responsibilities will need to be clarified as
+Anemoi matures. Participation in future governance will need to reflect alignment with
+Anemoi’s public-service purpose and willingness to assume longer-term stewardship
+responsibilities.
+ATS assesses candidate contributions to decide if new features, breaking changes,
+deprecation and other code adaptations should proceed. This assessment is done at a
+high level, running in tandem with peer code review which focusses on the technical
+implementation. Minutes from the meetings are made available to attendees of ATS and
+the MLP. ATS holds roadmap meetings approximately every six months, where
+organisations, via their ATS representatives, propose and discuss large-scale code
+evolution, ensuring alignment with operational model developments. The resulting
+roadmap is made available to those co-developing Anemoi for awareness and
+alignment.
+A notable topic for ATS in recent years has been to provide an initial definition of the
+scope of Anemoi. Anemoi was initially developed for data-driven weather forecasting,
+but its scope has broadened as the underlying science and technology have advanced
+rapidly. It is now being applied to other Earth-system modelling applications, including
+Earth-system components, a climate emulator in DestinE, nowcasting and downscaling.
+This makes it difficult to define its scope too narrowly at this stage. The following is the
+current first scope statement for Anemoi, agreed within ATS and anticipated to evolve
+and sharpen as the topic further matures. It is reproduced here as agreed by ATS; its
+longer-term formulation, including whether it should be expressed less in terms of
+specific model architectures, is an issue for future review.
+What is Anemoi for, and what is it not?
+Anemoi started out as a codebase for building data-driven weather forecasting
+models. Since then, it has evolved to include additional tasks, such as
+downscaling (super-resolution), time interpolation (temporal downscaling), and
+autoencoding. What these applications share is the need to build models in which
+information must be gathered, exchanged, and processed across the spatial
+dimension. For these use cases, scalable and parallelisable graph and
+transformer tooling is particularly valuable. Anemoi is not intended to address
+all Earth-system ML problems. Problems that focus on strictly local networks or
+on processing long temporal signals (e.g. LSTMs) share little in common with
+Anemoi’s current focus, and the framework is therefore unlikely to provide
+significant benefits for those use cases.
+Who is Anemoi for?
+Anemoi’s primary developers are based in operational meteorological centres,
+where it is used to create operational data-driven models. Many of these
+developers are also users of the framework, building and deploying models in
+practice. This user group places a strong emphasis on structure and
+reproducibility, in particular the ability to recreate the same models as Anemoi
+evolves and expands.
+6 of 12 ECMWF/TAC/58(26)11
+Anemoi also aims to serve the wider research community by enabling users to
+test new methods for training data-driven forecasting systems. This user group
+places greater emphasis on flexibility, allowing ideas to be easily adapted and
+tested.
+Refining and enforcing the scope of Anemoi will be critical for Anemoi’s sustainability,
+particularly in an era where LLM assisted coding lowers barriers allowing the
+community to develop AI modelling solutions without these necessarily needing to be
+implemented into Anemoi.
+Feedback from across Europe, via numerous fora, highlighted a limitation with the
+current Anemoi technical governance structure. Whilst broadly ATS was viewed as
+steering Anemoi’s evolution effectively, a gap was identified in higher-level strategic
+planning and cross-organisation prioritisation and resource management. To this end,
+in the Autumn a first Anemoi review meeting will be organised. Attended by both
+technical ATS members and senior representatives of contributing organisations, the
+goal will be to take a high-level view on the progress and plans over the past and next
+six months. It will also serve to identify strategic priorities, risks, and coordinate efforts
+across the partners, thereby adding an additional layer of lightweight governance that
+may further evolve based on needs being identified. The first meetings will also help
+clarify the respective roles of ATS, of the review meeting and of contributing
+organisations. This will include considering how priorities are set, how operational and
+scientific needs are balanced, and which decisions and recommendations should be
+documented and communicated more widely.
+Ahead of the autumn review meeting, initial work has begun to assess how
+contributions to Anemoi are currently distributed across organisations. The analysis
+covers code contributions, including new features and bug fixes, as well as the
+identification of technical issues and code reviews. Further work should broaden this
+assessment to other aspects that support sustainability, including testing,
+documentation, user support, operational adoption, datasets, computing resources and
+funded development. Tracking these figures over time will help inform discussions on
+Anemoi’s sustainability and the balance of partner contributions.
+3. Highlights of Anemoi activities from the last year
+This section summarises selected highlights from a very active year for Anemoi. Over
+the past six months alone, 500 code contributions were merged into Anemoi, after
+receiving over 2000 reviews from more than 15 organisations.
+3.1. Computational performance enhancements
+Extracting maximum computational performance, both in training and inference, is a
+key aspect for Anemoi. With the ever-increasing price of GPUs, making the most value
+of existing hardware is of utmost importance. Work undertaken in the past year has
+improved the efficiency of Anemoi’s data loading, training and inference capabilities
+which directly benefits all organisations using Anemoi.
+ECMWF/TAC/58(26)11 7 of 12
+This work was part of a broader shift from isolated model-level acceleration towards
+end-to-end optimisation, covering training, inference, data movement, GPU kernels and
+profiling. At high resolution, particular attention has been paid to removing memory
+and I/O bottlenecks that limit scalability: keeping batches sharded through the full
+training pipeline, improving mapper memory behaviour through edge sharding and
+chunking and enabling parallel output during inference. In parallel, selected
+performance-critical components have been moved from higher-level PyTorch/PyG
+implementations towards custom Triton kernels, improving runtime efficiency. These
+changes in concert have produced substantial practical gains, including more than a
+fivefold reduction in training costs for a 9km model (see Figure 1). Such optimisations
+directly benefit not only global model developments but are also directly applicable to
+kilometre-scale regional models, particularly important for Member States.
+Opportunities for efficiency gains are by no means exhausted and work will continue
+over the next period with partners to identify shared computational inefficiencies and
+work to rectify them.
+Figure 1: End-to-end training efficiency at 9 km global resolution measured on Jupiter H200 GPUs, showcasing the
+combined effects of a series of performance optimisations. The combination of 4 targeted performance improvements
+yields a five-fold increase in computational efficiency. This will directly benefit ECMWF’s push to 9 and 4km models
+and enable the development of regional kilometre-scale models by Member States.
+3.2. Testing
+Testing is fundamental to ensuring Anemoi is robust and reliable for operational use.
+As Anemoi matures, the testing infrastructure has evolved significantly in the last year.
+The most important evolution is the explicit expansion of the test pyramid, Figure 2. A
+test pyramid refers to a layered testing approach, with many small, fast tests which are
+run frequently, and fewer larger, slower tests run less often. Anemoi's current pyramid
+distinguishes unit tests, integration tests, and system-level tests.
+Unit tests cover small units of code, ensuring the interfaces and behaviour of kernels do
+not change without clear purpose.
+Integration tests now cover three aspects: workflow tests; benchmark tests; and
+accuracy tests.
+Workflow tests maintain functionality in key use-cases for Anemoi, e.g. ensuring that
+the interface to train a model has not changed. These tests can be fairly cheap, taking
+order minutes, and therefore cover a broad spectrum of different use-cases. As with
+system-level tests, this creates opportunities for organisation-specific tests. For 
+8 of 12 ECMWF/TAC/58(26)11
+example, one of the workflow tests is an example of training AICON, contributed by
+DWD.
+Benchmark tests provide assurances that code changes do not degrade computation
+performance. These capture throughput of training, data-loading and memory used by
+training. These tests cover global, stretched-grid and LAM models to ensure the
+ongoing performance of these key use-cases. Visibility to the evolution of the
+benchmark tests is provided through a dashboard on the Anemoi catalogue. Future
+work will cover benchmarking of inference.
+Accuracy tests are the latest evolution of Anemoi’s test pyramid. Here a small but
+representative training problem is captured, and the tests only pass if the training
+achieves an equivalent accuracy relative to a tolerance. Currently only a single global
+training example is used, but as with the above, there are opportunities for expansion
+to cover a wider range of Anemoi-based tasks.
+System-level tests allow the creation of end-to-end tests capturing specific
+organisations’ workflows, from dataset creation to inference, in a workflow that is easy
+to expand. A reusable workflow for these tests has been created, enabling organisations
+to contribute their own use-cases without needing to create the testing infrastructure.
+Currently ECMWF and MET Norway have contributed system-level tests representative
+of their use-cases.
+An important next step is to strengthen compatibility and regression testing so that
+upgrades cannot silently change or invalidate models and workflows used by partner
+organisations. This includes clearer compatibility guarantees, checkpoint migration and
+validation, numerical and skill-based regression testing, and release-candidate testing
+against representative end-to-end workflows. These tests will require contributions
+from partner organisations, which are best placed to identify the configurations and
+operational workflows for which continuity must be assured.
+Unit tests being cheap, are run at a high frequency, typically on every contribution to an
+active pull request into Anemoi. Integration tests, with a larger computational footprint
+are run before code is merged into Anemoi and are run before significant code
+contributions and every night. System level tests, with a yet larger footprint, are also
+run every night, currently using the latest version of each Anemoi package. 
+ECMWF/TAC/58(26)11 9 of 12
+Figure 2: Anemoi testing has evolved into a layered framework that combines frequent unit checks, broader
+integration tests and nightly system-level workflows. This organisation improves confidence before code is merged,
+increases coverage of operationally relevant use-cases and provides a reusable structure through which partner
+organisations can contribute tests for their own workflows.
+Across Anemoi contributor guidelines, review and governance processes, testing is
+emphasised as a vital part of any meaningful contribution to Anemoi, and code is not
+merged without providing this. Whilst a large part of the underlying infrastructure has
+been developed by ECMWF, it is crucial for all organisations to contribute meaningful
+tests for their operational workflows to ensure the robust evolution of Anemoi. This
+broader coverage will be an important element in defining readiness for version 1 and
+in giving operational users confidence that they can adopt new releases without
+unintended changes to their models or workflows.
+3.3. Expanding use-cases including use of observations
+A key theme of Anemoi’s evolution in the last year has been expanding use-cases, in line
+with ATS’s scope for Anemoi. Initially Anemoi enabled building forecasting models,
+covering global, stretched-grid and limited area applications. However, the same
+tooling can be used with relatively small changes to support other important
+operational use-cases. Two examples of this are temporal downscaling, driven by MET
+Norway and ECMWF, which is now merged into Anemoi, and spatial downscaling,
+which is a current activity to be concluded before the end of 2026.
+Anemoi now supports bringing different datasets together as either input or output, for
+example enabling an additional decoder to fine-tune a forecasting model to output
+more variables or higher resolution observation data. This also includes the number of
+time-slices that models can ingest and output, a development spearheaded by RMI.
+Anemoi now features a range of flavours of Continuous Ranked Probability Score
+(CRPS) optimisation variations, e.g. minimising the CRPS in a spectral space or across 
+10 of 12 ECMWF/TAC/58(26)11
+multiple length scales, and different diffusion variants. This enables the community to
+explore together the optimal approaches for high resolution probabilistic modelling.
+A current major development is the use of observations as additional data as inputs to
+the model and predicted outputs from models, in addition to training on NWP output.
+This poses an interesting technical challenge, as the data can be highly unstructured,
+which requires changes to dataset handling, model design and training, and inference.
+The process of fully incorporating observations in Anemoi is midway, with dataset
+building work completed, model building and training at a prototype stage and
+inference at a design stage. Once completed this will enhance again the flexibility,
+enabling organisations to train Direct Observation Prediction (DOP) models, or hybrids
+training on both analysis and observation data. This work is projected to be complete
+before the end of 2026.
+3.4. Compatibility across an evolving Anemoi
+A recurring topic in the Anemoi community and ATS has been balancing the pace of
+innovation and consistency of functionality. One example of this is the ability to
+continue training a model checkpoint that was first trained with one version of Anemoi,
+with a newer version of Anemoi. In the last year, spearheaded by Meteo France,
+functionality to migrate model checkpoints has been introduced. This includes new
+tests in the testing framework to detect issues with compatibility. For changes that
+would break compatibility, contributors must provide migrations to ensure this
+behaviour. Exceptions have been infrequently made by ATS when maintaining
+compatibility would ensure significant technical overhead.
+The next step for this compatibility work, which has just begun, is compatibility of the
+configuration files used to orchestrate Anemoi, which will follow a similar recipe to
+checkpoint migrations. The combination of checkpoint and configuration migrations
+will provide significant improvements for Anemoi users and minimise GPU hours spent
+on retraining models from scratch.
+4. Anemoi user/developer survey
+At the most recent in-person Machine Learning Project (MLP) event, held in
+Switzerland, the first survey of the Anemoi developer and contributor community was
+conducted. Over 50 responses were gathered from 18 organisations. The questions
+covered their use of Anemoi, confidence in contributing to it, and views on the existing
+governance structure. Half the respondents had not yet reviewed code and did not feel
+part of the developer group, despite the majority of the group using Anemoi on a
+weekly or more frequent basis. Widening the developer group and building user
+confidence in making code contributions were identified as priorities. Broadly, ATS was
+viewed positively. Better prioritisation and expanded documentation, particularly for
+improved onboarding, were the most common requests. When surveyed on activities to
+deemphasise, there were no consistent messages, suggesting that most Anemoi
+developments are viewed as useful additions.
+ECMWF/TAC/58(26)11 11 of 12
+Revisiting this survey regularly, including its use beyond the MLP, will provide a useful
+way to track community views, needs and concerns as Anemoi evolves, and to feed
+them into Anemoi governance meetings. Future surveys should include the wider
+international user and contributor community, while distinguishing between open
+community input and the responsibilities of organisations contributing to Anemoi’s
+European public-service and operational objectives.
+5. Outlook
+In the past year, Anemoi has taken significant steps towards maturity, with two key
+themes being testing and ecosystem expansion to enable the next-generation
+operational systems. Anemoi’s use, both in Europe and beyond, continues to increase,
+including NOAA’s use of Anemoi to develop its operational data-driven modelling
+capabilities, a mark of Anemoi’s success. This wider uptake illustrates the value of
+combining strong European public-service anchoring with open international
+participation and contribution.
+One topic for the coming year is deciding when to declare Anemoi version 1. Version 1
+should be linked to explicit readiness criteria rather than being a primarily symbolic
+milestone. At a minimum, these criteria should cover release and compatibility policy,
+checkpoint migration and validation, regression and end-to-end testing, and the
+associated user and developer documentation. The complete criteria and the process
+for assessing them should be agreed through the evolving governance arrangements.
+Another important topic will be the effective and efficient incorporation of the
+developments from the wider ML community, including in the framework of EU funded
+projects such as Destination Earth, WeatherGenerator or EarthGenerator.
+Effective use of coding agents promises to continue as a topic over the following years.
+ATS currently encourages exploration of the use of coding agents to establish where
+such tools are most and least valuable. Large-scale adoption of coding agents as the
+primary development tool was considered premature, particularly considering the
+current state of development of testing infrastructure. Use of coding agents as tools to
+empower developers was endorsed, including agents to conduct first reviews of code
+contributions. In the development of Anemoi nexus, which acts as a catalogue for
+Anemoi datasets used across the MLP, an exploratory model of prompt requirementdriven development has been adopted. This choice was made as the database and web
+aspects involved have clear examples in the wider world where LLMs are a powerful
+tool. With the current rapid pace of improvement of LLMs as coding agents, having an
+agile approach to their use will help Anemoi thrive.
+More broadly, the community will need mechanisms that bring together developments
+currently taking place through different projects and organisational settings. The
+emerging six-monthly review meeting is a first step; the value of a wider periodic
+community forum, open to operational services, research organisations and other
+contributors, could also be considered as the ecosystem develops.
+Key to Anemoi’s continued success will be the balance between incorporating and
+enabling scientific advances without compromising operational reliability. The current 
+12 of 12 ECMWF/TAC/58(26)11
+developments in testing and governance aim to support this goal. The next phase
+should therefore clarify the respective responsibilities for strategic direction, technical
+stewardship, operational release management and organisational resourcing; define
+the conditions for version 1; and establish how priorities and contributions will be
+reviewed across the community. These questions should be taken forward through the
+autumn review meeting and the related EUMETNET E-AI discussions.
+6. Acknowledgements
+ECMWF would like to thank Oliver Fuhrer (MeteoSwiss), Roland Potthast (DWD) and
+Jordis Tradowsky (MET Norway) for their feedback on a draft of this paper.
+7. Action required
+The Committee is invited to comment on the work described in this paper
+
+
+
+I think the balance between rapid adoption and operational resilience is not a contradiction, I rather think the two things go hand in hand - a flexible framework is usually built on stable and reliable interfaces, something that we don’t see much in Anemoi
+
+The Anemoi Trainer orchestrates training, it loads training method, task and model and runs the training. But there are no clearly defined interfaces - between these components. Which means that adding new features becomes tedious and error prone. Whereas had we had stable interfaces it would be easy to implement new models/training methods that would slot into the AnemoiTrainer. The issue that I have is that instead of working on building a stable interface where developing new features would be easy, instead the effort is focused on brute forcing new features that are implemented without interfaces. 
+
+The model interface has a lot of functionality and it constructs the model, and the model has to be very closely tied to the existing anemoi model. Had we instead had an interface without any coupling to the model, adopting to new advances in the field would be easier and it would be easier to experiment with new ideas. And at the same time a reliable interface is almost synonymous with a stable system. I think ECMWFs primary role should be exposing interfaces for the anemoi framework and let the users implement the functionality they want rather than implementing the features for them. 
+
+This is also what they need to do, if they want anemoi to live up to the second paragraph in 2. Who is anemoi for. One clear example of this is their consideration for deprecating the graph models because they were too hard to maintain. With an interface between model and framework the model should be trivial to maintain. 
+
+As they say in the paper they have done a very very very good job in optimising for speed in anemoi. And I think the TRUE conflict is actually not between stability / flexibility but rather speed / flexibility as there might be many of the optimizations that are rather bespoke.
+
+So in terms of 3.3.
+
+
+==================================================================
+REFINED VERSION
+==================================================================
+
+1. Flexibility and resilience go together
+
+The paper frames the challenge as balancing rapid adoption against operational resilience. I would argue these goals reinforce each other: flexible frameworks are built on stable, well-defined interfaces, which give operational users their guarantees and researchers a clear place to plug in new ideas. This corresponds to the "maintainable architecture" the paper lists under sustainability (Section 1), and it is currently the weakest part of Anemoi.
+
+2. Anemoi needs explicit interfaces between its components
+
+AnemoiTrainer combines a task, a training method and a model, but the contracts between them are implicit: base classes share code rather than define behaviour, training methods reach into model internals, and the model interface assumes the existing encoder–processor–decoder design. As a result, each new feature touches several components at once — Section 3.3 notes that observations require changes to "dataset handling, model design and training, and inference". Effort currently goes mainly into adding features on this structure rather than into the interfaces that would make features cheap to add. Stable, architecture-agnostic interfaces would let new models and training methods be developed in isolation, make it easier to adopt advances from the wider ML community, and best serve the research users the scope statement aims for ("Who is Anemoi for?", Section 2): the core effort maintains the extension points, and contributing organisations implement what they need behind them.
+
+3. The real tension is performance versus flexibility
+
+The performance work in Section 3.1 is impressive, but I think the genuine trade-off is between performance and flexibility. Optimisations such as end-to-end sharding and custom Triton kernels are often tied to a specific architecture or data layout. Clear interfaces would help here too, by making explicit which optimisations are general and which are model-specific.
+
+Suggestion: since the paper calls for explicit version 1 readiness criteria (Section 5), documented, stable interfaces between trainer, task, training method and model should be among them.
+
+==================================================================
+NOTES ON THE ORIGINAL COMMENT
+==================================================================
+
+- "they" vs "we": DMI is listed as an ATS member (Section 2), and the paper stresses co-development. Writing "this is what they need to do" positions you as an outsider and can read as blaming ECMWF. The refined version uses neutral phrasing ("core development effort", "contributing organisations"). Consider "we" if you want to signal shared responsibility.
+
+- Graph-model deprecation: the paper does not mention this. If it comes from ATS discussions, note that the paper says ATS minutes are shared only with ATS and MLP attendees, so citing it to a wider audience may be inappropriate — and readers can't verify it from the document. I replaced it with a general point about maintenance. If you keep it, cite where it was discussed.
+
+- "ECMWF's primary role should be exposing interfaces ... rather than implementing the features for them": this is the most likely sentence to cause friction. The paper credits ECMWF with most of the infrastructure (e.g. testing, Section 3.2) and asks other organisations to contribute more. Framed as "the core role", it is a fair architectural argument; framed as "ECMWF shouldn't build features", it can sound dismissive of that work. The refined version softens it accordingly.
+
+- "brute forcing new features": loaded wording; replaced with a description of the effect, supported by the paper's own observations example (3.3).
+
+- "very very very good job", "TRUE conflict": too informal for a committee-paper comment; emphasis works better through the argument.
+
+- "adopting to new advances" → "adapting to" / "adopting".
+
+- The unfinished "So in terms of 3.3." — I folded 3.3 into point 2 as evidence. If you had a different point in mind for 3.3 (e.g. downscaling or multi-dataset support), it would need its own paragraph.
+
+- Points 2 and 3 are the strongest but are only asserted. One concrete, checkable example (e.g. the autoencoder being a config combination of task, model and graph with nothing validating it, or the abstract task base class defining no abstract methods) would make the argument much harder to dismiss.
+
+- Point 6 is new: the original makes a critique but no request. Since the paper invites comments on v1 readiness criteria, tying the critique to a concrete, actionable ask makes it more likely to be acted on.
+

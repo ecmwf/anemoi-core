@@ -1,0 +1,20 @@
+#!/bin/bash
+#SBATCH --job-name=o96-linear-grouped-embedder-small
+#SBATCH --account=deste_340_26
+#SBATCH --partition=boost_usr_prod
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=4
+#SBATCH --gres=gpu:4
+#SBATCH --cpus-per-task=8
+#SBATCH --time=06:00:00
+#SBATCH --output=%x-%j.out
+#SBATCH --error=%x-%j.err
+
+set -euo pipefail
+
+cd /leonardo_work/DestE_340_26/users/jschrei1/anemoi-core
+source venv/bin/activate
+
+export MLFLOW_ALLOW_FILE_STORE=true
+
+srun anemoi-training train +experiment=o96_linear_grouped_embedder_small
