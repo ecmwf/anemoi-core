@@ -28,6 +28,7 @@ from anemoi.graphs.utils import validate_loaded_graph
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
+from anemoi.models.distributed.shapes import DatasetShardSizes
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 from anemoi.models.layers.bounding import build_boundings
@@ -547,12 +548,15 @@ class BaseGraphModel(nn.Module):
         dataset_name: str,
         spatial_pre_processors: Optional[nn.ModuleDict],
         model_comm_group: Optional[ProcessGroup],
-    ) -> tuple[Tensor, ...]:
-        """Apply one dataset's spatial preprocessor to tensors sharing a source grid."""
-        grid_shard_sizes = None  # TODO: grid_shard_size will be carried with the data
+        grid_shard_sizes: DatasetShardSizes | None,
+    ) -> tuple[tuple[Tensor, ...], DatasetShardSizes | None]:
+        """Apply one dataset's spatial preprocessor to tensors sharing a source grid.
 
+        Used by the transport models, whose sampling still runs on raw tensors with the
+        grid shard sizes passed alongside; :meth:`predict_step` projects the sources instead.
+        """
         if spatial_pre_processors is None or dataset_name not in spatial_pre_processors:
-            return tensors
+            return tensors, grid_shard_sizes
 
         source_grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
         projected_tensors = []
@@ -573,7 +577,7 @@ class BaseGraphModel(nn.Module):
 
         if grid_shard_sizes is not None:
             grid_shard_sizes[dataset_name] = output_grid_shard_sizes
-        return tuple(projected_tensors)
+        return tuple(projected_tensors), grid_shard_sizes
 
     def predict_step(
         self,
@@ -581,7 +585,7 @@ class BaseGraphModel(nn.Module):
         target_template: dict[str, BaseTemplate],
         pre_processors: nn.ModuleDict,
         post_processors: nn.ModuleDict,
-        target_forcing: Batch = None,
+        target_forcing: Batch,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
@@ -598,12 +602,12 @@ class BaseGraphModel(nn.Module):
             Input batched data (before pre-processing).
         target_template : dict[str, BaseTemplate]
             Decoder conditioning (before pre-processing): the forcing variables at the
-            output valid times, carrying the decode geometry and the output time extent.
+            output valid times.
         pre_processors : nn.ModuleDict
             Pre-processing module.
         post_processors : nn.ModuleDict
             Post-processing module.
-        target_forcing : Batch, optional
+        target_forcing : Batch
             Decoder conditioning (before pre-processing): the forcing variables at the output valid times.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
@@ -628,11 +632,10 @@ class BaseGraphModel(nn.Module):
                 for dataset_name in dataset_names:
                     x = x.replace(dataset_name, x[dataset_name].shard(model_comm_group))
 
-                if target_forcing is not None:
-                    for dataset_name in target_template.keys():
-                        target_forcing = target_forcing.replace(
-                            dataset_name, target_forcing[dataset_name].shard(model_comm_group)
-                        )
+                for dataset_name in target_forcing.keys():
+                    target_forcing = target_forcing.replace(
+                        dataset_name, target_forcing[dataset_name].shard(model_comm_group)
+                    )
 
             # Spatial preprocessing: applied after grid sharding and, as in training, before
             # normalisation, so projectors see raw values. The projected source is on the

@@ -155,48 +155,11 @@ def test_sparse_ensemble_keeps_sample_and_member_nodes_separate(model_type):
         output = model._forward_transport_network(inputs, target, {"grid": torch.zeros(2, 1, 2, 1, 1)})
     else:
         target = inputs.select(variables=[])
-        output = model(inputs, target_forcings=target, target_template=model.output_templates(target))
+        output = model(inputs, target_forcings=target, target_template=inputs.template())
     for expected, actual in zip(samples, output["grid"].data, strict=True):
         torch.testing.assert_close(actual, expected)
     sum(sample.sum() for sample in output["grid"].data).backward()
     assert all(torch.isfinite(sample.grad).all() and sample.grad.abs().sum() > 0 for sample in samples)
-
-
-def test_inference_forcing_only_target_preserves_output_metadata():
-    from anemoi.models.interface import AnemoiModelInterface
-    from anemoi.models.preprocessing import Processors
-    from anemoi.models.preprocessing.normalizer import InputNormalizer
-
-    model = _model(AnemoiModelEncProcDec)
-    model.statistics = {"grid": {"stdev": torch.tensor([2.0])}}
-    interface = AnemoiModelInterface.__new__(AnemoiModelInterface)
-    nn.Module.__init__(interface)
-    interface.model = model
-    interface.data_indices = model.data_indices
-    interface.statistics = model.statistics
-    interface.statistics_tendencies = None
-    interface.is_dataset_static = {"grid": True}
-    interface.n_step_input = {"grid": 2}
-    interface.pre_processors = nn.ModuleDict(
-        {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]])}
-    )
-    interface.post_processors = nn.ModuleDict(
-        {"grid": Processors([["normalizer", InputNormalizer({"default": "std"})]], inverse=True)}
-    )
-    grid = {
-        "latitudes": torch.rad2deg(torch.tensor([0.0, 0.2])),
-        "longitudes": torch.rad2deg(torch.tensor([0.0, 0.2])),
-        "layout": ("time", "ensemble", "grid", "variables"),
-    }
-    result = interface.predict_step(
-        {"grid": {**grid, "data": torch.full((2, 1, 2, 1), 4.0), "variables": ["a"]}},
-        target_template={"grid": {**grid, "data": torch.empty(1, 1, 2, 0), "variables": []}},
-        gather_out=False,
-    )["grid"]
-    torch.testing.assert_close(result["data"], torch.full((1, 1, 2, 1), 4.0))
-    assert result["variables"] == ["a"]
-    assert result["layout"] == ("time", "ensemble", "grid", "variables")
-    torch.testing.assert_close(result["latitudes"], torch.rad2deg(torch.tensor([0.0, 0.2])))
 
 
 @pytest.mark.parametrize("members", [1, 2])

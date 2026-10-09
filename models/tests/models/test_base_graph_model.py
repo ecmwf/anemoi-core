@@ -234,6 +234,11 @@ def _gridded_batch(grid: int, variables: list[str]) -> Batch:
     )
 
 
+def _target_template(grid: int) -> dict:
+    """The decode geometry of ``data``: its grid of ``grid`` points, without data."""
+    return {"data": _gridded_batch(grid=grid, variables=["var"])["data"].template()}
+
+
 def _identity_pre_processor():
     """Pre-processor that returns its input unchanged (identity)."""
 
@@ -270,10 +275,10 @@ def test_predict_step_spatial_preprocessors_called_before_normalization(monkeypa
     with torch.no_grad():
         model.predict_step(
             _gridded_batch(grid=2, variables=["var"]),
-            target=_gridded_batch(grid=2, variables=[]),
+            target_template=_target_template(grid=2),
+            target_forcing=_gridded_batch(grid=2, variables=[]),
             pre_processors=pre_processors,
             post_processors=post_processors,
-            n_step_input={"data": 1},
             spatial_pre_processors=spatial_processors,
         )
 
@@ -305,10 +310,9 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
 
     out = model.predict_step(
         _gridded_batch(grid=8, variables=["var"]),
-        target=_gridded_batch(grid=2, variables=[]),
+        target_template=_target_template(grid=2),
         pre_processors={"data": _identity_pre_processor()},
         post_processors={"data": _identity_pre_processor()},
-        n_step_input={"data": 1},
         model_comm_group=comm_group,
         gather_out=False,
         spatial_pre_processors=nn.ModuleDict({"data": RegriddingSpatialProcessor()}),
@@ -340,10 +344,9 @@ def test_predict_step_skips_input_only_datasets(monkeypatch):
 
     out = model.predict_step(
         batch,
-        target=_gridded_batch(grid=4, variables=[]),
+        target_template=_target_template(grid=4),
         pre_processors={"data": _identity_pre_processor(), "forcing": _identity_pre_processor()},
         post_processors={"data": _identity_pre_processor(), "forcing": _NotCalled()},
-        n_step_input={"data": 1, "forcing": 1},
     )
 
     assert set(out.dataset_names) == {"data"}

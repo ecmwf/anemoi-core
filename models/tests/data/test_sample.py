@@ -16,6 +16,7 @@ from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data import create_batched_struct
 from anemoi.models.data.sample import sample_registry
+from anemoi.models.data.sources import GriddedTemplate
 
 LATS = [0.0, 45.0, 90.0]
 LONS = [0.0, 90.0, 180.0]
@@ -68,12 +69,16 @@ def test_layout_object_and_slices_are_accepted():
     assert sample.boundaries == (slice(0, 3),)
 
 
-@pytest.mark.parametrize("build", [_gridded, _tabular])
-def test_data_is_optional(build):
-    sample = build(data=None, variables=[])
-    assert sample.data is None
-    with pytest.raises(ValueError, match="without data"):
-        Batch.collate({"ds": sample})
+#: What the interface passes, besides the payload, to build a gridded template.
+GRIDDED_TEMPLATE_SIZES = {"name": "ds", "ensemble_size": 1, "batch_size": 1, "time_size": 2}
+
+
+def test_gridded_payload_without_data_builds_a_template():
+    template = _gridded(data=None, **GRIDDED_TEMPLATE_SIZES)
+    assert isinstance(template, GriddedTemplate)
+    assert template.name == "ds"
+    assert (template.batch_size, template.ensemble_size, template.time_size) == (1, 1, 2)
+    torch.testing.assert_close(template.coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
 
 
 @pytest.mark.parametrize(
@@ -156,10 +161,9 @@ def test_tabular_collate_rejects_mixed_sharding():
         Batch.collate([{"obs": sharded}, {"obs": _tabular()}])
 
 
-@pytest.mark.parametrize("build", [_gridded, _tabular])
-def test_collate_rejects_mixed_data_presence(build):
-    with pytest.raises(ValueError, match="mixes samples with and without data"):
-        Batch.collate([{"ds": build()}, {"ds": build(data=None)}])
+def test_collate_rejects_mixing_samples_and_templates():
+    with pytest.raises(TypeError, match="single BaseSample subclass"):
+        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(data=None, **GRIDDED_TEMPLATE_SIZES)}])
 
 
 def test_collate_accepts_samples_sharing_statistics():

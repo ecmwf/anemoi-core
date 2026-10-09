@@ -25,6 +25,7 @@ from anemoi.models.data import Batch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import TabularSource
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.distributed.graph import gather_tensor
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -903,35 +904,32 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
 
     def predict_step(
         self,
-        batch: dict[str, torch.Tensor],
+        x: Batch,
+        target_template: dict[str, BaseTemplate],
         pre_processors: dict[str, nn.Module],
         post_processors: dict[str, nn.Module],
-        n_step_input: dict[str, int],
-        target_template: Batch,
+        target_forcing: Optional[Batch] = None,
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         schedule_params: Optional[dict] = None,
         sampler_params: Optional[dict] = None,
         statistics_tendencies: Optional[dict[str, Mapping]] = None,
-        target_forcing: Optional[Batch] = None,
         spatial_pre_processors: Optional[nn.ModuleDict] = None,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> Batch:
         """Run inference by sampling from the selected transport objective.
 
         Parameters
         ----------
-        batch : dict[str, torch.Tensor]
+        x : Batch
             Input batched data (before pre-processing).
+        target_template : dict[str, BaseTemplate]
+            Decoder conditioning (before pre-processing): the forcing variables at the
+            output valid times.
         pre_processors : dict[str, nn.Module]
             Pre-processing module.
         post_processors : dict[str, nn.Module]
             Post-processing module.
-        n_step_input : dict[str, int]
-            Number of input timesteps to embed per node for each dataset.
-        target_template : Batch
-            Output Batch template carrying the coordinates, sparse observation
-            boundaries, timedeltas and layouts to sample onto.
         model_comm_group : Optional[ProcessGroup]
             Process group for distributed training.
         gather_out : bool
@@ -963,15 +961,15 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         """
         with torch.no_grad():
 
-            assert isinstance(batch, dict), "Input batch must be a dictionary!"
-            for dataset_name, dataset_tensor in batch.items():
+            assert isinstance(x, dict), "Input batch must be a dictionary!"
+            for dataset_name, dataset_tensor in x.items():
                 assert (
                     len(dataset_tensor.shape) == 4
                 ), f'The input tensor "{dataset_name}" has an incorrect shape: expected a 4-dimensional tensor, got {dataset_tensor.shape}!'
 
             # Before sampling hook
             before_sampling_data, grid_shard_sizes = self._before_sampling(
-                batch,
+                x,
                 pre_processors,
                 n_step_input,
                 model_comm_group,
@@ -1002,7 +1000,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
             )
             out = out.with_sources(
                 {
-                    dataset_name: source.map_data(lambda data, dtype=batch[dataset_name].dtype: data.to(dtype))
+                    dataset_name: source.map_data(lambda data, dtype=x[dataset_name].dtype: data.to(dtype))
                     for dataset_name, source in out.items()
                 },
             )

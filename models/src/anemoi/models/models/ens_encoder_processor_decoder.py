@@ -142,7 +142,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             Decoder conditioning: the forcing variables at the output valid times.
         target_template : dict[str, BaseTemplate]
             What to predict for each decoded dataset: its nodes (coordinates, timedeltas,
-            sizes) and variables. See :meth:`BaseModel.output_templates`.
+            sizes) and variables, e.g. from :meth:`Source.template`.
         fcstep : int, optional
             Forecast step to condition on, clamped to `min(1, fcstep)`.
         model_comm_group : Optional[ProcessGroup], optional
