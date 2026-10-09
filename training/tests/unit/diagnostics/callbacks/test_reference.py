@@ -241,3 +241,17 @@ def test_bands_off_by_default() -> None:
     ref = FIELD["t_850"]
     scores = callback.scores({"lat": LAT, "cases": [{"step": "rstep0", "fields": {"t_850": (ref, ref)}}]})
     assert set(scores) == {"val_ref_rmse/t_850/rstep0", "val_ref_bias/t_850/rstep0"}
+
+
+def test_band_variables_limit_band_scores() -> None:
+    callback, _, _ = _setup(bands=True, band_variables=["t_850"])
+    fields = {var: (FIELD[var], FIELD[var]) for var in ("z_500", "t_850")}
+    scores = callback.scores({"lat": LAT, "cases": [{"step": "rstep0", "fields": fields}]})
+    banded = sorted(key for key in scores if key.split("/")[1] in ("nh", "tropics", "sh"))
+    assert banded == sorted(f"val_ref_{m}/{b}/t_850/rstep0" for m in ("rmse", "bias") for b in ("nh", "tropics", "sh"))
+    assert "val_ref_rmse/z_500/rstep0" in scores
+
+
+def test_unknown_band_variables_raise() -> None:
+    with pytest.raises(ValueError, match="band_variables"):
+        _setup(bands=True, band_variables=["q_700"])

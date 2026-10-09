@@ -137,7 +137,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
     ``score_dates`` adds dates that are scored but not plotted (and get no spectra), so the
     RMSE and bias can be averaged over many more cases than are worth a figure. With
     ``bands: true`` the RMSE and bias are also logged per latitude band as
-    ``val_ref_rmse/{nh,tropics,sh}/{var}/{step}`` (hard edges at +-20 deg). All means are
+    ``val_ref_rmse/{nh,tropics,sh}/{var}/{step}`` (hard edges at +-20 deg), for
+    ``band_variables`` only when given (default: every variable). All means are
     unweighted over grid points, which on an O96 grid is close to area weighting and equals the
     loss weighting when the graph ``area_weight`` is ``UniformWeights``.
 
@@ -155,6 +156,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
       steps: [dacycle3, rstep0]                         # labels from task.get_metric_name
       score_dates: ["2025-01-02T06:00", ...]            # optional: scored, not plotted
       bands: true                                       # optional: NH / Tropics / SH scores
+      band_variables: [z_500, t_850]                    # optional: subset scored per band
       every_n_epochs: 1
     ```
     """
@@ -172,6 +174,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         plotting_settings: PlottingSettings | None = None,
         score_dates: list[str] | None = None,
         bands: bool = False,
+        band_variables: list[str] | None = None,
     ) -> None:
         super().__init__(
             every_n_epochs=every_n_epochs,
@@ -184,6 +187,13 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         plotted = set(self.dates)
         self.score_dates = [d for d in (np.datetime64(d, "s") for d in score_dates or []) if d not in plotted]
         self.bands = bands
+        self.band_variables = list(self.variables) if band_variables is None else list(band_variables)
+        unknown = sorted(set(self.band_variables) - set(self.variables))
+        if unknown:
+            msg = f"ReferenceComparisonPlot: band_variables {unknown} are not in variables {list(self.variables)}."
+            raise ValueError(msg)
+        if band_variables is not None and not bands:
+            LOGGER.warning("ReferenceComparisonPlot: band_variables is ignored because bands is false.")
         self.steps = [s.lstrip("_") for s in steps] if steps is not None else None
         self.dataset_name = dataset_name
         self.high_k = high_k
@@ -327,7 +337,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         """Return date-averaged RMSE, bias and high-k spectral ratio per variable and step.
 
         The high-k ratio uses the plotted dates only; RMSE and bias use all dates, and per band
-        when ``bands`` is set.
+        for ``band_variables`` when ``bands`` is set.
         """
         masks = band_masks(np.asarray(result["lat"])) if self.bands else {}
         sums: dict[str, list[float]] = {}
@@ -341,7 +351,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                 diff = pred - ref
                 add(f"val_ref_rmse/{var}/{step}", float(np.sqrt(np.mean(diff**2))))
                 add(f"val_ref_bias/{var}/{step}", float(np.mean(diff)))
-                for band, mask in masks.items():
+                for band, mask in masks.items() if var in self.band_variables else ():
                     add(f"val_ref_rmse/{band}/{var}/{step}", float(np.sqrt(np.mean(diff[mask] ** 2))))
                     add(f"val_ref_bias/{band}/{var}/{step}", float(np.mean(diff[mask])))
                 if "spectra" in case:
