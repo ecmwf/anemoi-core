@@ -22,6 +22,7 @@ from .loss import get_loss_function
 from .mae import MAELoss
 from .mse import MSELoss
 from .multiscale import MultiscaleLossWrapper
+from .nan_aware_mse import BandNaNAwareMSELoss
 from .nan_aware_mse import NaNAwareMSELoss
 from .refractivity import RefractivityOperatorLoss
 from .rmse import RMSELoss
@@ -37,6 +38,7 @@ from .weighted_mse import WeightedMSELoss
 
 __all__ = [
     "CRPS",
+    "BandNaNAwareMSELoss",
     "CombinedLoss",
     "EnergyScoreLoss",
     "FourierCorrelationLoss",

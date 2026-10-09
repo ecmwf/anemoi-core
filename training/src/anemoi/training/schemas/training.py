@@ -649,6 +649,17 @@ class GraphSmoothnessLossSchema(BaseLossSchema):
     "Optional path to a file containing an edge_index tensor."
 
 
+class BandNaNAwareMSELossSchema(BaseLossSchema):
+    """Schema for BandNaNAwareMSELoss (validation metric restricted to a latitude band)."""
+
+    target_: Literal["anemoi.training.losses.BandNaNAwareMSELoss"] = Field(..., alias="_target_")
+    "Latitude-band NaN-aware MSE target."
+    lat_min: float = Field(ge=-90.0, le=90.0, example=-90.0)
+    "Southern band edge in degrees (inclusive)."
+    lat_max: float = Field(ge=-90.0, le=90.0, example=-20.0)
+    "Northern band edge in degrees (exclusive, except at 90)."
+
+
 class RefractivityLevelSchema(BaseModel):
     """One GNSS-RO refractivity observation level for RefractivityOperatorLoss."""
 
@@ -738,6 +749,7 @@ _LOSS_DISCRIMINATOR_TAGS = {
     "anemoi.training.losses.GraphLaplacianSmoothnessLoss": "graph_smoothness",
     "anemoi.training.losses.RefractivityOperatorLoss": "refractivity_operator",
     "anemoi.training.losses.TargetIdentityLoss": "target_identity",
+    "anemoi.training.losses.BandNaNAwareMSELoss": "band_nan_aware_mse",
     "anemoi.training.losses.GraphVariogramScoreLoss": "graph_variogram_score",
     "anemoi.training.losses.GraphEdgeCRPSLoss": "graph_edge_crps",
     "anemoi.training.losses.GraphEdgeEnergyScoreLoss": "graph_edge_energy_score",
@@ -784,6 +796,7 @@ class CombinedLossSchema(BaseLossSchema):
             | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
             | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
             | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
+            | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
             | Annotated[MultiScaleLossSchema, Tag("multiscale")]
             | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")],
             Discriminator(_loss_discriminator),
@@ -847,6 +860,7 @@ LossSchemas = Annotated[
     | Annotated[GraphSmoothnessLossSchema, Tag("graph_smoothness")]
     | Annotated[RefractivityOperatorLossSchema, Tag("refractivity_operator")]
     | Annotated[TargetIdentityLossSchema, Tag("target_identity")]
+    | Annotated[BandNaNAwareMSELossSchema, Tag("band_nan_aware_mse")]
     | Annotated[TimeAggregateLossWrapperSchema, Tag("time_aggregate")]
     | Annotated[MultiScaleLossSchema, Tag("multiscale")],
     Discriminator(_loss_discriminator),

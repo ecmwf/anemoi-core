@@ -56,7 +56,7 @@ class _Reference:
         return np.stack([FIELD["z_500"], FIELD["t_850"]])[:, None, :]
 
 
-def _setup(steps: list[str] | None = None) -> tuple[ReferenceComparisonPlot, Any, Any]:
+def _setup(steps: list[str] | None = None, **kwargs: Any) -> tuple[ReferenceComparisonPlot, Any, Any]:
     task = DAForecaster(
         multistep_input=2,
         multistep_output=1,
@@ -106,6 +106,7 @@ def _setup(steps: list[str] | None = None) -> tuple[ReferenceComparisonPlot, Any
         dates=["2025-01-02T00:00"],
         steps=steps,
         high_k=5,
+        **kwargs,
     )
     callback._reference = _Reference()
     return callback, trainer, pl_module
@@ -198,3 +199,45 @@ def test_plot_thread_does_no_numerics(monkeypatch: pytest.MonkeyPatch, tmp_path:
     monkeypatch.setattr(reference.SpectralGrid, "spectra", _fail)
     callback.scores(result)
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
+
+
+def test_score_dates_are_scored_not_plotted(tmp_path: Path) -> None:
+    callback, trainer, pl_module = _setup(
+        steps=["rstep0"],
+        score_dates=["2025-01-02T00:00", "2025-01-03T00:00", "2025-01-04T06:00"],
+    )
+    # The plotted date is not repeated among the score-only dates.
+    assert len(callback.score_dates) == 2
+    callback.save_basedir = str(tmp_path)
+    result = callback.compute(trainer, pl_module)
+    assert [case["plot"] for case in result["cases"]] == [True, False, False]
+    assert ["spectra" in case for case in result["cases"]] == [True, False, False]
+
+    scores = callback.scores(result)
+    assert scores["val_ref_rmse/z_500/rstep0"] == pytest.approx(0.0, abs=1e-2)
+    assert scores["val_ref_highk_ratio/z_500/rstep0"] == pytest.approx(1.0, rel=1e-3)
+    callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
+    assert len(list((tmp_path / "plots").glob("ref_*_epoch000.jpg"))) == 1
+
+
+def test_band_scores() -> None:
+    callback, _, _ = _setup(bands=True)
+    ref = FIELD["t_850"]
+    pred = ref + np.where(LAT < -20.0, 2.0, 0.0)
+    result = {"lat": LAT, "cases": [{"step": "rstep0", "fields": {"t_850": (pred, ref)}}]}
+
+    scores = callback.scores(result)
+    sh_fraction = np.mean(LAT < -20.0)
+    assert scores["val_ref_rmse/sh/t_850/rstep0"] == pytest.approx(2.0)
+    assert scores["val_ref_bias/sh/t_850/rstep0"] == pytest.approx(2.0)
+    assert scores["val_ref_rmse/tropics/t_850/rstep0"] == pytest.approx(0.0)
+    assert scores["val_ref_rmse/nh/t_850/rstep0"] == pytest.approx(0.0)
+    assert scores["val_ref_rmse/t_850/rstep0"] == pytest.approx(2.0 * np.sqrt(sh_fraction))
+    assert "val_ref_highk_ratio/t_850/rstep0" not in scores
+
+
+def test_bands_off_by_default() -> None:
+    callback, _, _ = _setup()
+    ref = FIELD["t_850"]
+    scores = callback.scores({"lat": LAT, "cases": [{"step": "rstep0", "fields": {"t_850": (ref, ref)}}]})
+    assert set(scores) == {"val_ref_rmse/t_850/rstep0", "val_ref_bias/t_850/rstep0"}
