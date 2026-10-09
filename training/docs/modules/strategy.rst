@@ -31,21 +31,25 @@ strategies:
 * initializes the different process group layouts (model, reader, ensemble)
 * configures DDP and injects per-parameter gradient scaling hooks
 * exposes the ``shard_shapes`` that dataloaders need to produce correctly
-   partitioned batches
+   partitioned batches, and passes the reader group of each rank to the
+   datasets in ``process_dataloader``
+* reports in ``distributed_sampler_kwargs`` how the samples are split
+   between groups of ranks that train on the same samples
 * seeds ``torch``, ``numpy`` and PyTorch Lightning RNGs in a controlled way
 
 To implement a new strategy inherit from :class:`BaseDDPStrategy` and
-override two methods:
+override:
 
 * ``_setup_communication_groups``: define how the ranks are split across
    model, reader, and optional ensemble groups. The method must return the
    model communication group ID for the current rank. Most strategies use
    the helpers in :mod:`anemoi.training.distributed.groups` to stay
    consistent with the existing layouts.
-* ``process_dataloader``: forward any group metadata that the underlying
-   dataset requires. The default implementation already calls the parent
-   DDP logic, so derived strategies only need to pass along additional
-   information (for example the ensemble group IDs).
+* ``sample_comm_group_size`` (optional): the number of ranks that train on
+   the same samples. It defaults to the model communication group size;
+   the ensemble strategy uses the ensemble group size. The datamodule
+   reads the resulting split from ``distributed_sampler_kwargs`` and builds
+   a sampler that gives each group its own share of the samples.
 
 Understanding communication groups
 ==================================
@@ -60,7 +64,7 @@ Understanding communication groups
    subdivided into reader groups of size ``read_group_size``. The
    :class:`~anemoi.training.distributed.groups.ReaderLayout` decides which
    rank loads which shard, and the dataset receives that information via
-   ``set_comm_group_info`` when ``process_dataloader`` runs.
+   ``set_reader_group_info`` when ``process_dataloader`` runs.
 * **Ensemble groups** (optional): needed only when training ensemble
    models. ``_setup_communication_groups`` builds a second hierarchy that
    spreads ensemble members across GPUs and exposes both the coarse group

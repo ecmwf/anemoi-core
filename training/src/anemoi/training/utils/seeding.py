@@ -9,9 +9,11 @@
 
 
 import os
+import random
 from enum import IntEnum
 
 import numpy as np
+import torch
 
 
 class SeedContext(IntEnum):
@@ -20,6 +22,7 @@ class SeedContext(IntEnum):
     TRAINER = 0
     MODEL = 1
     DATALOADER = 2
+    TRAINING_BATCH = 3
 
 
 def derive_seed(base_seed: int, context: SeedContext, *keys: int) -> int:
@@ -76,3 +79,17 @@ def get_base_seed(base_seed_env: str | None = None) -> int:
         base_seed = 42
 
     return base_seed
+
+
+def seed_random_generators(seed: int) -> None:
+    """Seed the Python, NumPy and PyTorch (CPU and all GPUs) random number generators of this process.
+
+    Parameters
+    ----------
+    seed : int
+        Seed in the range [0, 2**32 - 1], as returned by derive_seed().
+
+    """
+    random.seed(seed)
+    np.random.seed(seed)  # noqa: NPY002
+    torch.manual_seed(seed)
