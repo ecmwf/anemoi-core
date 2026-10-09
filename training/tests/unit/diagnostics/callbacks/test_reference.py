@@ -7,6 +7,7 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import contextlib
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -95,7 +96,10 @@ def _setup(steps: list[str] | None = None) -> tuple[ReferenceComparisonPlot, Any
         on_after_batch_transfer=lambda batch, _idx: batch,
         _step=_step,
     )
-    trainer = SimpleNamespace(datamodule=SimpleNamespace(ds_valid=dataset))
+    trainer = SimpleNamespace(
+        datamodule=SimpleNamespace(ds_valid=dataset),
+        precision_plugin=SimpleNamespace(forward_context=contextlib.nullcontext),
+    )
     callback = ReferenceComparisonPlot(
         reference_dataset="unused",
         variables=["z_500", "t_850"],
