@@ -18,7 +18,7 @@ branch: feat/richer-batch
 
 ### Metadata
 - [ ] Bump model metadata version
-- [ ] add predic_step() signature to metadata_inference with dtypes and shapes? 
+- [ ] add predic_step() signature to metadata_inference with dtypes and shapes?
 - [ ] add data_type (tabular/gridded) to metadata_inferece
 
 ### Batch
