@@ -43,3 +43,11 @@ graph:
 
 model:
   num_channels: 256
+  # benchmark also compiles CRPS, in the default mode (max-autotune re-records CUDA graphs every step)
+  compile:
+    - module: anemoi.models.layers.conv.GraphTransformerConv
+    - module: anemoi.models.layers.normalization.ConditionalLayerNorm
+    - module: anemoi.training.losses.CRPS
+      options:
+        dynamic: false
+        fullgraph: true
