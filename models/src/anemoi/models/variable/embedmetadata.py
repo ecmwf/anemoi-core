@@ -39,15 +39,10 @@ class EmbedMetadata(nn.Module):
         self.vocabulary = vocabulary
 
         forcing_names = sorted(
-            name
-            for name, spec in self.vocabulary.specification_by_name.items()
-            if spec.kind == "forcing"
+            name for name, spec in self.vocabulary.specification_by_name.items() if spec.kind == "forcing"
         )
 
-        self.forcing_to_id = {
-            name: i
-            for i, name in enumerate(forcing_names)
-        }
+        self.forcing_to_id = {name: i for i, name in enumerate(forcing_names)}
 
         self.num_params = len(self.vocabulary.param_to_id)
         self.num_vertical_level_types = len(self.vocabulary.vertical_type_to_id)
@@ -57,19 +52,19 @@ class EmbedMetadata(nn.Module):
         self.emb_param = nn.Embedding(self.num_params, emb_dim)
         self.emb_vertical__level_types = nn.Embedding(self.num_vertical_level_types, emb_dim)
         self.emb_temporal_operator = nn.Embedding(self.num_temporal_operators, emb_dim)
-        
+
         # Forcing metadata representation
         self.emb_forcing = nn.Embedding(len(self.forcing_to_id), emb_dim)
 
         # continous
         self.encode_level_types = nn.Sequential(nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim))
         self.encode_temporal_windows = nn.Sequential(nn.Linear(1, emb_dim), nn.SiLU(), nn.Linear(emb_dim, emb_dim))
-        
+
         # masks
         self.no_vertical_levels = nn.Parameter(torch.zeros(emb_dim))
         self.no_temporal_window = nn.Parameter(torch.zeros(emb_dim))
 
-        #norm
+        # norm
         self.norm = nn.LayerNorm(emb_dim)
 
     def forward(self, variables: str | list[str]) -> torch.Tensor:
@@ -98,7 +93,7 @@ class EmbedMetadata(nn.Module):
         current_vocabular = self.vocabulary.get_variables(variables)
 
         device = self.emb_param.weight.device
-        # forcing 
+        # forcing
         is_forcing = current_vocabular.is_forcing.to(device=device)
         is_physical = ~is_forcing
 
@@ -130,11 +125,15 @@ class EmbedMetadata(nn.Module):
             torch.zeros_like(temporal_windows, device=device),
         )
 
-        emb_temp_windows = self.encode_temporal_windows(_temporal_windows[..., None]/1800.0) # loss value blows up if not normalized
-        emb_vertical_levels = self.encode_level_types(_vertical_levels[..., None]/1000.0) # loss value blows up if not normalized
+        emb_temp_windows = self.encode_temporal_windows(
+            _temporal_windows[..., None] / 1800.0
+        )  # loss value blows up if not normalized
+        emb_vertical_levels = self.encode_level_types(
+            _vertical_levels[..., None] / 1000.0
+        )  # loss value blows up if not normalized
 
-        #emb_vertical_levels = self.normalize_level_types(emb_vertical_levels)
-        #emb_temp_windows = self.normalize_temporal_windows(emb_temp_windows)
+        # emb_vertical_levels = self.normalize_level_types(emb_vertical_levels)
+        # emb_temp_windows = self.normalize_temporal_windows(emb_temp_windows)
 
         emb_vertical_levels = torch.where(
             has_level[..., None],
@@ -148,13 +147,7 @@ class EmbedMetadata(nn.Module):
         )
 
         # Existing physical metadata representation
-        emb_physical = (
-            emb_param
-            + emb_vertical_type
-            + emb_temp_op
-            + emb_vertical_levels
-            + emb_temp_windows
-        )
+        emb_physical = emb_param + emb_vertical_type + emb_temp_op + emb_vertical_levels + emb_temp_windows
 
         # Look up forcing identities in the same order as `variables`
         forcing_indices = torch.tensor(
