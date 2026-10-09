@@ -75,7 +75,8 @@ class BaseGraphModel(nn.Module):
         self.latent_skip = model_config.model.latent_skip
 
         self.node_attributes = NamedNodesAttributes(
-            model_config.node_trainable_parameters, self._build_named_node_attributes_graph()
+            model_config.node_trainable_parameters,
+            self._build_named_node_attributes_graph(),
         )
 
         self._build_encoder_routing(model_config.encoders)
@@ -330,6 +331,17 @@ class BaseGraphModel(nn.Module):
         pass
 
     @abstractmethod
+    def _prepare_input_components(
+        self,
+        x,
+        batch_size,
+        grid_shard_sizes: DatasetShardSizes | None = None,
+        model_comm_group: ProcessGroup | None = None,
+        dataset_names: list[str] | None = None,
+    ):
+        pass
+
+    @abstractmethod
     def _assemble_output(self, x_out, x_skip, batch_size, ensemble_size, dtype):
         pass
 
@@ -490,7 +502,10 @@ class BaseGraphModel(nn.Module):
                         x[dataset_name], -2, model_comm_group=model_comm_group
                     )
                     x[dataset_name] = shard_tensor(
-                        x[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                        x[dataset_name],
+                        -2,
+                        grid_shard_sizes[dataset_name],
+                        model_comm_group,
                     )
 
             # Spatial preprocessing: applied after grid sharding, before normalisation.
@@ -522,7 +537,10 @@ class BaseGraphModel(nn.Module):
                 assert grid_shard_sizes is not None
                 for dataset_name in y_hat:
                     y_hat[dataset_name] = gather_tensor(
-                        y_hat[dataset_name], -2, grid_shard_sizes[dataset_name], model_comm_group
+                        y_hat[dataset_name],
+                        -2,
+                        grid_shard_sizes[dataset_name],
+                        model_comm_group,
                     )
 
         return y_hat

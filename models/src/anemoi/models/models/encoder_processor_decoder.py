@@ -170,30 +170,65 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             ``(x_data_latent, x_skip, grid_shard_sizes)`` where ``x_data_latent`` is the encoder
             source input, and ``x_skip`` is the residual to add to the decoder output.
         """
-        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
-        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
-        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
-
-        x_skip = self.residual[dataset_name](
+        x_skip, node_attributes_data, grid_shard_sizes = self._pepare_input(
             x,
+            batch_size=batch_size,
             grid_shard_sizes=grid_shard_sizes,
             model_comm_group=model_comm_group,
-            n_step_output=self.n_step_output,
+            dataset_name=dataset_name,
         )
-
-        if grid_shard_sizes is not None:
-            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
 
         # normalize and add data positional info (lat/lon)
         x_data_latent = torch.cat(
             (
-                einops.rearrange(x, "batch time ensemble grid vars -> (batch ensemble grid) (time vars)"),
+                einops.rearrange(
+                    x,
+                    "batch time ensemble grid vars -> (batch ensemble grid) (time vars)",
+                ),
                 node_attributes_data,
             ),
             dim=-1,  # feature dimension
         )
 
         return x_data_latent, x_skip, grid_shard_sizes
+
+    def _prepare_input_components(
+        self,
+        x: torch.Tensor,
+        batch_size: int,
+        grid_shard_sizes: DatasetShardSizes | None,
+        model_comm_group: ProcessGroup | None = None,
+        dataset_name: str | None = None,
+        compute_residual: bool = True,
+    ) -> tuple[torch.Tensor, ShardSizes]:
+        """Prepare the encoder source features for a single dataset.
+
+        Flattens the raw input over ``(batch, ensemble, grid)`` and ``(time, vars)``, concatenates
+        the per-node attributes on the feature dimension.
+
+        Returns
+        -------
+        tuple[Tensor, ShardSizes]
+            ``(x_data_latent, grid_shard_sizes)`` where ``x_data_latent`` is the encoder
+            source input.
+        """
+        assert dataset_name is not None, "dataset_name must be provided when using multiple datasets."
+        node_attributes_data = self.node_attributes(dataset_name, batch_size=batch_size)
+        grid_shard_sizes = grid_shard_sizes[dataset_name] if grid_shard_sizes is not None else None
+
+        if compute_residual:
+            x_skip = self.residual[dataset_name](
+                x,
+                grid_shard_sizes=grid_shard_sizes,
+                model_comm_group=model_comm_group,
+                n_step_output=self.n_step_output,
+            )
+        else:
+            x_skip = None
+
+        if grid_shard_sizes is not None:
+            node_attributes_data = shard_tensor(node_attributes_data, 0, grid_shard_sizes, model_comm_group)
+        return x_skip, node_attributes_data, grid_shard_sizes
 
     def _assemble_targets(
         self,
@@ -345,7 +380,12 @@ class AnemoiModelEncProcDec(BaseGraphModel):
             grid_shard_sizes=grid_shard_sizes,
         )
         for dataset_name in dataset_names:
-            self._assert_valid_sharding(batch_size, ensemble_size, in_out_sharded[dataset_name], model_comm_group)
+            self._assert_valid_sharding(
+                batch_size,
+                ensemble_size,
+                in_out_sharded[dataset_name],
+                model_comm_group,
+            )
 
         # Process each dataset through its corresponding encoder
         dataset_latents = {}
