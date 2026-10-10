@@ -83,13 +83,20 @@ class BaseVariableLevelScaler(BaseVariableLossScaler):
         )
         LOGGER.info("with slope = %s and y-intercept/minimum = %s.", self.slope, self.y_intercept)
 
-        for variable_name, idx in self.data_indices.model.output.name_to_index.items():
+        # Iterate over the data.output space (loss-tensor layout) and write at each variable's position.
+        # Target variables are not model outputs and keep a scaling of one.
+        model_output_names = set(self.data_indices.model.output.name_to_index)
+        index_to_name = {idx: name for name, idx in self.data_indices.data.output.name_to_index.items()}
+        for position, raw_idx in enumerate(self.data_indices.data.output.full.tolist()):
+            variable_name = index_to_name[raw_idx]
+            if variable_name not in model_output_names:
+                continue
             variable_group, _, variable_level = self.variable_metadata_extractor.get_group_and_level(variable_name)
             if variable_group != self.scaling_group:
                 continue
             # Apply variable level scaling
             assert variable_level is not None, f"Variable {variable_name} has no level to scale."
-            variable_level_scaling[idx] = self.get_level_scaling(float(variable_level))
+            variable_level_scaling[position] = self.get_level_scaling(float(variable_level))
 
         return variable_level_scaling
 

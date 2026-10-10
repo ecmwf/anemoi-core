@@ -40,6 +40,10 @@ Keep it human-readable, your future self will thank you!
 
 * **training:** "feat: reuse processing callbacks ([#1213](https://github.com/ecmwf/anemoi-core/issues/1213))" ([#1319](https://github.com/ecmwf/anemoi-core/issues/1319)) ([93476b7](https://github.com/ecmwf/anemoi-core/commit/93476b7a6ba35e1f0914b194f7971654b3d1e66b))
 
+### Bug Fixes
+
+* **training:** Tendency scalers (`StdevTendencyScaler`, `VarTendencyScaler`) now scale the prognostic variable at data index 0, which was silently left at 1.0. Tendency and variable-level scalers now write each value at its variable's column in the loss tensor (data.output layout), so scalings no longer shift columns when `target` variables sit between outputs. **This changes the baseline** for configs that use a tendency scaler: the dataset's first variable (e.g. `z_1000`) now gets its stdev/tendency-stdev weight, and runs with `target` variables change further.
+
 ## [0.16.0](https://github.com/ecmwf/anemoi-core/compare/training-0.15.0...training-0.16.0) (2026-08-11)
 
 
