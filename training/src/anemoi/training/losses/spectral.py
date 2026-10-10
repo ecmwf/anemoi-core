@@ -39,6 +39,7 @@ from anemoi.models.layers.spectral_transforms import DCT2D
 from anemoi.models.layers.spectral_transforms import FFT2D
 from anemoi.models.layers.spectral_transforms import OctahedralSHT
 from anemoi.models.layers.spectral_transforms import ReducedSHT
+from anemoi.models.layers.spectral_transforms import RegularSHT
 from anemoi.models.layers.spectral_transforms import SpectralTransform
 from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import Squash_mode
@@ -96,6 +97,7 @@ class SpectralLoss(BaseLoss):
         self,
         transform: Literal[
             "fft2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
             "dct2d",
@@ -150,7 +152,7 @@ class SpectralLoss(BaseLoss):
         # subgrid selects a contiguous block of the grid before the transform. This only makes
         # sense for the Cartesian transforms (FFT2D/DCT2D); spherical harmonic transforms need the
         # whole domain to compute the spectra, so reject an explicit subgrid for them.
-        if subgrid is not None and transform in ("reduced_sht", "octahedral_sht"):
+        if subgrid is not None and transform in ("regular_sht", "reduced_sht", "octahedral_sht"):
             msg = (
                 f"subgrid is not supported for the '{transform}' transform: "
                 "spherical harmonic transforms require the full grid"
@@ -171,6 +173,9 @@ class SpectralLoss(BaseLoss):
         elif transform == "dct2d":
             LOGGER.info("Using DCT2D spectral transform in spectral loss.")
             self.transform = DCT2D(**kwargs)
+        elif transform == "regular_sht":
+            LOGGER.info("Using regular-grid SHT spectral transform in spectral loss.")
+            self.transform = RegularSHT(**kwargs)
         elif transform == "reduced_sht":
             # expected additional args: grid
             # optional args: truncation, use_graphed_rfft
@@ -332,7 +337,7 @@ class SpectralAMSELoss(SpectralLoss):
     The physical interpretation of :math:`L` and :math:`M` depends on the
     spectral transform:
 
-    - ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
+    - ``regular_sht`` / ``octahedral_sht`` / ``reduced_sht``: :math:`L` is the total wavenumber
       and :math:`M` is the zonal wavenumber, consistent with the original paper.
       The sum over :math:`M` gives per-total-wavenumber power spectra.
     - ``fft2d`` / ``dct2d``: currently not supported. These transforms require
@@ -636,6 +641,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
     Works with:
       - FFT2D
       - DCT2D
+      - Regular SHT (Gaussian or equiangular latitudes)
       - Reduced SHT
       - Octahedral SHT
     """
@@ -645,6 +651,7 @@ class SpectralCRPSLoss(SpectralLoss, CRPS):
         transform: Literal[
             "fft2d",
             "dct2d",
+            "regular_sht",
             "reduced_sht",
             "octahedral_sht",
         ] = "fft2d",
