@@ -86,17 +86,23 @@ class BaseTendencyScaler(BaseScaler):
     def get_scaling_values(self, **_kwargs) -> torch.Tensor:
         variable_level_scaling = torch.ones((len(self.data_indices.data.output.full),), dtype=torch.float32)
 
-        for key, idx in self.data_indices.model.output.name_to_index.items():
-            if idx in self.data_indices.model.output.prognostic and self.data_indices.data.output.name_to_index.get(
-                key,
-            ):
-                prog_idx = self.data_indices.data.output.name_to_index[key]
-                variable_stdev = self.statistics["stdev"][prog_idx] if self.statistics_tendencies else 1
-                variable_tendency_stdev = (
-                    self.statistics_tendencies["stdev"][prog_idx] if self.statistics_tendencies else 1
-                )
-                scaling = self.get_level_scaling(variable_stdev, variable_tendency_stdev)
-                variable_level_scaling[idx] *= scaling
+        # Without tendency statistics every prognostic keeps a scaling of one.
+        if self.statistics_tendencies is None:
+            return variable_level_scaling
+
+        model_output = self.data_indices.model.output
+        prognostic_idx = set(model_output.prognostic.tolist())
+        prognostic_names = {name for name, idx in model_output.name_to_index.items() if idx in prognostic_idx}
+
+        # Iterate over the data.output space (loss-tensor layout): statistics are looked up with the
+        # data index, and the scaling is written at the variable's position in the loss tensor.
+        index_to_name = {idx: name for name, idx in self.data_indices.data.output.name_to_index.items()}
+        for position, raw_idx in enumerate(self.data_indices.data.output.full.tolist()):
+            if index_to_name[raw_idx] not in prognostic_names:
+                continue
+            variable_stdev = self.statistics["stdev"][raw_idx]
+            variable_tendency_stdev = self.statistics_tendencies["stdev"][raw_idx]
+            variable_level_scaling[position] *= self.get_level_scaling(variable_stdev, variable_tendency_stdev)
 
         return variable_level_scaling
 
