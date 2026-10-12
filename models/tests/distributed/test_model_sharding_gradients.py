@@ -270,7 +270,7 @@ def _build_model(model_class: type, obs_predicted: bool, max_obs_neighbours: int
         model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours),
         data_indices=_data_indices(),
         statistics=_statistics(),
-        is_dataset_static={"grid": True, "obs": False},
+        data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )

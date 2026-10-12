@@ -353,7 +353,7 @@ def _projecting_interface() -> AnemoiModelInterface:
     interface.statistics = {}
     interface.statistics_tendencies = None
     interface.data_indices = {}
-    interface.is_dataset_static = {}
+    interface.data_types = {}
     interface.n_step_input = {}
     interface.n_step_output = {}
     interface._build_model()

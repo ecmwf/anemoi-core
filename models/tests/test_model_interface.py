@@ -54,7 +54,7 @@ def test_interface_passes_complete_graph_to_spatial_preprocessor() -> None:
     model_interface.statistics = {}
     model_interface.statistics_tendencies = None
     model_interface.data_indices = {}
-    model_interface.is_dataset_static = {}
+    model_interface.data_types = {}
     model_interface.n_step_input = {}
     model_interface.n_step_output = {}
 

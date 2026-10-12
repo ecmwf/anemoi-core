@@ -122,7 +122,7 @@ def test_base_graph_model_builds_with_omegaconf_config(monkeypatch: pytest.Monke
         n_step_input={"data": 1},
         n_step_output={"data": 1},
         model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        is_dataset_static={"data": True},
+        data_types={"data": "gridded"},
     )
 
     assert model.seen_hidden_name == "hidden"
@@ -172,7 +172,7 @@ def test_base_graph_model_accepts_omegaconf_hidden_node_lists(monkeypatch: pytes
         n_step_input={"data": 1},
         n_step_output={"data": 1},
         model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        is_dataset_static={"data": True},
+        data_types={"data": "gridded"},
     )
 
     assert list(model.seen_hidden_name) == ["hidden_1", "hidden_2", "hidden_3"]
@@ -220,7 +220,7 @@ def _make_minimal_model(monkeypatch: pytest.MonkeyPatch) -> DummyGraphModel:
         n_step_input={"data": 1},
         n_step_output={"data": 1},
         model_graph_config={"nodes": {name: {} for name in graph.node_types}, "edges": []},
-        is_dataset_static={"data": True},
+        data_types={"data": "gridded"},
     )
 
 

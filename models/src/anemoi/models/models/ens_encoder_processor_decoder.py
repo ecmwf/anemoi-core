@@ -43,7 +43,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         model_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        is_dataset_static: dict[str, bool],
+        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -54,7 +54,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             model_graph_config=model_graph_config,
             data_indices=data_indices,
             statistics=statistics,
-            is_dataset_static=is_dataset_static,
+            data_types=data_types,
             n_step_input=n_step_input,
             n_step_output=n_step_output,
         )

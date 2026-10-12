@@ -218,7 +218,7 @@ def _build_model(kind: str) -> AnemoiTransportModelEncProcDec:
         model_graph_config=_graph_config(latitudes, longitudes),
         data_indices=_data_indices(),
         statistics=STATISTICS,
-        is_dataset_static={"grid": True, "obs": False},
+        data_types={"grid": "gridded", "obs": "tabular"},
         n_step_input={"grid": 2, "obs": 2},
         n_step_output={"grid": 1, "obs": 1},
     )
