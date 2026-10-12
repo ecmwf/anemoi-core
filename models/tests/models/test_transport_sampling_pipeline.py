@@ -120,20 +120,21 @@ def _model_batch(
     data: dict[str, torch.Tensor],
     variable_space: str,
 ) -> Batch:
-    """Gridded batch on the graph's grid nodes, described with the model's variables of ``variable_space``."""
-    return Batch(
-        {
-            name: GriddedSource(
-                name=name,
-                variables=model._sampling_variables(name, variable_space),
-                layout=GRIDDED_LAYOUT,
-                statistics=model._sampling_statistics(name, variable_space),
-                data=tensor,
-                coordinates=model._graph_data[name].x,
-            )
-            for name, tensor in data.items()
-        },
-    )
+    """Gridded batch on the graph's grid nodes, described with the model's ``"input"`` or ``"output"`` variables."""
+    sources = {}
+    for name, tensor in data.items():
+        indices = model.data_indices[name]
+        variables = list(getattr(indices.model, variable_space).ordered_names)
+        positions = [indices.name_to_index[variable] for variable in variables]
+        sources[name] = GriddedSource(
+            name=name,
+            variables=variables,
+            layout=GRIDDED_LAYOUT,
+            statistics={key: values[positions] for key, values in model.statistics[name].items()},
+            data=tensor,
+            coordinates=model._graph_data[name].x,
+        )
+    return Batch(sources)
 
 
 def _sampling_batch(model: AnemoiTransportModelEncProcDec, data: dict[str, torch.Tensor]) -> Batch:
@@ -387,6 +388,7 @@ def test_transport_assemble_input_adds_timedelta_features_to_sparse_rows() -> No
 def test_transport_input_width_counts_the_flag_of_sparse_data() -> None:
     model = _transport_model_stub()
     model.is_dataset_static = {"grid": True, "obs": False}
+    model.dataset2decoder = {"grid": "grid", "obs": "obs"}
 
     widths = {}
     for name in ("grid", "obs"):
