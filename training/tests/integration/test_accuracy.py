@@ -74,7 +74,7 @@ def test_accuracy(tmp_path: Path, mlflow_server: str) -> None:
 
     client = AnemoiMlflowClient(mlflow_server, authentication=True)
 
-    # Record every change of reference_id in config/accuracy_testing/CHANGELOG.md.
+    # Record every change of reference_id in config/CHANGELOG.md.
     reference_id: Final = "8b3bc3d3bd6947318cb825d777c9d750"
     metric: Final = "train_multi_dataset_loss_step"
 
