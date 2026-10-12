@@ -794,6 +794,7 @@ class AnemoiTransportModelEncProcDec(AnemoiModelEncProcDec):
         """
         del n_step_input
         with torch.no_grad():
+            target_template = self._shard_target_template(target_template, model_comm_group)
             x, target_forcing = self._prepare_prediction_inputs(
                 x,
                 target_forcing,

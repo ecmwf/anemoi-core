@@ -550,7 +550,7 @@ class BaseTemplate(ABC):
 
     def __post_init__(self) -> None:
         if self.variables is None or len(set(self.variables)) != len(self.variables):
-            raise ValueError(f"BaseTemplate {self.name!r} requires unique variable names.")
+            raise ValueError(f"{self.__class__.__name__} {self.name!r} requires unique variable names.")
 
     @property
     def n_variables(self) -> int:
@@ -588,6 +588,14 @@ class BaseTemplate(ABC):
     # Every subclass also provides ``batch_size``, ``ensemble_size``, ``time_size``,
     # ``coordinates``, ``shard_sizes`` and ``coordinates_are_static``, as fields or properties.
     # They are not declared here: a dataclass field in a subclass cannot override a property.
+
+    @abstractmethod
+    def shard(self, group: ProcessGroup | None) -> "BaseTemplate":
+        """Return this rank's part of the nodes when split across ``group``, as :meth:`Source.shard` splits a source.
+
+        A template that is already sharded, or a ``group`` that is not distributed, gives back the template itself.
+        """
+        ...
 
     @abstractmethod
     def flatten(self) -> "FlatSource":

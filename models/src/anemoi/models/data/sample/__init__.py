@@ -81,6 +81,13 @@ def create_batched_struct(
         Arguments specific to the kind: ``grid_size`` and ``shard_sizes`` for gridded
         samples; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)`` pairs)
         and ``shard_sizes`` for tabular samples.
+
+    Returns
+    -------
+    BaseSample
+        The sample of the registered kind. Without ``data``, the kind's
+        :attr:`BaseSample.template_type` instead (e.g. an inference target template),
+        built from the same validated geometry and ``**kwargs``.
     """
     sample_cls = sample_registry.lookup(data_type)
 
@@ -129,7 +136,7 @@ def create_batched_struct(
         variables=variables,
         layout=layout,
         coordinates=coordinates,
-        statistics=statistics,
+        statistics={} if statistics is None else statistics,
         **kwargs,
     )
 

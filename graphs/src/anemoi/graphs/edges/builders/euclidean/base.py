@@ -91,10 +91,11 @@ class BaseDistanceEdgeBuilders(BaseEdgeBuilder, NodeMaskingMixin, ABC):
             LOGGER.warning(PYG_INSTRUCTIONS)
             adj_matrix = self._compute_adj_matrix_sklearn(source_coords, target_coords, **kwargs)
 
+            # scipy stores the indices as int32; edge indices are int64, as on the pyg-lib path.
             if skip_flip:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.row, adj_matrix.col], axis=0).astype(np.int64))
             else:
-                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0))
+                edge_index = torch.from_numpy(np.stack([adj_matrix.col, adj_matrix.row], axis=0).astype(np.int64))
 
         return edge_index
 

@@ -540,6 +540,20 @@ class BaseGraphModel(nn.Module):
         """
         pass
 
+    @staticmethod
+    def _shard_target_template(
+        target_template: dict[str, BaseTemplate],
+        model_comm_group: Optional[ProcessGroup] = None,
+    ) -> dict[str, BaseTemplate]:
+        """Split the target templates across ``model_comm_group``, as the inputs are split for prediction.
+
+        The decoder reads its target nodes from the template, so with a distributed model each rank's
+        template must describe its own shard of the nodes.
+        """
+        if not model_is_distributed(model_comm_group):
+            return target_template
+        return {dataset_name: template.shard(model_comm_group) for dataset_name, template in target_template.items()}
+
     def _prepare_prediction_inputs(
         self,
         x: Batch,
@@ -664,6 +678,7 @@ class BaseGraphModel(nn.Module):
         ```
         """
         with torch.no_grad():
+            target_template = self._shard_target_template(target_template, model_comm_group)
             processed_batch, processed_target = self._prepare_prediction_inputs(
                 x,
                 target_forcing,

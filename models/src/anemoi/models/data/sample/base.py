@@ -14,10 +14,12 @@ from abc import abstractmethod
 from collections.abc import Mapping
 from collections.abc import Sequence
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Any
 from typing import ClassVar
 from typing import Self
 
+import numpy as np
 import torch
 
 from anemoi.models.data.layout import TensorLayout
@@ -36,7 +38,7 @@ class BaseSample(ABC):
     Subclasses must implement :meth:`from_validated`, :meth:`_collate_layout` and
     :meth:`_collate_data`, and set the class variable :attr:`source_type` to the
     :class:`Source` subclass to collate into. Each field is either metadata, listed in
-    :attr:`_METADATA_ATTRS` and taken from the first sample by :meth:`_collate_metadata`,
+    :attr:`_METADATA_ATTRS`, shared by every sample and checked by :meth:`_collate_metadata`,
     or dynamic, listed in :attr:`_DYNAMIC_ATTRS` and kept per sample by
     :meth:`_collate_dynamic_attrs`.
 
@@ -44,7 +46,8 @@ class BaseSample(ABC):
     ----------
     data : torch.Tensor or None
         The sample's data, laid out per :attr:`layout`. ``None`` for a sample that
-        only describes its geometry (e.g. an inference target template).
+        only describes its geometry (e.g. an inference target template); such a sample
+        cannot be collated into a :class:`Source`.
     variables : list[str]
         Variable names along the layout's ``variables`` axis, in order.
     layout : TensorLayout
@@ -59,7 +62,7 @@ class BaseSample(ABC):
     variables: list[str]
     layout: TensorLayout
     coordinates: torch.Tensor
-    statistics: Mapping[str, Any] | None = None
+    statistics: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
     @abstractmethod
@@ -110,13 +113,24 @@ class BaseSample(ABC):
         return {attr: [getattr(s, attr) for s in samples] for attr in cls._DYNAMIC_ATTRS}
 
     @classmethod
-    def _collate_metadata(cls, samples: Sequence[Self]) -> dict[str, Any]:
+    def _collate_metadata(cls, name: str, samples: Sequence[Self]) -> dict[str, Any]:
         """Return the dataset-level fields, checking every sample agrees with the first.
 
         The layout is metadata too: every sample shares it, and :meth:`_collate_layout`
-        turns it into the collated layout, whether or not the samples have data.
+        turns it into the collated layout. The first sample's values are kept, so a
+        tensor such as the static coordinates is passed on by reference.
         """
         first_sample = samples[0]
+        for attr in (*cls._METADATA_ATTRS, "layout"):
+            expected = getattr(first_sample, attr)
+            for index, sample in enumerate(samples[1:], start=1):
+                if not _same_metadata(getattr(sample, attr), expected):
+                    msg = (
+                        f"Dataset {name!r}: sample {index} has a different {attr!r} from sample 0; "
+                        f"every sample of a dataset must share its {attr!r}."
+                    )
+                    raise ValueError(msg)
+
         metadata = {attr: getattr(first_sample, attr) for attr in cls._METADATA_ATTRS}
         metadata["layout"] = cls._collate_layout(first_sample.layout)
         return metadata
@@ -127,26 +141,58 @@ class BaseSample(ABC):
 
         The metadata (variables, statistics, layout) is shared by the samples and taken
         once; the data and the per-sample fields are combined by the kind's hooks.
+        Samples without data are rejected: a :class:`Source` always holds data.
         """
-        metadata = cls._collate_metadata(samples)
-        attrs = cls._collate_dynamic_attrs(samples)
-
-        # Collate data
         n_without_data = sum(s.data is None for s in samples)
-        if 0 < n_without_data < len(samples):
-            msg = (
-                f"Dataset {name!r} mixes samples with and without data "
-                f"({n_without_data} of {len(samples)} without data)."
-            )
+        if n_without_data:
+            if n_without_data < len(samples):
+                msg = (
+                    f"Dataset {name!r} mixes samples with and without data "
+                    f"({n_without_data} of {len(samples)} without data)."
+                )
+            else:
+                msg = (
+                    f"Dataset {name!r} has samples without data, which cannot be collated into a "
+                    f"{cls.source_type.__name__}; use a template (see Source.template) to describe a "
+                    "source without data."
+                )
             raise ValueError(msg)
 
-        if n_without_data:
-            data = None
-        else:
-            data = cls._collate_data(samples)
-            validate_layout_against(name, metadata["layout"], data)
+        metadata = cls._collate_metadata(name, samples)
+        attrs = cls._collate_dynamic_attrs(samples)
+        data = cls._collate_data(samples)
+        validate_layout_against(name, metadata["layout"], data)
 
         return cls.source_type(name=name, data=data, **metadata, **attrs)
+
+
+def _same_metadata(value: Any, expected: Any) -> bool:
+    """Return whether two metadata values are equal, NaNs included.
+
+    Identity is checked first, so a reader that hands every sample the same object
+    (e.g. its cached statistics) pays nothing; otherwise tensors and arrays are compared
+    by value, and mappings and sequences element by element.
+    """
+    if value is expected:
+        return True
+    if isinstance(value, torch.Tensor) or isinstance(expected, torch.Tensor):
+        if not (isinstance(value, torch.Tensor) and isinstance(expected, torch.Tensor)):
+            return False
+        if value.shape != expected.shape or value.dtype != expected.dtype or value.device != expected.device:
+            return False
+        if value.is_floating_point() or value.is_complex():
+            return bool(((value == expected) | (value.isnan() & expected.isnan())).all())
+        return torch.equal(value, expected)
+    if isinstance(value, np.ndarray) or isinstance(expected, np.ndarray):
+        value, expected = np.asarray(value), np.asarray(expected)
+        return value.shape == expected.shape and np.array_equal(
+            value, expected, equal_nan=value.dtype.kind in "fc" and expected.dtype.kind in "fc"
+        )
+    if isinstance(value, Mapping) and isinstance(expected, Mapping):
+        return value.keys() == expected.keys() and all(_same_metadata(value[k], expected[k]) for k in value)
+    if isinstance(value, (list, tuple)) and isinstance(expected, (list, tuple)):
+        return len(value) == len(expected) and all(_same_metadata(v, e) for v, e in zip(value, expected, strict=True))
+    return bool(value == expected)
 
 
 def validate_layout_against(name: str, layout: TensorLayout, data: torch.Tensor | list[torch.Tensor]) -> None:
