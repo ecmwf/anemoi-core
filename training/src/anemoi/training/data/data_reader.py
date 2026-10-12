@@ -92,7 +92,7 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
             }
         }
     """
-    normalized = dict(dataset_config)
+    normalized = _as_dict(dataset_config)
 
     if "dataset" in normalized:
         msg = (
@@ -101,12 +101,10 @@ def _normalize_reader_config(dataset_config: dict | DictConfig) -> dict:
         )
         raise ValueError(msg)
 
-    base_dataset_config = normalized.pop("dataset_config", None)
-    if base_dataset_config is None:
+    if normalized.get("dataset_config", None) is None:
         msg = "Missing required 'dataset_config' in dataset reader configuration."
         raise ValueError(msg)
 
-    normalized["dataset_config"] = base_dataset_config
     return normalized
 
 
@@ -194,16 +192,13 @@ class BaseAnemoiReader(ABC):
 
     def __init__(
         self,
-        dataset: str | dict | None = None,
-        dataset_config: str | dict | None = None,
+        dataset_config: str | dict,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
     ):
         """Initialize Anemoi data reader."""
-        assert not (dataset and dataset_config), "Only one of dataset or dataset_config should be provided."
-        assert dataset or dataset_config, "Either dataset or dataset_config must be provided."
+        source: dict = _normalize_dataset_config(dataset_config)
 
-        source: dict = _normalize_dataset_config(dataset_config or dataset)
         # start/end must sit next to window/frequency for tabular datasets
         self.data = open_dataset(source | {"start": start, "end": end})
 
@@ -618,16 +613,12 @@ class TrajectoryDataReader(GriddedDataReader):
 
     def __init__(
         self,
-        dataset: str | dict | None = None,
-        dataset_config: str | dict | None = None,
+        dataset_config: str | dict,
         start: datetime.datetime | int | None = None,
         end: datetime.datetime | int | None = None,
         sampling: dict | None = None,
     ) -> None:
-        assert not (dataset and dataset_config), "Only one of dataset or dataset_config should be provided."
-        assert dataset or dataset_config, "Either dataset or dataset_config must be provided."
-
-        source: dict = _normalize_dataset_config(dataset_config or dataset)
+        source: dict = _normalize_dataset_config(dataset_config)
         if source.get("frequency") is not None:
             msg = (
                 f"{self.__class__.__name__} does not accept a 'frequency' in dataset_config. "
@@ -638,15 +629,15 @@ class TrajectoryDataReader(GriddedDataReader):
 
         # Trajectory datasets filter by initialisation date; passing start/end
         # would trigger access to .dates, which they do not have.
-        open_kwargs = {key: value for key, value in (("base_start", start), ("base_end", end)) if value is not None}
-        self.data = open_dataset(source, **open_kwargs)
-        self.sampling = sampling if sampling is not None else {"stride": None}
+        self.data = open_dataset(source | {"base_start": start, "base_end": end})
 
         # lazy init reader group info (will be set by DDPGroupStrategy)
         self.reader_group_rank = 0
         self.reader_group_size = 1
         self.grid_shard_sizes = None
         self.grid_shard_slice = None
+
+        self.sampling = sampling if sampling is not None else {"stride": None}
 
     @property
     def num_sequences(self) -> int:

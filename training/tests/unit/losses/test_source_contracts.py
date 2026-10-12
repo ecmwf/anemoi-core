@@ -41,12 +41,19 @@ def _grid(data: torch.Tensor, layout: TensorLayout | None = None) -> GriddedSour
 
 
 @pytest.mark.parametrize("side", ["prediction", "target"])
-@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float64])
-def test_training_checks_float32_before_casting(side: str, dtype: torch.dtype) -> None:
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16])
+def test_training_checks_full_precision_before_casting(side: str, dtype: torch.dtype) -> None:
     pred = _grid(torch.ones(1, 1, 1, 3, 2, dtype=dtype if side == "prediction" else torch.float32))
     target = _grid(torch.zeros(1, 1, 1, 3, 2, dtype=dtype if side == "target" else torch.float32))
-    with pytest.raises(AssertionError, match="must be float32"):
+    with pytest.raises(AssertionError, match="must be float32 or float64"):
         BaseTrainingModule._evaluate_loss(MSELoss(), pred, target)
+
+
+def test_training_evaluates_float64_loss_in_float64() -> None:
+    pred = _grid(torch.ones(1, 1, 1, 3, 2, dtype=torch.float64))
+    target = _grid(torch.zeros(1, 1, 1, 3, 2, dtype=torch.float64))
+    loss = BaseTrainingModule._evaluate_loss(MSELoss(), pred, target)
+    assert loss.dtype == torch.float64
 
 
 def test_base_loss_pairwise_checks_gridded_layout_and_coordinates() -> None:
@@ -184,6 +191,7 @@ def test_edm_loss_passes_sparse_weights_and_preserves_gradients() -> None:
     module = SimpleNamespace(
         loss={"obs": WeightedMSELoss()},
         model_comm_group=None,
+        loss_gradient_scaling=False,
         _evaluate_loss=BaseTrainingModule._evaluate_loss,
     )
     weights = {"obs": [torch.full((2, 1), 2.0), torch.full((3, 1), 3.0)]}

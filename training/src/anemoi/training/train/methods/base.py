@@ -323,6 +323,12 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         # Rescales the per-channel loss gradients; applied to the prediction in _evaluate_loss.
         self.loss_gradient_scaling = config.training.loss_gradient_scaling
+        # The channel weights are summed over the grid points a rank holds, so a model split across
+        # GPUs would weight each channel differently from the same model on one GPU.
+        assert not (self.loss_gradient_scaling and config.system.hardware.num_gpus_per_model > 1), (
+            "training.loss_gradient_scaling is not supported yet when the model is split across GPUs "
+            f"(system.hardware.num_gpus_per_model={config.system.hardware.num_gpus_per_model})."
+        )
 
         self.is_first_step = True
 
@@ -718,8 +724,13 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         With gradient_scaling, the gradient of the loss with respect to pred is rescaled
         per channel (see training.loss_gradient_scaling).
         """
-        assert pred.dtype == torch.float32, f"Prediction for {pred.name!r} must be float32, got {pred.dtype}."
-        assert target.dtype == torch.float32, f"Target for {target.name!r} must be float32, got {target.dtype}."
+        full_precision = (torch.float32, torch.float64)
+        assert (
+            pred.dtype in full_precision
+        ), f"Prediction for {pred.name!r} must be float32 or float64, got {pred.dtype}."
+        assert (
+            target.dtype in full_precision
+        ), f"Target for {target.name!r} must be float32 or float64, got {target.dtype}."
         dtype = torch.promote_types(torch.promote_types(pred.dtype, target.dtype), torch.float32)
         pred = pred.map_data(lambda data: data.to(dtype))
         target = target.map_data(lambda data: data.to(dtype))
