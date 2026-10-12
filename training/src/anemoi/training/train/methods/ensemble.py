@@ -27,8 +27,8 @@ if TYPE_CHECKING:
     from torch.distributed.distributed_c10d import ProcessGroup
 
     from anemoi.models.data.layout import TensorLayout
+    from anemoi.models.data.sources import BaseTemplate
     from anemoi.models.data.sources import Source
-    from anemoi.models.data.sources import Template
     from anemoi.training.train.step_output import TrainingStepOutput
     from anemoi.training.train.training_task.base import BaseTask
 
@@ -179,7 +179,7 @@ class EnsembleTraining(BaseTrainingModule):
             LOGGER.debug("SHAPE: x[%s].shape = %s", dataset_name, shapes)
         return batch.with_data(new_data)
 
-    def _member_template(self, templates: dict[str, Template]) -> dict[str, Template]:
+    def _member_template(self, templates: dict[str, BaseTemplate]) -> dict[str, BaseTemplate]:
         """What the model predicts for the tiled members, given the task's target ``templates``.
 
         The decoder reads its target node count from the template, so it must describe as many

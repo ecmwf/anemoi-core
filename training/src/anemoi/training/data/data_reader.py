@@ -245,8 +245,9 @@ class BaseAnemoiReader(ABC):
         """Return dataset statistics.
 
         Cached: some ``anemoi.datasets`` stores rebuild the dict (and re-read the arrays)
-        on every access, and every sample must carry the same statistics object for
-        :meth:`BaseSample.collate` to accept them together.
+        on every access. Handing every sample the same object also lets
+        :meth:`BaseSample.collate` confirm by identity, rather than by value, that the
+        samples share their statistics.
         """
         return self.data.statistics
 

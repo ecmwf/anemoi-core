@@ -416,6 +416,14 @@ class GriddedTemplate(BaseTemplate):
         """Number of grid points (on this rank, when sharded)."""
         return self.coordinates.shape[0]
 
+    def shard(self, group: ProcessGroup | None) -> "GriddedTemplate":
+        """Split the grid across ``group``, as :meth:`GriddedSource.shard` splits a source's data."""
+        if self.shard_sizes is not None or not model_is_distributed(group):
+            return self
+
+        sizes = get_shard_sizes(self.coordinates, -2, model_comm_group=group)
+        return replace(self, coordinates=shard_tensor(self.coordinates, -2, sizes, group), shard_sizes=sizes)
+
     def flatten(self) -> FlatSource:
         """Return the flat nodes: the grid repeated for every ``(sample, member)``."""
         coordinates = einops.repeat(

@@ -637,6 +637,11 @@ class BaseGraphModel(nn.Module):
                         dataset_name, target_forcing[dataset_name].shard(model_comm_group)
                     )
 
+                # The decoder reads its target nodes from the template, so it must describe this rank's shard.
+                target_template = {
+                    dataset_name: template.shard(model_comm_group) for dataset_name, template in target_template.items()
+                }
+
             # Spatial preprocessing: applied after grid sharding and, as in training, before
             # normalisation, so projectors see raw values. The projected source is on the
             # dataset's graph node set.

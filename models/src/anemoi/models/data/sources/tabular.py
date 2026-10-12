@@ -693,6 +693,19 @@ class TabularTemplate(BaseTemplate):
         """Number of points in each sample."""
         return [coords.shape[0] for coords in self.coordinates]
 
+    def shard(self, group: ProcessGroup | None) -> "TabularTemplate":
+        """Not supported, as for :meth:`TabularSource.shard`: tabular nodes are sharded at read time."""
+        if not model_is_distributed(group) or (
+            self.shard_sizes is not None and any(sizes is not None for sizes in self.shard_sizes)
+        ):
+            return self
+
+        msg = (
+            f"Sharding is implemented for gridded templates only, but {self.name!r} is tabular. "
+            "Tabular nodes are sharded at read time by the reader instead."
+        )
+        raise NotImplementedError(msg)
+
     def flatten(self) -> FlatSource:
         """Return the flat nodes: every sample's points repeated for each member, then joined."""
         # coordinates and timedeltas are repeated per member to line up with the folded data
@@ -737,7 +750,7 @@ class TabularTemplate(BaseTemplate):
         expected = (sum(row_counts), self.n_variables)
         if tuple(data.shape) != expected:
             msg = (
-                f"Template {self.name!r} expects flat data of shape {expected} "
+                f"{self.__class__.__name__} {self.name!r} expects flat data of shape {expected} "
                 f"(points over all samples and members, variables), got {tuple(data.shape)}."
             )
             raise ValueError(msg)

@@ -25,9 +25,9 @@ from torch_geometric.data import HeteroData
 from anemoi.models.data import Source
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data.sources import GriddedSource
 from anemoi.models.data.sources import TabularSource
-from anemoi.models.data.sources import Template
 from anemoi.models.data.utils import apply_pairwise
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.preprocessing import Processors
@@ -1569,7 +1569,7 @@ def _make_gridded_batch(data: torch.Tensor, variables: list[str] | None = None) 
 def _make_target_pair(
     data: torch.Tensor,
     variables: list[str] | None = None,
-) -> tuple[Batch, dict[str, Template], Batch]:
+) -> tuple[Batch, dict[str, BaseTemplate], Batch]:
     target = _make_gridded_batch(data, variables=variables)
     return target, target.template(), target.select(variables=[])
 
@@ -2222,7 +2222,7 @@ def test_single_training_rollout_step_kwarg_propagated_to_get_targets(
     captured_kwargs: list[dict] = []
     dummy_target = _make_target_pair(torch.zeros(1, 1, 1, 4, len(_NAME_TO_INDEX)))
 
-    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, dict[str, Template], Batch]:
+    def spy_get_targets(*_args: Any, **kwargs: Any) -> tuple[Batch, dict[str, BaseTemplate], Batch]:
         captured_kwargs.append(kwargs.copy())
         return dummy_target
 

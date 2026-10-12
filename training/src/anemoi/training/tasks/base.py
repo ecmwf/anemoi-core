@@ -17,8 +17,8 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.training.utils.time_indices import normalize_time_indices
 
 if TYPE_CHECKING:
+    from anemoi.models.data import BaseTemplate
     from anemoi.models.data import Batch
-    from anemoi.models.data import Template
 
 LOGGER = logging.getLogger(__name__)
 
@@ -155,7 +155,7 @@ class BaseTask(ABC):
         batch: "Batch",
         data_indices: dict[str, IndexCollection],
         **kwargs,
-    ) -> tuple["Batch", dict[str, "Template"], "Batch"]:
+    ) -> tuple["Batch", dict[str, "BaseTemplate"], "Batch"]:
         """Extract model targets from a Batch, preserving coords and metadata.
 
         Parameters
@@ -169,7 +169,7 @@ class BaseTask(ABC):
 
         Returns
         -------
-        tuple[Batch, dict[str, Template], Batch]: (target, target_template, target_forcing)
+        tuple[Batch, dict[str, BaseTemplate], Batch]: (target, target_template, target_forcing)
             target holds the target tensors per dataset, shape (bs, num_outputs, ensemble, grid, full_nvar)).
             target_template describes what the model predicts at the target nodes: the model's output
             variables, in the model's output order, with their statistics, and no data.
@@ -204,7 +204,7 @@ class BaseTask(ABC):
     def get_target_template(
         targets: "Batch",
         data_indices: dict[str, IndexCollection],
-    ) -> dict[str, "Template"]:
+    ) -> dict[str, "BaseTemplate"]:
         """Return what the model predicts at the nodes of ``targets``, one template per dataset.
 
         The targets carry every variable of a dataset; each template keeps the model's output
