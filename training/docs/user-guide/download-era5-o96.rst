@@ -35,7 +35,7 @@ To download the dataset, you can use the `anemoi-datasets` :ref:`copy
 .. code::
 
    % pip install "anemoi-datasets>=0.5.22"
-   % anemoi-dataset copy \
+   % anemoi-datasets copy \
        --url https://data.ecmwf.int/anemoi-datasets/era5-o96-1979-2023-6h-v8.zarr \
        --target era5-o96-1979-2023-6h-v8.zarr
 
