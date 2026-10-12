@@ -272,7 +272,21 @@ class BaseTransportTraining(BaseTrainingModule):
 
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
+        self._validate_single_step_task()
         self._prediction_mode = self._get_prediction_mode_cls()(self)
+
+    def _validate_single_step_task(self) -> None:
+        """Reject rollout configs: transport steps train and validate on the first rollout step only."""
+        rollout = getattr(self.task, "rollout", None)
+        if rollout is None:
+            return
+        max_rollout = max(rollout.step, rollout.maximum, getattr(self.task, "validation_rollout", None) or 1)
+        if max_rollout > 1:
+            msg = (
+                f"Transport training does not implement rollout, but the task unrolls up to {max_rollout} steps. "
+                "Set task.rollout.start and task.rollout.maximum to 1 and task.validation_rollout to null."
+            )
+            raise ValueError(msg)
 
     def _get_prediction_mode_cls(self) -> type[PredictionMode]:
         prediction_mode = self.config.training.transport.prediction_mode
