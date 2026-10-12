@@ -86,6 +86,7 @@ def _make_imputer_settings() -> tuple[InputImputer, IndexCollection]:
 def _make_model() -> AnemoiTransportTendModelEncProcDec:
     model = AnemoiTransportTendModelEncProcDec.__new__(AnemoiTransportTendModelEncProcDec)
     model.data_indices = {"data": _make_index_collection()}
+    model.target_datasets = ["data"]
     return model
 
 

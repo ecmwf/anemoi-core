@@ -15,9 +15,11 @@ once that work settles.
 
 A small deterministic model and a small EDM transport model, each with a gridded dataset and an
 observation dataset, run once on the whole batch without communication and once sharded across the
-process group, in float64 on CPU. The sharded gradients are combined the way training combines them:
-the strategy's hooks multiply every gradient by the group size except those of parameters named
-``trainable`` or ``no_gradscaling``, and DDP then averages over the ranks.
+process group, in float64 on CPU. Two further transport models, one predicting states and one predicting
+tendencies, predict the grid only and read the observations as input only. The sharded gradients are
+combined the way training combines them: the strategy's hooks multiply every gradient by the group size
+except those of parameters named ``trainable`` or ``no_gradscaling``, and DDP then averages over the
+ranks.
 
 A sharded batch reaches the observation graph in a different row order, so the per-batch graph must
 not depend on row order. Each model runs with pyg-lib's neighbour search and a cap above the number of
@@ -42,6 +44,7 @@ from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.models.encoder_processor_decoder import AnemoiModelEncProcDec
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportModelEncProcDec
+from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 
 from ._distributed_runner import _run_distributed_test
 
@@ -55,6 +58,12 @@ GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
 TABULAR_LAYOUT = TensorLayout(ensemble=0, grid=1, variables=2)
 # Parameters whose gradient is already complete on every rank; the strategy does not scale them.
 UNSCALED_PARAMETERS = ("trainable", "no_gradscaling")
+MODELS = {
+    "deterministic": {"model_class": AnemoiModelEncProcDec, "obs_predicted": True},
+    "edm_transport": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": True},
+    "edm_transport_obs_input_only": {"model_class": AnemoiTransportModelEncProcDec, "obs_predicted": False},
+    "edm_tendency_obs_input_only": {"model_class": AnemoiTransportTendModelEncProcDec, "obs_predicted": False},
+}
 NEIGHBOUR_SEARCH = {
     # pyg-lib keeps the first neighbours in row order, so its cap is above the number of observations.
     "pyg_all_neighbours": {"disable_pyg_lib": False, "max_obs_neighbours": 4096},
@@ -119,7 +128,9 @@ def _graph_config(grid_latitudes: np.ndarray, grid_longitudes: np.ndarray, max_o
     )
 
 
-def _model_config(transport: bool) -> DictConfig:
+def _model_config(model_class: type, obs_predicted: bool) -> DictConfig:
+    transport = issubclass(model_class, AnemoiTransportModelEncProcDec)
+    tendency = issubclass(model_class, AnemoiTransportTendModelEncProcDec)
     channels = 16
     layer_norm = (
         {
@@ -213,8 +224,15 @@ def _model_config(transport: bool) -> DictConfig:
                 "max_period": 1000,
             },
         }
-        # The transport network predicts the corrupted target itself, without a skip connection.
-        config["residual"] = {"datasets": {}}
+        if tendency:
+            # The tendency model takes the latest grid state as its reference and is conditioned on it.
+            config["condition_on_residual"] = True
+        else:
+            # The transport network predicts the corrupted target itself, without a skip connection.
+            config["residual"] = {"datasets": {}}
+    if not obs_predicted:
+        del config["decoders"]["obs"]
+        del config["bounding"]["datasets"]["obs"]
     return OmegaConf.create(config)
 
 
@@ -243,13 +261,12 @@ def _statistics() -> dict[str, dict[str, np.ndarray]]:
     return {"grid": stats(len(GRID_VARIABLES)), "obs": stats(len(OBS_VARIABLES))}
 
 
-def _build_model(transport: bool, max_obs_neighbours: int) -> torch.nn.Module:
+def _build_model(model_class: type, obs_predicted: bool, max_obs_neighbours: int) -> torch.nn.Module:
     generator = torch.Generator().manual_seed(0)
     latitudes, longitudes = _points_on_sphere(NUM_GRID_POINTS, generator)
-    model_class = AnemoiTransportModelEncProcDec if transport else AnemoiModelEncProcDec
     torch.manual_seed(1)
     model = model_class(
-        model_config=_model_config(transport),
+        model_config=_model_config(model_class, obs_predicted),
         model_graph_config=_graph_config(latitudes, longitudes, max_obs_neighbours),
         data_indices=_data_indices(),
         statistics=_statistics(),
@@ -332,7 +349,10 @@ def _local_rows(source, rank: int, world_size: int) -> torch.Tensor:
 
 
 def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
-    """Inputs, target forcings and the noisy target of one sample, on the whole grid."""
+    """Inputs, target forcings and the noisy target of one sample, on the whole grid.
+
+    The target forcings and the noisy target cover the predicted datasets only.
+    """
     generator = torch.Generator().manual_seed(2)
     grid_coordinates = model._graph_data["grid"].x.float()  # radians, as the graph stores them
     indices = _data_indices()
@@ -351,7 +371,7 @@ def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
     history_coordinates = [obs_coordinates(rows) for rows in OBS_ROWS_PER_WINDOW]
     target_coordinates = [obs_coordinates(OBS_TARGET_ROWS)]
 
-    return {
+    batches = {
         "x": Batch(
             {
                 "grid": _gridded(grid_inputs, randn(1, 2, 1, NUM_GRID_POINTS, len(grid_inputs)), grid_coordinates),
@@ -375,6 +395,9 @@ def _synthetic_batches(model: torch.nn.Module) -> dict[str, Batch]:
             },
         ),
     }
+    for key in ("target_forcing", "noisy_target"):
+        batches[key] = Batch({name: batches[key][name] for name in model.target_datasets})
+    return batches
 
 
 def _shard_batch(batch: Batch, rank: int, world_size: int, group) -> Batch:
@@ -419,13 +442,16 @@ def _loss(outputs: Batch, weights: dict[str, torch.Tensor], rows: dict[str, torc
     return total
 
 
-def _check_sharded_model(*, rank, world_size, device, group, transport, keep_batch_sharded, neighbour_search):
+def _check_sharded_model(*, rank, world_size, device, group, model, keep_batch_sharded, neighbour_search):
     del device  # CPU only: the Triton kernels have no float64 path
+    # Read by anemoi-graphs whenever it builds a graph: the graph stays on the CPU, also on a GPU node.
+    os.environ["ANEMOI_GRAPHS_FORCE_CPU"] = "1"
     if neighbour_search["disable_pyg_lib"]:
         # Read by anemoi-graphs whenever it builds edges; this process is one spawned rank.
         os.environ["ANEMOI_GRAPHS_DISABLE_PYG_LIB"] = "1"
     max_obs_neighbours = neighbour_search["max_obs_neighbours"]
-    reference_model = _build_model(transport, max_obs_neighbours)
+    transport = issubclass(model["model_class"], AnemoiTransportModelEncProcDec)
+    reference_model = _build_model(model["model_class"], model["obs_predicted"], max_obs_neighbours)
     sharded_model = deepcopy(reference_model)
     batches = _synthetic_batches(reference_model)
 
@@ -472,9 +498,9 @@ def _check_sharded_model(*, rank, world_size, device, group, transport, keep_bat
 @pytest.mark.distributed
 @pytest.mark.parametrize("neighbour_search", list(NEIGHBOUR_SEARCH))
 @pytest.mark.parametrize("keep_batch_sharded", [False, True], ids=["batch_gathered", "batch_sharded"])
-@pytest.mark.parametrize("transport", [False, True], ids=["deterministic", "edm_transport"])
+@pytest.mark.parametrize("model", list(MODELS))
 def test_sharded_model_matches_whole_model(
-    distributed_backend, distributed_world_size, transport, keep_batch_sharded, neighbour_search
+    distributed_backend, distributed_world_size, model, keep_batch_sharded, neighbour_search
 ):
     if distributed_backend != "gloo":
         pytest.skip("Float64 comparison runs on CPU only.")
@@ -482,7 +508,7 @@ def test_sharded_model_matches_whole_model(
         _check_sharded_model,
         backend=distributed_backend,
         world_size=distributed_world_size,
-        transport=transport,
+        model=MODELS[model],
         keep_batch_sharded=keep_batch_sharded,
         neighbour_search=NEIGHBOUR_SEARCH[neighbour_search],
     )

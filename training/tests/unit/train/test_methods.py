@@ -198,6 +198,7 @@ class DummyTransportModel(DummyModel):
             "rho": self.edm.rho,
         }
         self.stochastic_interpolant = StochasticInterpolantSettings(noise_scale=0.0)
+        self.target_datasets = ["data"]
 
     def __call__(
         self,
@@ -883,6 +884,7 @@ def test_state_reference_source_is_lazy_and_handles_diagnostic_variables() -> No
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, n_step_input=2, task=task)
     forecaster.model = SimpleNamespace(
+        model=SimpleNamespace(target_datasets=["data"]),
         pre_processors={"data": Processors([])},
         post_processors={"data": Processors([], inverse=True)},
     )
@@ -1092,6 +1094,7 @@ def test_state_prepare_target_imputes_model_target_and_keeps_loss_nans() -> None
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
     forecaster.model = SimpleNamespace(
+        model=SimpleNamespace(target_datasets=["data"]),
         pre_processors={"data": _FakeImputingProcessors()},
         post_processors={"data": Processors([], inverse=True)},
     )
@@ -1128,6 +1131,7 @@ def test_state_model_target_and_missing_stay_consistent_with_real_processors() -
         ],
     )
     forecaster.model = SimpleNamespace(
+        model=SimpleNamespace(target_datasets=["data"]),
         pre_processors={"data": processors},
         post_processors={"data": Processors([], inverse=True)},
     )
@@ -1187,6 +1191,7 @@ def test_state_model_target_and_missing_stay_consistent_for_sparse_obs() -> None
         ],
     )
     forecaster.model = SimpleNamespace(
+        model=SimpleNamespace(target_datasets=["data"]),
         pre_processors={"data": processors},
         post_processors={"data": Processors([], inverse=True)},
     )
@@ -1971,62 +1976,6 @@ def test_edm_transport_training_step_with_forecaster() -> None:
     assert output.predictions[0]["data"].data.shape == (b, 1, e, g, v)
 
 
-def test_transport_training_sample_builds_target_template_like_deterministic_training() -> None:
-    data_indices = _data_indices_single()
-    forecaster = TransportTraining.__new__(TransportTraining)
-    pl.LightningModule.__init__(forecaster)
-    _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_DIFFUSION)
-
-    layout = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
-    batch = build_batch(
-        data={"data": torch.randn(1, 2, 1, 3, 2)},
-        coordinates={"data": torch.zeros(3, 2)},
-        metadata={"static_coords": frozenset({"data"})},
-        layouts={"data": layout},
-        variables={"data": ["A", "B"]},
-        statistics={"data": {}},
-    )
-    x = batch.select(time=[0])
-    target_values = batch.select(time=[1])
-    target_template = {"data": target_values["data"].template()}
-    target_forcing = target_values.select(variables={"data": [1]})
-
-    task = MagicMock()
-    task.get_inputs.return_value = x
-    task.get_targets.return_value = (target_values, target_template, target_forcing)
-    forecaster.task = task
-
-    class _CoreModel:
-        def __init__(self) -> None:
-            self.call = None
-
-        def sample(self, *args, **kwargs) -> Source:
-            self.call = {"args": args, "kwargs": kwargs}
-            return kwargs["target_template"]
-
-    core_model = _CoreModel()
-    forecaster.model = SimpleNamespace(model=core_model)
-
-    out = forecaster.sample(
-        batch,
-        task_kwargs={"rollout_step": 0},
-        schedule_params={"num_steps": 2},
-        sampler_params={"sampler": "heun"},
-        marker="value",
-    )
-
-    assert out is target_template
-    task.get_inputs.assert_called_once_with(batch, data_indices=forecaster.data_indices)
-    task.get_targets.assert_called_once_with(batch, data_indices=forecaster.data_indices, rollout_step=0)
-    assert core_model.call["args"] == (x,)
-    assert core_model.call["kwargs"]["target_template"] is target_template
-    assert core_model.call["kwargs"]["target_forcing"] is target_forcing
-    assert core_model.call["kwargs"]["model_comm_group"] is forecaster.model_comm_group
-    assert core_model.call["kwargs"]["schedule_params"] == {"num_steps": 2}
-    assert core_model.call["kwargs"]["sampler_params"] == {"sampler": "heun"}
-    assert core_model.call["kwargs"]["marker"] == "value"
-
-
 # ── EnsembleTraining: expand helper ────────────────────────────────────────────
 
 
@@ -2746,6 +2695,7 @@ def test_transport_validation_returns_conditioned_target_for_plotting(
     pl.LightningModule.__init__(forecaster)
     _wire_training_module(forecaster, data_indices=data_indices, config=_CFG_EMPTY, task=task)
     forecaster.model = SimpleNamespace(
+        model=SimpleNamespace(target_datasets=["data"]),
         pre_processors={"data": Processors([])},
         post_processors={"data": Processors([], inverse=True)},
     )
@@ -2974,9 +2924,9 @@ def test_edm_transport_tendency_training_compute_dataset_loss_metrics_uses_metri
     torch.testing.assert_close(captured["metric_target"].data, metric_target["data"].data)
 
 
-def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
+def test_tendency_prediction_mode_prepare_target_rejects_predicted_sparse_obs() -> None:
     mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
-    mode.module = SimpleNamespace()
+    mode.module = SimpleNamespace(predicted_targets=lambda batch: (batch, batch))
     sparse_batch = build_batch(
         data={"obs": [torch.zeros(2, 1)]},
         coordinates={"obs": [torch.zeros(2, 2)]},
@@ -2989,6 +2939,85 @@ def test_tendency_prediction_mode_prepare_target_rejects_sparse_obs() -> None:
 
     with pytest.raises(NotImplementedError, match=r"Tendency prediction mode.*sparse"):
         mode.prepare_target(sparse_batch, sparse_batch)
+
+
+def _grid_and_input_only_obs_batch() -> Batch:
+    """A gridded dataset ``data`` and a sparse observation dataset ``obs``."""
+    grid = _gridded_tendency_batch(torch.randn(1, 1, 1, 3, 1))
+    obs = build_batch(
+        data={"obs": [torch.zeros(2, 1)]},
+        coordinates={"obs": [torch.zeros(2, 2)]},
+        metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
+        timedeltas={"obs": [torch.zeros(2)]},
+        layouts={"obs": TensorLayout(grid=0, variables=1)},
+        variables={"obs": ["a"]},
+        statistics={"obs": {}},
+    )
+    return Batch({**grid.sources, **obs.sources})
+
+
+def test_transport_training_targets_cover_predicted_datasets_only() -> None:
+    """A dataset the model only reads gets no target and needs no output-time window."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h")
+    forecaster = TransportTraining.__new__(TransportTraining)
+    pl.LightningModule.__init__(forecaster)
+    _wire_training_module(forecaster, data_indices=_data_indices_single(), config=_CFG_EMPTY, task=task)
+    forecaster.model = SimpleNamespace(model=SimpleNamespace(target_datasets=["data"]))
+    # The grid holds its input and output steps; the observations hold their input window only.
+    grid = _make_gridded_batch(torch.randn(1, 2, 1, 3, len(_NAME_TO_INDEX)))
+    obs = build_batch(
+        data={"obs": [torch.zeros(2, 1)]},
+        coordinates={"obs": [torch.zeros(2, 2)]},
+        metadata={"obs": {"boundaries": [(slice(0, 2),)]}},
+        timedeltas={"obs": [torch.zeros(2)]},
+        layouts={"obs": TensorLayout(grid=0, variables=1)},
+        variables={"obs": ["a"]},
+        statistics={"obs": {}},
+    )
+
+    target, target_forcing = forecaster.predicted_targets(Batch({**grid.sources, **obs.sources}))
+
+    assert list(target.keys()) == ["data"]
+    assert list(target_forcing.keys()) == ["data"]
+    torch.testing.assert_close(target["data"].data, grid["data"].data[:, 1:])
+
+
+def test_tendency_prediction_mode_reads_input_only_sparse_obs() -> None:
+    """Observations the model only reads do not block gridded tendency targets."""
+    batch = _grid_and_input_only_obs_batch()
+    grid_only = Batch({"data": batch["data"]})
+
+    class _TendencyModel:
+        def reference_state(self, x: Batch, *_args: Any) -> Batch:
+            return Batch({"data": x["data"]})
+
+        def compute_tendency(self, _dataset_name: str, state: Source, *_args: Any) -> Source:
+            return state.map_data(lambda data: data - 1.0)
+
+    mode = TendencyPredictionMode.__new__(TendencyPredictionMode)
+    mode._tendency_statistics = {"data": [{"mean": 1.0}]}
+    mode.module = SimpleNamespace(
+        model=SimpleNamespace(
+            model=_TendencyModel(),
+            pre_processors={"data": object()},
+            post_processors={"data": object()},
+        ),
+        predicted_targets=lambda _batch: (grid_only, grid_only),
+        preprocess_inputs=lambda batch: batch,
+        preprocess_targets=lambda batch: batch,
+        get_data_output_target=lambda batch: batch,
+        reduce_data_output_target_to_model_output=lambda batch: batch,
+        _grid_shard_sizes=lambda _source: None,
+        model_comm_group=None,
+        n_step_output={"data": 1},
+    )
+
+    prepared = mode.prepare_target(batch, batch)
+
+    assert list(prepared.model_target.keys()) == ["data"]
+    assert list(prepared.metric_target.keys()) == ["data"]
+    assert list(prepared.aux["reference"].keys()) == ["data"]
+    torch.testing.assert_close(prepared.model_target["data"].data, batch["data"].data - 1.0)
 
 
 def test_tendency_prediction_mode_only_the_network_target_is_imputed() -> None:
@@ -3011,8 +3040,7 @@ def test_tendency_prediction_mode_only_the_network_target_is_imputed() -> None:
             pre_processors={"data": object()},
             post_processors={"data": object()},
         ),
-        task=SimpleNamespace(get_targets=lambda _batch, **_kwargs: (raw_target, None, raw_target)),
-        data_indices={},
+        predicted_targets=lambda _batch: (raw_target, raw_target),
         preprocess_inputs=lambda _batch: imputed,
         preprocess_targets=lambda batch: batch,
         get_data_output_target=lambda batch: batch,

@@ -15,7 +15,6 @@ from typing import TYPE_CHECKING
 import torch
 from torch.utils.checkpoint import checkpoint
 
-from anemoi.models.data import Batch
 from anemoi.models.models.transport_encoder_processor_decoder import AnemoiTransportTendModelEncProcDec
 from anemoi.models.transport import reference_state_sampling_source
 from anemoi.training.diagnostics.callbacks.plot_adapter import EnsemblePlotAdapterWrapper
@@ -30,6 +29,7 @@ from anemoi.training.utils.index_space import IndexSpace
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
+    from anemoi.models.data import Batch
     from anemoi.models.data.sources import Source
 
 LOGGER = logging.getLogger(__name__)
@@ -68,7 +68,8 @@ class StatePredictionMode(PredictionMode):
         # taken from the full batch rather than the model inputs because
         # diagnostic output variables are not part of the model input, and it
         # is normalized (with imputation) like the model inputs.
-        latest_input = {name: n_step - 1 for name, n_step in self.module.n_step_input.items()}
+        batch = self.module.predicted_datasets(batch)
+        latest_input = {name: self.module.n_step_input[name] - 1 for name in batch}
         reference_state = self.module.preprocess_inputs(batch.select(time=latest_input))
         reference = reference_state
         for dataset_name, state_view in reference_state.items():
@@ -91,7 +92,7 @@ class StatePredictionMode(PredictionMode):
         x: Batch,
     ) -> PreparedPredictionTarget:
         del x
-        raw_target, _, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
+        raw_target, target_forcing = self.module.predicted_targets(batch)
         # Loss and metric targets keep their NaNs so missing observations are
         # masked in the loss (imputation skipped).
         target_full = self.module.preprocess_targets(raw_target)
@@ -164,7 +165,7 @@ class TendencyPredictionMode(PredictionMode):
             raise ValueError(msg)
         return {
             dataset_name: self._tendency_model.tendency_statistics(dataset_name, statistics.get(dataset_name))
-            for dataset_name in self.module.dataset_names
+            for dataset_name in self._tendency_model.target_datasets
         }
 
     def prepare_target(
@@ -172,12 +173,15 @@ class TendencyPredictionMode(PredictionMode):
         batch: Batch,
         x: Batch,
     ) -> PreparedPredictionTarget:
-        """Build tendency targets for training and state targets for validation metrics."""
-        if any(source.is_tabular for source in batch.values()):
-            msg = "Tendency prediction mode is not implemented for sparse observation datasets."
+        """Build tendency targets for training and state targets for validation metrics.
+
+        Only the predicted datasets get targets; the datasets the model only reads stay inputs.
+        """
+        raw_state_target, target_forcing = self.module.predicted_targets(batch)
+        if any(source.is_tabular for source in raw_state_target.values()):
+            msg = "Tendency prediction mode is not implemented for predicting sparse observation datasets."
             raise NotImplementedError(msg)
 
-        raw_state_target, _, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
         # The latest input state, which turns states into tendencies and tendencies back into states.
         reference = self._tendency_model.reference_state(
             x,
@@ -210,8 +214,8 @@ class TendencyPredictionMode(PredictionMode):
             tendencies(self.module.preprocess_inputs(raw_state_target)),
         )
         tendency_target_full = tendencies(state_target_full)
-        # The tendency path is dense-only (rejected above), so the reference source works on payload tensors.
-        x_data = {name: source.data for name, source in x.items()}
+        # The predicted datasets are dense (checked above), so the reference source works on payload tensors.
+        x_data = {name: source.data for name, source in x.items() if name in reference}
         return PreparedPredictionTarget(
             model_target=tendency_target,
             loss_target=tendency_target_full,
@@ -307,6 +311,22 @@ class BaseTransportTraining(BaseTrainingModule):
         if not hasattr(self, "_ensemble_plot_adapter"):
             self._ensemble_plot_adapter = EnsemblePlotAdapterWrapper(self.task._plot_adapter)
         return self._ensemble_plot_adapter
+
+    def predicted_datasets(self, batch: Batch) -> Batch:
+        """Keep only the datasets the model predicts, i.e. those with a decoder."""
+        predicted = self.model.model.target_datasets
+        return batch.with_sources({name: source for name, source in batch.items() if name in predicted})
+
+    def predicted_targets(self, batch: Batch) -> tuple[Batch, Batch]:
+        """Return the raw target states and the output-time forcings of the predicted datasets.
+
+        Datasets the model only reads need no output-time window, so the task never sees them here.
+        """
+        target, _, target_forcing = self.task.get_targets(
+            self.predicted_datasets(batch),
+            data_indices=self.data_indices,
+        )
+        return target, target_forcing
 
     def get_data_output_target(self, target_full: Batch) -> Batch:
         """Select the target variables that are present in the dataset output."""
@@ -466,32 +486,6 @@ class TransportTraining(BaseTransportTraining):
             dataset_name=dataset_name,
             pred_layout=pred_layout,
             target_layout=target_layout,
-            **kwargs,
-        )
-
-    def sample(
-        self,
-        batch: Batch,
-        *,
-        task_kwargs: dict | None = None,
-        schedule_params: dict | None = None,
-        sampler_params: dict | None = None,
-        **kwargs,
-    ) -> Batch:
-        """Sample from a full task batch using the deterministic target-template pattern."""
-        assert isinstance(batch, Batch), "batch must be a Batch instance"
-        task_kwargs = {} if task_kwargs is None else task_kwargs
-        x = self.task.get_inputs(batch, data_indices=self.data_indices)
-        _, target_template, target_forcing = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-        # The output-time forcings condition the decoder in the same normalization state as the
-        # caller-provided batch (matching x).
-        return self.model.model.sample(
-            x,
-            target_template=target_template,
-            model_comm_group=self.model_comm_group,
-            schedule_params=schedule_params,
-            sampler_params=sampler_params,
-            target_forcing=target_forcing,
             **kwargs,
         )
 
