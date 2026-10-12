@@ -107,7 +107,7 @@ class ICONMultiMesh:
         if self.max_level < self.reflvl_vertex.max():
             self.nodeset = self.nodeset[self.reflvl_vertex <= self.max_level]
         if self.min_level > self.reflvl_vertex.min():
-            self.reflvl_vertex[self.reflvl_vertex<self.min_level]=self.min_level
+            self.reflvl_vertex[self.reflvl_vertex < self.min_level] = self.min_level
 
     @cached_property
     def _vertices(self) -> tuple[list[np.ndarray], np.ndarray]:
