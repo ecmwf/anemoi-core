@@ -291,6 +291,57 @@ class TestCollate:
             )
 
 
+class TestAllgather:
+    """Gathering a source over the group it was split across, as training does once a batch is on the device."""
+
+    def test_replicated_gridded_source_is_returned_unchanged(self) -> None:
+        view = gridded_batch()["grid"]
+        assert view.allgather(None) is view
+
+    def test_single_rank_gridded_source_drops_its_shard_sizes(self) -> None:
+        view = gridded_batch()["grid"].clone(shard_sizes=[4])
+        gathered = view.allgather(None)
+        assert gathered.shard_sizes is None
+        assert gathered.data is view.data
+
+    def test_single_rank_gridded_source_must_hold_its_shard_size(self) -> None:
+        # Stale shard sizes, e.g. of another grid: the source holds 4 points, its sizes say 3.
+        view = gridded_batch()["grid"].clone(shard_sizes=[3])
+        with pytest.raises(ValueError, match="holds 4 grid points"):
+            view.allgather(None)
+
+    def test_gridded_shard_sizes_for_another_group_are_rejected(self) -> None:
+        # Split over two ranks but gathered over one: the source was split over another group.
+        view = gridded_batch()["grid"].clone(shard_sizes=[2, 2])
+        with pytest.raises(ValueError, match="shard_sizes has 2 entries"):
+            view.allgather(None)
+
+    def test_replicated_observations_are_returned_unchanged(self) -> None:
+        view = Batch.collate([{"obs": tabular_payload()}])["obs"]
+        assert view.allgather(None) is view
+
+    def test_single_rank_observations_drop_their_shard_sizes(self) -> None:
+        # One entry per time window, each sized for a single rank.
+        sample = replace(tabular_payload(), shard_sizes=[[2], [2]])
+        view = Batch.collate([{"obs": sample}])["obs"]
+        gathered = view.allgather(None)
+        assert gathered.shard_sizes is None
+        assert all(torch.equal(new, old) for new, old in zip(gathered.data, view.data, strict=True))
+
+    def test_single_rank_observations_must_hold_their_shard_sizes(self) -> None:
+        # The second window holds 2 observations, its sizes say 3.
+        sample = replace(tabular_payload(), shard_sizes=[[2], [3]])
+        view = Batch.collate([{"obs": sample}])["obs"]
+        with pytest.raises(ValueError, match=r"window 1\) holds 2 observations"):
+            view.allgather(None)
+
+    def test_observation_shard_sizes_for_another_group_are_rejected(self) -> None:
+        sample = replace(tabular_payload(), shard_sizes=[[1, 1], [1, 1]])
+        view = Batch.collate([{"obs": sample}])["obs"]
+        with pytest.raises(ValueError, match="shard_sizes has 2 entries"):
+            view.allgather(None)
+
+
 class TestBatchTransformations:
     def test_replace_swaps_one_source(self) -> None:
         batch = gridded_batch()

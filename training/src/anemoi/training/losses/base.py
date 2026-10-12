@@ -305,9 +305,8 @@ class BaseLoss(nn.Module, ABC):
 
         dims = tuple(f for f in (layout.batch, layout.time, layout.ensemble) if f is not None)
         out = torch.mean(space_time_reduced, dim=dims, keepdim=True) if dims else space_time_reduced
-        # Return a scalar or one loss per variable, preserving a single-variable vector.
-        if squash:
-            out = out.squeeze()
+        # Return a scalar, or one loss per variable whatever the layout (a single variable stays a vector).
+        out = out.squeeze() if squash else out.flatten()
 
         return out if group is None else reduce_tensor(out, group)
 

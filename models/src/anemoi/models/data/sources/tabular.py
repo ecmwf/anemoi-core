@@ -433,6 +433,15 @@ class TabularSource(Source):
                 )
 
         if not model_is_distributed(group):
+            # One rank holds every observation. Across several ranks, gather_tensor checks each piece.
+            for sample_idx, (boundaries, sample_shard_sizes) in enumerate(zip(self.boundaries, self.shard_sizes)):
+                for window_idx, (window, window_shard_sizes) in enumerate(zip(boundaries, sample_shard_sizes)):
+                    if window_shard_sizes is not None and window.stop - window.start != window_shard_sizes[0]:
+                        msg = (
+                            f"Tabular source view {self.name!r} (sample {sample_idx}, window {window_idx}) holds "
+                            f"{window.stop - window.start} observations, but its shard sizes say {window_shard_sizes[0]}."
+                        )
+                        raise ValueError(msg)
             return self.clone(shard_sizes=None)
 
         gathered_data = []

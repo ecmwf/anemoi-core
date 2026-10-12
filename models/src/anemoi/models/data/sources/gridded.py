@@ -291,6 +291,13 @@ class GriddedSource(Source):
         check_shard_sizes_match_group(self.shard_sizes, group, context=f"gridded source view {self.name!r}")
 
         if not model_is_distributed(group):
+            # One rank holds the whole grid. Across several ranks, gather_tensor checks each piece.
+            if self.data.shape[self.layout.grid] != self.shard_sizes[0]:
+                msg = (
+                    f"Gridded source view {self.name!r} holds {self.data.shape[self.layout.grid]} grid points, "
+                    f"but its shard sizes {self.shard_sizes} say {self.shard_sizes[0]}."
+                )
+                raise ValueError(msg)
             return self.clone(shard_sizes=None)
 
         gathered_coords = self.coordinates
