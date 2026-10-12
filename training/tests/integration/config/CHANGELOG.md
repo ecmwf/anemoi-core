@@ -7,6 +7,8 @@ Add a new entry at the top of the relevant section whenever a test or its refere
 
 Changes to the reference run (`reference_id` in `training/tests/integration/test_accuracy.py`)
 or to the accuracy test configuration (`accuracy_testing/`).
+A candidate reference can be checked first by dispatching the HPC integration workflow
+with `accuracy_reference_id` set to its run ID, before committing it.
 
 ### 2026-10-09 — torch 2.11 ([#1455](https://github.com/ecmwf/anemoi-core/pull/1455))
 - Reference run: `8b3bc3d3bd6947318cb825d777c9d750`

@@ -15,11 +15,27 @@ on:
           - test_benchmark
           - test_training_cycle
           - test_accuracy
+      accuracy_reference_id:
+        description: "MLflow run ID to compare test_accuracy against (empty: hard-coded reference)"
+        type: string
+        default: ""
   pull_request:
     types: [synchronize, labeled]
   merge_group:
 
 jobs:
+  # The dispatch input ends up in the HPC shell via pytest_cmd, so only allow a run ID.
+  validate-inputs:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          REFERENCE_ID: ${{ github.event.inputs.accuracy_reference_id }}
+        run: |
+          if [ -n "$REFERENCE_ID" ] && ! [[ "$REFERENCE_ID" =~ ^[0-9a-f]{32}$ ]]; then
+            echo "accuracy_reference_id must be empty or a 32 character hex MLflow run ID" >&2
+            exit 1
+          fi
+
   build-env:
     name: build-env
     runs-on: hpc
@@ -112,11 +128,11 @@ jobs:
     secrets: inherit
 
   test_accuracy:
-    needs: build-env
+    needs: [build-env, validate-inputs]
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.tests == 'all' || github.event.inputs.tests == 'test_accuracy' }}
     uses: ./.github/workflows/run-integration-test-hpc.yml
     with:
-      pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL
+      pytest_cmd: python3 -m pytest -v training/tests/integration/test_accuracy.py --slow --mlflow --mlflow-server=$MLFLOW_TEST_URL --accuracy-reference-id=${{ github.event.inputs.accuracy_reference_id }}
       timeout_minutes: 120
       sbatch_options: |
         #SBATCH --job-name=anemoi_core_pytest_accuracy
