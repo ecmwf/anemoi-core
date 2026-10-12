@@ -16,7 +16,6 @@ from omegaconf import DictConfig
 from torch.distributed.distributed_c10d import ProcessGroup
 
 from anemoi.models.data.batch import Batch
-from anemoi.models.data.sample import TabularSample
 from anemoi.models.data.sample import create_batched_struct
 from anemoi.models.data.sources import TabularSource
 from anemoi.models.preprocessing import Processors
