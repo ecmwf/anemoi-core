@@ -343,12 +343,14 @@ class MultiDataset(IterableDataset):
 
         Each value is the reader's :class:`~anemoi.models.data.BaseSample`, so that
         the dataloader's collate function can build a :class:`anemoi.models.data.Batch`.
+        Observation timedeltas are measured from the sample's reference time.
         """
         x: dict[str, BaseSample] = {}
         for name, data_reader in self.data_readers.items():
             sequence, position = (int(v) for v in self.anchors.rows[name][index])
             time_steps = offset_time_indices(position, self.relative_date_indices[name])
-            x[name] = data_reader.get_sample(sequence, time_steps)
+            sample = data_reader.get_sample(sequence, time_steps)
+            x[name] = data_reader.measure_from_reference(sample, position, time_steps)
 
         return x
 

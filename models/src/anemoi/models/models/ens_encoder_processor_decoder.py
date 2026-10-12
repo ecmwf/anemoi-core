@@ -23,7 +23,6 @@ from anemoi.models.data.batch import Batch
 from anemoi.models.data.sources import BaseTemplate
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.distributed.graph import shard_tensor
-from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.models import AnemoiModelEncProcDec
@@ -240,7 +239,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             batch_size=batch_ens_size,
             model_comm_group=model_comm_group,
         )
-        processor_edge_attr = processor_edge_attr.to(dtype=x_latent.dtype)
+        processor_edge_attr = processor_edge_attr.to(device=x_latent.device, dtype=x_latent.dtype)
+        processor_edge_index = processor_edge_index.to(x_latent.device)
 
         x_latent_proc = self.processor(
             x=x_latent_noised,
@@ -274,46 +274,18 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
                 )
             )
 
-            if target_coords.numel() == 0:
-                LOGGER.debug(
-                    "No data points for dataset %s in the batch (data_coords.shape = %s), "
-                    + "will decode to a size-zero tensor ...",
-                    dataset_name,
-                    list(target_coords.shape),
-                )
-
-            graph_batch_kwargs = (
-                {"src_batch_sizes": hidden_batch_sizes, "dst_batch_sizes": data_batch_sizes}
-                if data_batch_sizes is not None
-                else {}
-            )
-            decoder_edge_attr, decoder_edge_index, dec_edge_shard_sizes = self.decoder_graph_provider[
-                dataset_name
-            ].get_edges(
+            x_out = self._decode_rows(
+                dataset_name,
+                x_latent_proc,
+                (target_coords, target_data_latent, shard_sizes_data, data_batch_sizes, data_timedeltas),
                 batch_size=batch_ens_size,
-                src_coords=hidden_coordinates_batched if data_batch_sizes is not None else hidden_coordinates,
-                dst_coords=target_coords,
-                dst_timedeltas=data_timedeltas,
-                model_comm_group=model_comm_group,
-                **graph_batch_kwargs,
-            )
-            decoder_edge_attr = decoder_edge_attr.to(dtype=x_latent.dtype)
-
-            dec_shard_info = BipartiteGraphShardInfo(
-                src_nodes=shard_sizes_hidden,
-                dst_nodes=shard_sizes_data,  # None if not sharded
-                edges=dec_edge_shard_sizes,
-            )
-
-            decoder_name = self.dataset2decoder[dataset_name]
-            x_out = self.decoder[decoder_name](
-                (x_latent_proc, target_data_latent),
-                batch_size=batch_ens_size,
-                shard_info=dec_shard_info,
-                edge_attr=decoder_edge_attr,
-                edge_index=decoder_edge_index,
-                model_comm_group=model_comm_group,
+                hidden_coordinates=hidden_coordinates,
+                hidden_coordinates_batched=hidden_coordinates_batched,
+                hidden_batch_sizes=hidden_batch_sizes,
+                shard_sizes_hidden=shard_sizes_hidden,
+                edge_dtype=x_latent.dtype,
                 keep_x_dst_sharded=in_out_sharded[dataset_name],  # keep x_out sharded iff in_out_sharded
+                model_comm_group=model_comm_group,
             )
 
             x_out_dict[dataset_name] = self._assemble_output(

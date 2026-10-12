@@ -97,6 +97,8 @@ def test_sampling_template_supports_sparse_obs_shapes() -> None:
     model = AnemoiTransportModelEncProcDec.__new__(AnemoiTransportModelEncProcDec)
     torch.nn.Module.__init__(model)
     model.num_output_channels = {"obs": len(output_names)}
+    model.n_step_output = {"obs": 1}
+    model.target_datasets = ["obs"]
     model.data_indices = {
         "obs": SimpleNamespace(
             name_to_index={name: idx for idx, name in enumerate(output_names)},
@@ -105,9 +107,9 @@ def test_sampling_template_supports_sparse_obs_shapes() -> None:
     }
     model.statistics = {"obs": {}}
     model.is_dataset_static = {"obs": False}
-    target_template = _obs_batch([torch.zeros(2, 0), torch.zeros(5, 0)], variables=[])
+    obs = _obs_batch([torch.zeros(2, 0), torch.zeros(5, 0)], variables=[])
 
-    template = model._sampling_template(target_template)
+    template = model._sampling_template({"obs": obs["obs"].template()}, obs)
 
     assert template["obs"].is_tabular
     assert [tuple(sample.shape) for sample in template["obs"].data] == [(2, 4), (5, 4)]

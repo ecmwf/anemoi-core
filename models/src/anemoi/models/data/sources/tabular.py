@@ -84,7 +84,8 @@ class TabularSource(Source):
     coordinates : list[torch.Tensor]
         One ``(grid_i, 2)`` tensor of latitudes and longitudes in radians per sample.
     timedeltas : list[torch.Tensor]
-        One ``(grid_i,)`` tensor of per-point time offsets per sample.
+        One ``(grid_i,)`` tensor of per-point time offsets per sample, in seconds from the
+        forecast time of the current step (negative for history, positive for targets).
     boundaries : list[tuple[slice, ...]]
         The time windows of each sample, as slices along the grid axis.
     shard_sizes : list[list[ShardSizes]], optional
@@ -294,10 +295,27 @@ class TabularSource(Source):
         return [_sample_condition(sample, condition, index) for index, sample in enumerate(self.data)]
 
     def randn_like(self, model_comm_group: ProcessGroup | None = None) -> "TabularSource":
-        del model_comm_group  # each sample is drawn independently; windows are not grid-sharded
-        # torch.randn (not randn_like), as the gridded path draws through randn_with_grid_sharding.
+        """Gaussian noise shaped like this source, with distinct values on every rank of a sharded source.
+
+        Each rank draws the noise for all points of the model group and keeps its own rows, so ranks
+        that share a random seed do not repeat values and consume the same amount of randomness.
+        """
+        # Imported here: anemoi.models.transport imports this package.
+        from anemoi.models.transport.random_fields import randn_with_grid_sharding
+
+        shard_sizes = self.template().flatten().shard_sizes
         return self.clone(
-            data=[torch.randn(sample.shape, dtype=sample.dtype, device=sample.device) for sample in self.data],
+            data=[
+                randn_with_grid_sharding(
+                    tuple(sample.shape),
+                    device=sample.device,
+                    dtype=sample.dtype,
+                    model_comm_group=model_comm_group,
+                    grid_shard_sizes=shard_sizes,
+                    shard_dim=self.layout.axis("grid", ndim=sample.ndim),
+                )
+                for sample in self.data
+            ],
         )
 
     def pairwise(self, other: Source, func: Callable[..., torch.Tensor], *args, **kwargs) -> torch.Tensor:
@@ -654,7 +672,8 @@ class TabularTemplate(BaseTemplate):
     coordinates : list[torch.Tensor]
         One ``(grid_i, 2)`` tensor of latitudes and longitudes in radians per sample.
     timedeltas : list[torch.Tensor]
-        One ``(grid_i,)`` tensor of per-point time offsets per sample.
+        One ``(grid_i,)`` tensor of per-point time offsets per sample, in seconds from the
+        forecast time of the current step (negative for history, positive for targets).
     boundaries : list[tuple[slice, ...]]
         The time windows of each sample, as slices along the grid axis.
     shard_sizes : list[list[ShardSizes]], optional

@@ -189,7 +189,7 @@ class BaseTask(ABC):
 
         time_indices = normalize_time_indices(time_indices)
 
-        target_tensors = batch.select(time=time_indices)
+        target_tensors = self.measure_targets_from_step(batch.select(time=time_indices), **kwargs)
         for dataset_name, selected_source in target_tensors.items():
             LOGGER.debug("Selected targets: x[%s] = %s", dataset_name, selected_source)
 
@@ -199,6 +199,14 @@ class BaseTask(ABC):
         target_forcing = target_tensors.select(variables=var_indices)
 
         return target_tensors, self.get_target_template(target_tensors, data_indices), target_forcing
+
+    def measure_targets_from_step(self, targets: "Batch", **_kwargs) -> "Batch":
+        """Return ``targets`` with their point times measured from the step's own reference time.
+
+        Batches measure point times from the sample's reference time. Tasks whose steps move
+        that reference (e.g. rollout) shift the targets' times here.
+        """
+        return targets
 
     @staticmethod
     def get_target_template(

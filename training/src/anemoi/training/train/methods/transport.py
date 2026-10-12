@@ -178,42 +178,50 @@ class TendencyPredictionMode(PredictionMode):
             raise NotImplementedError(msg)
 
         raw_state_target, _, target_forcing = self.module.task.get_targets(batch, data_indices=self.module.data_indices)
-        # Tendency targets are fed through the network (as the corrupted target)
-        # and converted back to states for metrics, so they are imputed like the
-        # model inputs; prepare_metric_target re-inserts the missing values via
-        # the imputer inverse.
-        state_target = self.module.preprocess_inputs(raw_state_target)
-        y_data_output = self.module.get_data_output_target(state_target)
-
         # The latest input state, which turns states into tendencies and tendencies back into states.
         reference = self._tendency_model.reference_state(
             x,
             {name: self.module._grid_shard_sizes(view) for name, view in x.items()},
             self.module.model_comm_group,
         )
-        tendency_target_data_output = y_data_output.with_sources(
-            {
-                dataset_name: self._tendency_model.compute_tendency(
-                    dataset_name,
-                    state,
-                    reference[dataset_name],
-                    self._tendency_statistics[dataset_name],
-                    self.module.model.pre_processors[dataset_name],
-                    self.module.model.post_processors[dataset_name],
-                )
-                for dataset_name, state in y_data_output.items()
-            },
+
+        def tendencies(states: Batch) -> Batch:
+            data_output = self.module.get_data_output_target(states)
+            return data_output.with_sources(
+                {
+                    dataset_name: self._tendency_model.compute_tendency(
+                        dataset_name,
+                        state,
+                        reference[dataset_name],
+                        self._tendency_statistics[dataset_name],
+                        self.module.model.pre_processors[dataset_name],
+                        self.module.model.post_processors[dataset_name],
+                    )
+                    for dataset_name, state in data_output.items()
+                },
+            )
+
+        # The tendency fed through the network (as the corrupted target) is built from states
+        # imputed like the model inputs, since NaNs would spread through message passing. The
+        # loss and metric targets keep their NaNs, so the loss (with ignore_nans) and the
+        # validation metrics skip missing values instead of fitting imputed ones.
+        state_target_full = self.module.preprocess_targets(raw_state_target)
+        tendency_target = self.module.reduce_data_output_target_to_model_output(
+            tendencies(self.module.preprocess_inputs(raw_state_target)),
         )
-        tendency_target = self.module.reduce_data_output_target_to_model_output(tendency_target_data_output)
+        tendency_target_full = tendencies(state_target_full)
         # The tendency path is dense-only (rejected above), so the reference source works on payload tensors.
         x_data = {name: source.data for name, source in x.items()}
         return PreparedPredictionTarget(
             model_target=tendency_target,
-            loss_target=tendency_target_data_output,
+            loss_target=tendency_target_full,
             loss_target_layout=IndexSpace.DATA_OUTPUT,
-            metric_target=state_target,
+            metric_target=state_target_full,
             aux={
                 "reference": reference,
+                # NaN-keeping counterpart of model_target, used by objectives that derive their
+                # loss target from model_target (e.g. the SI drift) to re-mask missing values.
+                "model_target_missing": self.module.reduce_data_output_target_to_model_output(tendency_target_full),
                 # Build a reference-state source only if source.kind asks for it;
                 # Gaussian and zero sources do not need this projection.
                 "transport_reference_source": lambda: reference_state_sampling_source(
@@ -232,35 +240,19 @@ class TendencyPredictionMode(PredictionMode):
         prepared: PreparedPredictionTarget,
     ) -> Batch:
         """Convert predicted (normalised) tendencies into normalised states."""
-        states = {}
-        for dataset_name, tendency in prediction.items():
-            state = self._tendency_model.add_tendency_to_state(
-                dataset_name,
-                prepared.aux["reference"][dataset_name],
-                tendency,
-                self._tendency_statistics[dataset_name],
-                self.module.model.post_processors[dataset_name],
-                pre_processors=self.module.model.pre_processors[dataset_name],
-            )
-            states[dataset_name] = state.clone(
-                data=self._tendency_model._apply_imputer_inverse(
-                    self.module.model.post_processors,
+        return prediction.with_sources(
+            {
+                dataset_name: self._tendency_model.add_tendency_to_state(
                     dataset_name,
-                    state.data,
-                ),
-            )
-        return prediction.with_sources(states)
-
-    def prepare_metric_target(self, prepared: PreparedPredictionTarget) -> Batch:
-        metric_data = {
-            dataset_name: self.module.model.model._apply_imputer_inverse(
-                self.module.model.post_processors,
-                dataset_name,
-                target.data,
-            )
-            for dataset_name, target in prepared.metric_target.items()
-        }
-        return prepared.metric_target.with_data(metric_data)
+                    prepared.aux["reference"][dataset_name],
+                    tendency,
+                    self._tendency_statistics[dataset_name],
+                    self.module.model.post_processors[dataset_name],
+                    pre_processors=self.module.model.pre_processors[dataset_name],
+                )
+                for dataset_name, tendency in prediction.items()
+            },
+        )
 
 
 PREDICTION_MODE_CLASSES = {
@@ -476,18 +468,16 @@ class TransportTraining(BaseTransportTraining):
         assert isinstance(batch, Batch), "batch must be a Batch instance"
         task_kwargs = {} if task_kwargs is None else task_kwargs
         x = self.task.get_inputs(batch, data_indices=self.data_indices)
-        _, _, target_template = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
-        # The transport sampler still sizes its noise from a data Batch, so the target forcings serve
-        # as its template for now. The template carries the output-time decoding forcings in the same
-        # normalization state as the caller-provided batch (matching x).
+        _, target_template, target_forcing = self.task.get_targets(batch, data_indices=self.data_indices, **task_kwargs)
+        # The output-time forcings condition the decoder in the same normalization state as the
+        # caller-provided batch (matching x).
         return self.model.model.sample(
             x,
             target_template=target_template,
             model_comm_group=self.model_comm_group,
-            grid_shard_sizes={name: self._grid_shard_sizes(view) for name, view in x.items()},
             schedule_params=schedule_params,
             sampler_params=sampler_params,
-            target_forcing=target_template,
+            target_forcing=target_forcing,
             **kwargs,
         )
 

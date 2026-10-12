@@ -907,8 +907,7 @@ def partial_metadata_schema() -> dict[str, Any]:
             "dataset_names": list,  # list of datasets
             "task": None,
             "__datasets__": {  # schema applied to each dataset entry
-                "is_static_grid": None,
-                "is_tabular": None,
+                "data_type": None,
                 "grid_size": None,
                 "timesteps": {
                     "relative_date_indices_training": None,

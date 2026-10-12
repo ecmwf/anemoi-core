@@ -253,9 +253,9 @@ def test_shard_tensor_errors() -> None:
 
     with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
         shard_tensor(x, dim=2, sizes=[2, 2], mgroup=group)
-    with pytest.raises(TypeError, match="list or tuple of integers"):
+    with pytest.raises(ValueError, match="shard_sizes=None means 'replicated"):
         shard_tensor(x, dim=0, sizes=None, mgroup=group)
-    with pytest.raises(ValueError, match="one entry per process"):
+    with pytest.raises(ValueError, match="Shard/process-group mismatch"):
         shard_tensor(x, dim=0, sizes=[4], mgroup=group)
     with pytest.raises(TypeError, match="only integers"):
         shard_tensor(x, dim=0, sizes=[4, 0.0], mgroup=group)
@@ -511,9 +511,9 @@ def test_gather_tensor_errors() -> None:
 
     with pytest.raises(IndexError, match=r"Dimension out of range.*got 2"):
         gather_tensor(x, dim=2, sizes=[4, 0], mgroup=group)
-    with pytest.raises(TypeError, match="list or tuple of integers"):
+    with pytest.raises(ValueError, match="shard_sizes=None means 'replicated"):
         gather_tensor(x, dim=0, sizes=None, mgroup=group)
-    with pytest.raises(ValueError, match="one entry per process"):
+    with pytest.raises(ValueError, match="Shard/process-group mismatch"):
         gather_tensor(x, dim=0, sizes=[4], mgroup=group)
     with pytest.raises(TypeError, match="only integers"):
         gather_tensor(x, dim=0, sizes=[4, True], mgroup=group)
@@ -734,7 +734,7 @@ def test_sync_tensor_errors() -> None:
         sync_tensor(x, dim=2, sizes=[4, 0], mgroup=group)
     with pytest.raises(TypeError, match="list or tuple of integers"):
         sync_tensor(x, dim=0, sizes=4, mgroup=group)
-    with pytest.raises(ValueError, match="one entry per process"):
+    with pytest.raises(ValueError, match="Shard/process-group mismatch"):
         sync_tensor(x, dim=0, sizes=[4], mgroup=group)
     with pytest.raises(TypeError, match="only integers"):
         sync_tensor(x, dim=0, sizes=[4, 0.0], mgroup=group)

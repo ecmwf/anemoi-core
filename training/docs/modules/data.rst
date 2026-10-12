@@ -31,7 +31,10 @@ Tabular Data Reader
 The ``TabularDataReader`` class reads tabular (observation) datasets,
 selected when the dataset configuration has a ``window`` and a
 ``frequency``. Each sample holds the observations of its time windows,
-with per-observation coordinates and timedeltas.
+with per-observation coordinates and timedeltas. The timedeltas are in
+seconds from the sample's reference time, so observations in earlier
+windows have more negative values; during rollout they are measured from
+the forecast time of the current step.
 
 Trajectory Data Reader
 ----------------------
