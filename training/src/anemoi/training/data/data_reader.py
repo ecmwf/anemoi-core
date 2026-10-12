@@ -1010,8 +1010,25 @@ class SyntheticDataset(BaseAnemoiReader):
             if param in ("tp", "cp"):
                 variables_metadata[name].update({"process": "accumulation", "period": ["0h", frequency_to_string(self._frequency)]})
 
+        # Like the data_request of a MARS dataset: anemoi-inference reads the grid from it (e.g. for GRIB output).
+        pressure_levels = [list(self._split_name(n)) for n in self._variables if self._split_name(n)[1] is not None]
+        surface = [n for n in self._variables if self._split_name(n)[1] is None and n not in _SYNTHETIC_FORCINGS]
+        step = int(self._frequency.total_seconds() // 3600)
+        data_request = {
+            "grid": self.resolution,
+            "area": [
+                round(float(self.latitudes.max()), 3),
+                round(float(self.longitudes.min()), 3),
+                round(float(self.latitudes.min()), 3),
+                round(float(self.longitudes.max()), 3),
+            ],
+            "param_level": {"pl": pressure_levels, "sfc": surface},
+            "param_step": {"sfc": [[n, step] for n in surface if n in ("tp", "cp")]},
+        }
+
         return {
             "version": "synthetic",
+            "data_request": data_request,
             "name": f"synthetic-{self.grid}",
             "arguments": {"synthetic": self.grid, "seed": self.seed, "ensemble": self.ensemble},
             "frequency": frequency_to_string(self._frequency),
