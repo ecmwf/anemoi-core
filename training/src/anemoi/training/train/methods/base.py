@@ -105,8 +105,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         Statistics related to tendencies (if used).
     data_indices : dict[str, IndexCollection]
         Maps feature names to index ranges used for training and loss functions.
-    data_readers : dict
-        Dataset readers used to construct the model interface.
+    data_types : dict[str, str]
+        Kind of data of each dataset (``"gridded"``, ``"tabular"``), passed to the model interface.
     metadata : dict
         Dictionary with metadata such as dataset provenance and variable descriptions.
     supporting_arrays : dict
@@ -162,7 +162,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         statistics: dict[str, dict],
         statistics_tendencies: dict[str, dict],
         data_indices: dict[str, IndexCollection],
-        data_readers: dict,
+        data_types: dict[str, str],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -180,8 +180,8 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             Statistics of data tendencies.
         data_indices : dict[str, IndexCollection]
             Indices of the training data.
-        data_readers : dict
-            Dataset readers used to construct the model interface.
+        data_types : dict[str, str]
+            Kind of data of each dataset (``"gridded"``, ``"tabular"``).
         metadata : dict
             Provenance information
         supporting_arrays : dict
@@ -205,7 +205,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            data_readers=data_readers,
+            data_types=data_types,
             metadata=metadata,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
@@ -226,11 +226,10 @@ class BaseTrainingModule(pl.LightningModule, ABC):
 
         self.data_indices = data_indices
 
-        # `task` and `data_readers` hold runtime objects (e.g. anemoi-datasets
-        # readers wrapping `lru.LRU` caches) that cannot be deepcopied by
-        # Lightning's `save_hyperparameters` and are not meaningful to persist
-        # in the checkpoint hyperparameters anyway.
-        self.save_hyperparameters(ignore=["task", "data_readers"])
+        # `task` holds runtime objects that cannot be deepcopied by Lightning's
+        # `save_hyperparameters` and are not meaningful to persist in the
+        # checkpoint hyperparameters anyway.
+        self.save_hyperparameters(ignore=["task"])
 
         self.statistics_tendencies = statistics_tendencies
 
@@ -1451,7 +1450,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
                 )
                 raise ValueError(msg)
 
-            if reader.grid_size != projector.input_grid_size:
+            if reader.data_type == "gridded" and reader.grid_size != projector.input_grid_size:
                 msg = (
                     f"Spatial processor for dataset {dataset_name!r} expects a source grid of "
                     f"{projector.input_grid_size} points, but the dataset provides {reader.grid_size}. "

@@ -22,7 +22,7 @@ from torch.utils.data import IterableDataset
 
 from anemoi.models.data import BaseSample
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_range
-from anemoi.training.data.data_reader import BaseAnemoiReader
+from anemoi.training.data.readers import DataReader
 from anemoi.training.data.usable_indices import compute_valid_anchors
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
@@ -39,7 +39,7 @@ class MultiDataset(IterableDataset):
 
     def __init__(
         self,
-        data_readers: dict[str, BaseAnemoiReader],
+        data_readers: dict[str, DataReader],
         relative_date_indices: dict[str, TimeIndices],
         shuffle: bool = True,
         label: str = "multi",
@@ -51,7 +51,7 @@ class MultiDataset(IterableDataset):
 
         Parameters
         ----------
-        data_readers : dict[str, BaseAnemoiReader]
+        data_readers : dict[str, DataReader]
             Dictionary mapping dataset names to their data_readers
             Format: {"dataset_a": data_reader_a, "dataset_b": data_reader_b, ...}
         relative_date_indices : dict[str, TimeIndices]
@@ -84,7 +84,7 @@ class MultiDataset(IterableDataset):
         self._lazy_init_model_and_reader_group_info()
 
     @staticmethod
-    def _sampling_stride(data_readers: dict[str, BaseAnemoiReader]) -> int | None:
+    def _sampling_stride(data_readers: dict[str, DataReader]) -> int | None:
         """Return the anchor stride the readers agree on; stride 1 when none is configured."""
         configured = {name: reader.sampling.get("stride") for name, reader in data_readers.items() if reader.sampling}
         strides = set(configured.values())
@@ -163,11 +163,6 @@ class MultiDataset(IterableDataset):
     def variables(self) -> dict[str, list[str]]:
         """Return combined variables from all data readers."""
         return self._collect("variables")
-
-    @property
-    def data(self) -> dict:
-        """Return data from all data readers as dictionary."""
-        return self._collect("data")
 
     @cached_property
     def name_to_index(self) -> dict[str, dict]:
@@ -395,7 +390,7 @@ class MultiDataset(IterableDataset):
 
     def tree(self) -> Tree:
         tree = Tree(f"{self.__class__.__name__}")
-        for name, dataset in self.data_readers.items():
-            subtree = dataset.tree(prefix=name)
+        for name, reader in self.data_readers.items():
+            subtree = reader.tree(prefix=name)
             tree.add(subtree)
         return tree

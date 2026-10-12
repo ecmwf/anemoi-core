@@ -10,8 +10,8 @@
 import numpy as np
 from pytest_mock import MockFixture
 
-from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import GriddedDataReader
 from anemoi.training.data.usable_indices import ReaderAnchors
 
 
@@ -25,7 +25,6 @@ def test_multidataset_normalizes_relative_time_indices_to_slices(mocker: MockFix
         positions,
     )
     reader.sampling = None
-    reader.compute_anchors.return_value = np.column_stack([np.zeros(17, dtype=np.int64), np.arange(17)])
 
     ds = MultiDataset(
         data_readers={"a": reader, "b": reader},
@@ -53,14 +52,14 @@ def test_gridded_reader_passes_time_indices_through_to_dataset() -> None:
 
     full = (slice(None), slice(None), slice(None))
 
-    reader.get_data(0, 0, [4, 5, 7])
-    assert reader.data.last_index == (([4, 5, 7], *full), slice(None), slice(None), slice(None))
+    reader.get_data(0, [4, 5, 7])
+    assert reader.data.last_index == ([4, 5, 7], *full)
 
-    reader.get_data(0, 0, slice(4, 7, 1))
-    assert reader.data.last_index == ((slice(4, 7, 1), *full), slice(None), slice(None), slice(None))
+    reader.get_data(0, slice(4, 7, 1))
+    assert reader.data.last_index == (slice(4, 7, 1), *full)
 
     reader.grid_shard_slice = slice(0, 2)
-    x = reader.get_data(0, 0, slice(4, 7, 1))
+    x = reader.get_data(0, slice(4, 7, 1))
     assert reader.data.last_index == (slice(4, 7, 1), slice(None), slice(None), slice(0, 2))
     # (dates, variables, ensemble, grid) -> (dates, ensemble, grid, variables)
     assert tuple(x.shape) == (3, 4, 5, 2)

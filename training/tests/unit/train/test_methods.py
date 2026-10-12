@@ -446,7 +446,9 @@ def _spatial_grid_module(input_grid_size: int, reader_grid_sizes: dict[str, int]
     if reader_grid_sizes is None:
         module._trainer = SimpleNamespace(datamodule=None)
     else:
-        readers = {name: SimpleNamespace(grid_size=size) for name, size in reader_grid_sizes.items()}
+        readers = {
+            name: SimpleNamespace(data_type="gridded", grid_size=size) for name, size in reader_grid_sizes.items()
+        }
         module._trainer = SimpleNamespace(
             datamodule=SimpleNamespace(ds_train=SimpleNamespace(data_readers=readers)),
         )

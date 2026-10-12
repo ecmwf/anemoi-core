@@ -159,7 +159,7 @@ class BaseGraphModel(nn.Module):
         model_graph_config: DotDict,
         data_indices: dict[str, IndexCollection],
         statistics: dict[str, dict],
-        is_dataset_static: dict[str, bool],
+        data_types: dict[str, str],
         n_step_input: dict[str, int],
         n_step_output: dict[str, int],
     ) -> None:
@@ -175,6 +175,8 @@ class BaseGraphModel(nn.Module):
             Data statistics
         model_graph_config : DotDict
             Graph configuration
+        data_types : dict[str, str]
+            Data types for each dataset. Data types are "tabular" or "gridded".
         n_step_input : dict[str, int]
             Number of input time steps (windows, for tabular datasets) for each dataset. Gridded datasets embed
             all of them per node; tabular datasets stack their windows on the node axis, so each node carries one
@@ -188,10 +190,11 @@ class BaseGraphModel(nn.Module):
         model_config = DotDict(model_config)
         model_graph_config = DotDict(model_graph_config)
         self._graph_name_hidden = model_config.model.hidden_nodes_name
+        self.is_dataset_static = {name: data_type == "gridded" for name, data_type in data_types.items()}
 
         if model_graph_config.get("nodes"):
             static_graph_config, dynamic_graph_config = split_graph_config(
-                model_graph_config, is_dataset_static, self._graph_name_hidden
+                model_graph_config, self.is_dataset_static, self._graph_name_hidden
             )
             self._graph_data = GraphCreator(static_graph_config).create()
         else:
@@ -199,7 +202,7 @@ class BaseGraphModel(nn.Module):
             # interface passes ``system.input.graph`` as the graph config's ``path``.
             self._graph_data, dynamic_graph_config = load_existing_graph(
                 model_graph_config.get("path"),
-                is_dataset_static,
+                self.is_dataset_static,
                 self._graph_name_hidden,
             )
         self.data_indices = data_indices
@@ -208,7 +211,6 @@ class BaseGraphModel(nn.Module):
         self.n_step_output = n_step_output
 
         self.dataset_names = list(data_indices.keys())
-        self.is_dataset_static = is_dataset_static
         self._graph_name_hidden = model_config.model.hidden_nodes_name
 
         self.latent_skip = model_config.model.latent_skip

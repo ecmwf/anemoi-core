@@ -46,7 +46,7 @@ class EnsembleTraining(BaseTrainingModule):
         statistics: dict,
         statistics_tendencies: dict,
         data_indices: dict,
-        data_readers: dict,
+        data_types: dict[str, str],
         metadata: dict,
         supporting_arrays: dict,
     ) -> None:
@@ -62,8 +62,8 @@ class EnsembleTraining(BaseTrainingModule):
             Statistics of the training data
         data_indices : dict
             Indices of the training data,
-        data_readers : dict
-            Per-dataset readers; the model interface derives ``is_dataset_static`` from them.
+        data_types : dict[str, str]
+            Kind of data of each dataset (``"gridded"``, ``"tabular"``).
         metadata : dict
             Provenance information
         """
@@ -73,7 +73,7 @@ class EnsembleTraining(BaseTrainingModule):
             statistics=statistics,
             statistics_tendencies=statistics_tendencies,
             data_indices=data_indices,
-            data_readers=data_readers,
+            data_types=data_types,
             metadata=metadata,
             supporting_arrays=supporting_arrays,
         )

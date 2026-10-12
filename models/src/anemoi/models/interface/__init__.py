@@ -49,6 +49,8 @@ class AnemoiModelInterface(torch.nn.Module):
         Numpy arraysto store in the checkpoint.
     data_indices : dict
         Indices for the data.
+    data_types : dict[str, str]
+        Kind of data of each dataset, as registered in the sample registry (``"gridded"``, ``"tabular"``).
     pre_processors : Processors
         Pre-processing steps to apply to the data before passing it to the model.
     post_processors : Processors
@@ -66,7 +68,7 @@ class AnemoiModelInterface(torch.nn.Module):
         statistics: dict,
         data_indices: dict,
         metadata: dict,
-        data_readers: dict,
+        data_types: dict[str, str],
         statistics_tendencies: dict | None = None,
         supporting_arrays: dict | None = None,
     ) -> None:
@@ -80,8 +82,7 @@ class AnemoiModelInterface(torch.nn.Module):
         self.metadata = metadata
         self.supporting_arrays = supporting_arrays if supporting_arrays is not None else {}
         self.data_indices = data_indices
-
-        self.is_dataset_static = {name: not reader.is_tabular for name, reader in data_readers.items()}
+        self.data_types = data_types
 
         self._build_model()
         self._update_metadata()
@@ -137,7 +138,7 @@ class AnemoiModelInterface(torch.nn.Module):
             model_graph_config=graph_config,
             data_indices=self.data_indices,
             statistics=self.statistics,
-            is_dataset_static=self.is_dataset_static,
+            data_types=self.data_types,
             n_step_input=self.n_step_input,
             n_step_output=self.n_step_output,
             _recursive_=False,  # Disables recursive instantiation by Hydra

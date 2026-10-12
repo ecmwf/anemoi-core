@@ -20,8 +20,8 @@ import torch
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
 from anemoi.models.data.sample import GriddedSample
-from anemoi.training.data.data_reader import GriddedDataReader
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import GriddedDataReader
 from anemoi.training.data.usable_indices import ReaderAnchors
 
 if TYPE_CHECKING:
@@ -76,26 +76,27 @@ def test_sharded_reader_sample_keeps_full_grid_size(mocker: MockFixture) -> None
     np.testing.assert_allclose(sample.coordinates[:, 0].numpy(), np.deg2rad(reader.latitudes[4:8]), rtol=1e-6)
 
 
-def test_reader_get_coordinates_full_grid(mocker: MockFixture) -> None:
+def test_reader_get_latlons_full_grid(mocker: MockFixture) -> None:
     reader = _make_reader(grid=5, mocker=mocker)
-    coords = reader.get_coordinates()
-    assert coords.shape == (5, 2)
-    assert coords.dtype == torch.float32
-    np.testing.assert_allclose(coords[:, 0].numpy(), reader.latitudes)
-    np.testing.assert_allclose(coords[:, 1].numpy(), reader.longitudes)
+    latitudes, longitudes = reader.get_latlons()
+    assert latitudes.shape == longitudes.shape == (5,)
+    assert latitudes.dtype == longitudes.dtype == torch.float32
+    np.testing.assert_allclose(latitudes.numpy(), reader.latitudes)
+    np.testing.assert_allclose(longitudes.numpy(), reader.longitudes)
 
 
-def test_reader_get_coordinates_with_grid_shard(mocker: MockFixture) -> None:
+def test_reader_get_latlons_with_grid_shard(mocker: MockFixture) -> None:
     reader = _make_reader(grid=8, mocker=mocker)
     reader.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
-    coords = reader.get_coordinates()
-    assert coords.shape == (4, 2)
-    np.testing.assert_allclose(coords[:, 0].numpy(), reader.latitudes[4:8])
+    latitudes, longitudes = reader.get_latlons()
+    assert latitudes.shape == longitudes.shape == (4,)
+    np.testing.assert_allclose(latitudes.numpy(), reader.latitudes[4:8])
+    np.testing.assert_allclose(longitudes.numpy(), reader.longitudes[4:8])
 
 
-def test_gridded_reader_is_not_tabular(mocker: MockFixture) -> None:
+def test_gridded_reader_data_type(mocker: MockFixture) -> None:
     reader = _make_reader(grid=3, mocker=mocker)
-    assert reader.is_tabular is False
+    assert reader.data_type == "gridded"
 
 
 # -------------------------------------------------------- MultiDataset coords
@@ -103,8 +104,6 @@ def test_gridded_reader_is_not_tabular(mocker: MockFixture) -> None:
 
 def _make_mock_reader(mocker: MockFixture, grid: int) -> MockFixture:
     reader = mocker.MagicMock()
-    # (sequence, position) anchors of a 20-date series sampled with relative indices [0, 1]
-    reader.compute_anchors.return_value = np.column_stack([np.zeros(19, dtype=np.int64), np.arange(19)])
     positions = np.arange(19, dtype=np.int64)  # 20 dates, window of 2
     reader.valid_anchors.return_value = ReaderAnchors(
         positions.astype("datetime64[s]"),

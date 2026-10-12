@@ -15,8 +15,8 @@ import torch
 from pydantic import ValidationError
 
 from anemoi.models.data.sample import GriddedSample
-from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.readers import GriddedDataReader
+from anemoi.training.data.readers import create_reader
 from anemoi.training.schemas.dataloader import NativeDatasetSchema
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
@@ -43,7 +43,7 @@ class TestGriddedDataReader:
         end: datetime.datetime,
     ) -> None:
         """Test basic instantiation of GriddedDataReader."""
-        dataset = GriddedDataReader(dataset=dataset_path, start=start, end=end)
+        dataset = GriddedDataReader(dataset_config=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
         assert dataset.dates is not None
@@ -65,7 +65,7 @@ class TestGriddedDataReader:
         if drop is not None:
             dataset_cfg["drop"] = drop
 
-        dataset = GriddedDataReader(dataset=dataset_cfg)
+        dataset = GriddedDataReader(dataset_config=dataset_cfg)
 
         assert dataset.data is not None
         assert dataset.dates is not None
@@ -75,7 +75,7 @@ class TestGriddedDataReader:
     @skip_if_offline
     def test_instantiation_with_time_range(self, dataset_path: str) -> None:
         """Test GriddedDataReader with start and end dates."""
-        original = GriddedDataReader(dataset=dataset_path)
+        original = GriddedDataReader(dataset_config=dataset_path)
         dates = original.dates
 
         if len(dates) < 10:
@@ -84,7 +84,7 @@ class TestGriddedDataReader:
         start = dates[2]
         end = dates[-3]
 
-        dataset = GriddedDataReader(dataset=dataset_path, start=start, end=end)
+        dataset = GriddedDataReader(dataset_config=dataset_path, start=start, end=end)
 
         assert dataset.data is not None
         assert dataset.dates[0] >= start
@@ -94,14 +94,14 @@ class TestGriddedDataReader:
     def test_instantiation_with_drop(self, dataset_path: str) -> None:
         """Test GriddedDataReader with dropped variables."""
         # Get original variables to know what to drop
-        original = GriddedDataReader(dataset=dataset_path)
+        original = GriddedDataReader(dataset_config=dataset_path)
         original_vars = original.variables.copy()
 
         if len(original_vars) < 2:
             pytest.skip("Dataset needs at least 2 variables for drop test")
 
         drop_vars = [original_vars[0]]
-        dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": drop_vars})
+        dataset = GriddedDataReader(dataset_config={"dataset": dataset_path, "drop": drop_vars})
 
         assert dataset.data is not None
         assert drop_vars[0] not in dataset.variables
@@ -111,7 +111,7 @@ class TestGriddedDataReader:
     @skip_if_offline
     def test_dataset_properties(self, dataset_path: str) -> None:
         """Test that dataset properties are correctly accessible."""
-        dataset = GriddedDataReader(dataset=dataset_path)
+        dataset = GriddedDataReader(dataset_config=dataset_path)
 
         assert isinstance(dataset.dates, np.ndarray)
         assert len(dataset.dates) > 0
@@ -126,7 +126,7 @@ class TestGriddedDataReader:
     @skip_if_offline
     def test_get_sample_with_time_slice(self, dataset_path: str) -> None:
         """Test get_sample with a time slice on the full grid."""
-        dataset = GriddedDataReader(dataset=dataset_path)
+        dataset = GriddedDataReader(dataset_config=dataset_path)
 
         sample = dataset.get_sample(0, slice(0, 3))
 
@@ -142,7 +142,7 @@ class TestGriddedDataReader:
     @skip_if_offline
     def test_get_sample_with_time_index_list(self, dataset_path: str) -> None:
         """Test get_sample with irregular time indices (e.g. offset-forecaster inputs)."""
-        dataset = GriddedDataReader(dataset=dataset_path)
+        dataset = GriddedDataReader(dataset_config=dataset_path)
 
         sample = dataset.get_sample(0, [0, 2, 5])
 
@@ -154,7 +154,7 @@ class TestGriddedDataReader:
     @skip_if_offline
     def test_get_sample_with_grid_shard(self, dataset_path: str) -> None:
         """Test get_sample returns this reader's grid shard once reader-group info is set."""
-        dataset = GriddedDataReader(dataset=dataset_path)
+        dataset = GriddedDataReader(dataset_config=dataset_path)
         full = dataset.get_sample(0, slice(0, 3))
 
         dataset.set_reader_group_info(reader_group_rank=1, reader_group_size=2)
@@ -169,7 +169,7 @@ class TestGriddedDataReader:
 
 @skip_if_offline
 def test_gridded_data_reader_accepts_dataset_dictionary(dataset_path: str) -> None:
-    original = GriddedDataReader(dataset=dataset_path)
+    original = GriddedDataReader(dataset_config=dataset_path)
     if not original.variables:
         pytest.skip("Dataset has no variables to test drop.")
 
@@ -179,7 +179,7 @@ def test_gridded_data_reader_accepts_dataset_dictionary(dataset_path: str) -> No
         "frequency": "6h",
         "drop": [drop_var],
     }
-    dataset = GriddedDataReader(dataset=dataset_cfg, start=None, end=None)
+    dataset = GriddedDataReader(dataset_config=dataset_cfg, start=None, end=None)
 
     assert dataset.data is not None
     assert dataset.dates is not None
@@ -188,7 +188,7 @@ def test_gridded_data_reader_accepts_dataset_dictionary(dataset_path: str) -> No
 
 
 @skip_if_offline
-def test_create_dataset_accepts_nested_dataset_dictionary(dataset_path: str) -> None:
+def test_create_reader_accepts_nested_dataset_dictionary(dataset_path: str) -> None:
     dataset_reader_cfg = {
         "dataset_config": {
             "dataset": dataset_path,
@@ -199,14 +199,14 @@ def test_create_dataset_accepts_nested_dataset_dictionary(dataset_path: str) -> 
         "end": None,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert dataset.data is not None
 
 
 @skip_if_offline
-def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str) -> None:
-    original = GriddedDataReader(dataset=dataset_path)
+def test_create_reader_does_not_clip_when_start_end_are_none(dataset_path: str) -> None:
+    original = GriddedDataReader(dataset_config=dataset_path)
 
     dataset_reader_cfg = {
         "dataset_config": {
@@ -218,7 +218,7 @@ def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str)
         "end": None,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert dataset.dates[0] == original.dates[0]
     assert dataset.dates[-1] == original.dates[-1]
@@ -226,7 +226,7 @@ def test_create_dataset_does_not_clip_when_start_end_are_none(dataset_path: str)
 
 @skip_if_offline
 def test_gridded_data_reader_select_and_drop_filters_variables(dataset_path: str) -> None:
-    base = GriddedDataReader(dataset=dataset_path)
+    base = GriddedDataReader(dataset_config=dataset_path)
     variables = set(base.variables)
 
     required_for_test = {"2t", "msl", "10u"}
@@ -234,11 +234,11 @@ def test_gridded_data_reader_select_and_drop_filters_variables(dataset_path: str
         pytest.skip("Fixture dataset does not contain expected variables for select/drop test.")
 
     selected = ["2t", "msl", "10u"]
-    selected_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "select": selected})
+    selected_dataset = GriddedDataReader(dataset_config={"dataset": dataset_path, "select": selected})
     assert set(selected_dataset.variables) == set(selected)
 
     dropped = ["2t", "msl"]
-    dropped_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": dropped})
+    dropped_dataset = GriddedDataReader(dataset_config={"dataset": dataset_path, "drop": dropped})
     assert "2t" not in dropped_dataset.variables
     assert "msl" not in dropped_dataset.variables
     assert "10u" in dropped_dataset.variables
@@ -246,7 +246,7 @@ def test_gridded_data_reader_select_and_drop_filters_variables(dataset_path: str
 
 @skip_if_offline
 def test_gridded_data_reader_select_and_drop_atmospheric_variables(dataset_path: str) -> None:
-    base = GriddedDataReader(dataset=dataset_path)
+    base = GriddedDataReader(dataset_config=dataset_path)
     variables = set(base.variables)
 
     required_for_test = {"z_500", "t_100", "u_700"}
@@ -254,18 +254,18 @@ def test_gridded_data_reader_select_and_drop_atmospheric_variables(dataset_path:
         pytest.skip("Fixture dataset does not contain expected atmospheric variables for select/drop test.")
 
     selected = ["z_500", "t_100", "u_700"]
-    selected_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "select": selected})
+    selected_dataset = GriddedDataReader(dataset_config={"dataset": dataset_path, "select": selected})
     assert set(selected_dataset.variables) == set(selected)
 
     dropped = ["z_500", "t_100"]
-    dropped_dataset = GriddedDataReader(dataset={"dataset": dataset_path, "drop": dropped})
+    dropped_dataset = GriddedDataReader(dataset_config={"dataset": dataset_path, "drop": dropped})
     assert "z_500" not in dropped_dataset.variables
     assert "t_100" not in dropped_dataset.variables
     assert "u_700" in dropped_dataset.variables
 
 
 @skip_if_offline
-def test_create_dataset_supports_join_pattern(dataset_path: str) -> None:
+def test_create_reader_supports_join_pattern(dataset_path: str) -> None:
     dataset_reader_cfg = {
         "dataset_config": {
             "dataset": {
@@ -281,14 +281,14 @@ def test_create_dataset_supports_join_pattern(dataset_path: str) -> None:
         "end": None,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert dataset.data is not None
     assert len(dataset.dates) > 0
 
 
 @skip_if_offline
-def test_create_dataset_join_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+def test_create_reader_join_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
     outer_start = "2017-01-03T00:00:00"
     outer_end = "2017-01-08T18:00:00"
 
@@ -315,7 +315,7 @@ def test_create_dataset_join_with_inner_windows_and_outer_clipping(dataset_path:
         "end": outer_end,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert dataset.data is not None
     assert len(dataset.dates) > 0
@@ -324,7 +324,7 @@ def test_create_dataset_join_with_inner_windows_and_outer_clipping(dataset_path:
 
 
 @skip_if_offline
-def test_create_dataset_concat_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
+def test_create_reader_concat_with_inner_windows_and_outer_clipping(dataset_path: str) -> None:
     outer_start = "2017-01-03T00:00:00"
     outer_end = "2017-01-08T18:00:00"
 
@@ -351,7 +351,7 @@ def test_create_dataset_concat_with_inner_windows_and_outer_clipping(dataset_pat
         "end": outer_end,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert dataset.data is not None
     assert len(dataset.dates) > 0
@@ -359,7 +359,7 @@ def test_create_dataset_concat_with_inner_windows_and_outer_clipping(dataset_pat
     assert dataset.dates[-1] <= np.datetime64(outer_end)
 
 
-def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
+def test_create_reader_rejects_start_end_inside_dataset_config() -> None:
     dataset_reader_cfg = {
         "dataset_config": {
             "dataset": "aifs-ea-an-oper-0001-mars-o96-1979-2022-6h-v6",
@@ -371,7 +371,7 @@ def test_create_dataset_rejects_start_end_inside_dataset_config() -> None:
     }
 
     with pytest.raises(ValueError, match="dataset_config cannot contain"):
-        create_dataset(dataset_reader_cfg)
+        create_reader(dataset_reader_cfg)
 
 
 @skip_if_offline
@@ -382,7 +382,7 @@ def test_gridded_data_reader_raises_for_invalid_open_dataset_key(dataset_path: s
     }
 
     with pytest.raises(NotImplementedError, match=r"invalid_key|Unsupported arguments"):
-        GriddedDataReader(dataset=dataset_cfg, start=1985, end=2020)
+        GriddedDataReader(dataset_config=dataset_cfg, start=1985, end=2020)
 
 
 def test_native_dataset_schema_validates_new_dataset_dictionary() -> None:
@@ -448,7 +448,7 @@ def test_native_dataset_schema_without_validation_accepts_invalid_payload() -> N
 
 
 @skip_if_offline
-def test_create_dataset_without_trajectory_gives_gridded_reader(dataset_path: str) -> None:
+def test_create_reader_without_trajectory_gives_gridded_reader(dataset_path: str) -> None:
     """``trajectory: null`` creates a plain GriddedDataReader."""
     dataset_reader_cfg = {
         "dataset_config": {"dataset": dataset_path, "frequency": "6h"},
@@ -457,7 +457,6 @@ def test_create_dataset_without_trajectory_gives_gridded_reader(dataset_path: st
         "trajectory": None,
     }
 
-    dataset = create_dataset(dataset_reader_cfg)
+    dataset = create_reader(dataset_reader_cfg)
 
     assert type(dataset) is GriddedDataReader
-    assert not dataset.has_trajectories

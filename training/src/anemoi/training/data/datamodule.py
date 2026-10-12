@@ -19,8 +19,8 @@ from torch.utils.data import DataLoader
 from anemoi.models.data import Batch
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
-from anemoi.training.data.data_reader import create_dataset
 from anemoi.training.data.multidataset import MultiDataset
+from anemoi.training.data.readers import create_reader
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
 from anemoi.training.tasks.base import BaseTask
@@ -77,8 +77,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         lead_times = [frequency_to_string(step) for step in self.task.get_output_offsets()]
 
         stats_by_dataset: dict[str, dict | None] = {}
-        for dataset_name, dataset in self.ds_train.data_readers.items():
-            stats_by_lead = {lead_time: dataset.statistics_tendencies(lead_time) for lead_time in lead_times}
+        for dataset_name, reader in self.ds_train.data_readers.items():
+            stats_by_lead = {lead_time: reader.statistics_tendencies(lead_time) for lead_time in lead_times}
             if all(stats is None for stats in stats_by_lead.values()):
                 stats_by_dataset[dataset_name] = None
                 continue
@@ -87,6 +87,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         if not any(stats is not None for stats in stats_by_dataset.values()):
             return None
+
         return stats_by_dataset
 
     @cached_property
@@ -131,7 +132,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        data_readers = {name: create_reader(data_reader) for name, data_reader in config.items()}
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
         dataset_options = {}
         dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
@@ -264,8 +265,10 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         for dataset_name in self.dataset_names:
             metadata["metadata_inference"][dataset_name] = {}
             reader = self.ds_train.data_readers[dataset_name]
-            metadata["metadata_inference"][dataset_name]["data_type"] = "tabular" if reader.is_tabular else "grid"
-            metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size  # None for tabular readers
+            metadata["metadata_inference"][dataset_name]["data_type"] = reader.data_type
+
+            if reader.data_type == "gridded":
+                metadata["metadata_inference"][dataset_name]["grid_size"] = reader.grid_size
 
             name_to_index = {
                 "input": data_indices[dataset_name].model.input.name_to_index,
