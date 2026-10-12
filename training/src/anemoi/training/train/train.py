@@ -136,11 +136,7 @@ class AnemoiTrainer(ABC):
     def datamodule(self) -> Any:
         """DataModule instance and DataSets."""
         datamodule = AnemoiDatasetsDataModule(self.config, self.task)
-
-        # Log information for each dataset
-        for name, data in datamodule.ds_train.data.items():
-            LOGGER.info("Dataset '%s' - Number of variables: %s", name, len(data.variables))
-            LOGGER.info("Dataset '%s' - Variables: %s", name, str(data.variables))
+        LOGGER.info("Logging training dataset information: \n%s", datamodule.ds_train)
         return datamodule
 
     @cached_property
@@ -362,7 +358,7 @@ class AnemoiTrainer(ABC):
             "config": self.config,
             "task": self.task,
             "data_indices": self.data_indices,
-            "data_readers": self.datamodule.ds_train.data_readers,
+            "data_types": {name: reader.data_type for name, reader in self.datamodule.ds_train.data_readers.items()},
             "metadata": self.metadata,
             "statistics": self.datamodule.statistics,
             "statistics_tendencies": self.datamodule.statistics_tendencies,
@@ -587,9 +583,9 @@ class AnemoiTrainer(ABC):
 
     def _log_information(self) -> None:
         # Log number of variables (features) per dataset
-        for dataset_name, data in self.datamodule.ds_train.data.items():
+        for dataset_name, variables in self.datamodule.ds_train.variables.items():
             num_forcing_features = len(self.data_indices[dataset_name].forcing)
-            num_fc_features = len(data.variables) - num_forcing_features
+            num_fc_features = len(variables) - num_forcing_features
             LOGGER.info("Dataset '%s' - Total number of prognostic variables: %d", dataset_name, num_fc_features)
             LOGGER.info(
                 "Dataset '%s' - Total number of auxiliary variables: %d",
@@ -683,7 +679,7 @@ class AnemoiTrainer(ABC):
         Runs with at least one tabular observation dataset build a dynamic graph per batch  and route each sample
         through per-dataset encoders/decoders that may be unused when a dataset has no observations in a batch.
         """
-        if any(dr.is_tabular for dr in self.datamodule.ds_train.data_readers.values()):
+        if any(dr.data_type == "tabular" for dr in self.datamodule.ds_train.data_readers.values()):
             # If not all datasets are static, we set find_unused_parameters=True and static_graph=False.
             return instantiate(
                 self.config.training.strategy,

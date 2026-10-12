@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from anemoi.training.data.data_reader import BaseAnemoiReader
+    from anemoi.training.data.readers import DataReader
 
 LOGGER = logging.getLogger(__name__)
 
@@ -94,7 +94,7 @@ def _query_for(table: ReaderAnchors, keys: np.ndarray) -> np.ndarray:
 
 def _stride_steps(
     stride: int | None,
-    data_readers: dict[str, "BaseAnemoiReader"],
+    data_readers: dict[str, "DataReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
 ) -> tuple[int, int]:
     """Return ``(stride, grid)``: the stride in steps of the shared anchor grid of ``grid`` seconds."""
@@ -104,7 +104,7 @@ def _stride_steps(
         # non-overlapping: the next window starts after the widest window of any reader
         span = max(
             (int(np.max(relative_date_indices[name])) - int(np.min(relative_date_indices[name]))) * seconds[name]
-            for name in data_readers
+            for name in seconds
         )
         return span // grid + 1, grid
     return stride, grid
@@ -118,7 +118,7 @@ def _apply_stride(keys: np.ndarray, stride: int, grid: int) -> np.ndarray:
 
 
 def compute_valid_anchors(
-    data_readers: dict[str, "BaseAnemoiReader"],
+    data_readers: dict[str, "DataReader"],
     relative_date_indices: dict[str, np.ndarray | list[int]],
     stride: int | None = 1,
 ) -> Anchors:
@@ -132,7 +132,7 @@ def compute_valid_anchors(
 
     Parameters
     ----------
-    data_readers : dict[str, BaseAnemoiReader]
+    data_readers : dict[str, DataReader]
         Mapping of dataset name to data reader.
     relative_date_indices : dict[str, np.ndarray | list[int]]
         Relative offsets (in each reader's own positions) requested for each reader.
@@ -149,19 +149,18 @@ def compute_valid_anchors(
         msg = f"sampling stride must be >= 1, got {stride}."
         raise ValueError(msg)
 
-    tables: dict[str, ReaderAnchors] = {}
+    valid_anchors: dict[str, ReaderAnchors] = {}
     for name, reader in data_readers.items():
-        table = reader.valid_anchors(relative_date_indices[name])
-        if len(table) == 0:
+        valid_anchors[name] = reader.valid_anchors(relative_date_indices[name])
+        if len(valid_anchors[name]) == 0:
             msg = f"No valid anchors found for data reader '{name}': {reader}"
             raise ValueError(msg)
-        LOGGER.info("Data reader '%s' has %d valid anchors", name, len(table))
-        tables[name] = table
+        LOGGER.info("Data reader '%s' has %d valid anchors", name, len(valid_anchors[name]))
 
-    with_base = [name for name, table in tables.items() if table.base_dates is not None]
-    reference = tables[with_base[0] if with_base else next(iter(tables))]
+    with_base = [name for name, table in valid_anchors.items() if table.base_dates is not None]
+    reference = valid_anchors[with_base[0] if with_base else next(iter(valid_anchors))]
     keys = np.sort(reference.keys(), order=("base", "time"))
-    for table in tables.values():
+    for table in valid_anchors.values():
         keys = keys[_lookup(table.keys(), _query_for(table, keys)) >= 0]
 
     if len(keys) == 0:
@@ -172,7 +171,7 @@ def compute_valid_anchors(
         keys = _apply_stride(keys, *_stride_steps(stride, data_readers, relative_date_indices))
 
     rows = {}
-    for name, table in tables.items():
+    for name, table in valid_anchors.items():
         index = _lookup(table.keys(), _query_for(table, keys))
         rows[name] = np.stack([table.sequences[index], table.positions[index]], axis=1).astype(np.int64)
 

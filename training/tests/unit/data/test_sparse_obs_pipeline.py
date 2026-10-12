@@ -30,7 +30,7 @@ from anemoi.models.data import GriddedSample
 from anemoi.models.data import TabularSample
 from anemoi.models.data import TensorLayout
 from anemoi.models.data.batch import Batch
-from anemoi.training.data.data_reader import TabularDataReader
+from anemoi.training.data.readers import TabularDataReader
 
 _DATASET_NAME = "npp_atms"
 
@@ -38,7 +38,7 @@ _DATASET_NAME = "npp_atms"
 def test_make_anemoi_reader(monkeypatch: pytest.MonkeyPatch) -> None:
     payload = _make_obs_payload(v=5)
     dataset = _make_obs_reader(payload).data
-    monkeypatch.setattr("anemoi.training.data.data_reader.open_dataset", lambda _config: dataset)
+    monkeypatch.setattr("anemoi.training.data.readers.base.open_dataset", lambda _config: dataset)
     reader = TabularDataReader(dataset_config={"dataset": "test-observations"})
 
     sample = reader.get_sample(0, slice(0, 2))
@@ -181,9 +181,9 @@ def test_get_sample_returns_unified_contract() -> None:
     assert all(isinstance(s, slice) for s in sample.boundaries)
 
 
-def test_tabular_reader_is_tabular() -> None:
+def test_tabular_reader_data_type() -> None:
     reader = TabularDataReader.__new__(TabularDataReader)
-    assert reader.is_tabular is True
+    assert reader.data_type == "tabular"
 
 
 # ----------------------------------------------- Batch.collate (mixed batch)

@@ -23,9 +23,9 @@ import torch
 from omegaconf import OmegaConf
 
 from anemoi.models.data.sample import GriddedSample
-from anemoi.training.data.data_reader import GriddedDataReader
-from anemoi.training.data.data_reader import TrajectoryDataReader
-from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.readers import GriddedDataReader
+from anemoi.training.data.readers import TrajectoryDataReader
+from anemoi.training.data.readers import create_reader
 
 
 class FakeTrajectoryDataset:
@@ -67,18 +67,17 @@ class FakeTrajectoryDataset:
 
 def _make_reader(sampling: dict | None = None, **fake_kwargs) -> TrajectoryDataReader:
     fake = FakeTrajectoryDataset(**fake_kwargs)
-    with patch("anemoi.training.data.data_reader.open_dataset", return_value=fake):
-        return TrajectoryDataReader(dataset="fake.zarr", sampling=sampling)
+    with patch("anemoi.training.data.readers.base.open_dataset", return_value=fake):
+        return TrajectoryDataReader(dataset_config="fake.zarr", sampling=sampling)
 
 
 class TestTrajectoryDataReaderProperties:
 
-    def test_is_a_gridded_reader_with_trajectories(self) -> None:
+    def test_is_a_gridded_reader(self) -> None:
         reader = _make_reader()
         assert isinstance(reader, GriddedDataReader)
-        assert reader.sample_type is GriddedSample
-        assert reader.has_trajectories
-        assert not reader.is_tabular
+        assert reader.data_type == "gridded"
+        assert reader.data_type != "tabular"
 
     def test_sequences_are_base_dates_and_positions_are_steps(self) -> None:
         reader = _make_reader(num_base_dates=5, steps=7)
@@ -120,19 +119,19 @@ class TestTrajectoryDataReaderOpen:
             1,
             tzinfo=datetime.UTC,
         )
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeTrajectoryDataset()) as mock:
-            TrajectoryDataReader(dataset="fake.zarr", start=start, end=end)
-        mock.assert_called_once_with({"dataset": "fake.zarr"}, base_start=start, base_end=end)
+        with patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()) as mock:
+            TrajectoryDataReader(dataset_config="fake.zarr", start=start, end=end)
+        mock.assert_called_once_with({"dataset": "fake.zarr", "base_start": start, "base_end": end})
 
-    def test_unset_start_end_are_not_passed(self) -> None:
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeTrajectoryDataset()) as mock:
-            TrajectoryDataReader(dataset="fake.zarr")
-        mock.assert_called_once_with({"dataset": "fake.zarr"})
+    def test_unset_start_end_are_passed_as_none(self) -> None:
+        with patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()) as mock:
+            TrajectoryDataReader(dataset_config="fake.zarr")
+        mock.assert_called_once_with({"dataset": "fake.zarr", "base_start": None, "base_end": None})
 
     def test_rejects_frequency_in_dataset_config(self) -> None:
         with (
-            patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeTrajectoryDataset()),
-            pytest.raises(AssertionError, match="does not accept a 'frequency'"),
+            patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()),
+            pytest.raises(ValueError, match="does not accept a 'frequency'"),
         ):
             TrajectoryDataReader(dataset_config={"dataset": "fake.zarr", "frequency": "6h"})
 
@@ -185,21 +184,20 @@ class TestTrajectoryDataReaderGetSample:
 class TestCreateDatasetWithTrajectory:
 
     @pytest.mark.parametrize("trajectory", [{}, {"sampling": {"stride": 2}}])
-    def test_create_dataset_selects_trajectory_reader(self, trajectory: dict) -> None:
+    def test_create_reader_selects_trajectory_reader(self, trajectory: dict) -> None:
         config = OmegaConf.create({"dataset_config": {"dataset": "fake.zarr"}, "trajectory": trajectory})
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeTrajectoryDataset()):
-            reader = create_dataset(config)
+        with patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()):
+            reader = create_reader(config)
 
         assert isinstance(reader, TrajectoryDataReader)
         assert reader.sampling == trajectory.get("sampling", {"stride": None})
 
     @pytest.mark.parametrize("trajectory", [None, "absent"])
-    def test_create_dataset_without_trajectory_gives_gridded_reader(self, trajectory: str | None) -> None:
+    def test_create_reader_without_trajectory_gives_gridded_reader(self, trajectory: str | None) -> None:
         config = {"dataset_config": {"dataset": "fake.zarr"}}
         if trajectory != "absent":
             config["trajectory"] = trajectory
-        with patch("anemoi.training.data.data_reader.open_dataset", return_value=FakeTrajectoryDataset()):
-            reader = create_dataset(config)
+        with patch("anemoi.training.data.readers.base.open_dataset", return_value=FakeTrajectoryDataset()):
+            reader = create_reader(config)
 
         assert type(reader) is GriddedDataReader
-        assert not reader.has_trajectories
