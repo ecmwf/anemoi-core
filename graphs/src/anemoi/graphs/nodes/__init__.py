@@ -23,22 +23,24 @@ from .builders.from_refined_icosahedron import LimitedAreaTriNodes
 from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
+from .builders.from_kmeans_clusters import KMeansClusteredNodes
 
 __all__ = [
     "AnemoiDatasetNodes",
-    "NPZFileNodes",
-    "TriNodes",
     "HexNodes",
     "HEALPixNodes",
-    "LatLonNodes",
-    "LimitedAreaHEALPixNodes",
-    "LimitedAreaNPZFileNodes",
-    "LimitedAreaTriNodes",
-    "LimitedAreaHexNodes",
-    "ReducedGaussianGridNodes",
-    "StretchedTriNodes",
     "ICONMultiMeshNodes",
     "ICONCellGridNodes",
+    "KMeansClusteredNodes",
+    "LatLonNodes",
+    "LimitedAreaHEALPixNodes",
+    "LimitedAreaHexNodes",
+    "LimitedAreaNPZFileNodes",
+    "LimitedAreaTriNodes",
+    "NPZFileNodes",
     "TextNodes",
+    "TriNodes",
+    "ReducedGaussianGridNodes",
+    "StretchedTriNodes",
     "XArrayNodes",
 ]
