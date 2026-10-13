@@ -430,8 +430,14 @@ class TrajectoryDataset(BaseAnemoiReader):
             positions = np.asarray(positions).tolist()
 
         # data[sequence] -> (variables, ensembles, steps, cells)
-        x = self.data[sequence]
-        x = x[:, :, positions, :]
+        if positions and positions == list(range(positions[0], positions[0] + len(positions))):
+            # Read only the requested steps instead of the whole forecast; with per-step chunking
+            # this avoids reading and decompressing unused steps. Use a slice, not a list: a list
+            # index on the step axis is not applied correctly by anemoi-datasets.
+            x = self.data[sequence, :, :, positions[0] : positions[-1] + 1, :]
+        else:
+            x = self.data[sequence]
+            x = x[:, :, positions, :]
         if grid_shard_indices is not None:
             x = x[..., grid_shard_indices]
 

@@ -37,6 +37,7 @@ class FakeTrajectoriesDataset:
     ):
         self._shape = (num_inits, variables, ensemble, steps, gridpoints)
         self._data = np.random.default_rng(42).standard_normal(self._shape).astype(np.float32)
+        self.read_keys: list = []
         self._step_frequency = step_frequency or datetime.timedelta(hours=1)
         self._missing: set[int] = missing or set()
 
@@ -81,9 +82,10 @@ class FakeTrajectoriesDataset:
     def statistics(self) -> dict:
         return {"mean": np.zeros(self._shape[1]), "stdev": np.ones(self._shape[1])}
 
-    def __getitem__(self, n: int) -> np.ndarray:
-        """Return (variables, ensemble, steps, gridpoints) for a scalar init index."""
-        return self._data[n]
+    def __getitem__(self, key: int | tuple) -> np.ndarray:
+        """Return (variables, ensemble, steps, gridpoints) for a scalar init index, or index with a tuple."""
+        self.read_keys.append(key)
+        return self._data[key]
 
 
 def _make_trajectory_dataset(
@@ -229,6 +231,23 @@ class TestTrajectoryDatasetGetSample:
         ds = _make_trajectory_dataset(variables=3, ensemble=2, steps=24, gridpoints=10)
         sample = ds.get_sample(sequence=0, positions=[0, 1], grid_shard_indices=None)
         assert sample.shape == (2, 2, 10, 3)
+
+    def test_contiguous_positions_read_only_those_steps(self) -> None:
+        """Contiguous steps are read with one step slice, not by loading the whole forecast."""
+        ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        sample = ds.get_sample(sequence=1, positions=[5, 6, 7, 8], grid_shard_indices=None)
+
+        assert ds.data.read_keys == [(1, slice(None), slice(None), slice(5, 9), slice(None))]
+        expected = np.transpose(ds.data._data[1][:, :, [5, 6, 7, 8], :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(sample.numpy(), expected)
+
+    def test_non_contiguous_positions_fall_back_to_full_read(self) -> None:
+        ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
+        sample = ds.get_sample(sequence=2, positions=[0, 6, 12], grid_shard_indices=None)
+
+        assert ds.data.read_keys == [2]
+        expected = np.transpose(ds.data._data[2][:, :, [0, 6, 12], :], (2, 1, 3, 0))
+        np.testing.assert_array_equal(sample.numpy(), expected)
 
 
 # ---------------------------------------------------------------------------
