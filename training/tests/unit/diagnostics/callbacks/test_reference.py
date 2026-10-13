@@ -216,7 +216,7 @@ def test_plot_thread_does_no_numerics(monkeypatch: pytest.MonkeyPatch, tmp_path:
     """Spectra are computed once in compute(); the plot executor thread only draws."""
     from anemoi.training.diagnostics.callbacks import reference
 
-    callback, trainer, pl_module = _setup(steps=["rstep0"])
+    callback, trainer, pl_module = _setup(steps=["rstep0"], mean_maps=True)
     callback.save_basedir = str(tmp_path)
     result = callback.compute(trainer, pl_module)
 
@@ -226,6 +226,7 @@ def test_plot_thread_does_no_numerics(monkeypatch: pytest.MonkeyPatch, tmp_path:
 
     monkeypatch.setattr(reference, "compute_spectra", _fail)
     monkeypatch.setattr(reference.SpectralGrid, "spectra", _fail)
+    monkeypatch.setattr(reference.ZonalGrid, "mean", _fail)
     callback.scores(result)
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
 
@@ -248,6 +249,51 @@ def test_score_dates_are_scored_not_plotted(tmp_path: Path) -> None:
     assert scores["val_ref_highk_ratio/z_500/rstep0"] == pytest.approx(1.0, rel=1e-3)
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
     assert len(list((tmp_path / "plots").glob("ref_*_epoch000.jpg"))) == 1
+
+
+def test_mean_maps_over_all_dates(tmp_path: Path) -> None:
+    callback, trainer, pl_module = _setup(
+        steps=["dacycle1", "rstep0"],
+        score_dates=["2025-01-03T00:00", "2025-01-04T06:00"],
+        mean_maps=True,
+        pred_offset={"t_850": 1.5},
+    )
+    callback.save_basedir = str(tmp_path)
+    result = callback.compute(trainer, pl_module)
+    assert sorted(result["mean_maps"]) == ["dacycle1", "rstep0"]
+    stats = result["mean_maps"]["rstep0"]["t_850"]
+    assert stats["n_dates"] == 3
+    np.testing.assert_allclose(stats["bias"], 1.5, rtol=1e-5)
+    np.testing.assert_allclose(stats["rmse"], 1.5, rtol=1e-5)
+    np.testing.assert_allclose(stats["lat_rmse"], 1.5, rtol=1e-5)
+    assert stats["lat_bias"].shape == (16,)
+    np.testing.assert_allclose(result["mean_maps"]["rstep0"]["z_500"]["rmse"], 0.0, atol=1e-2)
+
+    callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
+    plots = tmp_path / "plots"
+    assert len(list(plots.glob("ref_mean_*_epoch000.jpg"))) == 2  # one per step
+    assert len(list(plots.glob("ref_2025*_epoch000.jpg"))) == 1  # per-date maps for plotted dates only
+
+
+def test_no_plotted_dates_keeps_scores_and_mean_figures(tmp_path: Path) -> None:
+    callback, trainer, pl_module = _setup(steps=["rstep0"], mean_maps=True, scores=["rmse", "highk_ratio"])
+    callback.dates = []
+    callback.score_dates = [np.datetime64("2025-01-03T00:00", "s"), np.datetime64("2025-01-04T00:00", "s")]
+    callback.save_basedir = str(tmp_path)
+    result = callback.compute(trainer, pl_module)
+    assert not any("spectra" in case for case in result["cases"])
+    scores = callback.scores(result)
+    assert "val_ref_rmse/z_500/rstep0" in scores
+    assert not any(key.startswith("val_ref_highk_ratio") for key in scores)
+    callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
+    plots = tmp_path / "plots"
+    assert len(list(plots.glob("ref_mean_*_epoch000.jpg"))) == 1
+    assert not list(plots.glob("ref_2025*_epoch000.jpg"))
+
+
+def test_mean_maps_off_by_default() -> None:
+    callback, trainer, pl_module = _setup()
+    assert "mean_maps" not in callback.compute(trainer, pl_module)
 
 
 def test_band_scores() -> None:
@@ -314,6 +360,7 @@ def _zonal_setup(**kwargs: Any) -> tuple[ReferenceComparisonPlot, Any, Any]:
 
 ZONAL_KEYS = {
     "sections": ["u_rmse", "t_rmse", *(f"jet_{h}_{q}_err" for h in ("nh", "sh") for q in ("lat", "speed"))],
+    "rmse_sections": ["u_point_rmse", "v_point_rmse", "t_point_rmse"],
     "thermal_wind": ["tw_residual_rmse"],
     "streamfunction": [f"hadley_{h}_{q}" for h in ("nh", "sh") for q in ("strength_ratio", "edge_err")],
     "eddy_fluxes": [f"{f}_{h}_ratio" for f in ("vt850", "uv250") for h in ("nh", "sh")],
@@ -355,6 +402,25 @@ def test_zonal_offsets_show_in_errors() -> None:
     assert scores["val_ref_zonal/t_rmse/rstep0"] == pytest.approx(1.0)
     assert scores["val_ref_zonal/jet_nh_speed_err/rstep0"] == pytest.approx(2.0)
     assert scores["val_ref_zonal/jet_sh_lat_err/rstep0"] == pytest.approx(0.0, abs=1e-5)
+    # Point-wise errors: a uniform offset gives the same RMSE on every level and latitude.
+    assert scores["val_ref_zonal/u_point_rmse/rstep0"] == pytest.approx(2.0)
+    assert scores["val_ref_zonal/t_point_rmse/rstep0"] == pytest.approx(1.0)
+    assert scores["val_ref_zonal/v_point_rmse/rstep0"] == pytest.approx(0.0, abs=1e-5)
+
+
+def test_zonal_rmse_sections_see_errors_the_zonal_mean_cancels() -> None:
+    """A zonal-wave error leaves [u] unchanged but shows in the point-wise RMSE section."""
+    wave = np.cos(np.deg2rad(3 * LON))
+    callback, trainer, pl_module = _zonal_setup(zonal={})
+    fields = dict(callback.reference.fields)  # the prediction keeps the unperturbed fields
+    for level in ZONAL_LEVELS:
+        fields[f"u_{level}"] = fields[f"u_{level}"] - 2.0 * wave
+    callback._reference = type(callback.reference)(fields=fields)
+    result = callback.compute(trainer, pl_module)
+    scores = callback.scores(result)
+    assert scores["val_ref_zonal/u_rmse/rstep0"] == pytest.approx(0.0, abs=1e-2)
+    assert scores["val_ref_zonal/u_point_rmse/rstep0"] == pytest.approx(2.0 / np.sqrt(2.0), rel=1e-2)
+    assert result["zonal"]["rstep0"]["err"]["u"].shape == (len(ZONAL_LEVELS), 16)
 
 
 def test_zonal_flags_select_scores_and_rows(tmp_path: Path) -> None:
@@ -362,7 +428,7 @@ def test_zonal_flags_select_scores_and_rows(tmp_path: Path) -> None:
     callback.save_basedir = str(tmp_path)
     result = callback.compute(trainer, pl_module)
     zonal = {key.split("/")[1] for key in callback.scores(result) if key.startswith("val_ref_zonal/")}
-    assert zonal == set(ZONAL_KEYS["streamfunction"] + ZONAL_KEYS["eddy_fluxes"])
+    assert zonal == set(ZONAL_KEYS["rmse_sections"] + ZONAL_KEYS["streamfunction"] + ZONAL_KEYS["eddy_fluxes"])
     callback._plot(SimpleNamespace(logger=None), pl_module, ["data"], epoch=0, result=result)
     assert len(list((tmp_path / "plots").glob("zonal_rstep0_epoch000.jpg"))) == 1
 
