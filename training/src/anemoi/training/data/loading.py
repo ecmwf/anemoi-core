@@ -119,4 +119,7 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
             seed=seed,
             drop_last=drop_last,
         )
-        return BatchSampler(sampler, batch_size=batch_size, drop_last=drop_last)
+        # drop_last in StatefulDistributedSampler shards the dataset evenly across sample groups;
+        # the BatchSampler wrapping it only groups a group's own share into batches, and should
+        # always keep its last, possibly incomplete, batch.
+        return BatchSampler(sampler, batch_size=batch_size, drop_last=False)
