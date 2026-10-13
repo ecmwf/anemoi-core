@@ -287,3 +287,19 @@ def test_predict_step_replaces_source_grid_shard_sizes(monkeypatch):
     )
 
     assert out["data"].shape[-2] == 2
+
+
+def test_predict_step_skips_input_only_datasets(monkeypatch):
+    """Datasets without a decoder (input-only) have no output and must not be post-processed."""
+    model = _make_minimal_model()
+
+    # `forcing` feeds an encoder but has no decoder, so forward only returns `data`
+    monkeypatch.setattr(model, "forward", lambda x, **kw: {"data": x["data"][:, -1:] + 1.0})
+
+    processors = {"data": _identity_pre_processor(), "forcing": _identity_pre_processor()}
+    batch = {"data": torch.zeros(1, 1, 4, 1), "forcing": torch.zeros(1, 1, 4, 2)}  # (batch, time, grid, vars)
+
+    out = model.predict_step(batch, pre_processors=processors, post_processors=processors, n_step_input=1)
+
+    assert set(out) == {"data"}
+    assert torch.equal(out["data"], torch.ones(1, 1, 1, 4, 1))
