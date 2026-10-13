@@ -56,7 +56,7 @@ LOGGER = logging.getLogger(__name__)
 # Latitude bands for the optional band scores: [lat_min, lat_max) in degrees, the pole included.
 BANDS = {"nh": (20.0, 90.0), "tropics": (-20.0, 20.0), "sh": (-90.0, -20.0)}
 SCORES = ("rmse", "bias", "highk_ratio")
-ZONAL_FLAGS = ("sections", "thermal_wind", "streamfunction", "eddy_fluxes")
+ZONAL_FLAGS = ("sections", "rmse_sections", "thermal_wind", "streamfunction", "eddy_fluxes")
 ZONAL_DEFAULTS = {
     **dict.fromkeys(ZONAL_FLAGS, True),
     "mask_below_ground": True,
@@ -158,6 +158,10 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
 
     ``score_dates`` adds dates that are scored but not plotted (and get no spectra), so the
     RMSE and bias can be averaged over many more cases than are worth a figure. With
+    ``mean_maps: true`` one ``ref_mean_{step}`` figure shows, per variable, the bias and RMSE
+    maps over all dates (plotted and score-only) and their zonal means against latitude, so
+    the per-date ``ref_{date}`` figures can be cut to one date showing a typical forecast, or
+    turned off with ``dates: []`` (then nothing gets spectra and ``highk_ratio`` is not logged). With
     ``bands: true`` the RMSE and bias are also logged per latitude band as
     ``val_ref_rmse/{nh,tropics,sh}/{var}/{step}`` (hard edges at +-20 deg), for
     ``band_variables`` only when given (default: every variable). All means are
@@ -173,6 +177,9 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
 
     - ``sections``: [u], [T] latitude-pressure sections; ``{u,t}_rmse`` (cos-lat weighted) and
       ``jet_{nh,sh}_{lat,speed}_err`` from [u] at ``uv_level``;
+    - ``rmse_sections``: zonal mean of the point-wise RMSE of u, v and T over the dates per
+      level, so where (latitude, height) the forecasts err, not only how wrong the mean
+      circulation is; ``{u,v,t}_point_rmse`` (cos-lat weighted, pooled over levels);
     - ``thermal_wind``: shear across ``tw_layer`` against thermal-wind balance (|lat| >= 15);
       ``tw_residual_rmse`` of the prediction;
     - ``streamfunction``: mean meridional mass streamfunction; ``hadley_{nh,sh}_strength_ratio``
@@ -196,6 +203,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
       dates: ["2025-01-15T00:00", "2025-03-01T12:00"]
       steps: [dacycle3, rstep0]                         # labels from task.get_metric_name
       score_dates: ["2025-01-02T06:00", ...]            # optional: scored, not plotted
+      mean_maps: true                                   # optional: bias/RMSE maps over all dates
       bands: true                                       # optional: NH / Tropics / SH scores
       band_variables: [z_500, t_850]                    # optional: subset scored per band
       scores: [rmse]                                    # optional: add bias, highk_ratio
@@ -224,6 +232,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         band_variables: list[str] | None = None,
         scores: list[str] | None = None,
         zonal: dict | None = None,
+        mean_maps: bool = False,
     ) -> None:
         super().__init__(
             every_n_epochs=every_n_epochs,
@@ -236,6 +245,7 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         plotted = set(self.dates)
         self.score_dates = [d for d in (np.datetime64(d, "s") for d in score_dates or []) if d not in plotted]
         self.bands = bands
+        self.mean_maps = mean_maps
         self.band_variables = list(self.variables) if band_variables is None else list(band_variables)
         unknown = sorted(set(self.band_variables) - set(self.variables))
         if unknown:
@@ -248,6 +258,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         if unknown:
             msg = f"ReferenceComparisonPlot: unknown scores {unknown}, expected a subset of {list(SCORES)}."
             raise ValueError(msg)
+        if not self.dates and "highk_ratio" in self.score_names:
+            LOGGER.warning("ReferenceComparisonPlot: highk_ratio needs plotted dates; none given, so it is not logged.")
         self.zonal = None
         if zonal is not None:
             unknown = sorted(set(zonal) - set(ZONAL_DEFAULTS))
@@ -350,7 +362,8 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         -------
         dict
             ``{"lat", "lon", "cases": [{"date", "step", "valid_time", "fields": {var: (pred, ref)}}]}``,
-            plus ``"zonal": {step: summary}`` when ``zonal`` is set (see :meth:`_zonal_summary`).
+            plus ``"zonal": {step: summary}`` when ``zonal`` is set (see :meth:`_zonal_summary`) and
+            ``"mean_maps"`` when ``mean_maps`` is set (see :meth:`_mean_maps`).
         """
         name = self.dataset_name
         dataset = trainer.datamodule.ds_valid
@@ -418,15 +431,45 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         # draws. SHTOOLS/FFTW planning and the shared BLAS pools are not safe to run concurrently on
         # a background thread while the training loop forks dataloader workers each epoch (that
         # combination hung debug jobs 33953861/33956258 after the first epoch's figures).
+        self._attach_spectra(cases, lat, lon)
+        result = {"lat": lat, "lon": lon, "cases": cases}
+        if self.mean_maps:
+            result["mean_maps"] = self._mean_maps(cases, lat, selected)
+        return self._attach_zonal(result, levels, selected)
+
+    def _attach_spectra(self, cases: list[dict], lat: np.ndarray, lon: np.ndarray) -> None:
+        """Add pred, ref and pred - ref spectra of every variable to the plotted cases."""
         if self._spectral_grid is None:
             self._spectral_grid = SpectralGrid(lat, lon)
         for case in cases:
-            if not case["plot"]:
-                continue
-            case["spectra"] = {
-                var: self._spectral_grid.spectra([pred, ref, pred - ref]) for var, (pred, ref) in case["fields"].items()
-            }
-        return self._attach_zonal({"lat": lat, "lon": lon, "cases": cases}, levels, selected)
+            if case["plot"]:
+                case["spectra"] = {
+                    var: self._spectral_grid.spectra([pred, ref, pred - ref])
+                    for var, (pred, ref) in case["fields"].items()
+                }
+
+    def _mean_maps(self, cases: list[dict], lat: np.ndarray, steps: list[str]) -> dict:
+        """Bias and RMSE maps over all dates per step and variable, plus their zonal means.
+
+        Returns ``{step: {var: {"bias", "rmse", "lat_bias", "lat_rmse", "n_dates"}}}``.
+        """
+        if self._zonal_grid is None:
+            self._zonal_grid = ZonalGrid(lat)
+        maps = {}
+        for step in steps:
+            step_cases = [case for case in cases if case["step"] == step]
+            maps[step] = {}
+            for var in self.variables:
+                diff = np.stack([pred - ref for pred, ref in (case["fields"][var] for case in step_cases)])
+                bias, mse = diff.mean(axis=0), (diff**2).mean(axis=0)
+                maps[step][var] = {
+                    "bias": bias,
+                    "rmse": np.sqrt(mse),
+                    "lat_bias": self._zonal_grid.mean(bias)[0],
+                    "lat_rmse": np.sqrt(self._zonal_grid.mean(mse)[0]),
+                    "n_dates": len(step_cases),
+                }
+        return maps
 
     def _attach_zonal(self, result: dict, levels: np.ndarray | None, steps: list[str]) -> dict:
         """Replace the per-case zonal moments by one date-averaged summary per step."""
@@ -460,21 +503,24 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             "pred": {var: pred[:, out_index[var]].astype(np.float64) for var in self._zonal_variables(levels)},
             "ref": ref,
         }
-        return {
-            side: zonal_moments(
-                self._zonal_grid,
-                *(np.stack([source[f"{var}_{int(level)}"] for level in levels]) for var in "uvt"),
-                mask,
-            )
+        stacked = {
+            side: {var: np.stack([source[f"{var}_{int(level)}"] for level in levels]) for var in "uvt"}
             for side, source in sources.items()
         }
+        moments = {side: zonal_moments(self._zonal_grid, *fields.values(), mask) for side, fields in stacked.items()}
+        if self.zonal["rmse_sections"]:
+            moments["err"] = {
+                var: self._zonal_grid.mean((stacked["pred"][var] - stacked["ref"][var]) ** 2, mask) for var in "uvt"
+            }
+        return moments
 
     def _zonal_summary(self, levels: np.ndarray, moments: list[dict]) -> dict:
         """Average the per-date zonal moments and derive balance, streamfunction and scalars.
 
         Returns ``{"lat", "levels", "pred": {...}, "ref": {...}}`` where each side holds the mean
         moments (``u, v, t, vt, uv, frac``), ``tw`` (thermal-wind ``actual``/``balanced``), ``psi``
-        and the scalars ``jet``, ``hadley``, ``vt_peak``, ``uv_peak``.
+        and the scalars ``jet``, ``hadley``, ``vt_peak``, ``uv_peak``. With ``rmse_sections``,
+        ``"err": {"u", "v", "t"}`` holds the zonal-mean point-wise RMSE over the dates, (level, n_lat).
         """
         lat = self._zonal_grid.lat
         index = {int(level): i for i, level in enumerate(levels)}
@@ -491,6 +537,10 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             mean["vt_peak"] = peak(lat, mean["vt"][index[self.zonal["vt_level"]]])
             mean["uv_peak"] = peak(lat, mean["uv"][index[self.zonal["uv_level"]]])
             summary[side] = mean
+        if self.zonal["rmse_sections"]:
+            with np.errstate(invalid="ignore"), warnings.catch_warnings():
+                warnings.simplefilter("ignore", RuntimeWarning)
+                summary["err"] = {var: np.sqrt(np.nanmean([m["err"][var] for m in moments], axis=0)) for var in "uvt"}
         return summary
 
     def scores(self, result: dict) -> dict[str, float]:
@@ -532,28 +582,15 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         """Scalars of one step's zonal summary for the enabled ``zonal`` flags (pred - ref or pred / ref)."""
         lat, pred, ref = summary["lat"], summary["pred"], summary["ref"]
         flags = self.zonal
-        out = {}
-
-        def ratio(a: float, b: float) -> float:
-            return a / b if b != 0.0 else float("nan")
-
+        out = _hemisphere_scores(pred, ref, flags)
         if flags["sections"]:
             out["u_rmse"] = section_rmse(lat, pred["u"] - ref["u"])
             out["t_rmse"] = section_rmse(lat, pred["t"] - ref["t"])
-            for hemi in ("nh", "sh"):
-                out[f"jet_{hemi}_lat_err"] = pred["jet"][hemi][0] - ref["jet"][hemi][0]
-                out[f"jet_{hemi}_speed_err"] = pred["jet"][hemi][1] - ref["jet"][hemi][1]
+        if flags["rmse_sections"]:
+            out.update({f"{var}_point_rmse": section_rmse(lat, rmse) for var, rmse in summary["err"].items()})
         if flags["thermal_wind"]:
             residual = pred["tw"]["actual"] - pred["tw"]["balanced"]
             out["tw_residual_rmse"] = section_rmse(lat, residual[None])
-        if flags["streamfunction"]:
-            for hemi in ("nh", "sh"):
-                out[f"hadley_{hemi}_strength_ratio"] = ratio(pred["hadley"][hemi][0], ref["hadley"][hemi][0])
-                out[f"hadley_{hemi}_edge_err"] = pred["hadley"][hemi][1] - ref["hadley"][hemi][1]
-        if flags["eddy_fluxes"]:
-            for hemi in ("nh", "sh"):
-                out[f"vt{flags['vt_level']}_{hemi}_ratio"] = ratio(pred["vt_peak"][hemi], ref["vt_peak"][hemi])
-                out[f"uv{flags['uv_level']}_{hemi}_ratio"] = ratio(pred["uv_peak"][hemi], ref["uv_peak"][hemi])
         return {key: float(value) for key, value in out.items()}
 
     @rank_zero_only
@@ -621,9 +658,55 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
             tag = f"ref_{np.datetime_as_string(date, unit='h')}".replace(":", "")
             self._output_figure(trainer.logger, fig, epoch=epoch, tag=tag, exp_log_tag="val_ref")
 
+        for step, maps in result.get("mean_maps", {}).items():
+            fig = self._plot_mean_maps(step, maps, x, y, lat_rows=self._zonal_grid.lat)
+            self._output_figure(trainer.logger, fig, epoch=epoch, tag=f"ref_mean_{step}", exp_log_tag="val_ref")
+
         for step, summary in result.get("zonal", {}).items():
             fig = self._plot_zonal(step, summary, n_dates=len(self.dates) + len(self.score_dates))
             self._output_figure(trainer.logger, fig, epoch=epoch, tag=f"zonal_{step}", exp_log_tag="val_ref")
+
+    def _plot_mean_maps(self, step: str, maps: dict, x: np.ndarray, y: np.ndarray, lat_rows: np.ndarray) -> plt.Figure:
+        """One row per variable: bias map | RMSE map | zonal-mean bias and RMSE against latitude."""
+        datashader = self.plotting_settings.datashader
+        fig, axes = plt.subplots(len(maps), 3, figsize=(16, 3.2 * len(maps)), layout=LAYOUT, squeeze=False)
+        n_dates = 0
+        for row, (var, stats) in enumerate(maps.items()):
+            n_dates = stats["n_dates"]
+            bmax = float(np.nanmax(np.abs(stats["bias"]))) or 1.0
+            single_plot(
+                fig,
+                axes[row, 0],
+                x,
+                y,
+                stats["bias"],
+                cmap="bwr",
+                norm=Normalize(-bmax, bmax),
+                title=f"bias {var} {step} (mean {np.mean(stats['bias']):.3g})",
+                datashader=datashader,
+            )
+            single_plot(
+                fig,
+                axes[row, 1],
+                x,
+                y,
+                stats["rmse"],
+                cmap="viridis",
+                norm=Normalize(0.0, float(np.nanmax(stats["rmse"])) or 1.0),
+                title=f"rmse {var} {step} (pooled {np.sqrt(np.mean(stats['rmse'] ** 2)):.3g})",
+                datashader=datashader,
+            )
+            ax = axes[row, 2]
+            ax.plot(lat_rows, stats["lat_rmse"], color="C0", label="rmse")
+            ax.plot(lat_rows, stats["lat_bias"], color="C3", label="bias")
+            for edge in (-20.0, 20.0):
+                ax.axvline(edge, color="grey", lw=0.5, ls="--")
+            ax.axhline(0.0, color="grey", lw=0.5)
+            ax.set_xlabel("latitude")
+            ax.set_title(f"zonal mean {var} {step}")
+            ax.legend(fontsize="small")
+        fig.suptitle(f"pred - reference, {step}, over {n_dates} dates")
+        return fig
 
     def _plot_zonal(self, step: str, summary: dict, n_dates: int) -> plt.Figure:
         """Latitude-pressure sections (pred | ref | pred - ref) and latitude profiles of one step."""
@@ -636,10 +719,12 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
         profiles = (["tw"] if flags["thermal_wind"] else []) + (["vt", "uv"] if flags["eddy_fluxes"] else [])
         profiles += ["jet"] if flags["sections"] else []
 
-        n_rows = len(sections) + bool(profiles)
+        n_rows = len(sections) + flags["rmse_sections"] + bool(profiles)
         fig, axes = plt.subplots(n_rows, 4, figsize=(22, 3.6 * n_rows), layout=LAYOUT, squeeze=False)
         for row, (title, key, scale) in enumerate(sections):
             _section_row(fig, axes[row], summary, key, title, scale)
+        if flags["rmse_sections"]:
+            _rmse_row(fig, axes[len(sections)], summary)
         if profiles:
             for ax, kind in zip(axes[-1], profiles, strict=False):
                 _profile_panel(ax, kind, summary, flags)
@@ -647,6 +732,26 @@ class ReferenceComparisonPlot(BasePerEpochPlotCallback):
                 ax.axis("off")
         fig.suptitle(f"zonal means {step}, mean over {n_dates} dates")
         return fig
+
+
+def _hemisphere_scores(pred: dict, ref: dict, flags: dict) -> dict[str, float]:
+    """Per-hemisphere jet, Hadley-cell and eddy-flux peak scalars for the enabled ``flags``."""
+
+    def ratio(a: float, b: float) -> float:
+        return a / b if b != 0.0 else float("nan")
+
+    out = {}
+    for hemi in ("nh", "sh"):
+        if flags["sections"]:
+            out[f"jet_{hemi}_lat_err"] = pred["jet"][hemi][0] - ref["jet"][hemi][0]
+            out[f"jet_{hemi}_speed_err"] = pred["jet"][hemi][1] - ref["jet"][hemi][1]
+        if flags["streamfunction"]:
+            out[f"hadley_{hemi}_strength_ratio"] = ratio(pred["hadley"][hemi][0], ref["hadley"][hemi][0])
+            out[f"hadley_{hemi}_edge_err"] = pred["hadley"][hemi][1] - ref["hadley"][hemi][1]
+        if flags["eddy_fluxes"]:
+            out[f"vt{flags['vt_level']}_{hemi}_ratio"] = ratio(pred["vt_peak"][hemi], ref["vt_peak"][hemi])
+            out[f"uv{flags['uv_level']}_{hemi}_ratio"] = ratio(pred["uv_peak"][hemi], ref["uv_peak"][hemi])
+    return out
 
 
 def _section_row(fig: plt.Figure, axes: np.ndarray, summary: dict, key: str, title: str, scale: float) -> None:
@@ -682,6 +787,25 @@ def _section_row(fig: plt.Figure, axes: np.ndarray, summary: dict, key: str, tit
         ax.set_xlabel("latitude")
         ax.set_ylabel("hPa")
         ax.set_title(label)
+    axes[3].axis("off")
+
+
+def _rmse_row(fig: plt.Figure, axes: np.ndarray, summary: dict) -> None:
+    """Draw the zonal-mean point-wise RMSE sections of u, v and T on the first three axes."""
+    lat, levels = summary["lat"], summary["levels"]
+    for ax, (var, unit) in zip(axes, (("u", "m/s"), ("v", "m/s"), ("t", "K")), strict=False):
+        rmse = summary["err"][var]
+        vmax = float(np.nanmax(rmse)) or 1.0
+        contour_levels = MaxNLocator(nbins=20).tick_values(0.0, vmax)
+        image = ax.contourf(lat, levels, np.ma.masked_invalid(rmse), levels=contour_levels, cmap="magma_r")
+        fig.colorbar(image, ax=ax)
+        ax.set_yscale("log")
+        ax.set_ylim(levels.max(), levels.min())
+        ax.set_yticks(levels, [str(int(level)) for level in levels])
+        ax.yaxis.set_minor_locator(plt.NullLocator())
+        ax.set_xlabel("latitude")
+        ax.set_ylabel("hPa")
+        ax.set_title(f"rmse {var.upper() if var == 't' else var} ({unit}), pooled {section_rmse(lat, rmse):.3g}")
     axes[3].axis("off")
 
 
