@@ -130,8 +130,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Number of batches loaded in advance by each worker."
     pin_memory: bool = Field(example=True)
     "If True, the data loader will copy Tensors into device/CUDA pinned memory before returning them."
-    persistent_workers: bool = Field(default=True)
-    "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
+    persistent_workers: bool = Field(default=False)
+    "Keep dataloader workers alive between epochs instead of starting new ones every epoch."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
     num_workers: LoaderSet

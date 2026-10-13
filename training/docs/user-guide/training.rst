@@ -136,8 +136,7 @@ Lightning resumes it into an empty epoch.
    drawn before the batch, and no generator state needs to be stored.
 
 When the rollout changes between epochs (``rollout.epoch_increment > 0``), the
-number of samples changes with it. The dataloaders are then rebuilt every epoch, and
-``persistent_workers`` is set to ``false``.
+number of samples changes with it, and the dataloaders are rebuilt every epoch.
 
 The same data and random numbers do not necessarily make the complete training run
 bitwise reproducible: some GPU kernels used by the model may produce results that
@@ -246,15 +245,17 @@ The dataloader config exposes configuration options of the underlying pytorch da
       validation: 2
       test: 2
 
-   persistent_workers: true
+   persistent_workers: false
    multiprocessing_context: None
 
 
-``persistent_workers`` defaults to ``true`` to avoid the worker startup cost
-between epochs. When the rollout changes between epochs, Anemoi automatically
-sets it to ``false``, because the dataloaders are then rebuilt every epoch to
-load the samples of the new rollout. A resumed run continues the data order of
-the interrupted run with and without persistent workers, see `Resuming a run`_.
+``persistent_workers`` keeps the dataloader workers alive between epochs
+instead of starting new ones every epoch, which saves the worker startup time.
+It defaults to ``false``. The setting does not change the data or the random
+numbers of a run, and a resumed run continues the data order of the
+interrupted run either way, see `Resuming a run`_. When the rollout changes
+between epochs, the dataloaders are rebuilt every epoch and start new workers
+regardless of this setting.
 
 Determining the optimal number of workers depends on your system and training setup. More dataloader processes can increase your filesystem bandwidth, at the cost of higher CPU memory usage. Higher source resolutions and larger batch sizes increase the memory required per worker. When the available CPU memory is not sufficient for the requested number of workers, your training run will crash. One can use the `anemoi dataloader benchmark`_ to quickly test different setups and determine the optimal configuration for your training setup.
 

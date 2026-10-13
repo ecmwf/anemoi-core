@@ -8,7 +8,6 @@
 # nor does it submit to any jurisdiction.
 
 import contextlib
-import logging
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import Mock
@@ -64,7 +63,7 @@ def _base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_datamodule(
     task: BaseTask,
     *,
-    persistent_workers: bool = True,
+    persistent_workers: bool = False,
     batch_size: int = 1,
     num_workers: int = 1,
 ) -> AnemoiDatasetsDataModule:
@@ -133,15 +132,17 @@ def test_temporal_downscaler_uses_cumulative_tendency_statistics_per_lead_time(m
     assert [call.args[0] for call in reader.statistics_tendencies.call_args_list] == ["2h", "4h"]
 
 
+@pytest.mark.parametrize(
+    "rollout",
+    [
+        pytest.param({"start": 1, "epoch_increment": 0, "maximum": 1}, id="fixed"),
+        pytest.param({"start": 1, "epoch_increment": 1, "maximum": 3}, id="progressing"),
+    ],
+)
 @pytest.mark.parametrize("persistent_workers", [False, True])
-def test_persistent_workers_follow_dataloader_config(persistent_workers: bool) -> None:
-    """All dataloaders use the configured persistence when rollout is fixed."""
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="6h",
-        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
-    )
+def test_persistent_workers_follow_dataloader_config(rollout: dict[str, int], persistent_workers: bool) -> None:
+    """All dataloaders use the configured persistence, whatever the rollout schedule."""
+    task = Forecaster(multistep_input=1, multistep_output=1, timestep="6h", rollout=rollout)
     datamodule = _make_datamodule(task, persistent_workers=persistent_workers)
 
     loaders = [datamodule._get_dataloader(SampleIndexDataset(), stage) for stage in ("training", "validation", "test")]
@@ -149,50 +150,14 @@ def test_persistent_workers_follow_dataloader_config(persistent_workers: bool) -
     assert [loader.persistent_workers for loader in loaders] == [persistent_workers] * len(loaders)
 
 
-def test_persistent_workers_default_to_true_when_config_is_unvalidated() -> None:
+def test_persistent_workers_default_to_false_when_config_is_unvalidated() -> None:
     """The documented default applies when validation does not populate the field."""
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="6h",
-        rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
-    )
-    datamodule = _make_datamodule(task)
+    datamodule = _make_datamodule(_fixed_rollout_task(), persistent_workers=True)
     del datamodule.config.dataloader.persistent_workers
 
     loader = datamodule._get_dataloader(SampleIndexDataset(), "training")
 
-    assert loader.persistent_workers is True
-
-
-@pytest.mark.parametrize(
-    "rollout",
-    [
-        pytest.param({"start": 1, "epoch_increment": 1, "maximum": 3}, id="progressing"),
-        pytest.param({"start": 3, "epoch_increment": 1, "maximum": 3}, id="at-maximum"),
-    ],
-)
-def test_persistent_workers_are_disabled_for_rollout_schedule(
-    rollout: dict[str, int],
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    """An epoch increment disables persistence even after rollout reaches its maximum."""
-    caplog.set_level(logging.INFO)
-    task = Forecaster(
-        multistep_input=1,
-        multistep_output=1,
-        timestep="6h",
-        rollout=rollout,
-    )
-    datamodule = _make_datamodule(task, persistent_workers=True)
-
-    loaders = [datamodule._get_dataloader(SampleIndexDataset(), stage) for stage in ("training", "validation", "test")]
-
-    assert [loader.persistent_workers for loader in loaders] == [False] * len(loaders)
-    assert datamodule.config.dataloader.persistent_workers is True
-    assert caplog.messages == [
-        "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
-    ]
+    assert loader.persistent_workers is False
 
 
 def test_set_epoch_updates_all_constructed_datasets(mocker: MockFixture) -> None:

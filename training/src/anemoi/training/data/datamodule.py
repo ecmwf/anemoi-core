@@ -178,17 +178,6 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         rollout = getattr(self.task, "rollout", None)
         return rollout is not None and rollout.epoch_increment > 0
 
-    @cached_property
-    def _use_persistent_workers(self) -> bool:
-        """Return the effective worker persistence setting."""
-        persistent_workers = self.config.dataloader.get("persistent_workers", True)
-        if persistent_workers and self.rollout_changes_between_epochs:
-            LOGGER.info(
-                "Disabling dataloader.persistent_workers because the rollout changes between epochs.",
-            )
-            return False
-        return persistent_workers
-
     def _sampler_group(self) -> dict[str, int]:
         """Return the number of sample groups and the group of this rank.
 
@@ -241,7 +230,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
             prefetch_factor=self.config.dataloader.prefetch_factor,
-            persistent_workers=self._use_persistent_workers,
+            persistent_workers=self.config.dataloader.get("persistent_workers", False),
             **extra,
         )
 

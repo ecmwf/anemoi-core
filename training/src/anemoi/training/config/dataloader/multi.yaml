@@ -1,7 +1,7 @@
 prefetch_factor: 2
 pin_memory: True
-# Automatically set to False when the rollout changes between epochs.
-persistent_workers: True
+# keep dataloader workers alive between epochs instead of starting new ones every epoch
+persistent_workers: False
 fake_dataloading: False
 
 # ============
