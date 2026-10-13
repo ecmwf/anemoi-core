@@ -14,7 +14,7 @@ from typing import Any
 
 import pytorch_lightning as pl
 from hydra.utils import instantiate
-from torch.utils.data import Sampler
+from torch.utils.data import BatchSampler
 from torchdata.stateful_dataloader import StatefulDataLoader
 
 from anemoi.models.data_indices.collection import IndexCollection
@@ -207,8 +207,8 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return {"num_replicas": 1, "rank": 0}
         return trainer.distributed_sampler_kwargs
 
-    def _get_sampler(self, ds: MultiDataset, stage: str) -> Sampler:
-        """Create the sampler that splits the samples between sample groups.
+    def _get_sampler(self, ds: MultiDataset, stage: str) -> BatchSampler:
+        """Create the batch sampler that splits the samples between sample groups.
 
         Every group gets the same number of samples. The training shuffle depends
         only on the base seed and the epoch. The sampler counts the samples it has
@@ -220,11 +220,12 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             **self._sampler_group(),
             shuffle=stage == "training",
             seed=derive_seed(get_base_seed(), SeedContext.DATALOADER),
+            batch_size=self.config.dataloader.batch_size[stage],
             drop_last=True,
         )
         # Lightning sets the epoch when an epoch starts, but a resumed run builds
         # its first dataloader before that, so the restored epoch is set here.
-        sampler.set_epoch(self.epoch)
+        sampler.sampler.set_epoch(self.epoch)
         return sampler
 
     def _get_dataloader(self, ds: MultiDataset, stage: str) -> StatefulDataLoader:
@@ -243,8 +244,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
 
         return StatefulDataLoader(
             ds,
-            batch_size=self.config.dataloader.batch_size[stage],
-            sampler=self._get_sampler(ds, stage),
+            batch_sampler=self._get_sampler(ds, stage),
             num_workers=self.config.dataloader.num_workers[stage],
             pin_memory=self.config.dataloader.pin_memory,
             prefetch_factor=self.config.dataloader.prefetch_factor,

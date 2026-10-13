@@ -10,8 +10,8 @@
 from abc import ABC
 from abc import abstractmethod
 
+from torch.utils.data import BatchSampler
 from torch.utils.data import Dataset
-from torch.utils.data import Sampler
 from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from anemoi.training.data.data_reader import BaseAnemoiReader
@@ -56,9 +56,10 @@ class DataLoadingPolicy(ABC):
         rank: int,
         shuffle: bool,
         seed: int,
+        batch_size: int,
         drop_last: bool,
-    ) -> Sampler:
-        """Build the sampler that orders and shards the dataset's samples.
+    ) -> BatchSampler:
+        """Build the batch sampler that orders, shards and batches the dataset's samples.
 
         Parameters
         ----------
@@ -72,6 +73,8 @@ class DataLoadingPolicy(ABC):
             Shuffle the samples.
         seed : int
             Seed for the shuffle, shared by every rank of a sample group.
+        batch_size : int
+            Number of samples per batch.
         drop_last : bool
             Drop the remaining samples if they don't divide evenly across sample groups.
         """
@@ -105,9 +108,10 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
         rank: int,
         shuffle: bool,
         seed: int,
+        batch_size: int,
         drop_last: bool,
-    ) -> StatefulDistributedSampler:
-        return StatefulDistributedSampler(
+    ) -> BatchSampler:
+        sampler = StatefulDistributedSampler(
             dataset,
             num_replicas=num_replicas,
             rank=rank,
@@ -115,3 +119,4 @@ class SynchronizedLoadingPolicy(DataLoadingPolicy):
             seed=seed,
             drop_last=drop_last,
         )
+        return BatchSampler(sampler, batch_size=batch_size, drop_last=drop_last)
