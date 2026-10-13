@@ -172,6 +172,7 @@ jobs:
       - uses: ecmwf/reusable-workflows/ci-hpc-generic@v2
         with:
           template: |
+            env | grep SLURM
             set -eux
             WORKDIR="$PERM/TESTING/integration-venvs/${{ github.run_id }}"
             rm -rf "$WORKDIR"
