@@ -21,6 +21,7 @@ from pydantic import RootModel
 from pydantic import computed_field
 
 from anemoi.models.schemas.schema_utils import DatasetDict
+from anemoi.training.schemas.training import GenericSchema
 from anemoi.utils.dates import frequency_to_timedelta
 from anemoi.utils.schemas import BaseModel
 
@@ -122,6 +123,10 @@ class LoaderSet(BaseModel):
     "Value for test dataset"
 
 
+class DataLoadingPolicySchema(GenericSchema):
+    """Hydra instantiation config for the DataLoadingPolicy that builds the dataset and sampler for each stage."""
+
+
 class DataLoaderSchema(PydanticBaseModel):
 
     model_config = ConfigDict(extra="allow", arbitrary_types_allowed=True)
@@ -134,6 +139,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
+    loading_policy: DataLoadingPolicySchema
+    "Hydra config for the DataLoadingPolicy that builds the dataset and sampler for each stage."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet

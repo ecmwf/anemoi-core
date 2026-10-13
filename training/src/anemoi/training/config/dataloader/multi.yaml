@@ -4,6 +4,9 @@ pin_memory: True
 persistent_workers: True
 fake_dataloading: False
 
+loading_policy:
+  _target_: anemoi.training.data.loading.SynchronizedLoadingPolicy
+
 # ============
 # read_group_size:
 #   Form subgroups of model comm groups that read data together.

@@ -13,12 +13,14 @@ from functools import cached_property
 from typing import Any
 
 import pytorch_lightning as pl
+from hydra.utils import instantiate
+from torch.utils.data import Sampler
 from torchdata.stateful_dataloader import StatefulDataLoader
-from torchdata.stateful_dataloader.sampler import StatefulDistributedSampler
 
 from anemoi.models.data_indices.collection import IndexCollection
 from anemoi.models.utils.config import get_multiple_datasets_config
 from anemoi.training.data.data_reader import create_dataset
+from anemoi.training.data.loading import DataLoadingPolicy
 from anemoi.training.data.multidataset import MultiDataset
 from anemoi.training.data.relative_time_indices import compute_relative_date_indices
 from anemoi.training.schemas.base_schema import BaseSchema
@@ -112,6 +114,11 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         return indices
 
     @cached_property
+    def loading_policy(self) -> DataLoadingPolicy:
+        """Return the policy that builds the dataset and sampler for each stage."""
+        return instantiate(self.config.dataloader.loading_policy)
+
+    @cached_property
     def ds_train(self) -> MultiDataset:
         """Create multi-dataset for training."""
         return self._get_dataset(self.train_dataloader_config, label="training")
@@ -138,9 +145,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 
-        return MultiDataset(
-            data_readers=data_readers,
-            relative_date_indices=relative_date_indices,
+        return self.loading_policy.build_dataset(
+            data_readers,
+            relative_date_indices,
             **dataset_options,
         )
 
@@ -200,7 +207,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
             return {"num_replicas": 1, "rank": 0}
         return trainer.distributed_sampler_kwargs
 
-    def _get_sampler(self, ds: MultiDataset, stage: str) -> StatefulDistributedSampler:
+    def _get_sampler(self, ds: MultiDataset, stage: str) -> Sampler:
         """Create the sampler that splits the samples between sample groups.
 
         Every group gets the same number of samples. The training shuffle depends
@@ -208,7 +215,7 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         handed out; Lightning saves this count, which is the same on every rank, so
         training can resume in the middle of an epoch.
         """
-        sampler = StatefulDistributedSampler(
+        sampler = self.loading_policy.build_sampler(
             ds,
             **self._sampler_group(),
             shuffle=stage == "training",
