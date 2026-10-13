@@ -771,6 +771,10 @@ class UpdateDsStatsOnCkptLoadSchema(BaseModel):
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
+    seed: NonNegativeInt | None = Field(default=None, example=None)
+    """Base seed of all random number generators. If null, a run continuing from a checkpoint takes the
+    checkpoint's seed and a new run draws one. A seed that differs from the checkpoint's changes the rest of the
+    interrupted epoch."""
     run_id: str | None = Field(example=None)
     "Run ID: used to resume a run from a checkpoint, either last.ckpt or specified in system.input.warm_start."
     fork_run_id: str | None = Field(example=None)

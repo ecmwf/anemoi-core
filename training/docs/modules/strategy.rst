@@ -35,6 +35,8 @@ strategies:
    datasets in ``process_dataloader``
 * reports in ``distributed_sampler_kwargs`` how the samples are split
    between groups of ranks that train on the same samples
+* gives every rank the base seed of rank 0, so that a freshly drawn base seed
+   is the same on all ranks
 * seeds ``torch``, ``numpy`` and PyTorch Lightning RNGs in a controlled way
 
 To implement a new strategy inherit from :class:`BaseDDPStrategy` and

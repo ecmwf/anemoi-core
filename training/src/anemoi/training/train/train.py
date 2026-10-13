@@ -51,8 +51,9 @@ from anemoi.training.utils.compile import prepare_compilation
 from anemoi.training.utils.hydra import instantiate_with_runtime_kwargs
 from anemoi.training.utils.jsonify import map_config_to_primitives
 from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import choose_base_seed
 from anemoi.training.utils.seeding import derive_seed
-from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import set_base_seed
 from anemoi.utils.provenance import gather_provenance_info
 
 LOGGER = logging.getLogger(__name__)
@@ -124,6 +125,8 @@ class AnemoiTrainer(ABC):
         # Update dry_run attribute, check if checkpoint exists
         self._check_dry_run()
 
+        set_base_seed(self.base_seed)
+
         # Check for dry run, i.e. run id without data
         self._log_information()
 
@@ -153,8 +156,16 @@ class AnemoiTrainer(ABC):
 
     @cached_property
     def base_seed(self) -> int:
-        """Base seed shared by all ranks."""
-        return get_base_seed()
+        """Base seed that the run starts with: ``training.seed``, or a freshly drawn one.
+
+        A freshly drawn seed differs between ranks; distributed training replaces it with
+        rank 0's seed when the ranks first connect. A run that continues from a checkpoint
+        with its full training state switches to the checkpoint's seed while the
+        checkpoint is restored, unless ``training.seed`` is set.
+        """
+        base_seed = choose_base_seed(self.config.training.seed, checkpoint_seed=None)
+        LOGGER.info("Base seed: %d", base_seed)
+        return base_seed
 
     @cached_property
     def initial_seed(self) -> int:
