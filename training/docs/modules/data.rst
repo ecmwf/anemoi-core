@@ -64,6 +64,16 @@ sampler that the datamodule builds, not by the dataset.
    should sub-class ``MultiDataset`` and override the ``get_sample``
    method.
 
+Data Loading Policy
+--------------------
+
+The ``DataLoadingPolicy`` pairs the dataset construction above with the
+sampler that orders, shards and batches its samples, so the two always
+stay consistent with each other. It is selected via the
+``dataloader.loading_policy`` config entry; ``SynchronizedLoadingPolicy``
+is the default, building one synchronized ``MultiDataset`` and a stock
+distributed sampler.
+
 API Reference
 =============
 
@@ -79,6 +89,14 @@ Multi-Dataset API
 -----------------
 
 .. automodule:: anemoi.training.data.multidataset
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
+
+Data Loading Policy API
+------------------------
+
+.. automodule:: anemoi.training.data.loading
    :members:
    :no-undoc-members:
    :show-inheritance:
