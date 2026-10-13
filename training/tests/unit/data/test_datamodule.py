@@ -24,6 +24,7 @@ from anemoi.training.data.datamodule import AnemoiDatasetsDataModule
 from anemoi.training.tasks import Forecaster
 from anemoi.training.tasks import TemporalDownscaler
 from anemoi.training.tasks.base import BaseTask
+from anemoi.training.utils import seeding
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 
@@ -52,6 +53,12 @@ def _fixed_rollout_task() -> Forecaster:
         timestep="6h",
         rollout={"start": 1, "epoch_increment": 0, "maximum": 1},
     )
+
+
+@pytest.fixture(autouse=True)
+def _base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Set the base seed, as AnemoiTrainer does before the datamodule builds its samplers."""
+    monkeypatch.setattr(seeding, "_base_seed", 1000)
 
 
 def _make_datamodule(
@@ -266,9 +273,8 @@ def test_rollout_changes_between_epochs(rollout: dict[str, int], expected: bool)
     assert _make_datamodule(task).rollout_changes_between_epochs is expected
 
 
-def test_training_sampler_shuffles_by_base_seed_and_epoch(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_training_sampler_shuffles_by_base_seed_and_epoch() -> None:
     """The training order is the same for the same base seed and epoch and changes between epochs."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1000")
     datamodule = _make_datamodule(_fixed_rollout_task())
     dataset = SampleIndexDataset(40)
 
@@ -403,12 +409,10 @@ def _fit(
 )
 def test_resumed_training_loads_the_same_batches(
     mocker: MockFixture,
-    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     stop: dict[str, int],
 ) -> None:
     """Training resumed from a checkpoint continues with the batches an uninterrupted run loads."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1000")
     checkpoint = tmp_path / "interrupted.ckpt"
 
     uninterrupted = _fit(mocker)

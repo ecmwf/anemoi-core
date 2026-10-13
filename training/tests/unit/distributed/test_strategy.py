@@ -17,8 +17,10 @@ from anemoi.training.distributed.strategy import BaseDDPStrategy
 from anemoi.training.distributed.strategy import DDPEnsGroupStrategy
 from anemoi.training.distributed.strategy import DDPGroupStrategy
 from anemoi.training.distributed.strategy import seed_rnd
+from anemoi.training.utils import seeding
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
+from anemoi.training.utils.seeding import get_base_seed
 
 
 def test_seed_rnd_uses_bounded_model_seed(mocker: MockFixture) -> None:
@@ -37,6 +39,19 @@ def test_seed_rnd_uses_bounded_model_seed(mocker: MockFixture) -> None:
 
     seed_everything.assert_called_once_with(expected_seed)
     assert 0 <= expected_seed <= 2**32 - 1
+
+
+def test_setup_environment_takes_rank_zero_base_seed(mocker: MockFixture, monkeypatch: pytest.MonkeyPatch) -> None:
+    """All ranks continue with rank 0's base seed, which may differ from the one they drew."""
+    monkeypatch.setattr(seeding, "_base_seed", 1234)
+    mocker.patch("anemoi.training.distributed.strategy.DDPStrategy.setup_environment")
+    strategy = DDPGroupStrategy(num_gpus_per_model=1, read_group_size=1)
+    broadcast = mocker.patch.object(strategy, "broadcast", return_value=5678)
+
+    strategy.setup_environment()
+
+    broadcast.assert_called_once_with(1234, src=0)
+    assert get_base_seed() == 5678
 
 
 def _place_strategy(mocker: MockFixture, strategy: BaseDDPStrategy, global_rank: int, world_size: int) -> None:

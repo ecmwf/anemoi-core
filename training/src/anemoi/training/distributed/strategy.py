@@ -28,6 +28,7 @@ from anemoi.training.distributed.groups import get_my_reader_group
 from anemoi.training.utils.seeding import SeedContext
 from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
+from anemoi.training.utils.seeding import set_base_seed
 
 LOGGER = logging.getLogger(__name__)
 
@@ -125,6 +126,12 @@ class BaseDDPStrategy(DDPStrategy):
             The model communication group ID for this rank.
         """
         raise NotImplementedError
+
+    def setup_environment(self) -> None:
+        super().setup_environment()
+        # Every rank picked its base seed on its own; a freshly drawn one differs
+        # between ranks, so all ranks take rank 0's seed, which goes into the checkpoint.
+        set_base_seed(self.broadcast(get_base_seed(), src=0))
 
     def setup(self, trainer: pl.Trainer) -> None:
         model_comm_group_id = self._setup_communication_groups()

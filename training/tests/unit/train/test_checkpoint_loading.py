@@ -23,7 +23,10 @@ from anemoi.models.preprocessing import StepwiseProcessors
 from anemoi.training.tasks.forecaster import Forecaster
 from anemoi.training.train.methods.base import BaseTrainingModule
 from anemoi.training.train.train import AnemoiTrainer
+from anemoi.training.utils import seeding
 from anemoi.training.utils.checkpoint import transfer_learning_loading
+from anemoi.training.utils.seeding import SeedContext
+from anemoi.training.utils.seeding import derive_seed
 from anemoi.training.utils.seeding import get_base_seed
 
 
@@ -32,12 +35,21 @@ class DummyIndex:
         self.name_to_index: dict[str, int] = {}
 
 
-def _resume_hyper_parameters(base_seed: int | None = None) -> dict:
-    """Hyperparameters of a checkpoint trained with the given base seed, by default the current one."""
-    return {
-        "data_indices": {"data": DummyIndex()},
-        "metadata": {"base_seed": get_base_seed() if base_seed is None else base_seed},
-    }
+@pytest.fixture(autouse=True)
+def _reset_base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the base seed that restoring a checkpoint sets from leaking into other tests."""
+    monkeypatch.setattr(seeding, "_base_seed", None)
+
+
+def _run_metadata(base_seed: int = 7) -> dict:
+    """Seed entries of the run metadata, as AnemoiTrainer builds them before a checkpoint is restored."""
+    seeds = {"base_seed": base_seed, "seed": derive_seed(base_seed, SeedContext.TRAINER)}
+    return {**seeds, "metadata_inference": dict(seeds)}
+
+
+def _resume_hyper_parameters(base_seed: int = 4321) -> dict:
+    """Hyperparameters of a checkpoint trained with the given base seed."""
+    return {"data_indices": {"data": DummyIndex()}, "metadata": {"base_seed": base_seed}}
 
 
 class DummyIndexWithCompare(DummyIndex):
@@ -124,10 +136,12 @@ def _make_dummy_module(model: torch.nn.Module, update_states: bool, update_tende
     module._device = torch.device("cpu")
     module.config = SimpleNamespace(
         training=SimpleNamespace(
+            seed=None,
             load_weights_only=False,
             update_ds_stats_on_ckpt_load=_make_update_cfg(update_states, update_tendencies),
         ),
     )
+    module._set_hparams({"metadata": _run_metadata()})
     return module
 
 
@@ -421,6 +435,7 @@ def _make_module_with_forecaster_task(
     rollout_cfg: dict,
     *,
     load_weights_only: bool = False,
+    seed: int | None = None,
 ) -> tuple[DummyTrainingModule, Forecaster]:
     """Build a minimal DummyTrainingModule whose task is a Forecaster."""
     module = DummyTrainingModule.__new__(DummyTrainingModule)
@@ -429,10 +444,12 @@ def _make_module_with_forecaster_task(
     module.task = task
     module.config = SimpleNamespace(  # type: ignore[assignment]
         training=SimpleNamespace(
+            seed=seed,
             load_weights_only=load_weights_only,
             update_ds_stats_on_ckpt_load=_make_update_cfg(False, False),
         ),
     )
+    module._set_hparams({"metadata": _run_metadata()})
     return module, task
 
 
@@ -783,35 +800,81 @@ def test_validate_transfer_learning_units_ignore_units_option() -> None:
     AnemoiTrainer._validate_transfer_learning_units(trainer, model)
 
 
-def test_on_load_checkpoint_rejects_different_base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Resuming with another base seed than the checkpoint's fails before any state is restored."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1234")
-    module, task = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
-    checkpoint = {
-        "task_state": {"rollout": {"step": 3, "last_increased_epoch": 1}},
-        "hyper_parameters": _resume_hyper_parameters(base_seed=4321),
-        "state_dict": {},
-    }
-
-    with pytest.raises(ValueError, match="ANEMOI_BASE_SEED=4321"):
-        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
-
-    assert task.rollout.step == 1
+def _attach_trainer(module: DummyTrainingModule) -> None:
+    """Attach a stand-in for the Trainer that restores the checkpoint in a training run."""
+    module._trainer = SimpleNamespace(datamodule=None)
 
 
-def test_on_load_checkpoint_load_weights_only_accepts_different_base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Loading only weights starts a new run, so its base seed may differ from the checkpoint's."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1234")
+def test_on_load_checkpoint_continues_with_checkpoint_base_seed() -> None:
+    """Without a seed in the config, a resumed run trains with the checkpoint's seed and records it."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 4321
+    assert module.hparams["metadata"] == _run_metadata(base_seed=4321)
+
+
+def test_on_load_checkpoint_keeps_configured_base_seed() -> None:
+    """A seed set in the config replaces the checkpoint's seed."""
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5}, seed=1234)
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 1234
+    assert module.hparams["metadata"] == _run_metadata(base_seed=1234)
+
+
+def test_on_load_checkpoint_load_weights_only_keeps_run_base_seed() -> None:
+    """Loading only the weights starts a new run, which keeps its own seed."""
+    seeding.set_base_seed(7)
     module, _ = _make_module_with_forecaster_task(
         {"start": 1, "epoch_increment": 1, "maximum": 5},
         load_weights_only=True,
     )
-    checkpoint = {
-        "hyper_parameters": _resume_hyper_parameters(base_seed=4321),
-        "state_dict": {},
-    }
+    _attach_trainer(module)
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
 
     BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 7
+    assert module.hparams["metadata"] == _run_metadata(base_seed=7)
+
+
+def test_on_load_checkpoint_without_stored_base_seed_keeps_run_base_seed(caplog: pytest.LogCaptureFixture) -> None:
+    """A checkpoint from an older version without a stored base seed resumes with the run's own seed."""
+    seeding.set_base_seed(7)
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    _attach_trainer(module)
+    hyper_parameters = _resume_hyper_parameters()
+    del hyper_parameters["metadata"]["base_seed"]
+    checkpoint = {"hyper_parameters": hyper_parameters, "state_dict": {}}
+
+    with caplog.at_level(logging.WARNING):
+        BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert get_base_seed() == 7
+    assert module.hparams["metadata"] == _run_metadata(base_seed=7)
+    assert "stores no base seed" in caplog.text
+
+
+def test_on_load_checkpoint_without_trainer_leaves_base_seed() -> None:
+    """Converting a checkpoint loads it without a Trainer and leaves the seeds alone.
+
+    The config stored in a checkpoint trained before ``training.seed`` existed has no seed entry.
+    """
+    module, _ = _make_module_with_forecaster_task({"start": 1, "epoch_increment": 1, "maximum": 5})
+    del module.config.training.seed
+    checkpoint = {"hyper_parameters": _resume_hyper_parameters(base_seed=4321), "state_dict": {}}
+
+    BaseTrainingModule.on_load_checkpoint(module, checkpoint)
+
+    assert seeding._base_seed is None
+    assert module.hparams["metadata"] == _run_metadata()
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ import pytest
 import torch
 
 from anemoi.training.train.methods.base import BaseTrainingModule
+from anemoi.training.utils import seeding
 
 
 def _draw_after_batch_start(model_comm_group_id: int, epoch: int, batch_idx: int) -> torch.Tensor:
@@ -23,7 +24,7 @@ def _draw_after_batch_start(model_comm_group_id: int, epoch: int, batch_idx: int
 
 def test_batch_random_numbers_do_not_depend_on_earlier_draws(monkeypatch: pytest.MonkeyPatch) -> None:
     """A resumed run draws the same numbers for a batch as the uninterrupted run."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1000")
+    monkeypatch.setattr(seeding, "_base_seed", 1000)
 
     uninterrupted = [_draw_after_batch_start(0, epoch=1, batch_idx=batch_idx) for batch_idx in range(3)]
     torch.rand(100)  # random numbers drawn elsewhere, for example before the interruption
@@ -35,7 +36,7 @@ def test_batch_random_numbers_do_not_depend_on_earlier_draws(monkeypatch: pytest
 
 def test_batch_random_numbers_differ_between_model_groups_and_epochs(monkeypatch: pytest.MonkeyPatch) -> None:
     """Model groups, such as ensemble members, and epochs draw different numbers for the same batch."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1000")
+    monkeypatch.setattr(seeding, "_base_seed", 1000)
 
     reference = _draw_after_batch_start(0, epoch=1, batch_idx=2)
 
@@ -45,9 +46,9 @@ def test_batch_random_numbers_differ_between_model_groups_and_epochs(monkeypatch
 
 def test_batch_random_numbers_follow_base_seed(monkeypatch: pytest.MonkeyPatch) -> None:
     """A different base seed draws different numbers for the same batch."""
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1000")
+    monkeypatch.setattr(seeding, "_base_seed", 1000)
     reference = _draw_after_batch_start(0, epoch=0, batch_idx=0)
 
-    monkeypatch.setenv("ANEMOI_BASE_SEED", "1001")
+    monkeypatch.setattr(seeding, "_base_seed", 1001)
 
     assert not torch.equal(_draw_after_batch_start(0, epoch=0, batch_idx=0), reference)

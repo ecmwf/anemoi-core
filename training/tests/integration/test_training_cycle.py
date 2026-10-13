@@ -9,7 +9,6 @@
 
 import hashlib
 import logging
-import os
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -28,9 +27,6 @@ from anemoi.training.train.train import AnemoiTrainer
 from anemoi.training.utils.time_indices import normalize_time_indices
 from anemoi.utils.testing import GetTestArchive
 from anemoi.utils.testing import skip_if_offline
-
-os.environ["ANEMOI_BASE_SEED"] = "42"  # need to set base seed if running on github runners
-
 
 LOGGER = logging.getLogger(__name__)
 
@@ -299,6 +295,7 @@ def test_resume_mid_epoch_matches_uninterrupted_training(
     cfg.dataloader.limit_batches.training = 6
     cfg.dataloader.limit_batches.validation = 1
     cfg.diagnostics.plot.callbacks = []
+    cfg.training.seed = 42
     checkpoints_dir = Path(cfg.system.output.root + "/" + cfg.system.output.checkpoints.root)
     records = _record_training_batches(monkeypatch)
 
@@ -319,6 +316,8 @@ def test_resume_mid_epoch_matches_uninterrupted_training(
 
     resumed_cfg = deepcopy(cfg)
     resumed_cfg.training.run_id = interrupted_dir.name
+    # Without a seed in the config, the resumed run takes the checkpoint's seed.
+    resumed_cfg.training.seed = None
     AnemoiTrainer(resumed_cfg).train()
 
     assert len(uninterrupted) == 12
