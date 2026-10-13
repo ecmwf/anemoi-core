@@ -75,7 +75,7 @@ API Reference
 Dataset Readers
 ---------------
 
-.. automodule:: anemoi.training.data.data_reader
+.. automodule:: anemoi.training.data.readers
    :members:
    :no-undoc-members:
    :show-inheritance:
