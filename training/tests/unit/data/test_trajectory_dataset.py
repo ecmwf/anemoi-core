@@ -255,12 +255,19 @@ class TestTrajectoryDatasetGetSample:
         expected = np.transpose(ds.data._data[1][:, :, steps, :], (2, 1, 3, 0))
         np.testing.assert_array_equal(sample.numpy(), expected)
 
-    def test_irregular_positions_fall_back_to_full_read(self) -> None:
+    @pytest.mark.parametrize(
+        ("positions", "steps"),
+        [
+            pytest.param([0, 6, 13], [0, 6, 13], id="irregular"),
+            pytest.param(slice(5, 1, -2), [5, 3], id="reversed-slice"),
+        ],
+    )
+    def test_irregular_positions_fall_back_to_full_read(self, positions: list[int] | slice, steps: list[int]) -> None:
         ds = _make_trajectory_dataset(num_inits=4, variables=3, ensemble=2, steps=24, gridpoints=10)
-        sample = ds.get_sample(sequence=2, positions=[0, 6, 13], grid_shard_indices=None)
+        sample = ds.get_sample(sequence=2, positions=positions, grid_shard_indices=None)
 
         assert ds.data.read_keys == [2]
-        expected = np.transpose(ds.data._data[2][:, :, [0, 6, 13], :], (2, 1, 3, 0))
+        expected = np.transpose(ds.data._data[2][:, :, steps, :], (2, 1, 3, 0))
         np.testing.assert_array_equal(sample.numpy(), expected)
 
 
