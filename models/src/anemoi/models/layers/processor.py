@@ -679,6 +679,12 @@ class GraphTransformerProcessor(BaseProcessor):
                 model_comm_group,
             )
 
+        if halo_info is not None and self.proc[0].graph_attention_backend == "triton":
+            # prime the shared CSC layout outside the checkpointed/compiled layers
+            self.proc[0].cached_csc(
+                halo_info.cache, halo_info.edge_index_local, (halo_info.total_src_nodes, halo_info.local_dst_nodes)
+            )
+
         x, edge_attr = self.run_layers(
             data=(x, edge_attr),
             edge_index=edge_index,

@@ -8,6 +8,8 @@
 # nor does it submit to any jurisdiction.
 
 
+from typing import Optional
+
 import torch
 from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
@@ -19,6 +21,8 @@ from anemoi.models.distributed.primitives import _halo_exchange
 from anemoi.models.distributed.primitives import _halo_exchange_bwd
 from anemoi.models.distributed.primitives import _reduce
 from anemoi.models.distributed.primitives import _split
+from anemoi.models.distributed.primitives import _halo_peer_plan
+from anemoi.models.distributed.primitives import _start_halo_comm
 from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.shapes import get_shard_sizes
 from anemoi.models.distributed.utils import model_is_distributed  # noqa: F401
@@ -436,6 +440,166 @@ class _AllToAllParallelSection(torch.autograd.Function):
         return grad_output, None, None, None, None, None
 
 
+class HaloExchangeHandle:
+    """State shared by the start and wait halves of one asynchronous halo exchange.
+
+    Created by :func:`halo_exchange_start`, consumed by :func:`halo_exchange_wait`.
+    The same object carries the pending reverse exchange of the backward pass.
+    """
+
+    __slots__ = ("halo_info", "group", "comm_dtype", "token", "works", "send_buf", "recv_buf", "grad_works", "grad_bufs")
+
+    def __init__(self, halo_info, group: ProcessGroup, comm_dtype: Optional[torch.dtype] = None) -> None:
+        self.halo_info = halo_info
+        self.group = group
+        self.comm_dtype = comm_dtype
+        self.token = None
+        self.works = None
+        self.send_buf = None
+        self.recv_buf = None
+        self.grad_works = None
+        self.grad_bufs = None
+
+
+def _peer_plan(info, direction: str):
+    """Cached per-peer offsets for the forward (send rows) or backward (send halo grads) exchange."""
+    key = ("peer_plan", direction)
+    plan = info.cache.get(key)
+    if plan is None:
+        if direction == "fwd":
+            plan = _halo_peer_plan(info.send_counts, info.recv_counts, info.peers)
+        else:
+            plan = _halo_peer_plan(info.recv_counts, info.send_counts, info.peers)
+        info.cache[key] = plan
+    return plan
+
+
+def _wait_all(works) -> None:
+    for work in works or ():
+        work.wait()
+
+
+class _HaloStart(torch.autograd.Function):
+    """Gather the rows to send and post the exchange; returns an empty token tensor.
+
+    Backward waits for the reverse exchange posted by :class:`_HaloWait` and
+    scatter-adds the received gradients onto the sent rows.
+    """
+
+    @staticmethod
+    def forward(ctx, input_: Tensor, handle: HaloExchangeHandle) -> Tensor:
+        info = handle.halo_info
+        comm_dtype = handle.comm_dtype or input_.dtype
+        send_buf = input_.index_select(0, info.send_index_flat).to(comm_dtype)
+        recv_buf = input_.new_empty((info.num_halo_nodes, *input_.shape[1:]), dtype=comm_dtype)
+        handle.works = _start_halo_comm(
+            send_buf, info.send_counts, recv_buf, info.recv_counts, info.peers, handle.group, _peer_plan(info, "fwd")
+        )
+        handle.send_buf = send_buf
+        handle.recv_buf = recv_buf
+
+        ctx.handle = handle
+        ctx.input_shape = input_.shape
+        ctx.input_dtype = input_.dtype
+        return input_.new_empty(0)
+
+    @staticmethod
+    def backward(ctx, grad_token: Tensor):
+        handle = ctx.handle
+        info = handle.halo_info
+        grad_input = torch.zeros(ctx.input_shape, dtype=torch.float32, device=grad_token.device)
+        if handle.grad_works is not None:
+            _wait_all(handle.grad_works)
+            grad_send, _ = handle.grad_bufs
+            if grad_send.numel() > 0:
+                grad_input.index_add_(0, info.send_index_flat, grad_send.to(torch.float32))
+        handle.grad_works = None
+        handle.grad_bufs = None
+        return grad_input.to(ctx.input_dtype), None
+
+
+class _HaloWait(torch.autograd.Function):
+    """Wait for the exchange posted by :class:`_HaloStart` and return the halo rows.
+
+    Backward posts the reverse exchange (halo gradients back to their owners)
+    without waiting, so it overlaps with the remaining backward computation.
+    """
+
+    @staticmethod
+    def forward(ctx, token: Tensor, handle: HaloExchangeHandle) -> Tensor:
+        _wait_all(handle.works)
+        recv_buf = handle.recv_buf
+        handle.works = None
+        handle.send_buf = None
+        handle.recv_buf = None
+
+        ctx.handle = handle
+        ctx.token_dtype = token.dtype
+        return recv_buf
+
+    @staticmethod
+    def backward(ctx, grad_halo: Tensor):
+        handle = ctx.handle
+        info = handle.halo_info
+        comm_dtype = handle.comm_dtype or grad_halo.dtype
+        grad_halo = grad_halo.to(comm_dtype).contiguous()
+        grad_send = grad_halo.new_empty((info.num_send_nodes, *grad_halo.shape[1:]))
+        # reverse direction: what we received is sent back, what we sent is received
+        handle.grad_works = _start_halo_comm(
+            grad_halo, info.recv_counts, grad_send, info.send_counts, info.peers, handle.group, _peer_plan(info, "bwd")
+        )
+        handle.grad_bufs = (grad_send, grad_halo)
+        return grad_halo.new_empty(0, dtype=ctx.token_dtype), None
+
+
+@torch.compiler.disable
+def halo_exchange_start(
+    input_: Tensor, halo_info, mgroup: ProcessGroup, comm_dtype: Optional[torch.dtype] = None
+) -> HaloExchangeHandle:
+    """Start an asynchronous halo exchange of ``input_`` (local node rows).
+
+    Only the rows listed in ``halo_info.send_index_flat`` are sent, and only to
+    neighbouring ranks. Pair with :func:`halo_exchange_wait`; computation that
+    does not need the halo rows can be issued in between to overlap with the
+    communication. Both halves are differentiable and the backward pass overlaps
+    the reverse exchange in the same way.
+
+    Parameters
+    ----------
+    input_ : Tensor
+        Local node features, shape ``(num_local_nodes, ...)``.
+    halo_info : HaloInfo
+        Per-rank halo exchange metadata (from :func:`build_halo_info`).
+    mgroup : ProcessGroup
+        Model communication group.
+    comm_dtype : torch.dtype, optional
+        Dtype used on the wire and for the returned halo rows, by default the
+        input dtype. Gradients are accumulated in float32.
+
+    Returns
+    -------
+    HaloExchangeHandle
+        Handle to pass to :func:`halo_exchange_wait`.
+    """
+    handle = HaloExchangeHandle(halo_info, mgroup, comm_dtype)
+    handle.token = _HaloStart.apply(input_, handle)
+    return handle
+
+
+@torch.compiler.disable
+def halo_exchange_wait(handle: HaloExchangeHandle) -> Tensor:
+    """Finish a halo exchange started by :func:`halo_exchange_start`.
+
+    Returns
+    -------
+    Tensor
+        ``(num_halo_nodes, ...)`` halo rows, ordered by source rank as expected by
+        ``halo_info.edge_index_local``.
+    """
+    token, handle.token = handle.token, None
+    return _HaloWait.apply(token, handle)
+
+
 def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     """Halo exchange for graph-partitioned node features.
 
@@ -460,7 +624,10 @@ def halo_exchange(input_: Tensor, halo_info, mgroup: ProcessGroup) -> Tensor:
     Tensor
         ``(num_local_nodes + num_halo_nodes, ...)`` — local + halo features.
     """
-    return _HaloExchangeParallelSection.apply(input_, halo_info, mgroup)
+    if not mgroup or mgroup.size() == 1:
+        return input_
+    halo = halo_exchange_wait(halo_exchange_start(input_, halo_info, mgroup))
+    return torch.cat([input_, halo], dim=0)
 
 
 class _HaloExchangeParallelSection(torch.autograd.Function):

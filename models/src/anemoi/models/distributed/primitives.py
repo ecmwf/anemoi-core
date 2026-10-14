@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import os
 from typing import Optional
 
 import torch
@@ -519,3 +520,68 @@ def _halo_exchange_bwd(
         grad_local.index_add_(0, all_indices, all_recv)
 
     return grad_local
+
+
+def _halo_comm_mode() -> str:
+    """Communication backend for the flat halo exchange (``p2p`` or ``a2a``)."""
+    mode = os.environ.get("ANEMOI_HALO_COMM", "p2p").lower()
+    assert mode in ("p2p", "a2a"), f"ANEMOI_HALO_COMM must be 'p2p' or 'a2a', got '{mode}'"
+    return mode
+
+
+def _halo_peer_plan(
+    send_splits: tuple[int, ...], recv_splits: tuple[int, ...], peers: tuple[int, ...]
+) -> tuple[tuple[int, int, int, int, int], ...]:
+    """Per peer ``(peer, send_offset, send_count, recv_offset, recv_count)`` into the flat buffers."""
+    send_offsets, recv_offsets = [0], [0]
+    for count in send_splits:
+        send_offsets.append(send_offsets[-1] + count)
+    for count in recv_splits:
+        recv_offsets.append(recv_offsets[-1] + count)
+    return tuple((p, send_offsets[p], send_splits[p], recv_offsets[p], recv_splits[p]) for p in peers)
+
+
+def _start_halo_comm(
+    send_buf: Tensor,
+    send_splits: tuple[int, ...],
+    recv_buf: Tensor,
+    recv_splits: tuple[int, ...],
+    peers: tuple[int, ...],
+    group: ProcessGroup,
+    peer_plan: Optional[tuple[tuple[int, int, int, int, int], ...]] = None,
+) -> list:
+    """Post a non-blocking halo exchange between contiguous send/recv buffers.
+
+    ``send_buf`` and ``recv_buf`` hold the rows for all peers back to back, ordered
+    by group rank, with ``send_splits[r]``/``recv_splits[r]`` rows for rank *r*.
+    In ``p2p`` mode only the ranks in ``peers`` are contacted, so the cost scales
+    with the number of neighbouring partitions rather than the group size. No
+    host synchronisation is required since all sizes are known on the host.
+    ``peer_plan`` (see :func:`_halo_peer_plan`) can be passed to skip recomputing offsets.
+
+    Returns the list of pending work handles; call ``wait()`` on each before
+    reading ``recv_buf``.
+    """
+    if _halo_comm_mode() == "a2a":
+        work = dist.all_to_all_single(
+            recv_buf,
+            send_buf,
+            output_split_sizes=list(recv_splits),
+            input_split_sizes=list(send_splits),
+            group=group,
+            async_op=True,
+        )
+        return [work]
+
+    if peer_plan is None:
+        peer_plan = _halo_peer_plan(send_splits, recv_splits, peers)
+
+    ops = []
+    for peer, send_offset, send_count, recv_offset, recv_count in peer_plan:
+        if recv_count > 0:
+            ops.append(dist.P2POp(dist.irecv, recv_buf.narrow(0, recv_offset, recv_count), group=group, group_peer=peer))
+        if send_count > 0:
+            ops.append(dist.P2POp(dist.isend, send_buf.narrow(0, send_offset, send_count), group=group, group_peer=peer))
+    if not ops:
+        return []
+    return dist.batch_isend_irecv(ops)

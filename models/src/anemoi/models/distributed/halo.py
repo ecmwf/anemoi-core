@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 from dataclasses import dataclass
+from dataclasses import field
 from typing import Optional
 
 import torch
@@ -65,6 +66,28 @@ class HaloInfo:
     recv_global_ids: Optional[tuple[Tensor, ...]]
     edge_index_local: Tensor
     num_local_dst_nodes: Optional[int] = None
+    # Derived in __post_init__: flat send index and the ranks we exchange rows with.
+    send_index_flat: Tensor = field(init=False, repr=False, compare=False)
+    peers: tuple[int, ...] = field(init=False, repr=False, compare=False)
+    # Per-plan cache for derived static graph data (e.g. CSC layouts), filled lazily.
+    cache: dict = field(init=False, repr=False, compare=False, hash=False)
+
+    def __post_init__(self) -> None:
+        device = self.edge_index_local.device
+        if len(self.send_indices) > 0:
+            send_index_flat = torch.cat([idx.to(device=device, dtype=torch.long) for idx in self.send_indices])
+        else:
+            send_index_flat = torch.empty(0, dtype=torch.long, device=device)
+        send_counts = self.send_counts
+        peers = tuple(r for r in range(len(send_counts)) if send_counts[r] > 0 or self.recv_counts[r] > 0)
+        object.__setattr__(self, "send_index_flat", send_index_flat)
+        object.__setattr__(self, "peers", peers)
+        object.__setattr__(self, "cache", {})
+
+    @property
+    def num_send_nodes(self) -> int:
+        """Total number of rows sent to all peers."""
+        return self.send_index_flat.size(0)
 
     @property
     def num_local_src_nodes(self) -> int:
