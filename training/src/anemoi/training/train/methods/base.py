@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
@@ -66,6 +67,11 @@ if TYPE_CHECKING:
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+# Lightning's sync_dist does a host-blocking world barrier plus an all-reduce on every logged step; the training
+# loss is already reduced within the model group, so ANEMOI_TRAIN_LOSS_SYNC_DIST=0 skips the cross-replica sync.
+_TRAIN_LOSS_SYNC_DIST = os.environ.get("ANEMOI_TRAIN_LOSS_SYNC_DIST", "1") != "0"
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -367,6 +373,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+        # Compute dtype for casting model inputs (set by the strategy during setup,
+        # based on the precision plugin). When set, the model forward casts input
+        # latents to this dtype, e.g. torch.bfloat16 for bf16 training.
+        self.compute_dtype: torch.dtype | None = None
+
+    def set_compute_dtype(self, dtype: torch.dtype) -> None:
+        """Set the compute dtype for input casting.
+
+        Called by the strategy during setup to communicate the precision mode from
+        the precision plugin to the model.
+
+        Parameters
+        ----------
+        dtype : torch.dtype
+            The dtype to use for computation (e.g., torch.bfloat16, torch.float32)
+
+        """
+        self.compute_dtype = dtype
+        LOGGER.info("%s: Setting compute dtype to %s", type(self).__name__, dtype)
+
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
@@ -446,6 +472,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_sizes=self.grid_shard_sizes,
+            compute_dtype=self.compute_dtype,
             **kwargs,
         )
 
@@ -1194,7 +1221,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             prog_bar=True,
             logger=self.logger_enabled,
             batch_size=batch_size,
-            sync_dist=True,
+            sync_dist=_TRAIN_LOSS_SYNC_DIST,
         )
 
         self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)

@@ -10,6 +10,8 @@
 
 import os
 from dataclasses import dataclass
+from dataclasses import field
+from typing import TYPE_CHECKING
 from typing import Optional
 from typing import Tuple
 from typing import Union
@@ -20,11 +22,11 @@ from torch import Tensor
 from torch.distributed.distributed_c10d import ProcessGroup
 from torch_geometric.typing import Adj
 from torch_geometric.typing import PairTensor
-from torch_geometric.utils import degree
 from torch_geometric.utils import index_sort
 
 from anemoi.models.distributed.balanced_partition import get_balanced_partition_sizes
 from anemoi.models.distributed.balanced_partition import get_partition_range
+from anemoi.models.distributed.graph import halo_exchange
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
@@ -32,6 +34,9 @@ from anemoi.models.distributed.shapes import ShardSizes
 from anemoi.models.distributed.utils import model_is_distributed
 
 ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
+
+if TYPE_CHECKING:
+    from anemoi.models.distributed.halo import HaloInfo
 
 
 def sort_edge_index_by_dst(edge_index: Adj, max_value: int = None) -> Tuple[Adj, Tensor]:
@@ -67,6 +72,9 @@ class GraphPartition:
         Per-partition destination node counts.
     edge_splits : list[int]
         Per-partition edge counts (derived from dst-sorted edge structure).
+    src_splits : list[int], optional
+        Per-partition source node counts, independent of destination ownership.
+        Halo metadata uses ``dst_splits`` for source ownership when omitted.
     """
 
     num_nodes: tuple[int, int]
@@ -74,6 +82,7 @@ class GraphPartition:
     num_parts: int
     dst_splits: list[int]
     edge_splits: list[int]
+    src_splits: Optional[list[int]] = None
 
     def materialise(
         self,
@@ -151,6 +160,91 @@ class GraphPartition:
         return edge_index_
 
 
+@dataclass(frozen=True)
+class ChunkPlan:
+    """Precomputed local chunking of a static, dst-sorted subgraph.
+
+    Stores, per chunk, the connected source nodes and the relabeled edge index,
+    so that :meth:`materialise` only slices tensors: no ``unique`` and no host
+    synchronisation. Valid as long as the graph topology does not change.
+
+    Parameters
+    ----------
+    partition : GraphPartition
+        Local chunk partition (dst and edge ranges).
+    src_ids : tuple[Tensor, ...]
+        Per-chunk indices of the source nodes connected to the chunk.
+    edge_index : tuple[Tensor, ...]
+        Per-chunk edge index relabeled to ``[0, len(src_ids[i]))`` x ``[0, chunk dst size)``.
+    cache : dict
+        Per-chunk lazily filled caches of derived graph data (e.g. CSC layouts).
+    """
+
+    partition: GraphPartition
+    src_ids: tuple[Tensor, ...]
+    edge_index: tuple[Tensor, ...]
+    cache: tuple[dict, ...] = field(repr=False, compare=False, hash=False)
+
+    @property
+    def num_parts(self) -> int:
+        return self.partition.num_parts
+
+    def materialise(
+        self,
+        partition_id: int,
+        x: PairTensor,
+        edge_attr: Tensor,
+        cond: Optional[PairTensor] = None,
+    ) -> tuple[PairTensor, Tensor, Adj, Optional[PairTensor]]:
+        """Slice nodes, edges and conditioning of one chunk, see :meth:`GraphPartition.materialise`."""
+        x_src, x_dst = x
+        src_ids = self.src_ids[partition_id]
+        dst_range = self.partition._get_dst_range(partition_id)
+        edge_attr_subset = edge_attr[self.partition._get_edge_range(partition_id)]
+
+        cond_subset = None
+        if cond is not None:
+            cond_src, cond_dst = cond
+            cond_subset = (cond_src[src_ids], cond_dst[dst_range])
+
+        return (x_src[src_ids], x_dst[dst_range]), edge_attr_subset, self.edge_index[partition_id], cond_subset
+
+
+def build_chunk_plan(edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]) -> ChunkPlan:
+    """Build a :class:`ChunkPlan` for a dst-sorted local edge_index."""
+    partition = build_graph_partition(edge_index, num_parts=num_parts, num_nodes=num_nodes)
+    src_ids, edge_indices = [], []
+    for partition_id in range(num_parts):
+        edge_index_subset = edge_index[:, partition._get_edge_range(partition_id)].clone()
+        partition._relabel_dst_nodes(edge_index_subset, partition_id)
+        connected_src_nodes = torch.unique(edge_index_subset[0])
+        relabel_map = torch.empty(num_nodes[0], dtype=torch.long, device=edge_index.device)
+        relabel_map[connected_src_nodes] = torch.arange(connected_src_nodes.size(0), device=edge_index.device)
+        edge_index_subset[0] = relabel_map[edge_index_subset[0]]
+        src_ids.append(connected_src_nodes)
+        edge_indices.append(edge_index_subset)
+    return ChunkPlan(
+        partition=partition,
+        src_ids=tuple(src_ids),
+        edge_index=tuple(edge_indices),
+        cache=tuple({} for _ in range(num_parts)),
+    )
+
+
+def _edge_splits_from_dst_sorted(dst: Tensor, dst_splits: list[int]) -> list[int]:
+    """Per-partition edge counts for dst-sorted edges, with a single host sync.
+
+    The edges of partition *p* are those whose destination lies in the
+    contiguous range given by ``dst_splits``; with sorted destinations the
+    boundaries are found by binary search.
+    """
+    if len(dst_splits) == 1:
+        return [dst.numel()]
+    dst_bounds = torch.tensor(dst_splits[:-1], dtype=dst.dtype).cumsum(0).to(dst.device)
+    edge_bounds = [0] + torch.searchsorted(dst.contiguous(), dst_bounds, side="left").tolist() + [dst.numel()]
+    return [edge_bounds[i + 1] - edge_bounds[i] for i in range(len(dst_splits))]
+
+
 def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int, int]) -> GraphPartition:
     """Build graph partitioning information from a dst-sorted edge_index.
 
@@ -176,9 +270,7 @@ def build_graph_partition(edge_index: Adj, num_parts: int, num_nodes: tuple[int,
         )
 
     dst_splits = get_balanced_partition_sizes(n_dst, num_parts)
-    degree_per_dst = degree(edge_index[1], num_nodes=n_dst, dtype=torch.long)
-    # use torch.split with dst_splits to match the balanced partitioning exactly
-    edge_splits = [chunk.sum().item() for chunk in torch.split(degree_per_dst, dst_splits)]
+    edge_splits = _edge_splits_from_dst_sorted(edge_index[1], dst_splits)
 
     return GraphPartition(
         num_nodes=num_nodes,
@@ -220,6 +312,7 @@ def build_graph_partition_from_shard_info(
     n_src = sum(shard_info.src_nodes) if shard_info.src_is_sharded() else x_src.size(0)
     n_dst = sum(shard_info.dst_nodes) if shard_info.dst_is_sharded() else x_dst.size(0)
     comm_size = model_comm_group.size() if model_comm_group is not None else 1
+    src_splits = shard_info.src_nodes
 
     if shard_info.edges_are_sharded():  # build partition from existing edge shard info:
         n_edges = sum(shard_info.edges)
@@ -233,10 +326,19 @@ def build_graph_partition_from_shard_info(
             num_parts=comm_size,
             dst_splits=dst_splits,
             edge_splits=edge_splits,
+            src_splits=src_splits,
         )
 
     # otherwise: edge_index is not sharded, so we can build the partition directly from it
-    return build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    partition = build_graph_partition(edge_index, num_parts=comm_size, num_nodes=(n_src, n_dst))
+    return GraphPartition(
+        num_nodes=partition.num_nodes,
+        num_edges=partition.num_edges,
+        num_parts=partition.num_parts,
+        dst_splits=partition.dst_splits,
+        edge_splits=partition.edge_splits,
+        src_splits=src_splits,
+    )
 
 
 def ensure_edges_are_dst_sorted(
@@ -300,7 +402,7 @@ def shard_edges_1hop(
     edge_shard_sizes = None
 
     if model_is_distributed(model_comm_group):
-        if edges_are_dst_sorted:  # fast path: compute splits from degree
+        if edges_are_dst_sorted:  # fast path: compute splits from sorted destinations
             num_parts = model_comm_group.size()
             edge_shard_sizes = build_graph_partition(edge_index, num_parts, num_nodes).edge_splits
         else:  # slow path: sort edges into 1-hop chunks via subgraph extraction
@@ -322,6 +424,7 @@ def shard_graph_to_local(
     shard_info: BipartiteGraphShardInfo,
     model_comm_group: Optional[ProcessGroup] = None,
     cond: Optional[PairTensor] = None,
+    halo_info: Optional["HaloInfo"] = None,
 ) -> tuple[PairTensor, Tensor, Adj, BipartiteGraphShardInfo, Optional[PairTensor]]:
     """Shard graph tensors to the local rank using precomputed partition metadata.
 
@@ -344,6 +447,9 @@ def shard_graph_to_local(
         Model communication group.
     cond : tuple[Tensor, Tensor], optional
         Conditioning tensors (cond_src, cond_dst).
+    halo_info : HaloInfo, optional
+        Precomputed metadata for exchanging only required source nodes. If
+        omitted, all source features are synchronized before localization.
 
     Returns
     -------
@@ -368,6 +474,9 @@ def shard_graph_to_local(
         ), f"Expected dst shard shapes {partition.dst_splits} but got {shard_info.dst_nodes}"
     else:
         x_dst = shard_tensor(x_dst, 0, partition.dst_splits, model_comm_group)
+        if cond is not None:
+            cond_src, cond_dst = cond
+            cond = (cond_src, shard_tensor(cond_dst, 0, partition.dst_splits, model_comm_group))
 
     # shard or validate edges
     if shard_info.edges_are_sharded():
@@ -378,27 +487,38 @@ def shard_graph_to_local(
         edge_attr = shard_tensor(edge_attr, 0, partition.edge_splits, model_comm_group)
         edge_index = shard_tensor(edge_index, 1, partition.edge_splits, model_comm_group)
 
-    # relabel dst indices to local
-    edge_index = edge_index.clone()
-    partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
+    if halo_info is None:
+        # relabel dst indices to local
+        edge_index = edge_index.clone()
+        partition._relabel_dst_nodes(edge_index, partition_id=my_rank)
 
-    # gather x_src — always reduce in backward for correct gradients on halo nodes
-    x_src_full = sync_tensor(
-        x_src,
-        0,
-        shard_info.src_nodes,
-        model_comm_group,
-        gather_in_fwd=shard_info.src_is_sharded(),
-    )
-
-    x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+        # gather x_src — always reduce in backward for correct gradients on halo nodes
+        x_src_full = sync_tensor(
+            x_src,
+            0,
+            shard_info.src_nodes,
+            model_comm_group,
+            gather_in_fwd=shard_info.src_is_sharded(),
+        )
+        x_src_local, edge_index, src_ids = _drop_unconnected_src_nodes(x_src_full, edge_index)
+    else:
+        assert (
+            x_src.size(0) == halo_info.num_local_src_nodes
+        ), f"Expected {halo_info.num_local_src_nodes} local source nodes, got {x_src.size(0)}"
+        x_src_local = halo_exchange(x_src, halo_info, model_comm_group)
+        edge_index = halo_info.edge_index_local
+        src_ids = None
 
     # same for conditioning [if cond is not None]
     cond_local = None
     if cond is not None:
         cond_src, cond_dst = cond
-        cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
-        cond_local = (cond_src_full[src_ids], cond_dst)
+        if halo_info is None:
+            cond_src_full = sync_tensor(cond_src, 0, shard_info.src_nodes, model_comm_group)
+            cond_src_local = cond_src_full[src_ids]
+        else:
+            cond_src_local = halo_exchange(cond_src, halo_info, model_comm_group)
+        cond_local = (cond_src_local, cond_dst)
 
     updated_shard_info = BipartiteGraphShardInfo(
         src_nodes=shard_info.src_nodes,

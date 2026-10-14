@@ -159,6 +159,7 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         fcstep: int,
         model_comm_group: Optional[ProcessGroup] = None,
         grid_shard_sizes: DatasetShardSizes | None = None,
+        compute_dtype: Optional[torch.dtype] = None,
         **kwargs,
     ) -> dict[str, Tensor]:
         """Forward operator.
@@ -174,6 +175,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         grid_shard_sizes : DatasetShardSizes, optional
             Per-dataset shard sizes for the grid dimension. ``None`` means the
             corresponding dataset is replicated, not sharded.
+        compute_dtype : Optional[torch.dtype], optional
+            Dtype to cast inputs to for computation, by default None
         **kwargs
             Additional keyword arguments
 
@@ -206,6 +209,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
         x_hidden_latent = self.node_attributes(self._graph_name_hidden, batch_size=batch_ens_size)
         shard_sizes_hidden = get_shard_sizes(x_hidden_latent, 0, model_comm_group)
         x_hidden_latent = shard_tensor(x_hidden_latent, 0, shard_sizes_hidden, model_comm_group)
+        if compute_dtype is not None:
+            x_hidden_latent = x_hidden_latent.to(compute_dtype)
         for dataset_name in x.keys():
             if dataset_name not in self.input_datasets:
                 continue
@@ -220,6 +225,9 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             )
             x_skip_dict[dataset_name] = x_skip
             shard_sizes_data_dict[dataset_name] = shard_sizes_data
+
+            if compute_dtype is not None:
+                x_data_latent = x_data_latent.to(compute_dtype)
 
             (
                 encoder_edge_attr,
@@ -259,6 +267,8 @@ class AnemoiEnsModelEncProcDec(AnemoiModelEncProcDec):
             ensemble_size=ensemble_size,
             grid_size=self.node_attributes.num_nodes[self._graph_name_hidden],
             grid_shard_sizes=shard_sizes_hidden,
+            # with explicit precision (bf16 weights, no autocast) the noise must match the noise MLP weights
+            noise_dtype=compute_dtype if compute_dtype is not None else torch.float32,
             model_comm_group=model_comm_group,
         )
 

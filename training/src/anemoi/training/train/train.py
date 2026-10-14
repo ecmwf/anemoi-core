@@ -695,6 +695,29 @@ class AnemoiTrainer(ABC):
             static_graph=not self.config.training.accum_grad_batches > 1,
         )
 
+    def _setup_precision(self) -> tuple[list, dict]:
+        """Set up precision plugin and settings for the Trainer.
+
+        Returns
+        -------
+        tuple[list, dict]
+            A tuple of (plugins_list, precision_settings_dict)
+        """
+        plugins = []
+        precision_settings = {}
+
+        if self.config.training.precision == "bf16-fp32-opt":
+            from anemoi.training.precision import BF16FP32OptPrecision
+
+            precision_plugin = BF16FP32OptPrecision()
+            plugins.append(precision_plugin)
+            # Don't pass precision argument when using custom plugin
+            # (Lightning will error if both plugin and precision are provided)
+        else:
+            precision_settings = {"precision": self.config.training.precision}
+
+        return plugins, precision_settings
+
     @cached_property
     def fit_parameters(self) -> Any:
         """Options to be passed to trainer.fit().
@@ -721,6 +744,8 @@ class AnemoiTrainer(ABC):
         """Training entry point."""
         LOGGER.debug("Setting up trainer..")
 
+        plugins, precision_settings = self._setup_precision()
+
         trainer = pl.Trainer(
             accelerator=self.accelerator,
             callbacks=self.callbacks,
@@ -729,7 +754,8 @@ class AnemoiTrainer(ABC):
             strategy=self.strategy,
             devices=self.config.system.hardware.num_gpus_per_node,
             num_nodes=self.config.system.hardware.num_nodes,
-            precision=self.config.training.precision,
+            **precision_settings,
+            plugins=plugins,
             max_epochs=self.config.training.max_epochs,
             max_steps=self.config.training.max_steps or -1,
             logger=self.logger,
@@ -751,14 +777,17 @@ class AnemoiTrainer(ABC):
 
         self.model = prepare_compilation(self.model, self.config.model, self.config.training)
 
-        LOGGER.debug("Starting training..")
+        LOGGER.info("Active Strategy: %s", trainer.strategy.__class__.__name__)
+        LOGGER.info("Active precision plugin: %s", trainer.strategy.precision_plugin.__class__.__name__)
+
+        LOGGER.info("Starting training..")
 
         trainer.fit(**self.fit_parameters)
 
         if self.config.diagnostics.print_memory_summary:
             LOGGER.info("memory summary: %s", torch.cuda.memory_summary(device=0))
 
-        LOGGER.debug("---- DONE. ----")
+        LOGGER.info("---- DONE. ----")
 
 
 @hydra.main(version_base=None, config_path=None, config_name="config")

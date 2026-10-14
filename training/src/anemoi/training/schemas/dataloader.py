@@ -134,6 +134,8 @@ class DataLoaderSchema(PydanticBaseModel):
     "Keep dataloader workers alive between epochs. Automatically disabled when the rollout changes between epochs."
     fake_dataloading: bool = Field(default=False)
     "Load one real sample per worker and reuse it for subsequent accesses."
+    ignore_dataset_dates: bool = Field(default=False)
+    "Synthetic benchmarks only: sample by index at the native frequency, ignoring date bounds. Splits may overlap."
     num_workers: LoaderSet
     "Number of process per-GPU for batch distribution."
     batch_size: LoaderSet

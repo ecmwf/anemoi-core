@@ -282,6 +282,24 @@ class PatchedProfile(profile):
         return _convert_npint_to_int(dist_info)
 
 
+def _keep_repeating(schedule_wrapper: object) -> None:
+    """Let Lightning's ScheduleWrapper run more than one wait/warmup/active cycle.
+
+    Lightning latches ``_training_step_reached_end`` at the first RECORD_AND_SAVE and returns NONE from then
+    on, which silently ignores ``repeat`` in the torch schedule. Clearing the latch after every call keeps the
+    torch schedule in charge; it returns NONE itself once all repeats are done.
+    """
+    base = type(schedule_wrapper)
+
+    class _RepeatingScheduleWrapper(base):
+        def __call__(self, num_step: int) -> torch.profiler.ProfilerAction:
+            action = base.__call__(self, num_step)
+            self._training_step_reached_end = False
+            return action
+
+    schedule_wrapper.__class__ = _RepeatingScheduleWrapper
+
+
 class BenchmarkProfiler(Profiler):
     """Custom PyTorch Lightning profiler for benchmarking."""
 
@@ -293,6 +311,10 @@ class BenchmarkProfiler(Profiler):
         if not self.warmup:
             self.warmup = 0
         self.num_steps = self.config.diagnostics.benchmark_profiler.memory.steps
+        # steps with the profiler fully off before the warmup; unlike warmup steps these run without tracing overhead
+        self.wait = self.config.diagnostics.benchmark_profiler.memory.get("wait", 0) or 0
+        # number of wait/warmup/active cycles; each cycle writes its own trace file
+        self.repeat = self.config.diagnostics.benchmark_profiler.memory.get("repeat", 1) or 1
 
         if self.config.diagnostics.benchmark_profiler.memory.extra_plots:
             assert (
@@ -375,13 +397,15 @@ class BenchmarkProfiler(Profiler):
                     dirpath=self.dirpath,
                     on_trace_ready=trace_handler(self.dirpath),
                     schedule=torch.profiler.schedule(
-                        wait=0,
+                        wait=self.wait,
                         warmup=self.warmup,
                         active=self.num_steps,
-                        repeat=1,
+                        repeat=self.repeat,
                         skip_first=self.config.training.num_sanity_val_steps,
                     ),
                 )
+            if self.repeat > 1 and getattr(self.memory_profiler, "_schedule", None) is not None:
+                _keep_repeating(self.memory_profiler._schedule)
         self.time_rows_dict = None  # updated if we create a memory profile report
 
     def start(self, action_name: str) -> None:

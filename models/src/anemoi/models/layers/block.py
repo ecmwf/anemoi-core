@@ -25,13 +25,12 @@ from torch_geometric.typing import OptPairTensor
 from torch_geometric.typing import Size
 
 from anemoi.models.distributed.graph import all_to_all_transpose
-from anemoi.models.distributed.graph import halo_exchange
+from anemoi.models.distributed.graph import HaloExchangeHandle
+from anemoi.models.distributed.graph import halo_exchange_start
+from anemoi.models.distributed.graph import halo_exchange_wait
 from anemoi.models.distributed.graph import shard_tensor
 from anemoi.models.distributed.graph import sync_tensor
-from anemoi.models.distributed.halo import build_halo_info
-from anemoi.models.distributed.halo import cache_specs as halo_cache_specs
-from anemoi.models.distributed.halo import verify_halo_info
-from anemoi.models.distributed.khop_edges import build_graph_partition_from_shard_info
+from anemoi.models.distributed.halo import HaloInfo
 from anemoi.models.distributed.khop_edges import sort_edges_1hop_chunks
 from anemoi.models.distributed.shapes import BipartiteGraphShardInfo
 from anemoi.models.distributed.shapes import GraphShardInfo
@@ -60,7 +59,6 @@ NUM_CHUNKS_INFERENCE = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS", "1"))
 NUM_CHUNKS_INFERENCE_PROCESSOR = int(os.environ.get("ANEMOI_INFERENCE_NUM_CHUNKS_PROCESSOR", NUM_CHUNKS_INFERENCE))
 # Change attention implementation during inference runtime
 ATTENTION_BACKEND = os.environ.get("ANEMOI_INFERENCE_GRAPHTRANSFORMER_ATTENTION_BACKEND", "")
-ANEMOI_DEBUG_SHARDING = os.environ.get("ANEMOI_DEBUG_SHARDING", "") != ""
 
 
 class BaseBlock(nn.Module, ABC):
@@ -669,6 +667,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         size: Union[int, tuple[int, int]],
         num_chunks: int,
         edges_are_dst_sorted: bool,
+        csc_cache: Optional[dict] = None,
     ) -> Tensor:
         query, key, value, edges = self.prepare_qkve_edge_sharding(query, key, value, edges)
         query, key = self._apply_qk_norm(query, key)
@@ -682,6 +681,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             size,
             num_chunks,
             edges_are_dst_sorted=edges_are_dst_sorted,
+            csc_cache=csc_cache,
         )
 
         return einops.rearrange(out, "nodes heads vars -> nodes (heads vars)")
@@ -767,6 +767,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         edge_index: Adj,
         size: Union[int, tuple[int, int]],
         edges_are_dst_sorted: bool = True,
+        csc_cache: Optional[dict] = None,
     ) -> Tensor:
         # self.conv requires size to be a tuple
         conv_size = (size, size) if isinstance(size, int) else size
@@ -777,9 +778,13 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             self._attention_backend_applied = True
 
         if self.graph_attention_backend == "triton":
-            csc, perm, reverse = edge_index_to_csc(
-                edge_index, num_nodes=conv_size, reverse=True, edges_are_dst_sorted=edges_are_dst_sorted
-            )
+            # csc_cache belongs to a static edge_index (e.g. HaloInfo.cache), so the layout is built once
+            if csc_cache is not None:
+                csc, perm, reverse = self.cached_csc(csc_cache, edge_index, conv_size, edges_are_dst_sorted)
+            else:
+                csc, perm, reverse = edge_index_to_csc(
+                    edge_index, num_nodes=conv_size, reverse=True, edges_are_dst_sorted=edges_are_dst_sorted
+                )
 
             if perm is not None:
                 edges = edges.index_select(0, perm)
@@ -789,6 +794,21 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
             args_conv = (edges, edge_index, conv_size)
 
         return self.conv(query, key, value, *args_conv)
+
+    @staticmethod
+    def cached_csc(csc_cache: dict, edge_index: Adj, size: tuple[int, int], edges_are_dst_sorted: bool = True):
+        """CSC layout of a static ``edge_index`` from ``csc_cache``, built on first use.
+
+        Call once outside checkpointed or compiled regions to prime the cache, so that the forward
+        and the recomputation (or the compiled graphs) take the same path.
+        """
+        cache_key = ("csc", tuple(size), edges_are_dst_sorted)
+        if cache_key not in csc_cache:
+            with torch.no_grad():
+                csc_cache[cache_key] = edge_index_to_csc(
+                    edge_index, num_nodes=tuple(size), reverse=True, edges_are_dst_sorted=edges_are_dst_sorted
+                )
+        return csc_cache[cache_key]
 
     def attention_block(
         self,
@@ -800,6 +820,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
         size: Union[int, tuple[int, int]],
         num_chunks: int,
         edges_are_dst_sorted: bool = True,
+        csc_cache: Optional[dict] = None,
     ) -> Tensor:
         # split 1-hop edges into chunks, compute self.conv chunk-wise
         if num_chunks > 1:
@@ -831,6 +852,7 @@ class GraphTransformerBaseBlock(BaseBlock, ABC):
                 edge_index=edge_index,
                 size=size,
                 edges_are_dst_sorted=edges_are_dst_sorted,
+                csc_cache=csc_cache,
             )
 
         return out
@@ -971,6 +993,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[tuple[Tensor, Tensor]] = None,
         edges_are_dst_sorted: bool = True,
+        csc_cache: Optional[dict] = None,
         **layer_kwargs,
     ):
         x_skip = x
@@ -1012,6 +1035,7 @@ class GraphTransformerMapperBlock(GraphTransformerBaseBlock):
                 size,
                 num_chunks=1,
                 edges_are_dst_sorted=edges_are_dst_sorted,
+                csc_cache=csc_cache,
             )
 
         out = self.projection(out + x_r)
@@ -1096,54 +1120,6 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         )
 
         self.shard_strategy = shard_strategy
-        self._cached_halo_info = None
-        self._cached_halo_cache_specs = None
-        self._cached_partition = None
-
-    def _get_or_build_cached_halo_info(
-        self,
-        x: Tensor,
-        edge_index: Adj,
-        shard_info: GraphShardInfo,
-        batch_size: int,
-        model_comm_group: Optional[ProcessGroup],
-    ):
-        """Return cached halo info, building it once when model sharding is active."""
-        if not model_is_distributed(model_comm_group):
-            return None
-
-        if batch_size != 1:
-            raise ValueError(
-                "GraphTransformerProcessorBlock halo exchange requires batch_size=1 when model sharding is enabled."
-            )
-
-        cache_specs = halo_cache_specs(shard_info, model_comm_group)
-        if self._cached_halo_info is not None and self._cached_halo_cache_specs == cache_specs:
-            return self._cached_halo_info
-
-        LOGGER.info(f"Building halo info for {self.__class__.__name__} with shard strategy 'edges'")
-        assert shard_info.edges_are_sharded(), "Halo strategy requires edges to be sharded"
-
-        bipartite_shard_info = BipartiteGraphShardInfo(
-            src_nodes=shard_info.nodes,
-            dst_nodes=shard_info.nodes,
-            edges=shard_info.edges,
-        )
-        partition = build_graph_partition_from_shard_info(edge_index, (x, x), bipartite_shard_info, model_comm_group)
-        self._cached_partition = partition
-        self._cached_halo_info = build_halo_info(
-            partition,
-            edge_index,
-            model_comm_group,
-            shard_info.edges,
-            debug=ANEMOI_DEBUG_SHARDING,
-        )
-        self._cached_halo_cache_specs = cache_specs
-
-        if ANEMOI_DEBUG_SHARDING:
-            verify_halo_info(self._cached_halo_info, partition, model_comm_group)
-
-        return self._cached_halo_info
 
     def _forward_edges_shard_strategy(
         self,
@@ -1155,21 +1131,38 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         model_comm_group: Optional[ProcessGroup],
         num_chunks: int,
         edges_are_dst_sorted: bool,
+        halo_info: Optional[HaloInfo] = None,
+        halo_handle: Optional[HaloExchangeHandle] = None,
     ) -> Tensor:
-        halo_info = self._get_or_build_cached_halo_info(x, edge_index, shard_info, batch_size, model_comm_group)
-
+        if model_is_distributed(model_comm_group) and halo_info is None:
+            raise ValueError(
+                "Distributed edge-sharded GraphTransformerProcessorBlock requires halo_info "
+                "from GraphTransformerProcessor."
+            )
         if halo_info is not None:
-            x_plus_halo = halo_exchange(x, halo_info, model_comm_group)
+            if halo_handle is None:
+                halo_handle = halo_exchange_start(x, halo_info, model_comm_group)
+
+            # compute everything that only needs local nodes while the halo rows are in flight
+            query = self.lin_query(x)
+            key_local = self.lin_key(x)
+            value_local = self.lin_value(x)
+            edges = self.lin_edge(self.edge_pre_mlp(edge_attr))
+
+            # k, v on halo nodes (src)
+            x_halo = halo_exchange_wait(halo_handle)
+            key = torch.cat([key_local, self.lin_key(x_halo)], dim=0)
+            value = torch.cat([value_local, self.lin_value(x_halo)], dim=0)
+
             edge_index_for_attention = halo_info.edge_index_local
             # attention_size: local nodes (dst) attend to local + halo nodes (src)
-            attention_size = (halo_info.total_nodes, halo_info.num_local_nodes)
+            attention_size = (halo_info.total_src_nodes, halo_info.local_dst_nodes)
+            csc_cache = halo_info.cache if num_chunks == 1 else None
         else:
-            x_plus_halo = x
+            query, key, value, edges = self.get_qkve(x, edge_attr)
             edge_index_for_attention = edge_index
             attention_size = (x.size(0), x.size(0))
-
-        # compute q on local nodes (dst), and k,v on local + halo nodes (src)
-        query, key, value, edges = self.get_qkve((x_plus_halo, x), edge_attr)
+            csc_cache = None
 
         return self._forward_edges_sharded_attention(
             query,
@@ -1180,6 +1173,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
             attention_size,
             num_chunks,
             edges_are_dst_sorted=edges_are_dst_sorted,
+            csc_cache=csc_cache,
         )
 
     def _forward_heads_shard_strategy(
@@ -1227,6 +1221,7 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         model_comm_group: Optional[ProcessGroup] = None,
         cond: Optional[Tensor] = None,
         edges_are_dst_sorted: bool = True,
+        halo_info: Optional[HaloInfo] = None,
         **kwargs,
     ):
         x_skip = x
@@ -1235,6 +1230,14 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
         cond_kwargs = {"cond": cond} if cond is not None else {}
 
         x = self.layer_norm_attention(x, **cond_kwargs)
+
+        # start the halo exchange as early as possible to overlap it with lin_self and the local q/k/v
+        halo_handle = None
+        if self.shard_strategy == "edges" and halo_info is not None:
+            # k/v projections cast to the autocast dtype anyway, so send the halo rows in that dtype
+            comm_dtype = torch.get_autocast_dtype(x.device.type) if torch.is_autocast_enabled(x.device.type) else None
+            halo_handle = halo_exchange_start(x, halo_info, model_comm_group, comm_dtype=comm_dtype)
+
         x_r = self.lin_self(x)
 
         # "inner" chunking for memory reductions in inference, controlled via env variable:
@@ -1250,6 +1253,8 @@ class GraphTransformerProcessorBlock(GraphTransformerBaseBlock):
                 model_comm_group,
                 num_chunks,
                 edges_are_dst_sorted,
+                halo_info,
+                halo_handle,
             )
         else:
             out = self._forward_heads_shard_strategy(

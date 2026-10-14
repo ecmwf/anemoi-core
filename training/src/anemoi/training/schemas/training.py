@@ -791,7 +791,7 @@ class BaseTrainingSchema(BaseModel):
     "This flag sets torch.backends.cudnn.deterministic. It may reduce nondeterminism, but does not guarantee exact"
     " reproducibility."
     precision: str = Field(default="16-mixed")
-    "Precision"
+    "Precision. Options: '32', '16-mixed', 'bf16-mixed', 'bf16-fp32-opt'"
     preferred_blas_backend: str | None = Field(default=None)
     "Optionally override PyTorch's default BLAS backend."
     accum_grad_batches: PositiveInt = Field(default=1)

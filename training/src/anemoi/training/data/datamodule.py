@@ -53,9 +53,9 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         self.dataset_names = list(self.train_dataloader_config.keys())
         LOGGER.info("Initializing multi-dataset module with datasets: %s", self.dataset_names)
 
-        # Set training end dates if not specified for each dataset
+        # Calendar bounds do not apply to index-only synthetic benchmarks.
         for name, dataset_config in self.train_dataloader_config.items():
-            if dataset_config.end is None:
+            if not self.config.dataloader.get("ignore_dataset_dates", False) and dataset_config.end is None:
                 msg = f"No end date specified for training dataset {name}."
                 raise ValueError(msg)
 
@@ -129,10 +129,15 @@ class AnemoiDatasetsDataModule(pl.LightningDataModule):
         shuffle: bool = True,
         label: str = "generic",
     ) -> MultiDataset:
-        data_readers = {name: create_dataset(data_reader, task=self.task) for name, data_reader in config.items()}
+        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
+        reader_options = {}
+        if dataloader_config.get("ignore_dataset_dates", False):
+            reader_options["ignore_dates"] = True
+        data_readers = {
+            name: create_dataset(data_reader, task=self.task, **reader_options) for name, data_reader in config.items()
+        }
         relative_date_indices = compute_relative_date_indices(self.task, data_readers, mode=label)
         dataset_options = {}
-        dataloader_config = getattr(getattr(self, "config", None), "dataloader", {})
         if dataloader_config.get("fake_dataloading", False):
             dataset_options["fake_dataloading"] = True
 

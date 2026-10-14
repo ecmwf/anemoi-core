@@ -9,6 +9,7 @@
 
 
 import logging
+import os
 from abc import abstractmethod
 from collections.abc import Sequence
 
@@ -132,6 +133,19 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
+        # Prepare optimizer with reference weights (must be done AFTER optimizer creation
+        # but BEFORE optimizer state is loaded from checkpoint)
+        if hasattr(self.precision_plugin, "prepare_optimizer"):
+            LOGGER.info("Preparing optimizer with precision plugin")
+            for optimizer in trainer.optimizers:
+                self.precision_plugin.prepare_optimizer(optimizer, self.lightning_module)
+
+        # Set compute dtype from precision plugin if the model was converted.
+        # Use lightning_module to access the unwrapped LightningModule (not the DDP wrapper).
+        if hasattr(self.precision_plugin, "_model_converted") and self.precision_plugin._model_converted:
+            first_param = next(self.lightning_module.parameters())
+            self.lightning_module.set_compute_dtype(first_param.dtype)
+
         self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
@@ -139,6 +153,18 @@ class BaseDDPStrategy(DDPStrategy):
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
+
+        # Register fp32 gradient reduction hook if the precision plugin provides one
+        # (e.g. bf16 training with fp32 gradient all-reduce).
+        # ANEMOI_BF16_GRAD_REDUCE=1 keeps the all-reduce in bf16 (half the bytes, lower precision).
+        bf16_grad_reduce = os.environ.get("ANEMOI_BF16_GRAD_REDUCE", "0") == "1"
+        if bf16_grad_reduce:
+            LOGGER.info("ANEMOI_BF16_GRAD_REDUCE=1: gradients are all-reduced in their parameter dtype")
+        if hasattr(self.precision_plugin, "get_ddp_communication_hook") and not bf16_grad_reduce:
+            hook = self.precision_plugin.get_ddp_communication_hook()
+            # self.model is the DDP-wrapped model after super().configure_ddp()
+            self.model.register_comm_hook(state=self.model.process_group, hook=hook)
+            LOGGER.info("Registered fp32 gradient reduction hook for DDP")
 
     def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
         """Set up shard sizes for the dataloader.
