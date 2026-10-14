@@ -426,9 +426,8 @@ class TrajectoryDataset(BaseAnemoiReader):
     ) -> torch.Tensor:
         """Load forecast steps ``positions`` of initialisation ``sequence``."""
         if isinstance(positions, slice):
-            positions = slice(*positions.indices(self.sequence_length(sequence)))
-        else:
-            positions = normalize_time_indices(np.asarray(positions).tolist())
+            positions = range(*positions.indices(self.sequence_length(sequence)))
+        positions = normalize_time_indices(np.asarray(positions).tolist())
 
         # data[sequence] -> (variables, ensembles, steps, cells)
         if isinstance(positions, slice):
