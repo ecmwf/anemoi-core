@@ -26,6 +26,22 @@ from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 from anemoi.training.utils.variables_metadata import ExtractVariableGroupAndLevel
 
+BATCH = TensorDim.BATCH_SIZE
+GRID = TensorDim.GRID
+VARIABLE = TensorDim.VARIABLE
+
+
+def _gridded_source_view(data: torch.Tensor) -> GriddedSource:
+    """Wrap a five-dimensional loss tensor in the public loss input type."""
+    return GriddedSource(
+        name="data",
+        data=data,
+        variables=[f"v{i}" for i in range(data.shape[-1])],
+        statistics={},
+        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
+        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+    )
+
 
 def test_instantiation_with_filtering() -> None:
     from anemoi.models.data_indices.collection import IndexCollection
@@ -43,8 +59,8 @@ def test_instantiation_with_filtering() -> None:
             },
         ),
         scalers={
-            "grid_uniform": (3, torch.ones(4)),
-            "dynamic": (4, torch.tensor([2.0, 7.0, 11.0])),
+            "grid_uniform": ((GRID,), torch.ones(4)),
+            "dynamic": ((VARIABLE,), torch.tensor([2.0, 7.0, 11.0])),
         },
         data_indices=data_indices,
     )
@@ -60,8 +76,8 @@ def test_instantiation_with_filtering() -> None:
     target[..., 2] = 3.0
 
     loss_total = loss(
-        pred,
-        target,
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
         pred_layout=IndexSpace.MODEL_OUTPUT,
         target_layout=IndexSpace.DATA_FULL,
     )
@@ -191,6 +207,9 @@ def test_loss_variable_mapper_preserves_wrapped_loss_reduction_default() -> None
         "target_layout": IndexSpace.DATA_OUTPUT,
     }
 
+    pred = _gridded_source_view(pred)
+    target = _gridded_source_view(target)
+
     scalar_loss = loss(pred, target, **loss_kwargs)
     per_variable_loss = loss(pred, target, squash=False, **loss_kwargs)
     summed_loss = loss(pred, target, squash_mode="sum", **loss_kwargs)
@@ -253,8 +272,8 @@ class CapturingLoss(BaseLoss):
 
     def forward(
         self,
-        pred: torch.Tensor,
-        target: torch.Tensor,
+        pred: GriddedSource,
+        target: GriddedSource,
         squash: bool = True,
         *,
         scaler_indices: tuple[object, ...] | None = None,
@@ -284,25 +303,27 @@ class TestVariableAxisScalerFiltering:
         """Multi-dim (BATCH, GRID, VARIABLE) scaler is sliced on the VARIABLE axis."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
         n_model_vars = len(data_indices_forcing_gaps.model.output.full)
-        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, n_model_vars), name="mixed")
+        w.add_scaler(dimension=(BATCH, GRID, VARIABLE), scaler=torch.ones(2, 8, n_model_vars), name="mixed")
 
         assert w.loss.scaler.tensors["mixed"][1].shape == (2, 8, 1)
 
     def test_broadcast_variable_axis_untouched(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Broadcast VARIABLE axis (size 1) must not be index-selected."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"], ["imerg"])
-        w.add_scaler(dimension=(0, 3, 4), scaler=torch.ones(2, 8, 1), name="bc")
+        w.add_scaler(dimension=(BATCH, GRID, VARIABLE), scaler=torch.ones(2, 8, 1), name="bc")
 
         assert w.loss.scaler.tensors["bc"][1].shape == (2, 8, 1)
 
-    def test_data_full_scaler_with_forcing_gap(self) -> None:
+    # A bare `TensorDim` is a str: it must name one dimension, not iterate into its characters.
+    @pytest.mark.parametrize("dimension", [(VARIABLE,), VARIABLE], ids=["tuple", "bare"])
+    def test_data_full_scaler_with_forcing_gap(self, dimension: tuple[TensorDim, ...] | TensorDim) -> None:
         """DATA_FULL-sized scaler correctly resolves through forcing gaps."""
         di = IndexCollection(
             DictConfig({"forcing": ["f0"], "diagnostic": [], "target": []}),
             {"f0": 0, "var_0": 1, "var_1": 2},
         )
         w = _mapper(di, ["var_1"])
-        w.add_scaler(dimension=4, scaler=torch.tensor([10.0, 20.0, 30.0]), name="full")
+        w.add_scaler(dimension=dimension, scaler=torch.tensor([10.0, 20.0, 30.0]), name="full")
 
         # var_1 is at data-full index 2 → value 30.0
         torch.testing.assert_close(w.loss.scaler.tensors["full"][1], torch.tensor([30.0]))
@@ -310,7 +331,7 @@ class TestVariableAxisScalerFiltering:
     def test_update_scaler_refilters(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """update_scaler with override re-applies VARIABLE-axis filtering."""
         w = _mapper(data_indices_forcing_gaps, ["var_2"])
-        w.add_scaler(dimension=4, scaler=torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]), name="vw")
+        w.add_scaler(dimension=(VARIABLE,), scaler=torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0]), name="vw")
         torch.testing.assert_close(w.loss.scaler.tensors["vw"][1], torch.tensor([3.0]))
 
         w.update_scaler("vw", torch.tensor([10.0, 20.0, 30.0, 40.0, 50.0]), override=True)
@@ -336,7 +357,7 @@ def test_scaler_preserves_reversed_variable_order() -> None:
                 "scalers": ["pl"],
             },
         ),
-        scalers={"pl": (4, torch.tensor([0.1 * (i + 1) for i in range(11)]))},
+        scalers={"pl": ((VARIABLE,), torch.tensor([0.1 * (i + 1) for i in range(11)]))},
         data_indices=di,
     )
 
@@ -400,8 +421,8 @@ class TestScalerIndicesRemapping:
     def test_global_to_local_remap(self, data_indices_forcing_gaps: IndexCollection) -> None:
         """Global scaler_indices are translated to filtered-tensor-local positions."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
-        w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
+        w.add_scaler(dimension=(GRID,), scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=(VARIABLE,), scaler=torch.tensor([2.0, 3.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
         target = torch.zeros(1, 1, 1, 8, 10)
@@ -410,8 +431,8 @@ class TestScalerIndicesRemapping:
 
         # Request global index 3 (var_3) → should remap to local index 1
         loss = w(
-            pred,
-            target,
+            _gridded_source_view(pred),
+            _gridded_source_view(target),
             scaler_indices=(..., [3]),
             pred_layout=IndexSpace.DATA_OUTPUT,
             target_layout=IndexSpace.DATA_FULL,
@@ -435,8 +456,8 @@ class TestScalerIndicesRemapping:
         requested_indices = torch.tensor([3, 0], dtype=torch.int32)
 
         w(
-            pred,
-            target,
+            _gridded_source_view(pred),
+            _gridded_source_view(target),
             scaler_indices=(..., requested_indices),
             pred_layout=IndexSpace.DATA_OUTPUT,
             target_layout=IndexSpace.DATA_FULL,
@@ -461,23 +482,25 @@ class TestScalerIndicesRemapping:
             data_indices=data_indices_forcing_gaps,
         )
 
-        pred = torch.zeros(1, 1, 1, 8, 6).transpose(2, 3)
-        target = torch.zeros(1, 1, 1, 8, 10).transpose(2, 3)
+        pred = torch.zeros(1, 1, 1, 6, 8).transpose(3, 4)
+        target = torch.zeros(1, 1, 1, 10, 8).transpose(3, 4)
+        assert not pred.is_contiguous()
+        assert not target.is_contiguous()
 
         w(
-            pred,
-            target,
+            _gridded_source_view(pred),
+            _gridded_source_view(target),
             pred_layout=IndexSpace.DATA_OUTPUT,
             target_layout=IndexSpace.DATA_FULL,
         )
 
         call = inner_loss.calls[-1]
-        assert isinstance(call["pred"], torch.Tensor)
-        assert isinstance(call["target"], torch.Tensor)
-        assert call["pred"].is_contiguous()
-        assert call["target"].is_contiguous()
-        assert call["pred"].shape[-1] == 2
-        assert call["target"].shape[-1] == 2
+        assert isinstance(call["pred"], GriddedSource)
+        assert isinstance(call["target"], GriddedSource)
+        assert call["pred"].data.is_contiguous()
+        assert call["target"].data.is_contiguous()
+        assert call["pred"].data.shape[-1] == 2
+        assert call["target"].data.shape[-1] == 2
 
     @pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
     @pytest.mark.parametrize("squash", [False, True])
@@ -489,8 +512,8 @@ class TestScalerIndicesRemapping:
     ) -> None:
         """Empty selections preserve the prediction dtype for scalar and variable outputs."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"])
-        w.add_scaler(dimension=TensorDim.GRID, scaler=torch.ones(8), name="grid")
-        w.add_scaler(dimension=TensorDim.VARIABLE, scaler=torch.tensor([2.0]), name="var_w")
+        w.add_scaler(dimension=(GRID,), scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=(VARIABLE,), scaler=torch.tensor([2.0]), name="var_w")
 
         def view(nvars: int) -> GriddedSource:
             return GriddedSource(
@@ -520,8 +543,8 @@ class TestScalerIndicesRemapping:
     ) -> None:
         """Partially dropped scaler indices should be visible at DEBUG level."""
         w = _mapper(data_indices_forcing_gaps, ["var_0", "var_3"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
-        w.add_scaler(dimension=4, scaler=torch.tensor([2.0, 3.0]), name="var_w")
+        w.add_scaler(dimension=(GRID,), scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=(VARIABLE,), scaler=torch.tensor([2.0, 3.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
         target = torch.zeros(1, 1, 1, 8, 10)
@@ -530,8 +553,8 @@ class TestScalerIndicesRemapping:
 
         with caplog.at_level(logging.DEBUG, logger="anemoi.training.losses.variable_mapper"):
             w(
-                pred,
-                target,
+                _gridded_source_view(pred),
+                _gridded_source_view(target),
                 scaler_indices=(..., [0, 5]),
                 pred_layout=IndexSpace.DATA_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,
@@ -546,8 +569,8 @@ class TestScalerIndicesRemapping:
     ) -> None:
         """Fully dropped scaler indices should warn because forward returns zeros."""
         w = _mapper(data_indices_forcing_gaps, ["var_0"])
-        w.add_scaler(dimension=3, scaler=torch.ones(8), name="grid")
-        w.add_scaler(dimension=4, scaler=torch.tensor([2.0]), name="var_w")
+        w.add_scaler(dimension=(GRID,), scaler=torch.ones(8), name="grid")
+        w.add_scaler(dimension=(VARIABLE,), scaler=torch.tensor([2.0]), name="var_w")
 
         pred = torch.zeros(1, 1, 1, 8, 6)
         target = torch.zeros(1, 1, 1, 8, 10)
@@ -555,8 +578,8 @@ class TestScalerIndicesRemapping:
 
         with caplog.at_level(logging.WARNING, logger="anemoi.training.losses.variable_mapper"):
             loss = w(
-                pred,
-                target,
+                _gridded_source_view(pred),
+                _gridded_source_view(target),
                 scaler_indices=(..., [3]),
                 pred_layout=IndexSpace.DATA_OUTPUT,
                 target_layout=IndexSpace.DATA_FULL,

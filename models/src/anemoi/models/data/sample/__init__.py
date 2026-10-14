@@ -27,6 +27,7 @@ from typing import Any
 import torch
 
 from anemoi.models.data.layout import TensorLayout
+from anemoi.models.data.sources import BaseTemplate
 from anemoi.utils.registry import Registry
 
 sample_registry = Registry(__name__)
@@ -55,13 +56,14 @@ def create_batched_struct(
     data: torch.Tensor | None = None,
     statistics: Mapping[str, Any] | None = None,
     **kwargs: Any,
-) -> BaseSample:
-    """Validate the inputs and build the :class:`BaseSample` registered as ``data_type``.
+) -> BaseSample | BaseTemplate:
+    """Validate the inputs and build the sample, or template, of the kind registered as ``data_type``.
 
     This is the single entry point used by the data readers and by
     :meth:`~anemoi.models.interface.AnemoiModelInterface.predict_step`. The fields
     common to every kind are checked and converted here; the rest is handed to the
-    kind's :meth:`BaseSample.from_validated`.
+    kind's :meth:`BaseSample.from_validated` or, without ``data``, to its
+    :meth:`BaseSample.template_from_validated`.
 
     Parameters
     ----------
@@ -74,20 +76,24 @@ def create_batched_struct(
     latitudes, longitudes : array-like
         ``(N,)`` coordinates in **degrees**; converted to radians here.
     data : torch.Tensor, optional
-        The sample's data. ``None`` for a sample that only describes its geometry.
+        The sample's data. ``None`` to build a template that only describes the
+        geometry, e.g. an inference target.
     statistics : Mapping[str, Any], optional
         Per-statistic arrays over the variable axis.
     **kwargs
-        Arguments specific to the kind: ``grid_size`` and ``shard_sizes`` for gridded
-        samples; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)`` pairs)
-        and ``shard_sizes`` for tabular samples.
+        Arguments specific to the kind: ``grid_size`` (samples only) and ``shard_sizes``
+        for gridded data; ``timedeltas``, ``boundaries`` (slices or ``(start, stop)``
+        pairs) and ``shard_sizes`` for tabular data.
+        A template also needs the dataset ``name`` and the ``batch_size``,
+        ``ensemble_size`` and ``time_size`` of the batch to decode. A tabular template
+        repeats the geometry for each of the ``batch_size`` samples, and takes its time
+        windows from ``boundaries`` rather than ``time_size``.
 
     Returns
     -------
-    BaseSample
-        The sample of the registered kind. Without ``data``, the kind's
-        :attr:`BaseSample.template_type` instead (e.g. an inference target template),
-        built from the same validated geometry and ``**kwargs``.
+    BaseSample or BaseTemplate
+        The sample of the registered kind or, without ``data``, the kind's
+        :attr:`BaseSample.template_type`, built from the same validated geometry.
     """
     sample_cls = sample_registry.lookup(data_type)
 
@@ -109,7 +115,9 @@ def create_batched_struct(
     variables = list(variables)
 
     if data is None:
-        return sample_cls.template_type(
+        return sample_cls.template_from_validated(
+            n_points=num_points,
+            device=device,
             variables=variables,
             layout=layout,
             coordinates=coordinates,

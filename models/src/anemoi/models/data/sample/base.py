@@ -83,6 +83,24 @@ class BaseSample(ABC):
         """
         ...
 
+    @classmethod
+    def template_from_validated(
+        cls,
+        *,
+        n_points: int,
+        device: torch.device | None,
+        **kwargs: Any,
+    ) -> BaseTemplate:
+        """Build a :attr:`template_type` from inputs already checked by :func:`create_batched_struct`.
+
+        ``kwargs`` holds the common fields as for :meth:`from_validated`, plus the dataset
+        ``name``, the ``batch_size``, ``ensemble_size`` and ``time_size`` of the batch to
+        decode, and the arguments specific to this kind. The default passes them on
+        unchanged; a kind whose template describes its geometry differently converts them.
+        """
+        del n_points, device
+        return cls.template_type(**kwargs)
+
     # The :class:`Source` subclass this kind collates into.
     source_type: ClassVar[type[Source]]
 

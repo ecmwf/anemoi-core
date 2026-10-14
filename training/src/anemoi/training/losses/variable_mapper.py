@@ -21,6 +21,7 @@ from anemoi.training.losses.base import BaseLoss
 from anemoi.training.losses.base import BaseLossWrapper
 from anemoi.training.losses.base import Squash_mode
 from anemoi.training.losses.scaler_tensor import ScaleTensor
+from anemoi.training.losses.scaler_tensor import as_dimension_tuple
 from anemoi.training.utils.enums import TensorDim
 from anemoi.training.utils.index_space import IndexSpace
 
@@ -116,10 +117,10 @@ class LossVariableMapper(BaseLossWrapper):
 
     def _filter_variable_axis_scaler(
         self,
-        dimension: int | tuple[int],
+        dimension: int | str | tuple[int | str, ...],
         scaler: torch.Tensor,
     ) -> torch.Tensor:
-        dims = (dimension,) if isinstance(dimension, int) else tuple(dimension)
+        dims = as_dimension_tuple(dimension)
         if TensorDim.VARIABLE not in dims:
             return scaler
 

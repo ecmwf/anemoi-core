@@ -116,6 +116,48 @@ class TabularSample(BaseSample):
         **common: Any,
     ) -> Self:
         """Convert the ``timedeltas`` to float32 and the ``(start, stop)`` boundaries to slices."""
+        timedeltas, boundaries = cls._validate_time_windows(n_points, device, timedeltas, boundaries)
+        return cls(**common, timedeltas=timedeltas, boundaries=boundaries)
+
+    @classmethod
+    def template_from_validated(
+        cls,
+        *,
+        n_points: int,
+        device: torch.device | None,
+        coordinates: torch.Tensor,
+        timedeltas: Any = None,
+        boundaries: Sequence[slice | tuple[int, int]] | None = None,
+        shard_sizes: list[ShardSizes] | None = None,
+        batch_size: int = 1,
+        time_size: int | None = None,
+        **common: Any,
+    ) -> TabularTemplate:
+        """Build a :class:`TabularTemplate` whose ``batch_size`` samples all share this geometry.
+
+        The geometry describes one sample, as for :meth:`from_validated`. A tabular template
+        keeps it per sample and takes its batch and time sizes from those lists, so the
+        geometry is repeated ``batch_size`` times. ``time_size`` is not used: the decoded time
+        windows are the ``boundaries`` the caller asked for, each point placed by its timedelta.
+        """
+        del time_size
+        timedeltas, boundaries = cls._validate_time_windows(n_points, device, timedeltas, boundaries)
+        return cls.template_type(
+            **common,
+            coordinates=[coordinates] * batch_size,
+            timedeltas=[timedeltas] * batch_size,
+            boundaries=[boundaries] * batch_size,
+            shard_sizes=None if shard_sizes is None else [shard_sizes] * batch_size,
+        )
+
+    @staticmethod
+    def _validate_time_windows(
+        n_points: int,
+        device: torch.device | None,
+        timedeltas: Any,
+        boundaries: Sequence[slice | tuple[int, int]] | None,
+    ) -> tuple[torch.Tensor, tuple[slice, ...]]:
+        """Return the ``timedeltas`` as float32 and the ``(start, stop)`` boundaries as slices, checked."""
         if timedeltas is None or boundaries is None:
             msg = "tabular samples require timedeltas and boundaries."
             raise ValueError(msg)
@@ -130,4 +172,4 @@ class TabularSample(BaseSample):
             msg = f"boundaries {boundaries} extend past the {n_points} points of the sample."
             raise ValueError(msg)
 
-        return cls(**common, timedeltas=timedeltas, boundaries=boundaries)
+        return timedeltas, boundaries

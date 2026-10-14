@@ -260,32 +260,34 @@ class AnemoiModelInterface(torch.nn.Module):
         model_comm_group: Optional[ProcessGroup] = None,
         gather_out: bool = True,
         **kwargs,
-    ) -> dict[str, torch.Tensor]:
+    ) -> dict[str, dict]:
         """Prediction step for the model.
 
         Parameters
         ----------
         x : dict[str, dict]
-            Input data, one payload per dataset. A payload carries the data in
-            model-input space and, optionally, the latlons (in degrees)
-            and layout. If the coords are omitted, we fall back to the graph.
+            Input data, one payload per dataset, as taken by
+            :func:`~anemoi.models.data.sample.create_batched_struct`: the ``data`` in
+            model-input space, its ``data_type``, ``variables`` and ``layout``, and the
+            ``latitudes`` and ``longitudes`` in degrees (required; there is no fallback
+            to the graph). Tabular payloads also carry ``timedeltas`` and ``boundaries``.
+        target_template : dict[str, dict]
+            Output geometry, one payload per decoded dataset; required. Like an input
+            payload without ``data``, naming the variables to decode.
         target_forcing : dict[str, dict]
             Decoder conditioning, one payload per decoded dataset, holding the forcing
             variables at the output valid times.
-        target_template : dict[str, dict]
-            Output geometry, one payload per decoded dataset; required.
         model_comm_group : Optional[ProcessGroup], optional
             Model communication group, specifies which GPUs work together.
         gather_out : bool, optional
             Whether to gather the output, by default True.
         **kwargs
-            Additional prediction keyword arguments. Transport models require
-            ``target_template`` here so sampling knows the output geometry.
+            Additional keyword arguments for the model's ``predict_step``.
 
         Returns
         -------
-        dict[str, torch.Tensor]
-            Predicted data.
+        dict[str, dict]
+            The prediction, one payload per decoded dataset.
         """
         assert target_template is not None, "target_template must be provided for prediction."
         if target_forcing is None:

@@ -52,6 +52,9 @@ spectral_losses = list(spectral_loss_kwargs)
 losses = [MSELoss, HuberLoss, MAELoss, RMSELoss, LogCoshLoss, CRPS, WeightedMSELoss, *spectral_losses]
 
 
+GRIDDED_LAYOUT = TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4)
+
+
 def _gridded_source_view(data: torch.Tensor) -> Source:
     """Wrap a five-dimensional loss tensor in the current public loss input type."""
     return GriddedSource(
@@ -59,8 +62,8 @@ def _gridded_source_view(data: torch.Tensor) -> Source:
         data=data,
         variables=[f"variable_{index}" for index in range(data.shape[-1])],
         statistics={},
-        coordinates=torch.zeros(data.shape[3], 2, device=data.device),
-        layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+        coordinates=torch.zeros(data.shape[GRIDDED_LAYOUT.grid], 2, device=data.device),
+        layout=GRIDDED_LAYOUT,
     )
 
 
@@ -84,9 +87,9 @@ def _assert_variable_and_scalar_shapes(
     target: torch.Tensor,
     nvars: int,
 ) -> None:
-    out = loss(pred, target, squash=False)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert out.shape == (nvars,), "squash=False should return per-variable loss"
-    out_total = loss(pred, target, squash=True)
+    out_total = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=True)
     assert out_total.numel() == 1, "squash=True should return a single aggregated loss"
 
 
@@ -288,8 +291,9 @@ def test_assert_of_grid_dim(functionalloss: type[FunctionalLoss]) -> None:
 
     assert TensorDim.GRID not in loss.scaler, "Grid dimension should not be set"
 
-    with pytest.raises(RuntimeError):
-        loss.scale(torch.ones((4, 2)))
+    # A tensor whose layout has no variable axis cannot take a variable scaler.
+    with pytest.raises(ValueError, match=r"'variables'.* is not defined"):
+        loss.scale(torch.ones((4, 2)), layout=TensorLayout(grid=0, variables=None))
 
 
 @pytest.mark.parametrize("add_grid_scaler", [False, True])
@@ -334,7 +338,7 @@ def test_simple_functionalloss(
     """Test a functional loss."""
     pred, target, loss_result = loss_inputs
 
-    loss = simple_functionalloss(pred, target)
+    loss = simple_functionalloss(_gridded_source_view(pred), _gridded_source_view(target))
 
     assert isinstance(loss, torch.Tensor)
     assert torch.allclose(loss, loss_result), "Loss should be equal to the expected result"
@@ -358,8 +362,14 @@ def test_batch_invariance(
 
     assert pred_batch_size_1.shape != pred_batch_size_2.shape, "Batch size should be different"
 
-    loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1)
-    loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2)
+    loss_batch_size_1 = simple_functionalloss(
+        _gridded_source_view(pred_batch_size_1),
+        _gridded_source_view(target_batch_size_1),
+    )
+    loss_batch_size_2 = simple_functionalloss(
+        _gridded_source_view(pred_batch_size_2),
+        _gridded_source_view(target_batch_size_2),
+    )
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
     assert torch.allclose(loss_batch_size_1, loss_result), "Loss should be equal to the expected result"
@@ -388,8 +398,16 @@ def test_batch_invariance_without_squash(
 
     assert pred_batch_size_1.shape != pred_batch_size_2.shape, "Batch size should be different"
 
-    loss_batch_size_1 = simple_functionalloss(pred_batch_size_1, target_batch_size_1, squash=False)
-    loss_batch_size_2 = simple_functionalloss(pred_batch_size_2, target_batch_size_2, squash=False)
+    loss_batch_size_1 = simple_functionalloss(
+        _gridded_source_view(pred_batch_size_1),
+        _gridded_source_view(target_batch_size_1),
+        squash=False,
+    )
+    loss_batch_size_2 = simple_functionalloss(
+        _gridded_source_view(pred_batch_size_2),
+        _gridded_source_view(target_batch_size_2),
+        squash=False,
+    )
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
     assert isinstance(loss_batch_size_2, torch.Tensor)
@@ -415,8 +433,14 @@ def test_batch_invariance_with_scaler(
 
     assert pred_batch_size_1.shape != pred_batch_size_2.shape
 
-    loss_batch_size_1 = functionalloss_with_scaler(pred_batch_size_1, target_batch_size_1)
-    loss_batch_size_2 = functionalloss_with_scaler(pred_batch_size_2, target_batch_size_2)
+    loss_batch_size_1 = functionalloss_with_scaler(
+        _gridded_source_view(pred_batch_size_1),
+        _gridded_source_view(target_batch_size_1),
+    )
+    loss_batch_size_2 = functionalloss_with_scaler(
+        _gridded_source_view(pred_batch_size_2),
+        _gridded_source_view(target_batch_size_2),
+    )
 
     assert isinstance(loss_batch_size_1, torch.Tensor)
     assert isinstance(loss_batch_size_2, torch.Tensor)
@@ -430,7 +454,7 @@ def test_grid_invariance(
     loss_inputs: tuple[torch.Tensor, torch.Tensor, torch.Tensor],
 ) -> None:
     """Test for batch invariance."""
-    gdim = TensorDim.GRID
+    gdim = GRIDDED_LAYOUT.axis(TensorDim.GRID)
     pred_coarse, target_coarse, _ = loss_inputs
     pred_fine = torch.cat([pred_coarse, pred_coarse], dim=gdim)
     target_fine = torch.cat([target_coarse, target_coarse], dim=gdim)
@@ -441,8 +465,8 @@ def test_grid_invariance(
     functionalloss_with_scaler.update_scaler("test", torch.ones((num_points_coarse,)) / num_points_coarse)
     functionalloss_with_scaler_fine.update_scaler("test", torch.ones((num_points_fine,)) / num_points_fine)
 
-    loss_coarse = functionalloss_with_scaler(pred_coarse, target_coarse)
-    loss_fine = functionalloss_with_scaler_fine(pred_fine, target_fine)
+    loss_coarse = functionalloss_with_scaler(_gridded_source_view(pred_coarse), _gridded_source_view(target_coarse))
+    loss_fine = functionalloss_with_scaler_fine(_gridded_source_view(pred_fine), _gridded_source_view(target_fine))
 
     assert isinstance(loss_coarse, torch.Tensor)
     assert isinstance(loss_fine, torch.Tensor)
@@ -477,12 +501,14 @@ def test_dynamic_init_scaler(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": ((0, 1), torch.ones((1, 2)))},
+        scalers={"test": ((TensorDim.GRID, TensorDim.VARIABLE), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
 
     assert "test" in loss.scaler
-    torch.testing.assert_close(loss.scaler.get_scaler(2), torch.ones((1, 2)))
+    dims, scaler = loss.scaler.tensors["test"]
+    assert dims == (TensorDim.GRID, TensorDim.VARIABLE)
+    torch.testing.assert_close(scaler, torch.ones((1, 2)))
 
 
 @pytest.mark.parametrize(
@@ -498,12 +524,14 @@ def test_dynamic_init_add_all(loss_cls: type[BaseLoss]) -> None:
     }
     loss = get_loss_function(
         DictConfig(loss_dic),
-        scalers={"test": ((0, 1), torch.ones((1, 2)))},
+        scalers={"test": ((TensorDim.GRID, TensorDim.VARIABLE), torch.ones((1, 2)))},
     )
     assert isinstance(loss, BaseLoss)
 
     assert "test" in loss.scaler
-    torch.testing.assert_close(loss.scaler.get_scaler(2), torch.ones((1, 2)))
+    dims, scaler = loss.scaler.tensors["test"]
+    assert dims == (TensorDim.GRID, TensorDim.VARIABLE)
+    torch.testing.assert_close(scaler, torch.ones((1, 2)))
 
 
 @pytest.mark.parametrize(
@@ -566,7 +594,7 @@ def test_fft2d_spectral_losses_shape_and_validation(target: str) -> None:
     # wrong grid size should fail (FFT2D reshape/assert)
     wrong = (torch.ones((6, 1, 1, 710 * 640 + 1, 2)), torch.zeros((6, 1, 1, 710 * 640 + 1, 2)))
     with pytest.raises(einops.EinopsError):
-        _ = loss(*wrong, squash=True)
+        _ = loss(*map(_gridded_source_view, wrong), squash=True)
 
 
 @pytest.mark.parametrize(
@@ -663,8 +691,8 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
     scale = mocker.spy(loss, "scale")
 
     out = loss(
-        pred,
-        target,
+        _gridded_source_view(pred),
+        _gridded_source_view(target),
         group=group,
         grid_shard_slice=slice(0, local_grid),
         grid_shard_sizes=grid_shard_sizes,
@@ -672,30 +700,32 @@ def test_spectral_losses_use_all_to_all_for_sharded_layout(
     )
 
     assert torch.isfinite(out).all()
+    # The losses resolve the grid and variable axes to non-negative positions in the source layout.
+    grid_axis, variable_axis = GRIDDED_LAYOUT.grid, GRIDDED_LAYOUT.variables
     assert get_sizes.call_count == 3
-    assert get_sizes.call_args_list[0].args[1] == TensorDim.VARIABLE
-    assert get_sizes.call_args_list[1].args[1] == TensorDim.VARIABLE
-    assert get_sizes.call_args_list[2].args[1] == -2
+    assert get_sizes.call_args_list[0].args[1] == variable_axis
+    assert get_sizes.call_args_list[1].args[1] == variable_axis
+    assert get_sizes.call_args_list[2].args[1] == grid_axis
 
     assert all_to_all.call_count == 3
     assert all_to_all.call_args_list[0].args[1:] == (
-        TensorDim.VARIABLE,
+        variable_axis,
         channel_shard_sizes,
-        -2,
+        grid_axis,
         grid_shard_sizes,
         group,
     )
     assert all_to_all.call_args_list[1].args[1:] == (
-        TensorDim.VARIABLE,
+        variable_axis,
         channel_shard_sizes,
-        -2,
+        grid_axis,
         grid_shard_sizes,
         group,
     )
     assert all_to_all.call_args_list[2].args[1:] == (
-        -2,
+        grid_axis,
         spectral_shard_sizes,
-        TensorDim.VARIABLE,
+        variable_axis,
         channel_shard_sizes,
         group,
     )
@@ -719,7 +749,8 @@ def test_reshard_spectral_loss_returns_global_slice_for_uneven_shards(mocker: Mo
         full_loss,
         group,
         channel_shard_sizes=[1, 1],
-        spectral_grid_dim=TensorDim.GRID,
+        spectral_grid_dim=GRIDDED_LAYOUT.grid,
+        variable_dim=GRIDDED_LAYOUT.variables,
     )
 
     assert result is local_loss
@@ -727,9 +758,9 @@ def test_reshard_spectral_loss_returns_global_slice_for_uneven_shards(mocker: Mo
     assert global_spectral_size == 16
     transpose.assert_called_once_with(
         full_loss,
-        TensorDim.GRID,
+        GRIDDED_LAYOUT.grid,
         spectral_shard_sizes,
-        TensorDim.VARIABLE,
+        GRIDDED_LAYOUT.variables,
         [1, 1],
         group,
     )
@@ -779,7 +810,7 @@ def test_sht_powerspectraldensity_loss(loss_target: str) -> None:
     pred_wrong = torch.zeros((2, 1, 1, expected_points + 1, nvars))
     target_wrong = torch.zeros_like(pred_wrong)
     with pytest.raises(AssertionError):
-        _ = loss(pred_wrong, target_wrong, squash=True)
+        _ = loss(_gridded_source_view(pred_wrong), _gridded_source_view(target_wrong), squash=True)
 
     # fail for transform without power spectral density method (e.g. FFT2D)
     with pytest.raises(hydra.errors.InstantiationException):
@@ -844,8 +875,8 @@ def test_spectral_crps_scores_the_selected_coefficient_values(
         einops.rearrange(target_for_score, "b t 1 m v -> b t v m 1"),
     ).sum(dim=-1)[0, 0]
     actual = loss(
-        torch.empty(1, 1, 3, 1, 1, dtype=torch.float64),
-        torch.empty(1, 1, 1, 1, 1, dtype=torch.float64),
+        _gridded_source_view(torch.empty(1, 1, 3, 1, 1, dtype=torch.float64)),
+        _gridded_source_view(torch.empty(1, 1, 1, 1, 1, dtype=torch.float64)),
         squash=False,
     )
 
@@ -862,7 +893,7 @@ def test_spectral_crps_coefficient_magnitude_has_finite_zero_gradient() -> None:
         coefficient_magnitude=True,
     )
 
-    score = loss(pred, target)
+    score = loss(_gridded_source_view(pred), _gridded_source_view(target))
     score.backward()
 
     assert torch.isfinite(score)
@@ -909,9 +940,9 @@ def test_spectral_crps_fft2d_projection(mocker: MockerFixture) -> None:
         ),
     )
 
-    out = loss(pred, target, squash=False)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert out.shape == (nvars,), "fft2d: per-variable CRPS expected"
-    out_total = loss(pred, target, squash=True)
+    out_total = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=True)
     assert out_total.numel() == 1, "fft2d: scalar CRPS expected"
 
 
@@ -939,7 +970,7 @@ def test_spectral_loss_projection_actually_applied(mocker: MockerFixture) -> Non
 
     pred = torch.randn(bs, 1, 1, n_src, nvars)
     target = torch.randn(bs, 1, 1, n_src, nvars)
-    result = loss(pred, target)
+    result = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert result.numel() == 1
 
 
@@ -971,7 +1002,7 @@ def test_spectral_loss_subgrid_actually_applied(subgrid: str | tuple) -> None:
 
     pred = torch.randn(bs, 1, 1, n_total, nvars)
     target = torch.randn(bs, 1, 1, n_total, nvars)
-    result = loss(pred, target)
+    result = loss(_gridded_source_view(pred), _gridded_source_view(target))
     assert result.numel() == 1
 
 
@@ -993,7 +1024,7 @@ def test_spectral_loss_projection_wrong_output_size_raises(mocker: MockerFixture
     pred = torch.randn(1, 1, 1, n_src, 2)
     target = torch.randn(1, 1, 1, n_src, 2)
     with pytest.raises(einops.EinopsError):
-        loss(pred, target)
+        loss(_gridded_source_view(pred), _gridded_source_view(target))
 
 
 def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
@@ -1011,7 +1042,7 @@ def test_spectral_loss_subgrid_out_of_bounds_raises() -> None:
     target = torch.randn(1, 1, 1, n_total, 2)
 
     with pytest.raises(einops.EinopsError):
-        loss(pred, target)
+        loss(_gridded_source_view(pred), _gridded_source_view(target))
 
 
 def test_spectral_loss_ambiguous_projection_config_raises() -> None:
@@ -1055,7 +1086,7 @@ def test_spectral_crps_projection_applies_subgrid_before_projection(mocker: Mock
         ),
     )
 
-    out = loss(pred, target, squash=False)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert out.shape == (nvars,)
 
 
@@ -1105,7 +1136,7 @@ def test_spectral_crps_projection_from_graph_config() -> None:
         data_node_name="data",
     )
 
-    out = loss(pred, target, squash=False)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert out.shape == (nvars,)
 
     # Target-grid mode applies the Gaussian (sigma-weighted) KNN weights by default; a
@@ -1152,7 +1183,7 @@ def test_spectral_crps_projection_from_existing_edges() -> None:
         data_node_name="data",
     )
 
-    out = loss(pred, target, squash=False)
+    out = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert out.shape == (nvars,)
 
 
@@ -1185,11 +1216,11 @@ def test_spectral_crps_sht_transforms(
         **transform_kwargs,
     )
 
-    per_variable = loss(pred, target, squash=False)
+    per_variable = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=False)
     assert per_variable.shape == (nvars,)
     assert torch.isfinite(per_variable).all()
 
-    scalar = loss(pred, target, squash=True)
+    scalar = loss(_gridded_source_view(pred), _gridded_source_view(target), squash=True)
     assert scalar.numel() == 1
     assert torch.isfinite(scalar).all()
     scalar.backward()

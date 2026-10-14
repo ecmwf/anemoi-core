@@ -8,6 +8,7 @@
 # nor does it submit to any jurisdiction.
 
 
+import functools
 import logging
 from typing import Any
 
@@ -364,6 +365,12 @@ def _gridded_source_view(data: torch.Tensor, variables: list[str]) -> Source:
     )
 
 
+def _combined_scaler(loss: Any, dim: TensorDim) -> torch.Tensor:
+    """Product of the loss's scalers along ``dim``, as ``ScaleTensor.scale_iteratively`` applies them."""
+    scalers = [scaler for _, scaler in loss.scaler.subset_by_dim(dim).tensors.values()]
+    return functools.reduce(torch.mul, scalers)
+
+
 @pytest.mark.parametrize("norm", [None, "unit-sum", "unit-mean"])
 @pytest.mark.parametrize(
     ("scaler_config", "expected_weights"),
@@ -478,7 +485,7 @@ def test_variable_loss_scaling_vals(
 
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
-    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
+    final_variable_scaling = _combined_scaler(loss, TensorDim.VARIABLE)
 
     assert torch.allclose(final_variable_scaling, expected_scaling)
 
@@ -662,7 +669,7 @@ def test_variable_loss_scaling_val_complex_variable_groups(
 
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
-    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.VARIABLE.value).get_scaler(len(TensorDim))
+    final_variable_scaling = _combined_scaler(loss, TensorDim.VARIABLE)
 
     assert torch.allclose(final_variable_scaling, expected_scaling)
 
@@ -689,7 +696,7 @@ def test_lead_time_decay_loss_scaling(
     )
     loss = get_loss_function(config.training.training_loss, scalers=scalers)
 
-    final_variable_scaling = loss.scaler.subset_by_dim(TensorDim.TIME.value).get_scaler(len(TensorDim))
+    final_variable_scaling = _combined_scaler(loss, TensorDim.TIME)
     assert torch.allclose(final_variable_scaling.flatten(), expected_scaling)
 
 

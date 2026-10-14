@@ -17,6 +17,7 @@ from anemoi.models.data import TensorLayout
 from anemoi.models.data import create_batched_struct
 from anemoi.models.data.sample import sample_registry
 from anemoi.models.data.sources import GriddedTemplate
+from anemoi.models.data.sources import TabularTemplate
 
 LATS = [0.0, 45.0, 90.0]
 LONS = [0.0, 90.0, 180.0]
@@ -69,16 +70,35 @@ def test_layout_object_and_slices_are_accepted():
     assert sample.boundaries == (slice(0, 3),)
 
 
-#: What the interface passes, besides the payload, to build a gridded template.
-GRIDDED_TEMPLATE_SIZES = {"name": "ds", "ensemble_size": 1, "batch_size": 1, "time_size": 2}
+#: What the interface passes, besides the payload, to build a template.
+TEMPLATE_SIZES = {"name": "ds", "ensemble_size": 1, "batch_size": 1, "time_size": 2}
 
 
 def test_gridded_payload_without_data_builds_a_template():
-    template = _gridded(data=None, **GRIDDED_TEMPLATE_SIZES)
+    template = _gridded(data=None, **TEMPLATE_SIZES)
     assert isinstance(template, GriddedTemplate)
     assert template.name == "ds"
     assert (template.batch_size, template.ensemble_size, template.time_size) == (1, 1, 2)
     torch.testing.assert_close(template.coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
+
+
+def test_tabular_payload_without_data_builds_a_template():
+    template = _tabular(data=None, **(TEMPLATE_SIZES | {"batch_size": 2, "ensemble_size": 3}))
+    assert isinstance(template, TabularTemplate)
+    assert template.name == "ds"
+    # one entry per sample, each holding the payload's geometry
+    assert (template.batch_size, template.ensemble_size) == (2, 3)
+    assert template.time_size == 2, "the time windows come from the boundaries"
+    assert template.boundaries == [(slice(0, 2), slice(2, 3))] * 2
+    assert template.node_counts == [3, 3]
+    for coordinates, timedeltas in zip(template.coordinates, template.timedeltas, strict=True):
+        torch.testing.assert_close(coordinates[:, 0], torch.deg2rad(torch.tensor(LATS)))
+        assert timedeltas.dtype == torch.float32
+
+
+def test_tabular_template_checks_its_time_windows():
+    with pytest.raises(ValueError, match="extend past the 3 points"):
+        _tabular(data=None, boundaries=[(0, 4)], **TEMPLATE_SIZES)
 
 
 @pytest.mark.parametrize(
@@ -163,7 +183,7 @@ def test_tabular_collate_rejects_mixed_sharding():
 
 def test_collate_rejects_mixing_samples_and_templates():
     with pytest.raises(TypeError, match="single BaseSample subclass"):
-        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(data=None, **GRIDDED_TEMPLATE_SIZES)}])
+        Batch.collate([{"ds": _gridded()}, {"ds": _gridded(data=None, **TEMPLATE_SIZES)}])
 
 
 def test_collate_accepts_samples_sharing_statistics():

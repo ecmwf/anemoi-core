@@ -46,6 +46,7 @@ class FakeModelConfig:
     specs: dict[str, DatasetSpec] = field(default_factory=lambda: {"data": DatasetSpec()})
     num_nodes: int = 5
     n_step_input: int = 2
+    n_step_output: int = 1
     num_vars: int = 7
     input_datasets: list[str] | None = None  # defaults to every dataset in `specs`
 
@@ -55,6 +56,7 @@ class FakeModelConfig:
         model = SimpleNamespace(
             node_attributes=node_attributes,
             n_step_input={name: self.n_step_input for name in self.specs},
+            n_step_output={name: self.n_step_output for name in self.specs},
             num_input_channels_forcings={},
             num_input_channels_prognostic={},
             _forcing_input_idx={},
@@ -235,6 +237,84 @@ class TestTargetFeatures(TargetFeatureTestCase):
             out[:num_nodes, spec.coord_dim :],
             model.node_attributes.trainable_tensors[self.DATASET].trainable,
         )
+
+
+class TestTargetGeometryAndForcings(TargetFeatureTestCase):
+    """Test the features that read the decoder target rather than the encoder input."""
+
+    @pytest.fixture
+    def x_target(self, model_init: FakeModelConfig, spec: DatasetSpec) -> GriddedSource:
+        """Decoder target carrying the forcings over the output time window."""
+        shape = (
+            self.BATCH_SIZE,
+            model_init.n_step_output,
+            self.ENSEMBLE_SIZE,
+            model_init.num_nodes,
+            len(spec.forcing_idx),
+        )
+        return GriddedSource(
+            name=self.DATASET,
+            data=torch.rand(shape, dtype=torch.float32),
+            coordinates=torch.zeros(model_init.num_nodes, 2),
+            variables=[f"f{i}" for i in range(len(spec.forcing_idx))],
+            statistics={},
+            layout=TensorLayout(batch=0, time=1, ensemble=2, grid=3, variables=4),
+        )
+
+    def test_coordinates_are_sin_cos_of_the_target_geometry(
+        self,
+        model: SimpleNamespace,
+        model_init: FakeModelConfig,
+        x_input_data: GriddedSource,
+        x_target: GriddedSource,
+        target_spec: FlatSource,
+    ) -> None:
+        """``coordinates`` reads the *target* geometry, not the input grid."""
+        target_spec = replace(target_spec, coordinates=torch.rand_like(target_spec.coordinates))
+        feature = create_decoding_target_features(["coordinates"], [self.DATASET], model)
+
+        out = feature.tensor(
+            x_input_data, None, x_target, target_spec, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+        )
+
+        expected = torch.cat([torch.sin(target_spec.coordinates), torch.cos(target_spec.coordinates)], dim=-1)
+        torch.testing.assert_close(out, expected)
+
+    def test_target_forcings_pass_the_target_data_through(
+        self,
+        model: SimpleNamespace,
+        model_init: FakeModelConfig,
+        x_input_data: GriddedSource,
+        x_target: GriddedSource,
+        target_spec: FlatSource,
+    ) -> None:
+        """``target_forcings`` is the flattened target payload verbatim, ``n_step_output`` forcings per node."""
+        feature = create_decoding_target_features(["target_forcings"], [self.DATASET], model)
+
+        assert feature.dim == 1 * 2  # n_step_output * len(spec.forcing_idx)
+
+        out = feature.tensor(
+            x_input_data, None, x_target, target_spec, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+        )
+
+        assert out.shape == (self.BATCH_SIZE * self.ENSEMBLE_SIZE * model_init.num_nodes, feature.dim)
+        torch.testing.assert_close(out, x_target.flatten().data)
+
+    def test_target_forcings_reject_a_mismatched_width(
+        self,
+        model: SimpleNamespace,
+        x_input_data: GriddedSource,
+        x_target: GriddedSource,
+        target_spec: FlatSource,
+    ) -> None:
+        """A target carrying the wrong number of forcings fails here, not deep inside the decoder."""
+        feature = create_decoding_target_features(["target_forcings"], [self.DATASET], model)
+        bad_target = x_target.select(variables=[0])
+
+        with pytest.raises(AssertionError, match="Expected flattened target forcing width"):
+            feature.tensor(
+                x_input_data, None, bad_target, target_spec, batch_size=self.BATCH_SIZE, dataset_name=self.DATASET
+            )
 
 
 class TestTargetFeatureValidate(TargetFeatureTestCase):
