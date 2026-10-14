@@ -12,16 +12,12 @@ import logging
 
 import numpy as np
 import torch
-from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-from sklearn.cluster import KMeans
-from anemoi.graphs.utils import current_device_context
+from sklearn.cluster import MiniBatchKMeans
 from anemoi.graphs.utils import get_distributed_device
-from anemoi.graphs.utils import is_pyg_lib_available
 
 LOGGER = logging.getLogger(__name__)
 
@@ -120,7 +116,7 @@ class KMeansClusterBuilder:
 
         num_points = len(self._coords_xyz)
         num_clusters = max(1, round(num_points / ratio))
-        self._backend = KMeans(n_clusters=num_clusters, **kwargs)
+        self._backend = MiniBatchKMeans(n_clusters=num_clusters, **kwargs)
         LOGGER.info(
             "Fitting K-means with %d clusters for %d reference points.",
             num_clusters,
