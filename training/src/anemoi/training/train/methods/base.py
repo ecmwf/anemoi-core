@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import importlib
 import logging
+import os
 from abc import ABC
 from abc import abstractmethod
 from functools import cached_property
@@ -66,6 +67,11 @@ if TYPE_CHECKING:
     from anemoi.training.utils.index_space import IndexSpace
 
 LOGGER = logging.getLogger(__name__)
+
+
+# Lightning's sync_dist does a host-blocking world barrier plus an all-reduce on every logged step; the training
+# loss is already reduced within the model group, so ANEMOI_TRAIN_LOSS_SYNC_DIST=0 skips the cross-replica sync.
+_TRAIN_LOSS_SYNC_DIST = os.environ.get("ANEMOI_TRAIN_LOSS_SYNC_DIST", "1") != "0"
 
 
 class BaseTrainingModule(pl.LightningModule, ABC):
@@ -1187,7 +1193,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             prog_bar=True,
             logger=self.logger_enabled,
             batch_size=batch_size,
-            sync_dist=True,
+            sync_dist=_TRAIN_LOSS_SYNC_DIST,
         )
 
         self.task.log_extra(logger=self.log, logger_enabled=self.logger_enabled)
