@@ -7,6 +7,8 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+import os
+
 import torch
 from torch import Tensor
 
@@ -387,8 +389,7 @@ def _gt_bwd_src_pass(
 # for more details on pytorch custom ops see https://docs.pytorch.org/tutorials/advanced/python_custom_ops_functional.html
 
 
-@torch.library.custom_op("anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda")
-def graph_transformer_attention(
+def _graph_transformer_attention_impl(
     q: Tensor,
     k: Tensor,
     v: Tensor,
@@ -428,6 +429,11 @@ def graph_transformer_attention(
     return out, out_saved, m
 
 
+graph_transformer_attention = torch.library.custom_op(
+    "anemoi::graph_transformer_attention", mutates_args=(), device_types="cuda"
+)(_graph_transformer_attention_impl)
+
+
 @graph_transformer_attention.register_fake
 def _graph_transformer_attention_fake(
     q: Tensor,
@@ -448,8 +454,7 @@ def _graph_transformer_attention_fake(
 
 
 # TODO(Jan): single bwd pass for non-bipartite graphs
-@torch.library.custom_op("anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda")
-def graph_transformer_attention_backward(
+def _graph_transformer_attention_backward_impl(
     d_out: Tensor,
     q: Tensor,
     k: Tensor,
@@ -498,6 +503,11 @@ def graph_transformer_attention_backward(
     _gt_bwd_src_pass[(N_src,)](q, k, v, e, rowptr, edge_ids, edge_dst, D, m, d_out, dK, dV, dE, N_src, H, C, grad_dtype)
 
     return dQ, dK, dV, dE
+
+
+graph_transformer_attention_backward = torch.library.custom_op(
+    "anemoi::graph_transformer_attention_backward", mutates_args=(), device_types="cuda"
+)(_graph_transformer_attention_backward_impl)
 
 
 @graph_transformer_attention_backward.register_fake
@@ -561,6 +571,35 @@ graph_transformer_attention.register_autograd(
 #######################
 
 
+class _GraphTransformerAttentionEager(torch.autograd.Function):
+    """Eager-mode wrapper around the same op implementations as the custom op.
+
+    Calling a ``torch.library.custom_op`` eagerly goes through the dispatcher and a Python autograd
+    wrapper that re-binds the arguments via ``inspect`` on every call. In the strong-scaling regime
+    the per-layer GPU work is small enough for this host overhead to dominate, so eager calls use
+    this plain ``autograd.Function`` instead. Numerics are identical (same kernels, same code).
+    """
+
+    @staticmethod
+    def forward(ctx, q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst):
+        out, out_saved, m = _graph_transformer_attention_impl(q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst)
+        _graph_transformer_attention_setup_context(
+            ctx, (q, k, v, e, row, colptr, rowptr, edge_ids, edge_dst), (out, out_saved, m)
+        )
+        return out
+
+    @staticmethod
+    def backward(ctx, d_out):
+        q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst = ctx.saved_tensors
+        dQ, dK, dV, dE = _graph_transformer_attention_backward_impl(
+            d_out, q, k, v, e, out_saved, m, row, colptr, rowptr, edge_ids, edge_dst
+        )
+        return dQ, dK, dV, dE, None, None, None, None, None
+
+
+_USE_EAGER_GT_FUNCTION = os.environ.get("ANEMOI_TRITON_GT_EAGER_FUNCTION", "1") != "0"
+
+
 def graph_transformer_attention_conv(
     query: Tensor,
     key: Tensor,
@@ -572,5 +611,7 @@ def graph_transformer_attention_conv(
     """torch.compile-friendly GraphTransformer attention."""
     row, colptr = csc
     rowptr, edge_ids, edge_dst = reverse
+    if _USE_EAGER_GT_FUNCTION and not torch.compiler.is_compiling():
+        return _GraphTransformerAttentionEager.apply(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
     out, _out_saved, _m = graph_transformer_attention(query, key, value, edges, row, colptr, rowptr, edge_ids, edge_dst)
     return out

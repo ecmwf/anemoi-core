@@ -10,6 +10,7 @@
 
 import logging
 import math
+import os
 from typing import Optional
 
 from hydra.errors import InstantiationException
@@ -63,6 +64,11 @@ class CheckpointWrapper(nn.Module):
         return checkpoint(self.module, *args, **kwargs, use_reentrant=False)
 
 
+# Saving/restoring the CPU and CUDA RNG states around every checkpointed region is only needed when the
+# region draws random numbers (e.g. dropout); it costs host time per region. Set to "0" to skip it.
+_CKPT_PRESERVE_RNG_STATE = os.environ.get("ANEMOI_CKPT_PRESERVE_RNG_STATE", "1") != "0"
+
+
 def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     """Conditionally apply gradient checkpointing to a function.
 
@@ -80,7 +86,7 @@ def maybe_checkpoint(func, enabled: bool, *args, **kwargs):
     The result of calling func with the provided arguments
     """
     if enabled:
-        return checkpoint(func, *args, **kwargs, use_reentrant=False)
+        return checkpoint(func, *args, **kwargs, use_reentrant=False, preserve_rng_state=_CKPT_PRESERVE_RNG_STATE)
     return func(*args, **kwargs)
 
 
