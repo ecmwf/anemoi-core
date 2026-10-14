@@ -9,7 +9,7 @@
 
 """Test sharding orchestration through a minimal real GraphConv model.
 
-Each rank supplies its owned data-grid input. The normal model forward prepares
+Each rank supplies owned or replicated data-grid inputs. The normal model forward prepares
 hidden-node shards, graph-provider edge shards, encoder/processor/decoder layouts,
 and the local prediction with its input residual. Compare predictions, the global
 weighted loss, input gradients and all parameter gradients with an unsharded model.
@@ -34,19 +34,23 @@ from tests.distributed._distributed_runner import _run_distributed_test
 
 
 def _build_model_graph(world_size: int) -> tuple[HeteroData, list[int]]:
-    """Build data/hidden populations and destination-sorted edges for each model stage.
+    """Build input/output-grid and hidden-graph nodes with destination-sorted edges.
 
+    The input/output dataset is named "data". Rank 0 owns four data nodes and
+    three hidden nodes; each remaining rank owns three data nodes and two hidden
+    nodes. These uneven partitions have different source/destination offsets.
     Every destination uses an owned source and a source from the next rank.
-    Different population sizes give uneven partitions and different endpoint offsets.
     """
     data_splits = [4] + [3] * (world_size - 1)
     hidden_splits = [3] + [2] * (world_size - 1)
     graph = HeteroData()
     generator = torch.Generator().manual_seed(31)
+    # Initialize each node with a random coordinate pair.
     for name, splits in (("data", data_splits), ("hidden", hidden_splits)):
         graph[name].x = torch.randn(sum(splits), 2, generator=generator)
         graph[name].num_nodes = sum(splits)
 
+    # Construct the directed relations used by the encoder, processor and decoder.
     relations = (
         ("data", "hidden", data_splits, hidden_splits),
         ("hidden", "hidden", hidden_splits, hidden_splits),
@@ -57,20 +61,24 @@ def _build_model_graph(world_size: int) -> tuple[HeteroData, list[int]]:
         dst_starts = [sum(dst_splits[:rank]) for rank in range(world_size)]
         edges = []
         for rank in range(world_size):
-            peer = (rank + 1) % world_size
+            # Choose a source owner on the next rank to require a remote read.
+            remote_src_rank = (rank + 1) % world_size
             for offset in range(dst_splits[rank]):
                 dst = dst_starts[rank] + offset
                 edges.extend(
                     [
                         (src_starts[rank] + offset % src_splits[rank], dst),
-                        (src_starts[peer] + offset % src_splits[peer], dst),
+                        (src_starts[remote_src_rank] + offset % src_splits[remote_src_rank], dst),
                     ]
                 )
+        # PyG stores edges as [2, num_edges]
         edge_index = torch.tensor(edges, dtype=torch.long).T.contiguous()
         relation = (src_name, "to", dst_name)
         graph[relation].edge_index = edge_index
         graph[relation].edge_attr = torch.randn(len(edges), 3, generator=generator)
+        # Nonnegative differences mean destination IDs are sorted, with repeated IDs allowed.
         assert (edge_index[1].diff() >= 0).all(), f"{relation} must be destination-sorted"
+        # Verify that every rank's destination-owned edges include a remote source.
         for rank in range(world_size):
             local_edges = (edge_index[1] >= dst_starts[rank]) & (edge_index[1] < dst_starts[rank] + dst_splits[rank])
             sources = edge_index[0, local_edges]
@@ -152,7 +160,7 @@ def _build_graphconv_model(graph: HeteroData) -> AnemoiModelEncProcDec:
 
 
 def _test_graphconv_model_matches_unsharded_rank(
-    *, rank: int, world_size: int, device: torch.device, group: dist.ProcessGroup
+    *, rank: int, world_size: int, device: torch.device, group: dist.ProcessGroup, input_is_sharded: bool
 ) -> None:
     """Compare normal model orchestration with one globally normalized reference objective."""
     torch.set_num_threads(1)
@@ -220,20 +228,26 @@ def _test_graphconv_model_matches_unsharded_rank(
     reference_loss = (weights * (reference_output - target).square()).sum() / weights.numel()
     reference_loss.backward()
 
-    # Distributed execution starts with externally owned input rows. The model
-    # prepares hidden shards, edge shards, component layouts and residual output.
+    # Anemoi prepares hidden/edge shards and component layouts in both external modes.
     start = sum(data_splits[:rank])
     stop = start + data_splits[rank]
-    local_input = inputs[..., start:stop, :].clone().requires_grad_(True)
+    local_input = (inputs[..., start:stop, :] if input_is_sharded else inputs).clone().requires_grad_(True)
     distributed_outputs = distributed_model(
-        {"data": local_input}, model_comm_group=group, grid_shard_sizes={"data": data_splits}
+        {"data": local_input},
+        model_comm_group=group,
+        grid_shard_sizes={"data": data_splits} if input_is_sharded else None,
     )
     assert set(distributed_outputs) == {"data"}, "Each rank must return the configured data dataset"
     local_output = distributed_outputs["data"]
-    assert local_output.shape == local_input.shape, "Each rank must predict only its owned data-grid rows"
-    local_loss = (
-        weights[..., start:stop, :] * (local_output - target[..., start:stop, :]).square()
-    ).sum() / weights.numel()
+    assert local_output.shape == local_input.shape, "Predictions must match the supplied external data-grid layout"
+    if input_is_sharded:
+        local_loss = (
+            weights[..., start:stop, :] * (local_output - target[..., start:stop, :]).square()
+        ).sum() / weights.numel()
+    else:
+        # Gather backward splits model sensitivities; the full residual loss also
+        # gives the replicated input its complete direct-path gradient on every rank.
+        local_loss = (weights * (local_output - target).square()).sum() / weights.numel()
     local_loss.backward()
 
     # Compare output/loss, owned input gradients, and complete/partial parameter gradients.
@@ -241,18 +255,19 @@ def _test_graphconv_model_matches_unsharded_rank(
     gradient_tolerances = {"rtol": 1e-4, "atol": 1e-7}
     torch.testing.assert_close(
         local_output,
-        reference_output[..., start:stop, :],
+        reference_output[..., start:stop, :] if input_is_sharded else reference_output,
         **output_tolerances,
         msg=lambda details: f"prediction on rank {rank}\n{details}",
     )
     global_loss = local_loss.detach().clone()
-    dist.all_reduce(global_loss, group=group)
+    if input_is_sharded:
+        dist.all_reduce(global_loss, group=group)
     torch.testing.assert_close(global_loss, reference_loss.detach(), **output_tolerances)
     assert reference_input.grad is not None, "Missing reference input gradient"
     assert local_input.grad is not None, "Missing distributed input gradient"
     torch.testing.assert_close(
         local_input.grad,
-        reference_input.grad[..., start:stop, :],
+        reference_input.grad[..., start:stop, :] if input_is_sharded else reference_input.grad,
         **gradient_tolerances,
         msg=lambda details: f"input gradient on rank {rank}\n{details}",
     )
@@ -276,10 +291,14 @@ def _test_graphconv_model_matches_unsharded_rank(
 
 
 @pytest.mark.distributed
-def test_graphconv_model_matches_unsharded(distributed_backend: str, distributed_world_size: int) -> None:
-    """A complete GraphConv model preserves predictions and gradients with sharded external inputs."""
+@pytest.mark.parametrize("input_is_sharded", [True, False], ids=["sharded-input", "replicated-input"])
+def test_graphconv_model_matches_unsharded(
+    distributed_backend: str, distributed_world_size: int, input_is_sharded: bool
+) -> None:
+    """Model orchestration preserves predictions and gradients under the external input layout."""
     _run_distributed_test(
         _test_graphconv_model_matches_unsharded_rank,
         backend=distributed_backend,
         world_size=distributed_world_size,
+        input_is_sharded=input_is_sharded,
     )
