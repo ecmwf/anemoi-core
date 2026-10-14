@@ -29,6 +29,10 @@ from anemoi.training.losses import GraphVariogramScoreLoss
 from anemoi.training.losses import MultiscaleLossWrapper
 from anemoi.training.losses import get_loss_function
 from anemoi.training.losses.base import BaseLoss
+from anemoi.training.losses.graph_edge_operations import compute_edge_validity
+from anemoi.training.losses.graph_edge_operations import edge_difference
+from anemoi.training.losses.graph_edge_operations import weighted_edge_row_l2_norm
+from anemoi.training.losses.graph_edge_operations import weighted_row_l2_norm
 from anemoi.training.losses.graph_score_graph import GraphScoreGraph
 from anemoi.training.losses.variable_mapper import LossVariableMapper
 from anemoi.training.schemas.training import CombinedLossSchema
@@ -283,6 +287,107 @@ def test_graph_scores_match_reference(
     torch.testing.assert_close(actual, expected)
 
 
+def test_graph_edge_energy_gradients_match_reference(
+    graph_data: HeteroData,
+    loss_graph: dict[str, object],
+) -> None:
+    generator = torch.Generator().manual_seed(42)
+    prediction_values = torch.randn(1, 1, 3, 3, 2, dtype=torch.float64, generator=generator)
+    target_values = torch.randn(1, 1, 1, 3, 2, dtype=torch.float64, generator=generator)
+
+    prediction = prediction_values.clone().requires_grad_()
+    target = target_values.clone().requires_grad_()
+    loss = GraphEdgeEnergyScoreLoss(
+        graph_data=graph_data,
+        loss_graph=loss_graph,
+        fair=False,
+    )
+    actual = loss._compute_local_score_tensor(
+        prediction,
+        target.squeeze(2),
+        *loss._graph_kernel_tensors(prediction),
+    )
+    actual_gradients = torch.autograd.grad(actual.sum(), (prediction, target))
+
+    reference_prediction = prediction_values.clone().requires_grad_()
+    reference_target = target_values.clone().requires_grad_()
+    expected = _graph_edge_energy_reference(
+        reference_prediction,
+        reference_target,
+        graph_data,
+        fair=False,
+    )
+    expected_gradients = torch.autograd.grad(expected.sum(), (reference_prediction, reference_target))
+
+    torch.testing.assert_close(actual, expected)
+    for actual_gradient, expected_gradient in zip(actual_gradients, expected_gradients, strict=True):
+        torch.testing.assert_close(actual_gradient, expected_gradient)
+
+
+def test_weighted_edge_row_l2_norm_passes_gradcheck() -> None:
+    source_index = torch.tensor([1, 2, 0, 2, 0, 1])
+    destination_index = torch.tensor([0, 0, 1, 1, 2, 2])
+    edge_weights = torch.tensor([0.25, 0.75, 0.4, 0.6, 0.3, 0.7], dtype=torch.float64)
+    generator = torch.Generator().manual_seed(42)
+    node_values = torch.randn(1, 1, 3, 2, dtype=torch.float64, generator=generator, requires_grad=True)
+
+    def row_norm(values: torch.Tensor) -> torch.Tensor:
+        return weighted_edge_row_l2_norm(
+            values,
+            source_index,
+            destination_index,
+            edge_weights,
+            node_valid=None,
+            edge_valid=None,
+            valid_weight_sum=None,
+            row_normalize=False,
+        )
+
+    assert torch.autograd.gradcheck(row_norm, (node_values,))
+
+
+def test_weighted_edge_row_l2_norm_matches_nan_normalized_autograd() -> None:
+    source_index = torch.tensor([1, 2, 0, 2, 0, 1])
+    destination_index = torch.tensor([0, 0, 1, 1, 2, 2])
+    edge_weights = torch.tensor([0.25, 0.75, 0.4, 0.6, 0.3, 0.7], dtype=torch.float64)
+    node_valid = torch.tensor([[[[True], [False], [True]]]])
+    edge_valid, valid_weight_sum = compute_edge_validity(
+        node_valid,
+        source_index,
+        destination_index,
+        edge_weights,
+    )
+
+    node_values = torch.tensor([[[[1.0], [torch.nan], [4.0]]]], dtype=torch.float64, requires_grad=True)
+    actual = weighted_edge_row_l2_norm(
+        node_values,
+        source_index,
+        destination_index,
+        edge_weights,
+        node_valid=node_valid,
+        edge_valid=edge_valid,
+        valid_weight_sum=valid_weight_sum,
+        row_normalize=True,
+    )
+    (actual_gradient,) = torch.autograd.grad(torch.nansum(actual), (node_values,))
+
+    reference_values = node_values.detach().clone().requires_grad_()
+    expected = weighted_row_l2_norm(
+        edge_difference(reference_values, source_index, destination_index),
+        destination_index,
+        edge_weights,
+        reference_values.shape[-2],
+        node_valid=node_valid,
+        edge_valid=edge_valid,
+        valid_weight_sum=valid_weight_sum,
+        row_normalize=True,
+    )
+    (expected_gradient,) = torch.autograd.grad(torch.nansum(expected), (reference_values,))
+
+    torch.testing.assert_close(actual, expected, equal_nan=True)
+    torch.testing.assert_close(actual_gradient, expected_gradient)
+
+
 def test_graph_energy_matches_row_normalized_closed_neighbourhood(
     closed_graph_data: HeteroData,
     score_inputs: tuple[torch.Tensor, torch.Tensor],
@@ -396,6 +501,41 @@ def test_graph_edge_energy_centering_preserves_spatial_offset_invariance(
     assert torch.isfinite(score).all()
     assert torch.isfinite(shifted_score).all()
     torch.testing.assert_close(shifted_score, score)
+
+
+def test_graph_edge_energy_avoids_cancellation_for_locally_close_values() -> None:
+    graph = HeteroData()
+    graph["data"].num_nodes = 3
+    graph["data", "to", "data"].edge_index = torch.tensor(
+        [
+            [1, 2, 0],
+            [0, 1, 2],
+        ],
+    )
+    prediction = torch.tensor(
+        [[[[[0.0], [10_000.0], [10_001.0]], [[0.0], [10_000.0], [10_001.0]]]]],
+        requires_grad=True,
+    )
+    target = torch.zeros(1, 1, 1, 3, 1)
+    loss = GraphEdgeEnergyScoreLoss(
+        graph_data=graph,
+        loss_graph={"edges_name": ["data", "to", "data"]},
+    )
+
+    score = loss._compute_local_score_tensor(
+        prediction,
+        target.squeeze(2),
+        *loss._graph_kernel_tensors(prediction),
+    )
+    node_score = score[..., 1, :].sum()
+    node_score.backward()
+
+    torch.testing.assert_close(node_score, torch.tensor(1.0))
+    assert prediction.grad is not None
+    expected_gradient = torch.zeros_like(prediction)
+    expected_gradient[:, :, :, 1] = -0.5
+    expected_gradient[:, :, :, 2] = 0.5
+    torch.testing.assert_close(prediction.grad, expected_gradient)
 
 
 @pytest.mark.parametrize(

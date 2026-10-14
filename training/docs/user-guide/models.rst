@@ -72,8 +72,10 @@ Transformer
 ===========
 
 The Transformer uses a multi-head self attention on the processor. Note
-that this requires `flash-attention
-<https://github.com/Dao-AILab/flash-attention>`__ to be installed.
+that this requires an optimised attention implementation to be installed.
+Anemoi offers a triton attention implementation, which is supported on GPUs.
+Another option is to install the `flash-attention
+<https://github.com/Dao-AILab/flash-attention>`__ library.
 
 The attention windows are chosen in such a way that a complete grid
 neighbourhood is always included (see Figure below). Like with the
@@ -203,8 +205,8 @@ coarser grid:
 
 The ``MultiscaleLossWrapper`` implements the multiscale loss formulation
 presented in <https://arxiv.org/abs/2506.10868>. It wraps around loss
-functions such as the ``AlmostFairKernelCRPSLoss`` to provide
-scale-aware model training.
+functions such as the ``CRPS`` loss to provide scale-aware model
+training.
 
 The wrapper is configured via a single ``multiscale_config`` key that
 supports two modes.
@@ -226,7 +228,8 @@ geometric progression of KNN smoothers:
              base_sigma: 0.1
              scale_factor: 2
            per_scale_loss:
-             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             _target_: anemoi.training.losses.CRPS
+             alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
 **File-based mode** — load pre-computed sparse matrices from disk:
@@ -247,7 +250,8 @@ geometric progression of KNN smoothers:
                - filter_2x.npz
                - null            # full resolution
            per_scale_loss:
-             _target_: anemoi.training.losses.kcrps.AlmostFairKernelCRPS
+             _target_: anemoi.training.losses.CRPS
+             alpha: 0.95           # 1.0 = fair CRPS, 0.0 = standard, in between = almost fair
              scalers: ['node_weights']
 
 The loss at each scale is computed on the *residual* between successive

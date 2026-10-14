@@ -93,6 +93,17 @@ choose stable, descriptive names.
    All datasets encoded by the same encoder group must produce latents
    with consistent shapes (see the target-feature validation below).
 
+***************************************************
+ Encoding multiple datasets with the same encoder
+***************************************************
+
+The support for encoding multiple datasets with the same encoder is currently limited to one dataset per encoder.
+Future updates may introduce more flexible dataset fusing strategies. A different strategy can be chosen for each encoder
+by setting the ``dataset_fusing_strategy`` field, which supports the following values:
+
+``not_supported``
+   Indicates that multiple datasets per encoder are not currently supported.
+
 *******************
  Latent aggregator
 *******************
@@ -124,6 +135,27 @@ Available aggregators (in ``anemoi.models.layers.aggregator``):
    the order of the mapping passed to the model. Every configured dataset
    must be active because omitting one would change the output width.
 
+``PointwiseCrossAttentionAggregator``
+   Pointwise cross-attention over the active dataset latents. The
+   initial hidden-node attributes provide the query and residual, while
+   each dataset latent is projected to ``num_channels`` and used as a
+   named key/value source. Encoder widths may differ and active dataset
+   subsets are supported. The output width is ``num_channels`` and must
+   match the processor width.
+
+   .. code:: yaml
+
+      latent_aggregator:
+        _target_: anemoi.models.layers.aggregator.PointwiseCrossAttentionAggregator
+        num_channels: ${model.num_channels}
+        num_heads: 16
+        attn_channels: null
+        dropout_p: 0.0
+        qkv_bias: false
+        qk_norm: false
+        gradient_checkpointing: true
+        layer_kernels: ${model.layer_kernels}
+
 *********************************
   Decoder target node features
 *********************************
@@ -141,7 +173,7 @@ what the decoder receives in addition to the processed latent representation.
        target_node_features: [ "encoded_data" ]  # default
 
 .. note::
-   Here, "__target__" refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
+   Here, __"target"__ refers to the target grid of the decoder, i.e., the grid on which the decoder produces its output.
    It does not refer to the targets used to compute the loss of the ML model.
 
 Valid features:

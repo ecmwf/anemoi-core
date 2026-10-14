@@ -21,13 +21,113 @@ from torch_geometric.data import HeteroData
 
 from anemoi.graphs.plotting.prepare import compute_isolated_nodes
 from anemoi.graphs.plotting.prepare import compute_node_adjacencies
+from anemoi.graphs.plotting.prepare import coordinates_to_lat_lon
 from anemoi.graphs.plotting.prepare import edge_list
+from anemoi.graphs.plotting.prepare import edge_list_from_coordinates
 from anemoi.graphs.plotting.prepare import node_list
 
 annotations_style = {"text": "", "showarrow": False, "xref": "paper", "yref": "paper", "x": 0.005, "y": -0.002}
 plotly_axis_config = {"showgrid": False, "zeroline": False, "showticklabels": False}
 
 LOGGER = logging.getLogger(__name__)
+
+
+def plot_edges_2d(
+    source_coords: np.ndarray | torch.Tensor,
+    target_coords: np.ndarray | torch.Tensor,
+    edge_index: np.ndarray | torch.Tensor,
+    out_file: Optional[Union[str, Path]] = None,
+    source_name: str = "source",
+    target_name: str = "target",
+    title: Optional[str] = None,
+    show_nodes: bool = True,
+    show: bool = True,
+) -> go.Figure:
+    """Plot edges from coordinate arrays and an edge index.
+
+    Parameters
+    ----------
+    source_coords : np.ndarray | torch.Tensor
+        Source latitude-longitude coordinates in radians with shape ``(N, 2)``.
+    target_coords : np.ndarray | torch.Tensor
+        Target latitude-longitude coordinates in radians with shape ``(M, 2)``.
+    edge_index : np.ndarray | torch.Tensor
+        Edge index with shape ``(2, E)``, where row 0 indexes source nodes and row 1 indexes target nodes.
+    out_file : str | Path, optional
+        Name of the file to save the plot. Default is None.
+    source_name : str, optional
+        Name to use for the source-node trace.
+    target_name : str, optional
+        Name to use for the target-node trace.
+    title : str, optional
+        Plot title. Defaults to ``"Graph {source_name} --> {target_name}"``.
+    show_nodes : bool, optional
+        Whether to include source and target node markers. Default is True.
+    show : bool, optional
+        Whether to show the figure when ``out_file`` is not provided. Default is True.
+
+    Returns
+    -------
+    go.Figure
+        Plotly figure containing the edge traces and, optionally, node traces.
+    """
+    edge_latitudes, edge_longitudes = edge_list_from_coordinates(source_coords, target_coords, edge_index)
+
+    traces = [
+        go.Scattergeo(
+            lat=edge_latitudes,
+            lon=edge_longitudes,
+            line={"width": 0.5, "color": "#888"},
+            hoverinfo="none",
+            mode="lines",
+            name="Connections",
+        )
+    ]
+
+    if show_nodes:
+        source_latitudes, source_longitudes = coordinates_to_lat_lon(source_coords, "source_coords")
+        target_latitudes, target_longitudes = coordinates_to_lat_lon(target_coords, "target_coords")
+        traces.extend(
+            [
+                go.Scattergeo(
+                    lat=source_latitudes,
+                    lon=source_longitudes,
+                    mode="markers",
+                    hoverinfo="text",
+                    name=source_name,
+                    marker={"showscale": False, "color": "red", "size": 4, "line_width": 1},
+                ),
+                go.Scattergeo(
+                    lat=target_latitudes,
+                    lon=target_longitudes,
+                    mode="markers",
+                    hoverinfo="text",
+                    name=target_name,
+                    marker={"showscale": False, "color": "blue", "size": 4, "line_width": 1},
+                ),
+            ]
+        )
+
+    layout = go.Layout(
+        title="<br>" + (title or f"Graph {source_name} --> {target_name}"),
+        title_font_size=16,
+        showlegend=True,
+        hovermode="closest",
+        margin={"b": 20, "l": 5, "r": 5, "t": 40},
+        annotations=[annotations_style],
+        legend={"x": 0, "y": 1},
+        xaxis=plotly_axis_config,
+        yaxis=plotly_axis_config,
+    )
+    fig = go.Figure(data=traces, layout=layout)
+    fig.update_geos(fitbounds="locations")
+
+    if out_file is not None:
+        fig.write_html(out_file)
+    elif show:
+        fig.show()
+
+    return fig
 
 
 def plot_interactive_subgraph_2d(

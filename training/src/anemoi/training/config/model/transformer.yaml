@@ -33,7 +33,7 @@ processor:
   num_heads: 16 # GraphTransformer or Transformer only
   window_size: 512
   dropout_p: 0.0 # GraphTransformer
-  attention_implementation: flash_attention # Possible values:  scaled_dot_product_attention, flash_attention
+  attention_implementation: triton_attention # Possible values:  flash_attention, triton_attention, scaled_dot_product_attention
   qk_norm: False # Transformer and GraphTransformer only
   softcap: 0.0 # Transformer only
   use_alibi_slopes: False # Transformer only
@@ -62,6 +62,9 @@ encoders:
       shard_strategy: "edges"
       graph_attention_backend: "triton" # Options: "triton", "pyg"
 
+latent_aggregator:
+  _target_: anemoi.models.layers.aggregator.SumAggregator
+
 decoders:
   "0":
     target_datasets: [ "data" ]
@@ -69,6 +72,7 @@ decoders:
     mapper:
       _target_: anemoi.models.layers.mapper.GraphTransformerBackwardMapper
       trainable_size: ${model.edge_trainable_parameters.hidden2data}
+      num_channels: ${model.num_channels}
       sub_graph_edge_attributes: ${model.attributes.edges}
       num_chunks: 4
       mlp_hidden_ratio: 4 # GraphTransformer/Transformer only; use 4 (mlp) or ~2.67 (glu/swiglu/geglu/reglu)

@@ -427,9 +427,10 @@ class BasePerBatchPlotCallback(BasePlotCallback):
         if batch_idx % self.every_n_batches == 0:
 
             batch = self._prepare_batch(pl_module, batch)
-            # gather tensors if necessary
+            # Lightning hands us the batch returned by `on_after_batch_transfer`, so it sits on the
+            # projected grid like the predictions do — `grid_shard_sizes`, not the reader `shard_sizes`.
             batch = {
-                dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+                dataset_name: pl_module.allgather_batch(dataset_tensor, pl_module.grid_shard_sizes[dataset_name])
                 for dataset_name, dataset_tensor in batch.items()
             }
             preds = output.predictions
@@ -438,7 +439,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                 raise TypeError(preds)
             gathered_predictions = [
                 {
-                    dataset_name: pl_module.allgather_batch(dataset_pred, dataset_name)
+                    dataset_name: pl_module.allgather_batch(dataset_pred, pl_module.grid_shard_sizes[dataset_name])
                     for dataset_name, dataset_pred in pred.items()
                 }
                 for pred in preds
@@ -452,7 +453,7 @@ class BasePerBatchPlotCallback(BasePlotCallback):
                     if isinstance(getattr(post_processor, "nan_locations", None), torch.Tensor):
                         post_processor.nan_locations = pl_module.allgather_batch(
                             post_processor.nan_locations,
-                            dataset_name,
+                            pl_module.grid_shard_sizes[dataset_name],
                         )
                 self.post_processors[dataset_name] = self.post_processors[dataset_name].cpu()
 
@@ -743,7 +744,7 @@ class LossCurvePlot(BasePerBatchPlotCallback):
                         # with the gathered mask through the ScaleTensor API.
                         scaler.update_scaler(
                             "nan_mask_weights",
-                            pl_module.allgather_batch(nan_mask_weights, dataset),
+                            pl_module.allgather_batch(nan_mask_weights, pl_module.grid_shard_sizes[dataset]),
                         )
 
         return pl_module.plot_adapter.prepare_loss_batch(batch)
@@ -800,7 +801,7 @@ class BasePlotAdditionalMetrics(BasePerBatchPlotCallback):
         if auxiliary_output is None:
             return None
         return {
-            dataset_name: pl_module.allgather_batch(dataset_tensor, dataset_name)
+            dataset_name: pl_module.allgather_batch(dataset_tensor, pl_module.grid_shard_sizes[dataset_name])
             for dataset_name, dataset_tensor in auxiliary_output.items()
         }
 
