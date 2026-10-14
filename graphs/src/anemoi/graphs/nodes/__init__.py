@@ -16,6 +16,7 @@ from .builders.from_healpix import HEALPixNodes
 from .builders.from_healpix import LimitedAreaHEALPixNodes
 from .builders.from_icon import ICONCellGridNodes
 from .builders.from_icon import ICONMultiMeshNodes
+from .builders.from_kmeans_clusters import KMeansClusteredNodes
 from .builders.from_reduced_gaussian import ReducedGaussianGridNodes
 from .builders.from_refined_icosahedron import HexNodes
 from .builders.from_refined_icosahedron import LimitedAreaHexNodes
@@ -23,7 +24,6 @@ from .builders.from_refined_icosahedron import LimitedAreaTriNodes
 from .builders.from_refined_icosahedron import StretchedTriNodes
 from .builders.from_refined_icosahedron import TriNodes
 from .builders.from_vectors import LatLonNodes
-from .builders.from_kmeans_clusters import KMeansClusteredNodes
 
 __all__ = [
     "AnemoiDatasetNodes",

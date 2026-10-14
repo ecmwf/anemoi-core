@@ -15,17 +15,17 @@ from typing import Any
 from typing import Iterable
 from typing import Union
 
+import numpy as np
 import torch
 from hydra.utils import instantiate
+from scipy.spatial import cKDTree
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs import EARTH_RADIUS
 from anemoi.graphs.edges.attributes import EdgeLength
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 from anemoi.graphs.utils import NodesAxis
 from anemoi.graphs.utils import get_edge_attributes
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-import numpy as np
-from scipy.spatial import cKDTree
 
 LOGGER = logging.getLogger(__name__)
 
@@ -428,10 +428,31 @@ class RemoveSelfEdges(BaseEdgeMaskingProcessor):
 
 class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
     """Remove crossing edges from an edge store.
-    
+
     For each edge, we will take a given number of middle points (if 1 only the midpoint)
     to check if the edge crosses any area. The check is done based on whether the closest
     point to any of the middle points is in the restricted area.
+
+    Parameters
+    ----------
+    source_name : str
+        The name of the source nodes.
+    target_name : str
+        The name of the target nodes.
+    reference_nodes_name : str
+        The name of the node set defining the restricted area.
+    reference_attribute_name : str
+        Boolean node attribute on the reference nodes. True marks the points
+        inside the restricted area, e.g. land points.
+    num_middle_points : int, optional
+        Number of points sampled along each edge. Defaults to 1, the midpoint
+        test.
+    source_mask_attr_name : str, optional
+        Boolean node attribute on the source nodes. Only the edges leaving a
+        True source node are checked. By default, all edges are checked.
+    target_mask_attr_name : str, optional
+        Boolean node attribute on the target nodes. Only the edges arriving at a
+        True target node are checked. By default, all edges are checked.
     """
 
     def __init__(
@@ -460,7 +481,7 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
         return latlon_rad_to_cartesian_np(graph[nodes_name].x.detach().cpu().numpy().astype(np.float64))
 
     @staticmethod
-    def _get_node_attr(graph: HeteroData, nodes_name: str, attr_name: str, dtype = torch.bool) -> np.ndarray:
+    def _get_node_attr(graph: HeteroData, nodes_name: str, attr_name: str, dtype=torch.bool) -> np.ndarray:
         return graph[nodes_name][attr_name].detach().cpu().numpy().reshape(-1).astype(dtype)
 
     def get_area_mask(self, graph: HeteroData) -> torch.Tensor:
@@ -505,5 +526,6 @@ class RemoveEdgesCrossingArea(BaseEdgeMaskingProcessor):
 
 class RemoveEdgesOutsideArea(RemoveEdgesCrossingArea):
     """Remove the edges outside a mask."""
+
     def get_area_mask(self, graph: HeteroData) -> torch.Tensor:
         return ~super().get_area_mask(graph)

@@ -7,17 +7,17 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
+from __future__ import annotations
 
 import logging
 
 import numpy as np
 import torch
+from sklearn.cluster import MiniBatchKMeans
 from torch_geometric.data import HeteroData
 
 from anemoi.graphs.generate.transforms import cartesian_to_latlon_rad
 from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
-from sklearn.cluster import MiniBatchKMeans
-from anemoi.graphs.utils import get_distributed_device
 
 LOGGER = logging.getLogger(__name__)
 
@@ -25,15 +25,12 @@ LOGGER = logging.getLogger(__name__)
 class KMeansClusterBuilder:
     """K-means cluster builder for reference nodes on a unit sphere.
 
-
     Methods
     -------
-    fit_coords(coords_rad: torch.Tensor)
-        Fit the backend to the coordinates in radians.
     fit(graph: HeteroData)
-        Fit the backend to the reference nodes.
-    get_mask(coords_rad: torch.Tensor | np.ndarray) -> torch.Tensor
-        Get the mask for the nodes based on the distance to the reference nodes.
+        Gather the reference node coordinates (and weights) from the graph.
+    get_clusters(ratio: float, **kwargs) -> np.ndarray
+        Cluster the reference nodes and return the cluster centres, in radians.
     """
 
     def __init__(
@@ -42,18 +39,16 @@ class KMeansClusterBuilder:
         mask_attr_name: str | None = None,
         node_weight_attribute_name: str | None = None,
     ):
-        """Initialisation of the KMeansClusterMaskBuilder."""
+        """Initialisation of the KMeansClusterBuilder."""
         self.reference_node_name = reference_node_name
         self.mask_attr_name = mask_attr_name
         self.node_weight_attribute_name = node_weight_attribute_name
-
-        self.device = get_distributed_device()
 
         self._backend = None
         self._coords_xyz = None
         self._weights = None
 
-    def _get_reference_coords(self, graph: HeteroData) -> torch.Tensor:
+    def _get_reference_coords(self, graph: HeteroData) -> tuple[torch.Tensor, torch.Tensor | None]:
         """Retrieve coordinates from the reference nodes.
 
         Parameters
@@ -63,8 +58,9 @@ class KMeansClusterBuilder:
 
         Returns
         -------
-        torch.Tensor of shape (N_ref, 2)
-            Latitude and longitude of the reference nodes in radians.
+        tuple[torch.Tensor, torch.Tensor | None]
+            Latitude and longitude of the reference nodes in radians, of shape
+            (N_ref, 2), and their weights of shape (N_ref,), if requested.
         """
         assert (
             self.reference_node_name in graph.node_types
@@ -91,23 +87,22 @@ class KMeansClusterBuilder:
         return coords_rad, weights
 
     def fit(self, graph: HeteroData) -> None:
-        """Fit the K-means model to the reference nodes in the graph."""
+        """Gather the reference nodes to cluster from the graph."""
         reference_mask_str = self.reference_node_name
         if self.mask_attr_name is not None:
             reference_mask_str += f"[{self.mask_attr_name}]"
 
         coords_rad, weights = self._get_reference_coords(graph)
         LOGGER.info(
-            "Fitting %s (%s) with %d reference nodes from %s.",
+            "Fitting %s with %d reference nodes from %s.",
             self.__class__.__name__,
-            self._backend.__class__.__name__,
             len(coords_rad),
             reference_mask_str,
         )
         LOGGER.debug("Reference nodes live on %s", coords_rad.device)
 
-        self._coords_xyz = latlon_rad_to_cartesian_np(coords_rad)
-        self._weights = weights
+        self._coords_xyz = latlon_rad_to_cartesian_np(coords_rad.detach().cpu().numpy().astype(np.float64))
+        self._weights = None if weights is None else weights.detach().cpu().numpy().astype(np.float64)
 
     def get_clusters(self, ratio: float, **kwargs) -> np.ndarray:
         """Get the cluster centers in latitude and longitude (radians)."""
@@ -118,7 +113,8 @@ class KMeansClusterBuilder:
         num_clusters = max(1, round(num_points / ratio))
         self._backend = MiniBatchKMeans(n_clusters=num_clusters, **kwargs)
         LOGGER.info(
-            "Fitting K-means with %d clusters for %d reference points.",
+            "Fitting %s with %d clusters for %d reference points.",
+            self._backend.__class__.__name__,
             num_clusters,
             num_points,
         )

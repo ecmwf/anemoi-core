@@ -9,9 +9,8 @@
 
 """K-means cluster meshes for irregular (e.g. ocean) domains.
 
-Implements the node placement and land-aware Delaunay edges described in
-Holmberg et al., "Njord: A Probabilistic Graph Neural Network for Ensemble
-Ocean Forecasting" (arXiv:2605.15470), Appendix C.
+Implements the node placement described in Holmberg et al., "Njord: A
+Probabilistic Graph Neural Network for Ensemble Ocean Forecasting", Appendix C.
 """
 
 from __future__ import annotations
@@ -21,15 +20,17 @@ import logging
 import torch
 from torch_geometric.data import HeteroData
 
-from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 from anemoi.graphs.generate.kmeans import KMeansClusterBuilder
+from anemoi.graphs.nodes.builders.base import BaseNodeBuilder
 
 LOGGER = logging.getLogger(__name__)
 
 
 class KMeansClusteredNodes(BaseNodeBuilder):
-    """Nodes placed at the centroids of a weighted spherical K-means clustering
-    of a reference node set (optionally restricted to a mask, e.g. the ocean/land).
+    """Nodes at the centroids of a weighted spherical K-means clustering.
+
+    The clustering is run over a reference node set, optionally restricted to a
+    mask (e.g. the sea points).
 
     Parameters
     ----------
@@ -44,14 +45,13 @@ class KMeansClusteredNodes(BaseNodeBuilder):
     mask_attr_name : str, optional
         Boolean node attribute on the reference nodes defining the area of
         interest (True = include, e.g. sea points). Points outside the mask are
-        excluded from clustering and are treated as land by KMeansDelaunayEdges.
+        excluded from the clustering.
     node_weight_attribute_name : str, optional
-        Name of the node attribute to use as weights for the clustering. If not specified, 
-        defaults to uniform weighting.
-    max_iter : int
-        Maximum K-means iterations.
-    random_state : int
-        Seed, so that the graph is reproducible.
+        Name of the node attribute to use as weights for the clustering. If not
+        specified, defaults to uniform weighting.
+    kmeans_kwargs : dict, optional
+        Keyword arguments forwarded to `sklearn.cluster.MiniBatchKMeans`, such as
+        `max_iter` or `random_state` (set it to make the graph reproducible).
     """
 
     def __init__(

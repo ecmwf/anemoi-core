@@ -7,12 +7,10 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-# my_package/kmeans_mesh.py
-"""K-means cluster meshes for irregular (e.g. ocean) domains.
+"""Delaunay mesh edges for irregular (e.g. ocean) domains.
 
-Implements the node placement and land-aware Delaunay edges described in
-Holmberg et al., "Njord: A Probabilistic Graph Neural Network for Ensemble
-Ocean Forecasting" (arXiv:2605.15470), Appendix C.
+Implements the edge construction described in Holmberg et al., "Njord: A
+Probabilistic Graph Neural Network for Ensemble Ocean Forecasting", Appendix C.
 """
 
 from __future__ import annotations
@@ -25,25 +23,25 @@ from scipy.spatial import ConvexHull
 from torch_geometric.data.storage import NodeStorage
 
 from anemoi.graphs.edges.builders.base import BaseEdgeBuilder
-from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np 
+from anemoi.graphs.generate.transforms import latlon_rad_to_cartesian_np
 
 LOGGER = logging.getLogger(__name__)
 
 
 class DelaunayEdges(BaseEdgeBuilder):
-    """Same-level mesh edges for KMeansClusteredNodes: spherical Delaunay
-    triangulation, then removal of edges that cross land.
+    """Same-level mesh edges from a spherical Delaunay triangulation.
 
-    An edge is removed if any of `num_samples` points along it is nearest to a
-    grid point outside the area-of-interest mask (num_samples=1 is the
-    midpoint test from the paper), or if it is longer than `max_length_km`.
+    Intended for node sets without a regular structure, such as
+    :class:`~anemoi.graphs.nodes.KMeansClusteredNodes`. To drop the edges that
+    cross land, follow this builder with the ``RemoveEdgesCrossingArea``
+    post-processor; to drop the longest edges, use ``RestrictEdgeLength``.
 
     Parameters
     ----------
     source_name : str
         The name of the source nodes.
     target_name : str
-        The name of the target nodes.
+        The name of the target nodes. Must match `source_name`.
     """
 
     def __init__(
@@ -82,7 +80,7 @@ class DelaunayEdges(BaseEdgeBuilder):
     def compute_edge_index(self, source_nodes: NodeStorage, target_nodes: NodeStorage) -> torch.Tensor:
         """Compute the edge indices based on Delaunay triangulation of the given nodes."""
         xyz = latlon_rad_to_cartesian_np(source_nodes.x.detach().cpu().numpy().astype(np.float64))
-        
+
         pairs = self.get_delaunay_pairs(xyz)
 
         # Edges are directed in anemoi. Add both directions.
