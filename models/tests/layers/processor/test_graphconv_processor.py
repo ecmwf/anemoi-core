@@ -24,8 +24,7 @@ from anemoi.models.layers.graph_provider import create_graph_provider
 from anemoi.models.layers.processor import GNNProcessor
 from anemoi.models.layers.utils import load_layer_kernels
 from anemoi.utils.config import DotDict
-
-from ...distributed._distributed_runner import _run_distributed_test
+from tests.distributed._distributed_runner import _run_distributed_test
 
 
 @dataclass
@@ -234,8 +233,11 @@ def _test_gnn_processor_matches_unsharded_rank(
     reference_params = dict(reference.named_parameters())
     subject_params = dict(subject.named_parameters())
     assert reference_params.keys() == subject_params.keys()
+    # Callable messages add comparison/rank context without replacing PyTorch's numerical diagnostics.
     for name, param in reference_params.items():
-        torch.testing.assert_close(subject_params[name], param, msg=f"initial {name}")
+        torch.testing.assert_close(
+            subject_params[name], param, msg=lambda details, name=name: f"initial {name} on rank {rank}\n{details}"
+        )
 
     x_full = x.clone().requires_grad_(True)
     edges_full = edge_attr.clone().requires_grad_(True)
@@ -281,7 +283,12 @@ def _test_gnn_processor_matches_unsharded_rank(
         assert reference_grad is not None, f"Missing reference gradient of {name}"
         grad = param.grad.detach().clone()
         dist.all_reduce(grad, group=group)
-        torch.testing.assert_close(grad, reference_grad, **tolerances, msg=f"gradient of {name}")
+        torch.testing.assert_close(
+            grad,
+            reference_grad,
+            **tolerances,
+            msg=lambda details, name=name: f"gradient of {name} on rank {rank}\n{details}",
+        )
 
 
 @pytest.mark.distributed
