@@ -493,6 +493,10 @@ class MemorySchema(BaseModel):
     "Frequency of memory profiling. Default to 5."
     warmup: NonNegativeInt = Field(example=2)
     "Number of step to discard before the profiler starts to record traces. Default to 2."
+    wait: NonNegativeInt = Field(default=0)
+    "Number of steps with the profiler fully off before the warmup steps. Default to 0."
+    repeat: PositiveInt = Field(default=1)
+    "Number of wait/warmup/active cycles. Each cycle writes its own trace file. Default to 1."
     extra_plots: bool = Field(example=False)
     "Save plots produced with torch.cuda._memory_viz.profile_plot if available. Default to false."
     trace_rank0_only: bool = Field(example=False)
