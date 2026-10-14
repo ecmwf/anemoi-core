@@ -457,36 +457,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             **kwargs,
         )
 
-    def _update_checkpoint_state_dict_for_load(self, checkpoint: dict[str, Any]) -> None:
-        update_cfg = self.config.training.update_ds_stats_on_ckpt_load
-        update_states = update_cfg.states
-        update_tendencies = update_cfg.tendencies
-        state_dict = checkpoint.get("state_dict")
-        if not isinstance(state_dict, dict) or not (update_states or update_tendencies):
-            return
-
-        processor_prefixes: tuple[str, ...] = ()
-        if update_states:
-            processor_prefixes += ("model.pre_processors.", "model.post_processors.")
-        if update_tendencies:
-            processor_prefixes += (
-                "model.pre_processors_tendencies.",
-                "model.post_processors_tendencies.",
-            )
-
-        if not processor_prefixes:
-            return
-        for key in list(state_dict.keys()):
-            if key.startswith(processor_prefixes):
-                del state_dict[key]
-
-        model_state_dict = self.model.state_dict()
-        processor_prefixes += tuple(f"model.{k}" for k in model_state_dict if "model_output_idx" in k)
-        for key, value in model_state_dict.items():
-            full_key = f"model.{key}"
-            if full_key.startswith(processor_prefixes):
-                state_dict[full_key] = value
-
     def on_save_checkpoint(self, checkpoint: dict) -> None:
         checkpoint["task_state"] = self.task.training_runtime_state_dict()
 
@@ -494,7 +464,6 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         # Apply migrations to handle state_dict key changes from older checkpoints.
         # These are idempotent: already-migrated checkpoints are unaffected.
         _trainable_edge_perm_fix_migration(checkpoint, model=self)
-        self._update_checkpoint_state_dict_for_load(checkpoint)
 
         self._ckpt_model_name_to_index = {
             dataset_name: data_indices.name_to_index

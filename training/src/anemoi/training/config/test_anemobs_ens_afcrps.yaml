@@ -644,9 +644,6 @@ training:
   fork_run_id: null
   transfer_learning: false
   load_weights_only: false
-  update_ds_stats_on_ckpt_load:
-    states: false
-    tendencies: true
   deterministic: false
   precision: bf16-mixed
   accum_grad_batches: 1

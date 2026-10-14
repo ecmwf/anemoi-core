@@ -781,15 +781,6 @@ StrategySchemas = BaseDDPStrategySchema | DDPEnsGroupStrategyStrategySchema | Si
 VariableGroupType = dict[str, str | list[str] | dict[str, str | bool | list[str | int]]] | None
 
 
-class UpdateDsStatsOnCkptLoadSchema(BaseModel):
-    """Configuration for updating processor statistics on checkpoint load."""
-
-    states: bool = Field(default=False, example=False)
-    "Rebuild state pre/post-processing statistics from the current dataset."
-    tendencies: bool = Field(default=True, example=True)
-    "Rebuild tendency pre/post-processing statistics from the current dataset."
-
-
 class BaseTrainingSchema(BaseModel):
     """Training configuration."""
 
@@ -805,8 +796,6 @@ class BaseTrainingSchema(BaseModel):
         default_factory=CheckVariablesCompatibilitySchema,
     )
     "Options forwarded to ``Variable.check_compatibility`` when checking checkpoint vs. current dataset (fine-tuning)."
-    update_ds_stats_on_ckpt_load: UpdateDsStatsOnCkptLoadSchema = Field(default_factory=UpdateDsStatsOnCkptLoadSchema)
-    "Rebuild pre/post-processing statistics from the current dataset when loading a checkpoint."
     submodules_to_freeze: list[str] = Field(example=["processor"])
     "List of submodules to freeze during transfer learning."
     deterministic: bool = Field(default=False)
