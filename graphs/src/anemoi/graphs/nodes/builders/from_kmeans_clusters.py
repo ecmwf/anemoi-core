@@ -7,12 +7,6 @@
 # granted to it by virtue of its status as an intergovernmental organisation
 # nor does it submit to any jurisdiction.
 
-"""K-means cluster meshes for irregular (e.g. ocean) domains.
-
-Implements the node placement described in Holmberg et al., "Njord: A
-Probabilistic Graph Neural Network for Ensemble Ocean Forecasting", Appendix C.
-"""
-
 from __future__ import annotations
 
 import logging

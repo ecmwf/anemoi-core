@@ -25,3 +25,8 @@
    :exclude-members: IcosahedralNodes,LimitedAreaIcosahedralNodes,StretchedIcosahedronNodes
    :no-undoc-members:
    :show-inheritance:
+
+.. automodule:: anemoi.graphs.nodes.builders.from_kmeans_clusters
+   :members:
+   :no-undoc-members:
+   :show-inheritance:
