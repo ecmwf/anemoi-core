@@ -16,6 +16,7 @@ import torch.fft
 import torch.nn.functional as F
 
 from anemoi.models.layers.spectral_helpers import InverseSphericalHarmonicTransform
+from anemoi.models.layers.spectral_helpers import LatitudeGrid
 from anemoi.models.layers.spectral_helpers import SphericalHarmonicTransform
 
 LOGGER = logging.getLogger(__name__)
@@ -226,12 +227,14 @@ class SHT(SpectralTransform):
 
 
 class RegularSHT(SHT):
-    """SHT on a regular lon-lat grid."""
+    """SHT on Gaussian or equally spaced latitude rings and uniform longitudes."""
 
     def __init__(
         self,
         nlat: int,
         truncation: int | None = None,
+        nlon: int | None = None,
+        latitude_grid: LatitudeGrid = "legendre-gauss",
         **kwargs,
     ) -> None:
         """SHT on a regular lon-lat grid.
@@ -242,13 +245,25 @@ class RegularSHT(SHT):
             Number of latitudes in the regular grid.
         truncation : int | None
             Truncation parameter for the spherical harmonic transform. Keeping "truncation" wave numbers.
+        nlon : int | None
+            Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        latitude_grid : {"legendre-gauss", "equiangular-poles"}
+            Latitude sampling, north to south. Equiangular rows include both poles:
+            latitude[j] = 90 - j * 180 / (nlat - 1).
+            Equiangular truncation must satisfy 2 * truncation < nlat.
         """
         super().__init__()
         self.nlat = nlat
-        self.nlon = 2 * self.nlat
+        self.nlon = 2 * nlat if nlon is None else nlon
+        if nlat < 2 or self.nlon < 2:
+            raise ValueError("nlat and nlon must both be at least 2")
+        if truncation is None:
+            truncation = min(nlat // 2 - 1, (self.nlon - 1) // 2)
+        if 2 * truncation >= self.nlon:
+            raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._sht = SphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
@@ -258,7 +273,7 @@ class RegularSHT(SHT):
         coeffs = self._sht(x)
 
         # -> [b,t,e,L,M,v] == [b,t,e,y_freq,x_freq,v]
-        return einops.rearrange(coeffs, "(b t e v) yF xF -> b t e yF xF v", b=b, e=e, v=v, t=t)
+        return einops.rearrange(coeffs, "b t e v yF xF -> b t e yF xF v")
 
 
 class ReducedSHT(SHT):
@@ -381,9 +396,16 @@ class InverseSpectralTransform(torch.nn.Module):
 
 
 class InverseRegularSHT(InverseSpectralTransform):
-    """Inverse SHT on a regular lon-lat grid."""
+    """Inverse SHT on Gaussian or equally spaced latitude rings and uniform longitudes."""
 
-    def __init__(self, nlat: int, truncation: int | None = None, **kwargs) -> None:
+    def __init__(
+        self,
+        nlat: int,
+        truncation: int | None = None,
+        nlon: int | None = None,
+        latitude_grid: LatitudeGrid = "legendre-gauss",
+        **kwargs,
+    ) -> None:
         """Initialize InverseRegularSHT.
 
         Parameters
@@ -392,15 +414,27 @@ class InverseRegularSHT(InverseSpectralTransform):
             Number of latitudes.
         truncation : int | None
             Spectral truncation. Defaults to ``nlat // 2 - 1``.
+        nlon : int | None
+            Number of equally spaced longitudes in [0, 360), starting at zero. Defaults to 2 * nlat.
+        latitude_grid : {"legendre-gauss", "equiangular-poles"}
+            Latitude sampling, north to south. Equiangular rows include both poles:
+            latitude[j] = 90 - j * 180 / (nlat - 1).
+            Equiangular truncation must satisfy 2 * truncation < nlat.
         **kwargs : dict
             Additional keyword arguments (ignored).
         """
         super().__init__()
         self.nlat = nlat
-        self.nlon = 2 * nlat
+        self.nlon = 2 * nlat if nlon is None else nlon
+        if nlat < 2 or self.nlon < 2:
+            raise ValueError("nlat and nlon must both be at least 2")
+        if truncation is None:
+            truncation = min(nlat // 2 - 1, (self.nlon - 1) // 2)
+        if 2 * truncation >= self.nlon:
+            raise ValueError("Require 2 * truncation < nlon to resolve all zonal modes")
         self.lons_per_lat = [self.nlon] * self.nlat
         self._isht = InverseSphericalHarmonicTransform(
-            lons_per_lat=self.lons_per_lat, truncation=truncation or self.nlat // 2 - 1
+            lons_per_lat=self.lons_per_lat, truncation=truncation, latitude_grid=latitude_grid
         )
 
     def forward(self, data: torch.Tensor) -> torch.Tensor:
