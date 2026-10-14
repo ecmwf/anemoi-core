@@ -132,6 +132,19 @@ class BaseDDPStrategy(DDPStrategy):
 
         super().setup(trainer)
 
+        # Prepare optimizer with reference weights (must be done AFTER optimizer creation
+        # but BEFORE optimizer state is loaded from checkpoint)
+        if hasattr(self.precision_plugin, "prepare_optimizer"):
+            LOGGER.info("Preparing optimizer with precision plugin")
+            for optimizer in trainer.optimizers:
+                self.precision_plugin.prepare_optimizer(optimizer, self.lightning_module)
+
+        # Set compute dtype from precision plugin if the model was converted.
+        # Use lightning_module to access the unwrapped LightningModule (not the DDP wrapper).
+        if hasattr(self.precision_plugin, "_model_converted") and self.precision_plugin._model_converted:
+            first_param = next(self.lightning_module.parameters())
+            self.lightning_module.set_compute_dtype(first_param.dtype)
+
         self.shard_sizes = self._setup_shard_sizes(trainer)
         seed_rnd(model_comm_group_id, self.global_rank)
 
@@ -139,6 +152,14 @@ class BaseDDPStrategy(DDPStrategy):
         """Configure DDP with custom gradient hooks."""
         self.register_parameter_hooks()
         super().configure_ddp()
+
+        # Register fp32 gradient reduction hook if the precision plugin provides one
+        # (e.g. bf16 training with fp32 gradient all-reduce).
+        if hasattr(self.precision_plugin, "get_ddp_communication_hook"):
+            hook = self.precision_plugin.get_ddp_communication_hook()
+            # self.model is the DDP-wrapped model after super().configure_ddp()
+            self.model.register_comm_hook(state=self.model.process_group, hook=hook)
+            LOGGER.info("Registered fp32 gradient reduction hook for DDP")
 
     def _setup_shard_sizes(self, trainer: pl.Trainer) -> dict:
         """Set up shard sizes for the dataloader.

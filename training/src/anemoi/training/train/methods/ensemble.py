@@ -235,6 +235,7 @@ class EnsembleTraining(BaseTrainingModule):
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_sizes=self.grid_shard_sizes,
+            compute_dtype=self.compute_dtype,
             **kwargs,
         )
 

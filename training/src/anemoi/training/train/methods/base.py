@@ -367,6 +367,26 @@ class BaseTrainingModule(pl.LightningModule, ABC):
         self.grid_shard_sizes = dict.fromkeys(self.dataset_names, None)
         self.grid_shard_slice = dict.fromkeys(self.dataset_names, None)
 
+        # Compute dtype for casting model inputs (set by the strategy during setup,
+        # based on the precision plugin). When set, the model forward casts input
+        # latents to this dtype, e.g. torch.bfloat16 for bf16 training.
+        self.compute_dtype: torch.dtype | None = None
+
+    def set_compute_dtype(self, dtype: torch.dtype) -> None:
+        """Set the compute dtype for input casting.
+
+        Called by the strategy during setup to communicate the precision mode from
+        the precision plugin to the model.
+
+        Parameters
+        ----------
+        dtype : torch.dtype
+            The dtype to use for computation (e.g., torch.bfloat16, torch.float32)
+
+        """
+        self.compute_dtype = dtype
+        LOGGER.info("%s: Setting compute dtype to %s", type(self).__name__, dtype)
+
     @property
     def plot_adapter(self) -> Any:
         """Single entry point for diagnostics plot callbacks (replaces 5 small methods)."""
@@ -446,6 +466,7 @@ class BaseTrainingModule(pl.LightningModule, ABC):
             x,
             model_comm_group=self.model_comm_group,
             grid_shard_sizes=self.grid_shard_sizes,
+            compute_dtype=self.compute_dtype,
             **kwargs,
         )
 
